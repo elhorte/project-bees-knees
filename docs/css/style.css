@@ -1,0 +1,19 @@
+h1, h2, h3, h4, h5, h6 {
+    font-family: "Avenir Light", Avenir, "Nunito Sans", Calibri, sans-serif;
+    color: #000;
+}
+
+:root {
+    --md-primary-fg-color: #72c32d;
+    --md-accent-fg-color: #053050;
+}
+
+.md-header {
+    background-color: #b9e3f8;
+    
+    font-family: "Avenir Light", Avenir, "Nunito Sans", Calibri, sans-serif;
+}
+
+.md-content {
+    color: #63656a;
+}
