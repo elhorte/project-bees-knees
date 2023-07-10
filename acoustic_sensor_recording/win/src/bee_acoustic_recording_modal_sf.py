@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+
+# using sounddevice and soundfile to record and save flac files
+
 import sounddevice as sd
 import numpy as np
 import os
@@ -13,10 +17,19 @@ CHANNELS = 2
 SAMPLE_RATE = 192000
 BIT_DEPTH_IN = 'PCM_16'
 BIT_DEPTH_OUT = 16
-FORMAT = 'FLAC'  # 'WAV' or 'FLAC'
+FORMAT = 'FLAC'  # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
+
+DURATION = 600   # seconds
+INTERVAL = 0 # seconds between recordings
+EVENT_TRIGGER = -20 # dBFS threshold for recording
+TIME_BEFORE = 5 # seconds before event trigger to record
+TIME_AFTER = 5 # seconds after event trigger to record
+
+MODE = "continuous" # "continuous" or "event"
 
 LOCATION_ID = "Zeev-Berkeley"
-DURATION = 600   # seconds
+
+
 
 def record_audio(output_filename, duration=DURATION, device=DEVICE_IN, rate=SAMPLE_RATE, channels=CHANNELS, subtype='PCM_16'):
     try:
@@ -32,7 +45,7 @@ def record_audio(output_filename, duration=DURATION, device=DEVICE_IN, rate=SAMP
         sf.write(output_path, recording, rate, format=FORMAT, subtype=subtype)
         print("* Finished saving:", DURATION, "sec at:", datetime.now())
     except Exception as e:
-        print(f"An error occurred while recording audio: {e}")
+        print(f"An error occurred while attempting to record audio: {e}")
         print("These are the available devices: \n", sd.query_devices())
         quit(-1)
 
