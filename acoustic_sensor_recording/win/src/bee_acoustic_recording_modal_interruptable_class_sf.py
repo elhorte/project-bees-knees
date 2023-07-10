@@ -23,7 +23,8 @@ INTERVAL = 10
 EVENT_TRIGGER = 10
 TIME_BEFORE = 5
 TIME_AFTER = 5
-MODE = "event"
+MODE = "continuous" # "continuous" or "event"
+#MODE = "event"
 LOCATION_ID = "Zeev-Berkeley"
 
 def initialization():
@@ -54,8 +55,8 @@ class EventRecorder:
         volume_norm = np.linalg.norm(indata) * 10
         if volume_norm > self.threshold:
             self.triggered = True  # Set the trigger if the volume is above the threshold
-            print('Event detected at threshold:', self.threshold, 'at:', datetime.now())
-
+            print('Event detected at threshold', self.threshold, 'at:', datetime.now())
+            
     def start_recording(self):
         print('* Monitoring for events...')
         self.stream.start()
@@ -64,7 +65,7 @@ class EventRecorder:
                 time.sleep(0.1)  # Sleep a bit to reduce CPU usage
                 if self.triggered:
                     print('Event detected, writing to file...')
-                    output_filename = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}_{LOCATION_ID}.{FORMAT.lower()}"
+                    output_filename = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}_{'EVENT'}_{LOCATION_ID}.{FORMAT.lower()}"
                     output_path = os.path.join(OUTPUT_DIRECTORY, output_filename)
                     sf.write(output_path, np.array(self.buffer), self.rate, format=FORMAT, subtype=BIT_DEPTH_IN)
                     print('* Finished saving')
@@ -78,17 +79,6 @@ class EventRecorder:
         finally:
             self.stream.stop()
             self.stream.close()
-
-def continuous_recording():
-    while True:
-        now = datetime.now()                        # get current date and time
-        timestamp = now.strftime("%Y%m%d-%H%M%S")   # convert to string and format for filename
-        print("recording from:", timestamp)
-        filename = f"{timestamp}_{DURATION}_{INTERVAL}_{LOCATION_ID}.{FORMAT.lower()}" 
-        duration_based_recording(filename)
-        print("time sleeping: ", INTERVAL)
-        time.sleep(INTERVAL)
-        ##play_audio(filename, DEVICE_OUT)  # debugging
 
 def duration_based_recording(output_filename, duration=DURATION, interval=INTERVAL, device=DEVICE_IN, rate=SAMPLE_RATE, channels=CHANNELS, subtype='PCM_16'):
     try:
@@ -116,6 +106,17 @@ def play_audio(filename, device):
     sd.play(data, fs, device)
     sd.wait()
     print("* Finished playback")
+
+def continuous_recording():
+    while True:
+        now = datetime.now()                        # get current date and time
+        timestamp = now.strftime("%Y%m%d-%H%M%S")   # convert to string and format for filename
+        print("recording from:", timestamp)
+        filename = f"{timestamp}_{DURATION}_{INTERVAL}_{LOCATION_ID}.{FORMAT.lower()}" 
+        duration_based_recording(filename)
+        print("time sleeping: ", INTERVAL)
+        time.sleep(INTERVAL)
+        ##play_audio(filename, DEVICE_OUT)  # debugging
 
 if __name__ == "__main__":
     initialization()
