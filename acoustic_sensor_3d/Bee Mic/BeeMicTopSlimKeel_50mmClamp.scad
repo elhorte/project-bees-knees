@@ -35,7 +35,7 @@ difference() {
     #linear_extrude(22.2) square([6.1,1.0], center=true);
     
     // keel
-    translate([0,32.5,-5])
+    translate([0,37.5,-5])
     rotate([90,0,0])
     #linear_extrude(KEEL_LENGTH) square([KEEL_WIDTH, KEEL_HEIGHT], center=true); 
 
@@ -45,16 +45,16 @@ difference() {
       rotate([90, 0, 0])
       union() {
         // Vertical arm of the C-clamp 2
-        translate([0, 0, 0]) cube([1, 5, 8]);
+        translate([0, 0, -4]) cube([1, 5, 8]);
         // Horizontal arm of the C-clamp
         rotate([90, 0, 0])
-        translate([-1.5, 0, -5]) cube([1.5, 8, 1]);
+        translate([-1.5, -4, -5]) cube([1.5, 8, 1]);
           
         // Vertical arm of the C-clamp 1
-        translate([-6, 0, 0]) cube([1, 5, 8]);
+        translate([-6, 0, -4]) cube([1, 5, 8]);
         // Horizontal arm of the C-clamp
         rotate([90, 0, 0])
-        translate([-5, 0,-5]) cube([1.5, 8, 1]);
+        translate([-5, -4,-5]) cube([1.5, 8, 1]);
 
 
         // Horizontal arm of the C-clamp
