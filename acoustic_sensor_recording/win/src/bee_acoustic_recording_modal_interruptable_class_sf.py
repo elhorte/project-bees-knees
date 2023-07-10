@@ -11,19 +11,19 @@ from collections import deque
 
 # Parameters
 OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
-DEVICE_IN = 1
+DEVICE_IN = 1           # OS specific device ID
 DEVICE_OUT = 3
-CHANNELS = 2
+CHANNELS = 2            # currently max = 2
 SAMPLE_RATE = 192000
 BIT_DEPTH_IN = 'PCM_16'
 BIT_DEPTH_OUT = 16
 FORMAT = 'FLAC'
-DURATION = 30
-INTERVAL = 10
-EVENT_TRIGGER = 10
-TIME_BEFORE = 5
-TIME_AFTER = 5
-MODE = "continuous" # "continuous" or "event"
+DURATION = 30           # seconds for continuous recording
+INTERVAL = 10           # seconds between recordings
+EVENT_TRIGGER = 10      # dBFS threshold for triggering event recording
+TIME_BEFORE = 5         # seconds before event trigger to record
+TIME_AFTER = 5          # seconds after event trigger to record
+MODE = "continuous"     # "continuous" or "event"
 #MODE = "event"
 LOCATION_ID = "Zeev-Berkeley"
 

@@ -25,7 +25,6 @@ INTERVAL = 10       # seconds between recordings
 EVENT_TRIGGER = 10 # dBFS threshold for recording
 TIME_BEFORE = 5     # seconds before event trigger to record
 TIME_AFTER = 5      # seconds after event trigger to record
-threshold = 0       # linear scale calculated from EVENT_TRIGGER
 vol_counter = 0         # number of times around the loop
 
 MODE = "continuous" # "continuous" or "event"
