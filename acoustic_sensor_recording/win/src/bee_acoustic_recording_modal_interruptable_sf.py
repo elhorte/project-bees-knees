@@ -94,6 +94,8 @@ def callback(indata, frames, time, status):
     volume_norm = np.linalg.norm(indata) * 10
     if vol_counter % 100 == 0:
         print("vol, thresh:", int(volume_norm),":", int(threshold))
+        vol_counter = 0
+    vol_counter += 1
     if volume_norm > threshold:
         triggered = True  # Set the trigger if the volume is above the threshold
 
