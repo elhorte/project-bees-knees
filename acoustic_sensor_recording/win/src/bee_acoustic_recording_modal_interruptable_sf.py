@@ -20,15 +20,14 @@ BIT_DEPTH_IN = 'PCM_16'
 BIT_DEPTH_OUT = 16
 FORMAT = 'FLAC'  # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
-DURATION = 30       # seconds
-INTERVAL = 10       # seconds between recordings
+DURATION = 300       # seconds of recording
+INTERVAL = 300       # seconds between recordings
 EVENT_TRIGGER = 10 # dBFS threshold for recording
 TIME_BEFORE = 5     # seconds before event trigger to record
 TIME_AFTER = 5      # seconds after event trigger to record
 vol_counter = 0         # number of times around the loop
 
 MODE = "continuous" # "continuous" or "event"
-MODE = "event"
 LOCATION_ID = "Zeev-Berkeley"
 
 def initialization():
@@ -44,7 +43,7 @@ def initialization():
 
 def duration_based_recording(output_filename, duration=DURATION, interval=INTERVAL, device=DEVICE_IN, rate=SAMPLE_RATE, channels=CHANNELS, subtype='PCM_16'):
     try:
-        print("* Recording")
+        print("* Recording for:",duration," waiting for:", interval)
         recording = sd.rec(int(duration * rate), samplerate=rate, channels=channels, device=device, dtype='int16')
         for _ in range(int(duration * 100)):  # Check every 1/100th of a second
             sd.sleep(10)
@@ -60,7 +59,7 @@ def duration_based_recording(output_filename, duration=DURATION, interval=INTERV
         print(f"An error occurred while attempting to record audio: {e}")
         print("These are the available devices: \n", sd.query_devices())
         quit(-1)
-
+'''
 def event_based_recording(device=DEVICE_IN, rate=SAMPLE_RATE, channels=CHANNELS, duration=TIME_BEFORE+TIME_AFTER):
     print('* Monitoring for events...')
     buffer = deque(maxlen=int((TIME_BEFORE+TIME_AFTER) * rate))  # A rolling buffer for the past 'duration' seconds
@@ -98,7 +97,8 @@ def callback(indata, frames, time, status):
     vol_counter += 1
     if volume_norm > threshold:
         triggered = True  # Set the trigger if the volume is above the threshold
-
+'''
+# for debugging
 def play_audio(filename, device):
     print("* Playing back")
     data, fs = sf.read(filename)
@@ -123,7 +123,8 @@ if __name__ == "__main__":
         if MODE == 'continuous':
             continuous_recording()
         elif MODE == 'event':
-            event_based_recording()
+            #event_based_recording()
+            pass
         else:
             print("MODE not recognized")
             quit(-1)
