@@ -7,12 +7,11 @@
 # Input audio from a device ID at a defineable sample rate, bit depth, and channel count. 
 # Write incoming audio into a circular buffer that is of a definable length. 
 # Monitor the incoming audio for levels above a definable threshold for a defineable duration and set a flag when conditions are met. 
-# Note the point in the buffer of the event and then continue to record audio until a definable time period after the start of the event. 
-# Note the point in the buffer of the end of the time period after the start of the event.
-# Continue recording audio into the circular buffer
-# Save to a FLAC file the audio in the circular buffer from the start of a defineable time period before the event to the end of the time period after the event.
-# Reset the audio threshold level flag.
-# Reset event_start_time back to None after saving audio.
+# Note the position in the buffer of the event and then continue to record audio until a definable time period after the start of the event. 
+# Note the position in the buffer of the end of the time period after the start of the event.
+# Continue recording audio into the circular buffer while saving the audio to a FLAC file.
+# Save audio in the circular buffer from the start of a defineable time period before the event to the end of the defineable time period after the event.
+# Reset the audio threshold level flag and event_start_time after saving audio.
 
 
 import sounddevice as sd
@@ -34,10 +33,11 @@ SAVE_DURATION_AFTER = 10    # seconds to save after the event
 OUTPUT_DIRECTORY = "."
 ##OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
 
+# prep buffers and variables
 buffer_size = int(BUFFER_SECONDS * SAMPLE_RATE)
 buffer = np.zeros((buffer_size, CHANNELS), dtype=f'int{BIT_DEPTH}')
 buffer_index = 0
-
+# init event variables
 event_start_index = None
 save_thread = None
 detected_level = None
@@ -54,18 +54,17 @@ if (SAVE_DURATION_BEFORE + SAVE_DURATION_AFTER) * 1.2 > BUFFER_SECONDS:
 try:
     device_info = sd.query_devices(DEVICE_IN)  
     device_CH = device_info['max_input_channels'] 
-    if device_CH != CHANNELS:
-        print("The device does not have the number of channels required by 'CHANNELS': ", device_CH)
+    if device_CH < CHANNELS:
+        print(f"The device only has {device_CH} channel(s) but require {CHANNELS} channels.")
         quit(-1)
     device_SR = device_info['default_samplerate'] 
     if device_SR != SAMPLE_RATE:
-        print("The device sample rate is not equal to the required 'SAMPLE_RATE': ", device_SR)
+        print(f"The device sample rate {device_SR} is not equal to the required 'SAMPLE_RATE' of {SAMPLE_RATE}")
         quit(-1)
 except Exception as e:
     print(f"An error occurred while attempting to access the input device: {e}")
     print("These are the available devices: \n", sd.query_devices())
     quit(-1)
-#print(sd.query_devices())
 
 # Create the output directory if it doesn't exist
 try:
@@ -139,6 +138,7 @@ def check_level(data, index):
         save_thread = threading.Thread(target=save_audio_after_delay)
         save_thread.start()
     fake_vu_meter(level)
+
 
 def callback(indata, frames, time, status):
     global buffer, buffer_index
