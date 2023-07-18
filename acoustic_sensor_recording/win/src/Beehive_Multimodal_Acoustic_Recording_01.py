@@ -48,6 +48,7 @@ detected_level = None
 buffer_index = 0
 buffer = None
 dtype = None
+subtype = None
 
 # Op Mode & ID =====================================================================================
 #MODE = "cont"              # "continuous" or "event"
@@ -58,7 +59,7 @@ HIVE_ID = "Z1"
 
 ### startup housekeeping ###
 def initialization():
-    global buffer, buffer_index, dtype, buffer_size
+    global buffer, buffer_index, dtype, buffer_size, subtype
 
     # Check on parms
     if (SAVE_DURATION_BEFORE + SAVE_DURATION_AFTER) * 1.2 > BUFFER_SECONDS:
@@ -92,10 +93,13 @@ def initialization():
     # translate human to machine
     if BIT_DEPTH == 16:
         dtype = 'int16'
+        subtype = 'PCM_16'
     elif BIT_DEPTH == 24:
         dtype = 'int24'
+        subtype = 'PCM_24'
     elif BIT_DEPTH == 32:
         dtype = 'int32' 
+        subtype = 'PCM_32'
     else:
         print("The bit depth is not supported: ", BIT_DEPTH)
         quit(-1)
@@ -127,7 +131,7 @@ def save_audio_after_delay():
 
 
 def save_audio():
-    global buffer, event_start_index, save_thread, detected_level
+    global buffer, event_start_index, save_thread, detected_level, subtype
 
     if event_start_index is None:  # if this has been reset already, don't try to save
         return
@@ -142,7 +146,7 @@ def save_audio():
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     filename = os.path.join(OUTPUT_DIRECTORY, f"recording_{timestamp}.flac")
-    sf.write(filename, data, SAMPLE_RATE, format=FORMAT, subtype=dtype)
+    sf.write(filename, data, SAMPLE_RATE, format=FORMAT, subtype=subtype)
     print(f"Saved audio to {filename}, audio threshold level: {detected_level}, duration: {data.shape[0] / SAMPLE_RATE} seconds")
 
     save_thread = None
@@ -230,7 +234,8 @@ def play_audio(filename, device):
 if __name__ == "__main__":
 
     initialization()
-    
+    print("Acoustic Signal Capture")
+    print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {CHANNELS}")
     try:
         if MODE == 'cont':
             print("Starting audio stream in continuous recording mode")
@@ -238,6 +243,8 @@ if __name__ == "__main__":
         elif MODE == 'event':
             print("Starting audio stream in event detect mode")
             audio_stream()
+        elif MODE == 'combo':
+            print("Starting audio capture in continous mode w/event capture")
         else:
             print("MODE not recognized")
             quit(-1)
