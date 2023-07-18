@@ -41,6 +41,14 @@ INTERVAL = 10               # seconds between recordings
 SAVE_DURATION_BEFORE = 10   # seconds to save before the event
 SAVE_DURATION_AFTER = 10    # seconds to save after the event
 
+# init event variables
+event_start_index = None
+save_thread = None
+detected_level = None
+buffer_index = 0
+buffer = None
+dtype = None
+
 # Op Mode & ID =====================================================================================
 #MODE = "cont"              # "continuous" or "event"
 MODE = "event"              # "continuous" or "event"
@@ -48,20 +56,10 @@ LOCATION_ID = "Zeev-Berkeley"
 HIVE_ID = "Z1"
 # ==================================================================================================
 
-# prep buffers and variables
-buffer_size = int(BUFFER_SECONDS * SAMPLE_RATE)
-buffer = np.zeros((buffer_size, CHANNELS), dtype=f'int{BIT_DEPTH}')
-buffer_index = 0
-
-# init event variables
-event_start_index = None
-save_thread = None
-detected_level = None
-
-dtype = None
-
 ### startup housekeeping ###
 def initialization():
+    global buffer, buffer_index, dtype, buffer_size
+
     # Check on parms
     if (SAVE_DURATION_BEFORE + SAVE_DURATION_AFTER) * 1.2 > BUFFER_SECONDS:
         print("The buffer is not large enough to hold the maximum amount of audio that can be saved.")
@@ -102,6 +100,10 @@ def initialization():
         print("The bit depth is not supported: ", BIT_DEPTH)
         quit(-1)
 
+    # prep buffers and variables
+    buffer_size = int(BUFFER_SECONDS * SAMPLE_RATE)
+    buffer = np.zeros((buffer_size, CHANNELS), dtype=dtype)
+
 
 def fake_vu_meter(value):
     # Normalize the value to the range 0-20
@@ -138,9 +140,9 @@ def save_audio():
     else:
         data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     filename = os.path.join(OUTPUT_DIRECTORY, f"recording_{timestamp}.flac")
-    sf.write(filename, data, SAMPLE_RATE, format='FLAC')
+    sf.write(filename, data, SAMPLE_RATE, format=FORMAT, subtype=dtype)
     print(f"Saved audio to {filename}, audio threshold level: {detected_level}, duration: {data.shape[0] / SAMPLE_RATE} seconds")
 
     save_thread = None
@@ -200,7 +202,7 @@ def duration_based_recording(output_filename, duration=DURATION, interval=INTERV
                 print('Input overflow detected while recording audio.')
         print("* Finished recording at:      ", datetime.now())
         output_path = os.path.join(OUTPUT_DIRECTORY, output_filename)
-        sf.write(output_path, recording, rate, format=FORMAT, subtype=subtype)
+        sf.write(output_path, recording, SAMPLE_RATE, format=FORMAT, subtype=dtype)
         print("* Finished saving:", DURATION, "sec at:", datetime.now())
     except KeyboardInterrupt:
         print('Recording interrupted by user.')
