@@ -30,7 +30,7 @@ from scipy.signal import resample_poly
 from pydub import AudioSegment
 
 
-THRESHOLD = 8000            # audio level threshold to be considered an event
+THRESHOLD = 16000            # audio level threshold to be considered an event
 BUFFER_SECONDS = 600        # seconds of a circular buffer
 SAMPLE_RATE = 44100         # Audio sample rate
 DEVICE_IN = 1               # Device ID of input device
@@ -39,29 +39,38 @@ BIT_DEPTH = 16              # Audio bit depth
 CHANNELS = 2                # Number of channels
 OUTPUT_DIRECTORY = "."      # for debugging
 ##OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
-FORMAT = 'mp3'  # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
+FORMAT = 'FLAC'             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
-#continuous recording
-DURATION = 10               # seconds of recording
-INTERVAL = 10               # seconds between recordings
+#periodic recording
+PERIOD = 10                 # seconds of recording
+INTERVAL = 20              # seconds between start of period, must be > period, of course
+
+# init periodic varibles
+period_start_index = None
+period_save_thread = None
 
 # event recording
-SAVE_DURATION_BEFORE = 10   # seconds to save before the event
-SAVE_DURATION_AFTER = 10    # seconds to save after the event
+SAVE_BEFORE_EVENT = 10   # seconds to save before the event
+SAVE_AFTER_EVENT = 10    # seconds to save after the event
 
 # init event variables
 event_start_index = None
-save_thread = None
+event_save_thread = None
 detected_level = None
+
+
 buffer_index = 0
 buffer = None
 _dtype = None
 _subtype = None
 
+vu_dampen = 0
+
 # Op Mode & ID =====================================================================================
-MODE = "cont"              # "continuous" or "event"
-#MODE = "event"              # "continuous" or "event"
-#MODE = "combo"             # sparse continous recording with event detection
+MODE = "orig_period"       # keeping it around for debugging
+#MODE = "period"            # period only
+#MODE = "event"             # event only
+#MODE = "combo"             # period recording with event detection
 LOCATION_ID = "Zeev-Berkeley"
 HIVE_ID = "Z1"
 # ==================================================================================================
@@ -71,9 +80,14 @@ def initialization():
     global buffer, buffer_index, _dtype, buffer_size, _subtype
 
     # Check on parms
-    if (SAVE_DURATION_BEFORE + SAVE_DURATION_AFTER) * 1.2 > BUFFER_SECONDS:
+    if (SAVE_BEFORE_EVENT + SAVE_AFTER_EVENT) * 1.2 > BUFFER_SECONDS:
         print("The buffer is not large enough to hold the maximum amount of audio that can be saved.")
         print("Reduce SAVE_DURATION_BEFORE and/or SAVE_DURATION_AFTER or increase the size of the circular buffer 'BUFFER_SECONDS'")
+        quit(-1)
+
+    if (PERIOD) * 1.1 > BUFFER_SECONDS:
+        print("The buffer is not large enough to hold the maximum amount of audio that can be saved.")
+        print("Reduce PERIOD or increase the size of the circular buffer 'BUFFER_SECONDS'")
         quit(-1)
 
     # Check on input device parms or if input device even exits
@@ -119,60 +133,104 @@ def initialization():
 
 
 def fake_vu_meter(value):
-    # Normalize the value to the range 0-20
     normalized_value = int(value / 1000)
-    # Create a string of asterisks corresponding to the normalized value
     asterisks = '*' * normalized_value
-    # Print the string of asterisks, ending with a carriage return to overwrite the line
-    print(asterisks.ljust(20, ' '), end='\r')
+    # Print the string of asterisks, ending with only a carriage return to overwrite the line
+    print(asterisks.ljust(50, ' '), end='\r')
 
-def print_threshold():
-    normalized_value = int(THRESHOLD / 1000)
+def print_threshold_ref(value):
+    normalized_value = int(value / 1000)
     asterisks = '*' * normalized_value
-    print(asterisks.ljust(20, ' '))
+    print(asterisks.ljust(50, ' '))
 #
 # event recording functions
 #
-def save_audio_after_delay():
+def save_audio_after_event():
     global event_start_index
 
-    time.sleep(SAVE_DURATION_AFTER)
-    save_audio()
+    time.sleep(SAVE_AFTER_EVENT)
+    save_event_audio()
 
 
-def save_audio():
-    global buffer, event_start_index, save_thread, detected_level, _subtype
+def save_audio_for_period():
+    global period_start_index
+
+    time.sleep(PERIOD)
+    save_period_audio()
+
+
+def save_event_audio():
+    global buffer, event_start_index, event_save_thread, detected_level
 
     if event_start_index is None:  # if this has been reset already, don't try to save
         return
-    save_start_index = (event_start_index - SAVE_DURATION_BEFORE * SAMPLE_RATE) % buffer_size
-    save_end_index = (event_start_index + SAVE_DURATION_AFTER * SAMPLE_RATE) % buffer_size
+
+    save_start_index = ((event_start_index - SAVE_BEFORE_EVENT) * SAMPLE_RATE) % buffer_size
+    save_end_index = ((event_start_index + SAVE_AFTER_EVENT) * SAMPLE_RATE) % buffer_size
 
     # saving from a circular buffer so segments aren't necessarily contiguous
-    if save_end_index > save_start_index:
-        data = buffer[save_start_index:save_end_index]
-    else:
-        data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+    if save_end_index > save_start_index:   # is contiguous
+        audio_data = buffer[save_start_index:save_end_index]
+    else:                                   # ain't
+        audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    filename = os.path.join(OUTPUT_DIRECTORY, f"recording_{timestamp}.flac")
-    sf.write(filename, data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
-    print(f"Saved audio to {filename}, audio threshold level: {detected_level}, duration: {data.shape[0] / SAMPLE_RATE} seconds")
+    output_filename = f"{timestamp}_evemt_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+    full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
+    sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
 
-    save_thread = None
+    print(f"Saved evemt audio to {full_path_name}, audio threshold level: {detected_level}, duration: {audio_data.shape[0] / SAMPLE_RATE} seconds")
+
+    event_save_thread = None
     event_start_index = None
 
 
-def check_level(data, index):
-    global event_start_index, save_thread, detected_level
+def save_period_audio():
+    global buffer, period_start_index, period_save_thread
 
-    level = np.max(np.abs(data))
-    if (level > THRESHOLD) and event_start_index is None:
-        detected_level = level
+    if period_start_index is None:  # if this has been reset already, don't try to save
+        return
+
+    save_start_index = (period_start_index * SAMPLE_RATE) % buffer_size
+    save_end_index = ((period_start_index + PERIOD) * SAMPLE_RATE) % buffer_size
+
+    # saving from a circular buffer so segments aren't necessarily contiguous
+    if save_end_index > save_start_index:   # is contiguous
+        audio_data = buffer[save_start_index:save_end_index]
+    else:                                   # ain't contiguous
+        audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    output_filename = f"{timestamp}_period_{PERIOD}_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+    full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
+    sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
+
+    print(f"Saved period audio to {full_path_name}, period: {PERIOD}, interval {INTERVAL} seconds")
+
+    period_save_thread = None
+    period_start_index = None
+
+
+def check_level(audio_data, index):
+    global event_start_index, event_save_thread, detected_level
+
+    audio_level = np.max(np.abs(audio_data))
+    if (audio_level > THRESHOLD) and event_start_index is None:
+        detected_level = audio_level
         event_start_index = index
-        save_thread = threading.Thread(target=save_audio_after_delay)
-        save_thread.start()
-    fake_vu_meter(level)
+        event_save_thread = threading.Thread(target=save_audio_after_event)
+        event_save_thread.start()
+
+    fake_vu_meter(audio_level)
+
+
+def check_period(index):
+    global period_start_index, period_save_thread, detected_level
+
+    if not int(time.time()) % INTERVAL: # if modulo INTERVAL zero then start of period
+        period_start_index = index
+        period_save_thread = threading.Thread(target=save_audio_for_period)
+        period_save_thread.start()
 
 
 def callback(indata, frames, time, status):
@@ -190,33 +248,26 @@ def callback(indata, frames, time, status):
         buffer[buffer_index:] = indata[:-overflow]
         buffer[:overflow] = indata[-overflow:]
 
-    check_level(indata, buffer_index)
+    if MODE == "event" or MODE == "combo":
+        check_level(indata, buffer_index)   # trigger saving audio if above threshold
+    if MODE == "period" or MODE == "combo":
+        check_period(buffer_index)           # trigger saving audio if save period expired
+
     buffer_index = (buffer_index + data_len) % buffer_size
 
 
 def audio_stream():
-    global buffer, buffer_index, save_thread
+    global buffer, buffer_index, event_save_thread
 
     stream = sd.InputStream(device=DEVICE_IN, channels=CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, callback=callback)
     with stream:
         print("Start recording...")
-        print_threshold()
+        print_threshold_ref(THRESHOLD)  # mark audio threshold on the CLI for ref
         while stream.active:
             pass
-
 #
 # audio sample rate conversion routines
 #
-'''
-def resample_audio(input_audio_data, original_sample_rate, new_sample_rate):
-    resample_ratio = new_sample_rate / original_sample_rate
-    num_channels = input_audio_data.shape[0]
-    resampled_audio_data = np.empty((num_channels, int(input_audio_data.shape[1] * resample_ratio)))
-    # Resample each channel
-    for i in range(num_channels):
-        resampled_audio_data[i] = resample_poly(input_audio_data[i], new_sample_rate, original_sample_rate)
-    return resampled_audio_data'''
-
 def resample_audio(input_audio_data, original_sample_rate, new_sample_rate):
     num_channels = input_audio_data.shape[1]
     resampled_audio_data = []
@@ -229,8 +280,6 @@ def resample_audio(input_audio_data, original_sample_rate, new_sample_rate):
     return np.transpose(resampled_audio_data)
 
 
-
-
 def save_to_mp3(audio_data, sample_rate, bit_depth, file_name):
     # Convert audio data to int16 format
     audio_data_int16 = (audio_data * np.iinfo(np.int16).max).astype(np.int16)
@@ -238,42 +287,34 @@ def save_to_mp3(audio_data, sample_rate, bit_depth, file_name):
     audio_segment = AudioSegment(audio_data_int16.tobytes(), frame_rate=sample_rate, sample_width=bit_depth//8, channels=audio_data.shape[0])
     # Save to MP3
     audio_segment.export(file_name, format="mp3")
-
 #
-# continuous recording functions #
+# period recording functions #
 #
-
-def duration_based_recording(output_filename, duration=DURATION, interval=INTERVAL, device=DEVICE_IN, rate=SAMPLE_RATE, channels=CHANNELS, subtype=_subtype):
+def period_recording(output_filename, period=PERIOD, interval=INTERVAL, device=DEVICE_IN, rate=SAMPLE_RATE, channels=CHANNELS, subtype=_subtype, dtype=_dtype):
     try:
-        print("* Recording for:",duration," waiting for:", interval)
-        audio_data = sd.rec(int(duration * rate), samplerate=rate, channels=channels, device=device, dtype=_dtype)
-        for _ in range(int(duration * 100)):  # Check every 1/100th of a second
+        print("* Recording for:",period," waiting for:", interval)
+        audio_data = sd.rec(int(period * rate), samplerate=rate, channels=channels, device=device, dtype=dtype)
+        for _ in range(int(period * 100)):  # Check every 1/100th of a second
             sd.sleep(10)
             if sd.get_status().input_overflow:
                 print('Input overflow detected while recording audio.')
         print("* Finished recording at:      ", datetime.now())
 
-        output_path = os.path.join(OUTPUT_DIRECTORY, output_filename)
-        sf.write(output_path, audio_data, SAMPLE_RATE, format=FORMAT, subtype=subtype)
-        print("* Finished saving:", DURATION, "sec at:", datetime.now())
-
-        # testing continuos audio to mp3
-        print("resampling, audio_data.shape(0):", audio_data.shape)
-        resampled_audio_data = resample_audio(audio_data, SAMPLE_RATE, 48000)
-        print("saving to mp3")
-        save_to_mp3(resampled_audio_data, 48000, 16, "resampled_audio.mp3")
+        full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
+        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=subtype)
+        print("* Finished saving:", PERIOD, "sec at:", datetime.now())
 
     except KeyboardInterrupt:
         print('Recording interrupted by user.')
 
 
-def periodic_segment_recording():
+def period_segment_recording():
     while True:
         now = datetime.now()                        # get current date and time
         timestamp = now.strftime("%Y%m%d-%H%M%S")   # convert to string and format for filename
         print("recording from:", timestamp)
-        filename = f"{timestamp}_{MODE}_{DURATION}_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}" 
-        duration_based_recording(filename)
+        filename = f"{timestamp}_orig-period_{PERIOD}_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}" 
+        period_recording(filename)
         print("time sleeping: ", INTERVAL)
         time.sleep(INTERVAL)
         ##play_audio(filename, DEVICE_OUT)  # debugging
@@ -292,14 +333,18 @@ if __name__ == "__main__":
     print("Acoustic Signal Capture")
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {CHANNELS}")
     try:
-        if MODE == 'cont':
-            print("Starting audio stream in continuous recording mode")
-            periodic_segment_recording()
+        if MODE == 'orig_period':
+            print("Starting audio stream in original period-only recording mode")
+            period_segment_recording()
+        elif MODE == 'period':
+            print("Starting audio stream in period-only mode")
+            audio_stream()
         elif MODE == 'event':
-            print("Starting audio stream in event detect mode")
+            print("Starting audio stream in event detect-only mode")
             audio_stream()
         elif MODE == 'combo':
-            print("Starting audio capture in continous mode w/event capture")
+            print("Starting audio capture in periodic mode w/event capture")
+            audio_stream()
         else:
             print("MODE not recognized")
             quit(-1)
