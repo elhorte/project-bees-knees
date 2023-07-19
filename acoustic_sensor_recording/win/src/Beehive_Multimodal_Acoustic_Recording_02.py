@@ -23,10 +23,11 @@ import io
 import threading
 import subprocess32 as subprocess
 import numpy as np
-from scipy.io import wavfile
-from scipy.io.wavfile import read as wavread
-import resampy
-
+#from scipy.io import wavfile
+#from scipy.io.wavfile import read as wavread
+#import resampy
+from scipy.signal import resample_poly
+from pydub import AudioSegment
 
 
 THRESHOLD = 8000            # audio level threshold to be considered an event
@@ -54,8 +55,8 @@ save_thread = None
 detected_level = None
 buffer_index = 0
 buffer = None
-dtype = None
-subtype = None
+_dtype = None
+_subtype = None
 
 # Op Mode & ID =====================================================================================
 MODE = "cont"              # "continuous" or "event"
@@ -67,7 +68,7 @@ HIVE_ID = "Z1"
 
 ### startup housekeeping ###
 def initialization():
-    global buffer, buffer_index, dtype, buffer_size, subtype
+    global buffer, buffer_index, _dtype, buffer_size, _subtype
 
     # Check on parms
     if (SAVE_DURATION_BEFORE + SAVE_DURATION_AFTER) * 1.2 > BUFFER_SECONDS:
@@ -100,21 +101,21 @@ def initialization():
 
     # translate human to machine
     if BIT_DEPTH == 16:
-        dtype = 'int16'
-        subtype = 'PCM_16'
+        _dtype = 'int16'
+        _subtype = 'PCM_16'
     elif BIT_DEPTH == 24:
-        dtype = 'int24'
-        subtype = 'PCM_24'
+        _dtype = 'int24'
+        _subtype = 'PCM_24'
     elif BIT_DEPTH == 32:
-        dtype = 'int32' 
-        subtype = 'PCM_32'
+        _dtype = 'int32' 
+        _subtype = 'PCM_32'
     else:
         print("The bit depth is not supported: ", BIT_DEPTH)
         quit(-1)
 
     # prep buffers and variables
     buffer_size = int(BUFFER_SECONDS * SAMPLE_RATE)
-    buffer = np.zeros((buffer_size, CHANNELS), dtype=dtype)
+    buffer = np.zeros((buffer_size, CHANNELS), dtype=_dtype)
 
 
 def fake_vu_meter(value):
@@ -134,12 +135,13 @@ def print_threshold():
 #
 def save_audio_after_delay():
     global event_start_index
+
     time.sleep(SAVE_DURATION_AFTER)
     save_audio()
 
 
 def save_audio():
-    global buffer, event_start_index, save_thread, detected_level, subtype
+    global buffer, event_start_index, save_thread, detected_level, _subtype
 
     if event_start_index is None:  # if this has been reset already, don't try to save
         return
@@ -154,7 +156,7 @@ def save_audio():
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     filename = os.path.join(OUTPUT_DIRECTORY, f"recording_{timestamp}.flac")
-    sf.write(filename, data, SAMPLE_RATE, format=FORMAT, subtype=subtype)
+    sf.write(filename, data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
     print(f"Saved audio to {filename}, audio threshold level: {detected_level}, duration: {data.shape[0] / SAMPLE_RATE} seconds")
 
     save_thread = None
@@ -195,32 +197,77 @@ def callback(indata, frames, time, status):
 def audio_stream():
     global buffer, buffer_index, save_thread
 
-    stream = sd.InputStream(device=DEVICE_IN, channels=CHANNELS, samplerate=SAMPLE_RATE, dtype=dtype, callback=callback)
+    stream = sd.InputStream(device=DEVICE_IN, channels=CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, callback=callback)
     with stream:
         print("Start recording...")
         print_threshold()
         while stream.active:
             pass
+
+#
+# audio sample rate conversion routines
+#
+'''
+def resample_audio(input_audio_data, original_sample_rate, new_sample_rate):
+    resample_ratio = new_sample_rate / original_sample_rate
+    num_channels = input_audio_data.shape[0]
+    resampled_audio_data = np.empty((num_channels, int(input_audio_data.shape[1] * resample_ratio)))
+    # Resample each channel
+    for i in range(num_channels):
+        resampled_audio_data[i] = resample_poly(input_audio_data[i], new_sample_rate, original_sample_rate)
+    return resampled_audio_data'''
+
+def resample_audio(input_audio_data, original_sample_rate, new_sample_rate):
+    num_channels = input_audio_data.shape[1]
+    resampled_audio_data = []
+
+    # Resample each channel
+    for i in range(num_channels):
+        resampled_channel = resample_poly(input_audio_data[:, i], new_sample_rate, original_sample_rate)
+        resampled_audio_data.append(resampled_channel)
+
+    return np.transpose(resampled_audio_data)
+
+
+
+
+def save_to_mp3(audio_data, sample_rate, bit_depth, file_name):
+    # Convert audio data to int16 format
+    audio_data_int16 = (audio_data * np.iinfo(np.int16).max).astype(np.int16)
+    # Create AudioSegment instance
+    audio_segment = AudioSegment(audio_data_int16.tobytes(), frame_rate=sample_rate, sample_width=bit_depth//8, channels=audio_data.shape[0])
+    # Save to MP3
+    audio_segment.export(file_name, format="mp3")
+
 #
 # continuous recording functions #
 #
-def duration_based_recording(output_filename, duration=DURATION, interval=INTERVAL, device=DEVICE_IN, rate=SAMPLE_RATE, channels=CHANNELS, subtype=subtype):
+
+def duration_based_recording(output_filename, duration=DURATION, interval=INTERVAL, device=DEVICE_IN, rate=SAMPLE_RATE, channels=CHANNELS, subtype=_subtype):
     try:
         print("* Recording for:",duration," waiting for:", interval)
-        recording = sd.rec(int(duration * rate), samplerate=rate, channels=channels, device=device, dtype='int16')
+        audio_data = sd.rec(int(duration * rate), samplerate=rate, channels=channels, device=device, dtype=_dtype)
         for _ in range(int(duration * 100)):  # Check every 1/100th of a second
             sd.sleep(10)
             if sd.get_status().input_overflow:
                 print('Input overflow detected while recording audio.')
         print("* Finished recording at:      ", datetime.now())
+
         output_path = os.path.join(OUTPUT_DIRECTORY, output_filename)
-        sf.write(output_path, recording, SAMPLE_RATE, format=FORMAT, subtype=subtype)
+        sf.write(output_path, audio_data, SAMPLE_RATE, format=FORMAT, subtype=subtype)
         print("* Finished saving:", DURATION, "sec at:", datetime.now())
+
+        # testing continuos audio to mp3
+        print("resampling, audio_data.shape(0):", audio_data.shape)
+        resampled_audio_data = resample_audio(audio_data, SAMPLE_RATE, 48000)
+        print("saving to mp3")
+        save_to_mp3(resampled_audio_data, 48000, 16, "resampled_audio.mp3")
+
     except KeyboardInterrupt:
         print('Recording interrupted by user.')
 
 
-def continuous_recording():
+def periodic_segment_recording():
     while True:
         now = datetime.now()                        # get current date and time
         timestamp = now.strftime("%Y%m%d-%H%M%S")   # convert to string and format for filename
@@ -247,7 +294,7 @@ if __name__ == "__main__":
     try:
         if MODE == 'cont':
             print("Starting audio stream in continuous recording mode")
-            continuous_recording()
+            periodic_segment_recording()
         elif MODE == 'event':
             print("Starting audio stream in event detect mode")
             audio_stream()
@@ -264,83 +311,3 @@ if __name__ == "__main__":
 
     print("* Finished playback")
 
-
-    # -----------------------------------------------------------
-
-
-def convert_audio_buffer(audio_buffer, sample_rate, output_sample_rate=48000):
-    # Read audio from buffer
-    _, audio = wavread(io.BytesIO(audio_buffer))
-
-    # Resample audio to the output sample rate
-    resampled_audio = resampy.resample(audio, sample_rate, output_sample_rate)
-
-    # Ensure audio data is in 16-bit integer format, as this is what's expected by wavfile.write
-    resampled_audio = np.round(resampled_audio).astype(np.int16)
-
-    # Write to output buffer
-    output_buffer = io.BytesIO()
-    wavfile.write(output_buffer, output_sample_rate, resampled_audio)
-    
-    # Get bytes value
-    output_audio_buffer = output_buffer.getvalue()
-
-    return output_audio_buffer
-
-
-# usage
-# buffer should contain your audio data in bytes
-buffer = b'\x00\x00...'
-output_buffer = convert_audio_buffer(buffer, sample_rate=44100)
-
-# ----------------------------------------------------------------------
-
-# another attempt
-
-import numpy as np
-from scipy.signal import resample_poly
-from pydub import AudioSegment
-
-def resample_audio(input_audio_data, original_sample_rate, new_sample_rate):
-    # Calculate resample ratio
-    resample_ratio = new_sample_rate / original_sample_rate
-
-    # Get the number of channels
-    num_channels = input_audio_data.shape[0]
-
-    # Create an empty array to store the resampled audio
-    resampled_audio_data = np.empty((num_channels, int(input_audio_data.shape[1] * resample_ratio)))
-
-    # Resample each channel
-    for i in range(num_channels):
-        resampled_audio_data[i] = resample_poly(input_audio_data[i], new_sample_rate, original_sample_rate)
-
-    return resampled_audio_data
-
-def save_to_mp3(audio_data, sample_rate, bit_depth, file_name):
-    # Convert audio data to int16 format
-    audio_data_int16 = (audio_data * np.iinfo(np.int16).max).astype(np.int16)
-
-    # Create AudioSegment instance
-    audio_segment = AudioSegment(audio_data_int16.tobytes(), frame_rate=sample_rate, sample_width=bit_depth//8, channels=audio_data.shape[0])
-
-    # Save to MP3
-    audio_segment.export(file_name, format="mp3")
-
-# Now suppose you have audio data in a variable named 'audio_data' with shape (2, num_samples)
-audio_data = ...
-
-# Original sample rate
-original_sample_rate = 192000
-
-# New sample rate
-new_sample_rate = 48000
-
-# Bit depth
-bit_depth = 16
-
-# Resample audio
-resampled_audio_data = resample_audio(audio_data, original_sample_rate, new_sample_rate)
-
-# Save to MP3
-save_to_mp3(resampled_audio_data, new_sample_rate, bit_depth, "resampled_audio.mp3")
