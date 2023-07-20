@@ -21,24 +21,24 @@ import time
 import os
 import io
 import threading
-import subprocess32 as subprocess
+##import subprocess32 as subprocess
 import numpy as np
 #from scipy.io import wavfile
 #from scipy.io.wavfile import read as wavread
 #import resampy
 from scipy.signal import resample_poly
-from pydub import AudioSegment
+##from pydub import AudioSegment
 
 
-THRESHOLD = 12000            # audio level threshold to be considered an event
-BUFFER_SECONDS = 600        # seconds of a circular buffer
-SAMPLE_RATE = 44100         # Audio sample rate
+THRESHOLD = 21000            # audio level threshold to be considered an event
+BUFFER_SECONDS = 400        # seconds of a circular buffer
+SAMPLE_RATE = 192000         # Audio sample rate
 DEVICE_IN = 1               # Device ID of input device
 DEVICE_OUT = 3              # Device ID of output device
 BIT_DEPTH = 16              # Audio bit depth
 CHANNELS = 2                # Number of channels
-OUTPUT_DIRECTORY = "."      # for debugging
-##OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
+##OUTPUT_DIRECTORY = "."      # for debugging
+OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
 FORMAT = 'FLAC'             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
 #periodic recording
@@ -93,10 +93,10 @@ def initialization():
         if device_CH < CHANNELS:
             print(f"The device only has {device_CH} channel(s) but require {CHANNELS} channels.")
             quit(-1)
-        device_SR = device_info['default_samplerate'] 
-        if device_SR != SAMPLE_RATE:
-            print(f"The device sample rate {device_SR} is not equal to the required 'SAMPLE_RATE' of {SAMPLE_RATE}")
-            quit(-1)
+        ##device_SR = device_info['default_samplerate'] 
+        ##if device_SR != SAMPLE_RATE:
+        ##    print(f"The device sample rate {device_SR} is not equal to the required 'SAMPLE_RATE' of {SAMPLE_RATE}")
+        ##    quit(-1)
     except Exception as e:
         print(f"An error occurred while attempting to access the input device: {e}")
         print("These are the available devices: \n", sd.query_devices())
@@ -203,7 +203,8 @@ def save_event_audio():
         audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_evemt_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+    threshold_tag = int(THRESHOLD/1000)
+    output_filename = f"{timestamp}_event_{threshold_tag}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
     sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
 
