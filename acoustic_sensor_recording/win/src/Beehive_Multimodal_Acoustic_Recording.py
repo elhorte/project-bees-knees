@@ -67,9 +67,9 @@ _subtype = None
 vu_dampen = 0
 
 # Op Mode & ID =====================================================================================
-MODE = "orig_period"       # keeping it around for debugging
+#MODE = "orig_period"       # keeping it around for debugging
 #MODE = "period"            # period only
-#MODE = "event"             # event only
+MODE = "event"             # event only
 #MODE = "combo"             # period recording with event detection
 LOCATION_ID = "Zeev-Berkeley"
 HIVE_ID = "Z1"
@@ -138,6 +138,7 @@ def fake_vu_meter(value):
     # Print the string of asterisks, ending with only a carriage return to overwrite the line
     print(asterisks.ljust(50, ' '), end='\r')
 
+
 def print_threshold_ref(value):
     normalized_value = int(value / 1000)
     asterisks = '*' * normalized_value
@@ -145,7 +146,7 @@ def print_threshold_ref(value):
 #
 # event recording functions
 #
-def save_audio_after_event():
+def save_audio_around_event():
     global event_start_index
 
     time.sleep(SAVE_AFTER_EVENT)
@@ -218,7 +219,7 @@ def check_level(audio_data, index):
     if (audio_level > THRESHOLD) and event_start_index is None:
         detected_level = audio_level
         event_start_index = index
-        event_save_thread = threading.Thread(target=save_audio_after_event)
+        event_save_thread = threading.Thread(target=save_audio_around_event)
         event_save_thread.start()
 
     fake_vu_meter(audio_level)
@@ -227,7 +228,7 @@ def check_level(audio_data, index):
 def check_period(index):
     global period_start_index, period_save_thread, detected_level
 
-    if not int(time.time()) % INTERVAL: # if modulo INTERVAL zero then start of period
+    if not int(time.time()) % INTERVAL: # if modulo INTERVAL == zero then start of period
         period_start_index = index
         period_save_thread = threading.Thread(target=save_audio_for_period)
         period_save_thread.start()
