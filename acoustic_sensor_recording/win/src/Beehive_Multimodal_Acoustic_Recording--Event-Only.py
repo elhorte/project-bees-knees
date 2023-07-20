@@ -21,11 +21,7 @@ import time
 import os
 import io
 import threading
-##import subprocess32 as subprocess
 import numpy as np
-#from scipy.io import wavfile
-#from scipy.io.wavfile import read as wavread
-#import resampy
 from scipy.signal import resample_poly
 ##from pydub import AudioSegment
 
@@ -41,14 +37,6 @@ CHANNELS = 2                # Number of channels
 OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
 FORMAT = 'FLAC'             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
-#periodic recording
-PERIOD = 60                 # seconds of recording
-INTERVAL = 300              # seconds between start of period, must be > period, of course
-
-# init periodic varibles
-period_start_index = None
-period_save_thread = None
-
 # event recording
 SAVE_BEFORE_EVENT = 30   # seconds to save before the event
 SAVE_AFTER_EVENT = 30    # seconds to save after the event
@@ -63,8 +51,6 @@ _subtype = None
 
 
 # Op Mode & ID =====================================================================================
-#MODE = "orig_period"       # keeping it around for debugging
-#MODE = "period"            # period only
 #MODE = "event"             # event only
 MODE = "combo"             # period recording with event detection
 LOCATION_ID = "Zeev-Berkeley"
@@ -128,57 +114,6 @@ def initialization():
     buffer = np.zeros((buffer_size, CHANNELS), dtype=_dtype)
     buffer_index = 0
 
-
-# Print a string of asterisks, ending with only a carriage return to overwrite the line
-# value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
-def fake_vu_meter(value, end):
-    normalized_value = int(value / 1000)
-    asterisks = '*' * normalized_value
-    print(asterisks.ljust(50, ' '), end=end)
-#
-# period recording functions
-#
-def save_audio_for_period():
-    time.sleep(PERIOD)
-    save_period_audio()
-
-
-def save_period_audio():
-    global buffer, period_start_index, period_save_thread
-
-    if period_start_index is None:  # if this has been reset already, don't try to save
-        return
-
-    save_start_index = period_start_index % buffer_size
-    save_end_index = (period_start_index + (PERIOD * SAMPLE_RATE)) % buffer_size
-
-    # saving from a circular buffer so segments aren't necessarily contiguous
-    if save_end_index > save_start_index:   # is contiguous
-        audio_data = buffer[save_start_index:save_end_index]
-    else:                                   # ain't contiguous
-        audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
-
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_period_{PERIOD}_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
-    full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
-    sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
-
-    print(f"Saved period audio to {full_path_name}, period: {PERIOD}, interval {INTERVAL} seconds")
-
-    period_save_thread = None
-    period_start_index = None
-
-
-def check_period(audio_data, index):
-    global period_start_index, period_save_thread, detected_level
-
-    audio_level = np.max(np.abs(audio_data))
-    # if modulo INTERVAL == zero then start of period
-    if not int(time.time()) % INTERVAL and period_start_index is None: 
-        print("period started at:", datetime.now(), "audio level:", audio_level)
-        period_start_index = index 
-        period_save_thread = threading.Thread(target=save_audio_for_period)
-        period_save_thread.start()
 #
 # event recording functions
 #
@@ -224,8 +159,6 @@ def check_level(audio_data, index):
         event_start_index = index
         event_save_thread = threading.Thread(target=save_audio_around_event)
         event_save_thread.start()
-
-    fake_vu_meter(audio_level,'\r')
 #
 # audio stream callback function
 #
@@ -244,11 +177,7 @@ def callback(indata, frames, time, status):
         buffer[buffer_index:] = indata[:-overflow]
         buffer[:overflow] = indata[-overflow:]
 
-    if MODE == "event" or MODE == "combo":
-        check_level(indata, buffer_index)   # trigger saving audio if above threshold
-
-    if MODE == "period" or MODE == "combo":
-        check_period(indata, buffer_index)  # start saving audio if save period expired
+    check_level(indata, buffer_index)   # trigger saving audio if above threshold
 
     buffer_index = (buffer_index + data_len) % buffer_size
 
@@ -259,41 +188,8 @@ def audio_stream():
     stream = sd.InputStream(device=DEVICE_IN, channels=CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, callback=callback)
     with stream:
         print("Start recording...")
-        fake_vu_meter(THRESHOLD, '\n')  # mark audio threshold on the CLI for ref
         while stream.active:
             pass
-
-#
-# period recording functions #
-#
-def period_recording(output_filename, period=PERIOD, interval=INTERVAL, device=DEVICE_IN, rate=SAMPLE_RATE, channels=CHANNELS, subtype=_subtype, dtype=_dtype):
-    try:
-        print("* Recording for:",period," waiting for:", interval)
-        audio_data = sd.rec(int(period * rate), samplerate=rate, channels=channels, device=device, dtype=dtype)
-        for _ in range(int(period * 100)):  # Check every 1/100th of a second
-            sd.sleep(10)
-            if sd.get_status().input_overflow:
-                print('Input overflow detected while recording audio.')
-        print("* Finished recording at:      ", datetime.now())
-
-        full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
-        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=subtype)
-        print("* Finished saving:", PERIOD, "sec at:", datetime.now())
-
-    except KeyboardInterrupt:
-        print('Recording interrupted by user.')
-
-
-def period_segment_recording():
-    while True:
-        now = datetime.now()                        # get current date and time
-        timestamp = now.strftime("%Y%m%d-%H%M%S")   # convert to string and format for filename
-        print("recording from:", timestamp)
-        filename = f"{timestamp}_orig-period_{PERIOD}_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}" 
-        period_recording(filename)
-        print("time sleeping: ", INTERVAL)
-        time.sleep(INTERVAL)
-        ##play_audio(filename, DEVICE_OUT)  # debugging
 
 ###########################
 ########## MAIN ###########
@@ -326,14 +222,3 @@ if __name__ == "__main__":
         print(f"An error occurred while attempting to execute this script: {e}")
         quit(-1)         # quit with error
 
-
-##########################  
-# utilities
-##########################
-
-# for debugging
-def play_audio(filename, device):
-    print("* Playing back")
-    data, fs = sf.read(filename)
-    sd.play(data, fs, device)
-    sd.wait()
