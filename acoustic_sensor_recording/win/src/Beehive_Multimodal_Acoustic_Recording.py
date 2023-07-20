@@ -30,7 +30,7 @@ from scipy.signal import resample_poly
 ##from pydub import AudioSegment
 
 
-THRESHOLD = 21000            # audio level threshold to be considered an event
+THRESHOLD = 27000            # audio level threshold to be considered an event
 BUFFER_SECONDS = 400        # seconds of a circular buffer
 SAMPLE_RATE = 192000         # Audio sample rate
 DEVICE_IN = 1               # Device ID of input device
@@ -204,7 +204,7 @@ def save_event_audio():
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     threshold_tag = int(THRESHOLD/1000)
-    output_filename = f"{timestamp}_event_{threshold_tag}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+    output_filename = f"{timestamp}_event_{detected_level}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
     sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
 
