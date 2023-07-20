@@ -30,7 +30,7 @@ from scipy.signal import resample_poly
 from pydub import AudioSegment
 
 
-THRESHOLD = 16000            # audio level threshold to be considered an event
+THRESHOLD = 12000            # audio level threshold to be considered an event
 BUFFER_SECONDS = 600        # seconds of a circular buffer
 SAMPLE_RATE = 44100         # Audio sample rate
 DEVICE_IN = 1               # Device ID of input device
@@ -42,35 +42,31 @@ OUTPUT_DIRECTORY = "."      # for debugging
 FORMAT = 'FLAC'             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
 #periodic recording
-PERIOD = 10                 # seconds of recording
-INTERVAL = 20              # seconds between start of period, must be > period, of course
+PERIOD = 60                 # seconds of recording
+INTERVAL = 300              # seconds between start of period, must be > period, of course
 
 # init periodic varibles
 period_start_index = None
 period_save_thread = None
 
 # event recording
-SAVE_BEFORE_EVENT = 10   # seconds to save before the event
-SAVE_AFTER_EVENT = 10    # seconds to save after the event
+SAVE_BEFORE_EVENT = 30   # seconds to save before the event
+SAVE_AFTER_EVENT = 30    # seconds to save after the event
 
 # init event variables
 event_start_index = None
 event_save_thread = None
 detected_level = None
 
-
-buffer_index = 0
-buffer = None
 _dtype = None
 _subtype = None
 
-vu_dampen = 0
 
 # Op Mode & ID =====================================================================================
 #MODE = "orig_period"       # keeping it around for debugging
 #MODE = "period"            # period only
-MODE = "event"             # event only
-#MODE = "combo"             # period recording with event detection
+#MODE = "event"             # event only
+MODE = "combo"             # period recording with event detection
 LOCATION_ID = "Zeev-Berkeley"
 HIVE_ID = "Z1"
 # ==================================================================================================
@@ -127,11 +123,13 @@ def initialization():
         print("The bit depth is not supported: ", BIT_DEPTH)
         quit(-1)
 
-    # prep buffers and variables
+    # audio buffers and variables
     buffer_size = int(BUFFER_SECONDS * SAMPLE_RATE)
     buffer = np.zeros((buffer_size, CHANNELS), dtype=_dtype)
+    buffer_index = 0
 
-# Print the string of asterisks, ending with only a carriage return to overwrite the line
+
+# Print a string of asterisks, ending with only a carriage return to overwrite the line
 # value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
 def fake_vu_meter(value, end):
     normalized_value = int(value / 1000)
@@ -151,8 +149,8 @@ def save_period_audio():
     if period_start_index is None:  # if this has been reset already, don't try to save
         return
 
-    save_start_index = (period_start_index * SAMPLE_RATE) % buffer_size
-    save_end_index = (period_start_index + PERIOD * SAMPLE_RATE) % buffer_size
+    save_start_index = period_start_index % buffer_size
+    save_end_index = (period_start_index + (PERIOD * SAMPLE_RATE)) % buffer_size
 
     # saving from a circular buffer so segments aren't necessarily contiguous
     if save_end_index > save_start_index:   # is contiguous
@@ -171,10 +169,13 @@ def save_period_audio():
     period_start_index = None
 
 
-def check_period(index):
+def check_period(audio_data, index):
     global period_start_index, period_save_thread, detected_level
+
+    audio_level = np.max(np.abs(audio_data))
     # if modulo INTERVAL == zero then start of period
     if not int(time.time()) % INTERVAL and period_start_index is None: 
+        print("period started at:", datetime.now(), "audio level:", audio_level)
         period_start_index = index 
         period_save_thread = threading.Thread(target=save_audio_for_period)
         period_save_thread.start()
@@ -244,8 +245,9 @@ def callback(indata, frames, time, status):
 
     if MODE == "event" or MODE == "combo":
         check_level(indata, buffer_index)   # trigger saving audio if above threshold
+
     if MODE == "period" or MODE == "combo":
-        check_period(buffer_index)           # trigger saving audio if save period expired
+        check_period(indata, buffer_index)  # start saving audio if save period expired
 
     buffer_index = (buffer_index + data_len) % buffer_size
 
@@ -338,22 +340,3 @@ def play_audio(filename, device):
 #
 # audio sample rate conversion routines
 #
-def resample_audio(input_audio_data, original_sample_rate, new_sample_rate):
-    num_channels = input_audio_data.shape[1]
-    resampled_audio_data = []
-
-    # Resample each channel
-    for i in range(num_channels):
-        resampled_channel = resample_poly(input_audio_data[:, i], new_sample_rate, original_sample_rate)
-        resampled_audio_data.append(resampled_channel)
-
-    return np.transpose(resampled_audio_data)
-
-
-def save_to_mp3(audio_data, sample_rate, bit_depth, file_name):
-    # Convert audio data to int16 format
-    audio_data_int16 = (audio_data * np.iinfo(np.int16).max).astype(np.int16)
-    # Create AudioSegment instance
-    audio_segment = AudioSegment(audio_data_int16.tobytes(), frame_rate=sample_rate, sample_width=bit_depth//8, channels=audio_data.shape[0])
-    # Save to MP3
-    audio_segment.export(file_name, format="mp3")
