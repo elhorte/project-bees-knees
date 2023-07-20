@@ -131,59 +131,18 @@ def initialization():
     buffer_size = int(BUFFER_SECONDS * SAMPLE_RATE)
     buffer = np.zeros((buffer_size, CHANNELS), dtype=_dtype)
 
-
-def fake_vu_meter(value):
+# Print the string of asterisks, ending with only a carriage return to overwrite the line
+# value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
+def fake_vu_meter(value, end):
     normalized_value = int(value / 1000)
     asterisks = '*' * normalized_value
-    # Print the string of asterisks, ending with only a carriage return to overwrite the line
-    print(asterisks.ljust(50, ' '), end='\r')
-
-
-def print_threshold_ref(value):
-    normalized_value = int(value / 1000)
-    asterisks = '*' * normalized_value
-    print(asterisks.ljust(50, ' '))
+    print(asterisks.ljust(50, ' '), end=end)
 #
-# event recording functions
+# period recording functions
 #
-def save_audio_around_event():
-    global event_start_index
-
-    time.sleep(SAVE_AFTER_EVENT)
-    save_event_audio()
-
-
 def save_audio_for_period():
-    global period_start_index
-
     time.sleep(PERIOD)
     save_period_audio()
-
-
-def save_event_audio():
-    global buffer, event_start_index, event_save_thread, detected_level
-
-    if event_start_index is None:  # if this has been reset already, don't try to save
-        return
-
-    save_start_index = ((event_start_index - SAVE_BEFORE_EVENT) * SAMPLE_RATE) % buffer_size
-    save_end_index = ((event_start_index + SAVE_AFTER_EVENT) * SAMPLE_RATE) % buffer_size
-
-    # saving from a circular buffer so segments aren't necessarily contiguous
-    if save_end_index > save_start_index:   # is contiguous
-        audio_data = buffer[save_start_index:save_end_index]
-    else:                                   # ain't
-        audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
-
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_evemt_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
-    full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
-    sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
-
-    print(f"Saved evemt audio to {full_path_name}, audio threshold level: {detected_level}, duration: {audio_data.shape[0] / SAMPLE_RATE} seconds")
-
-    event_save_thread = None
-    event_start_index = None
 
 
 def save_period_audio():
@@ -193,7 +152,7 @@ def save_period_audio():
         return
 
     save_start_index = (period_start_index * SAMPLE_RATE) % buffer_size
-    save_end_index = ((period_start_index + PERIOD) * SAMPLE_RATE) % buffer_size
+    save_end_index = (period_start_index + PERIOD * SAMPLE_RATE) % buffer_size
 
     # saving from a circular buffer so segments aren't necessarily contiguous
     if save_end_index > save_start_index:   # is contiguous
@@ -212,28 +171,62 @@ def save_period_audio():
     period_start_index = None
 
 
+def check_period(index):
+    global period_start_index, period_save_thread, detected_level
+    # if modulo INTERVAL == zero then start of period
+    if not int(time.time()) % INTERVAL and period_start_index is None: 
+        period_start_index = index 
+        period_save_thread = threading.Thread(target=save_audio_for_period)
+        period_save_thread.start()
+#
+# event recording functions
+#
+def save_audio_around_event():
+    time.sleep(SAVE_AFTER_EVENT)
+    save_event_audio()
+
+
+def save_event_audio():
+    global buffer, event_start_index, event_save_thread, detected_level
+
+    if event_start_index is None:  # if this has been reset already, don't try to save
+        return
+
+    save_start_index = (event_start_index - SAVE_BEFORE_EVENT * SAMPLE_RATE) % buffer_size
+    save_end_index = (event_start_index + SAVE_AFTER_EVENT * SAMPLE_RATE) % buffer_size
+
+    # saving from a circular buffer so segments aren't necessarily contiguous
+    if save_end_index > save_start_index:   # is contiguous
+        audio_data = buffer[save_start_index:save_end_index]
+    else:                                   # ain't contiguous
+        audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    output_filename = f"{timestamp}_evemt_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+    full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
+    sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
+
+    print(f"Saved evemt audio to {full_path_name}, audio threshold level: {detected_level}, duration: {audio_data.shape[0] / SAMPLE_RATE} seconds")
+
+    event_save_thread = None
+    event_start_index = None
+
+
 def check_level(audio_data, index):
     global event_start_index, event_save_thread, detected_level
 
     audio_level = np.max(np.abs(audio_data))
     if (audio_level > THRESHOLD) and event_start_index is None:
+        print("event detected at:", datetime.now(), "audio level:", audio_level)
         detected_level = audio_level
         event_start_index = index
         event_save_thread = threading.Thread(target=save_audio_around_event)
         event_save_thread.start()
 
-    fake_vu_meter(audio_level)
-
-
-def check_period(index):
-    global period_start_index, period_save_thread, detected_level
-
-    if not int(time.time()) % INTERVAL: # if modulo INTERVAL == zero then start of period
-        period_start_index = index
-        period_save_thread = threading.Thread(target=save_audio_for_period)
-        period_save_thread.start()
-
-
+    fake_vu_meter(audio_level,'\r')
+#
+# audio stream callback function
+#
 def callback(indata, frames, time, status):
     global buffer, buffer_index
 
@@ -258,36 +251,15 @@ def callback(indata, frames, time, status):
 
 
 def audio_stream():
-    global buffer, buffer_index, event_save_thread
+    global buffer, buffer_index, _dtype
 
     stream = sd.InputStream(device=DEVICE_IN, channels=CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, callback=callback)
     with stream:
         print("Start recording...")
-        print_threshold_ref(THRESHOLD)  # mark audio threshold on the CLI for ref
+        fake_vu_meter(THRESHOLD, '\n')  # mark audio threshold on the CLI for ref
         while stream.active:
             pass
-#
-# audio sample rate conversion routines
-#
-def resample_audio(input_audio_data, original_sample_rate, new_sample_rate):
-    num_channels = input_audio_data.shape[1]
-    resampled_audio_data = []
 
-    # Resample each channel
-    for i in range(num_channels):
-        resampled_channel = resample_poly(input_audio_data[:, i], new_sample_rate, original_sample_rate)
-        resampled_audio_data.append(resampled_channel)
-
-    return np.transpose(resampled_audio_data)
-
-
-def save_to_mp3(audio_data, sample_rate, bit_depth, file_name):
-    # Convert audio data to int16 format
-    audio_data_int16 = (audio_data * np.iinfo(np.int16).max).astype(np.int16)
-    # Create AudioSegment instance
-    audio_segment = AudioSegment(audio_data_int16.tobytes(), frame_rate=sample_rate, sample_width=bit_depth//8, channels=audio_data.shape[0])
-    # Save to MP3
-    audio_segment.export(file_name, format="mp3")
 #
 # period recording functions #
 #
@@ -320,13 +292,9 @@ def period_segment_recording():
         time.sleep(INTERVAL)
         ##play_audio(filename, DEVICE_OUT)  # debugging
 
-# for debugging
-def play_audio(filename, device):
-    print("* Playing back")
-    data, fs = sf.read(filename)
-    sd.play(data, fs, device)
-    sd.wait()
-
+###########################
+########## MAIN ###########
+###########################
 
 if __name__ == "__main__":
 
@@ -353,7 +321,39 @@ if __name__ == "__main__":
         print('\nRecording process stopped by user.')
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
-        quit(-1)         
+        quit(-1)         # quit with error
 
-    print("* Finished playback")
 
+
+##########################  
+# utilities
+##########################
+
+# for debugging
+def play_audio(filename, device):
+    print("* Playing back")
+    data, fs = sf.read(filename)
+    sd.play(data, fs, device)
+    sd.wait()
+#
+# audio sample rate conversion routines
+#
+def resample_audio(input_audio_data, original_sample_rate, new_sample_rate):
+    num_channels = input_audio_data.shape[1]
+    resampled_audio_data = []
+
+    # Resample each channel
+    for i in range(num_channels):
+        resampled_channel = resample_poly(input_audio_data[:, i], new_sample_rate, original_sample_rate)
+        resampled_audio_data.append(resampled_channel)
+
+    return np.transpose(resampled_audio_data)
+
+
+def save_to_mp3(audio_data, sample_rate, bit_depth, file_name):
+    # Convert audio data to int16 format
+    audio_data_int16 = (audio_data * np.iinfo(np.int16).max).astype(np.int16)
+    # Create AudioSegment instance
+    audio_segment = AudioSegment(audio_data_int16.tobytes(), frame_rate=sample_rate, sample_width=bit_depth//8, channels=audio_data.shape[0])
+    # Save to MP3
+    audio_segment.export(file_name, format="mp3")
