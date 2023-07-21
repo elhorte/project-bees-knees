@@ -30,8 +30,8 @@ from scipy.signal import resample_poly
 ##from pydub import AudioSegment
 
 
-THRESHOLD = 27000            # audio level threshold to be considered an event
-BUFFER_SECONDS = 400        # seconds of a circular buffer
+THRESHOLD = 20000            # audio level threshold to be considered an event
+BUFFER_SECONDS = 660        # seconds of a circular buffer
 SAMPLE_RATE = 192000         # Audio sample rate
 DEVICE_IN = 1               # Device ID of input device
 DEVICE_OUT = 3              # Device ID of output device
@@ -42,8 +42,8 @@ OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
 FORMAT = 'FLAC'             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
 #periodic recording
-PERIOD = 60                 # seconds of recording
-INTERVAL = 300              # seconds between start of period, must be > period, of course
+PERIOD = 600                 # seconds of recording
+INTERVAL = 3600              # seconds between start of period, must be > period, of course
 
 # init periodic varibles
 period_start_index = None
@@ -52,6 +52,7 @@ period_save_thread = None
 # event recording
 SAVE_BEFORE_EVENT = 30   # seconds to save before the event
 SAVE_AFTER_EVENT = 30    # seconds to save after the event
+EVENT_CH = 1             # channel to monitor for event (0 = both, left = 1, right = 2)
 
 # init event variables
 event_start_index = None
@@ -61,12 +62,11 @@ detected_level = None
 _dtype = None
 _subtype = None
 
-
 # Op Mode & ID =====================================================================================
 #MODE = "orig_period"       # keeping it around for debugging
 #MODE = "period"            # period only
-#MODE = "event"             # event only
-MODE = "combo"             # period recording with event detection
+MODE = "event"             # event only
+#MODE = "combo"             # period recording with event detection
 LOCATION_ID = "Zeev-Berkeley"
 HIVE_ID = "Z1"
 # ==================================================================================================
@@ -135,9 +135,11 @@ def fake_vu_meter(value, end):
     normalized_value = int(value / 1000)
     asterisks = '*' * normalized_value
     print(asterisks.ljust(50, ' '), end=end)
+
 #
 # period recording functions
 #
+
 def save_audio_for_period():
     time.sleep(PERIOD)
     save_period_audio()
@@ -179,9 +181,11 @@ def check_period(audio_data, index):
         period_start_index = index 
         period_save_thread = threading.Thread(target=save_audio_for_period)
         period_save_thread.start()
+
 #
 # event recording functions
 #
+
 def save_audio_around_event():
     time.sleep(SAVE_AFTER_EVENT)
     save_event_audio()
@@ -214,10 +218,16 @@ def save_event_audio():
     event_start_index = None
 
 
-def check_level(audio_data, index):
+def check_level(audio_data, index, channel_select=EVENT_CH):
     global event_start_index, event_save_thread, detected_level
 
-    audio_level = np.max(np.abs(audio_data))
+    if channel_select == 0:
+        audio_level = np.max(np.abs(audio_data[:,:]))
+        print("both channels", channel_select)
+    else:
+        audio_level = np.max(np.abs(audio_data[:,channel_select-1]))
+        print("one channel", channel_select)
+
     if (audio_level > THRESHOLD) and event_start_index is None:
         print("event detected at:", datetime.now(), "audio level:", audio_level)
         detected_level = audio_level
@@ -225,10 +235,12 @@ def check_level(audio_data, index):
         event_save_thread = threading.Thread(target=save_audio_around_event)
         event_save_thread.start()
 
-    fake_vu_meter(audio_level,'\r')
+    fake_vu_meter(audio_level,'\r') # no line feed
+
 #
 # audio stream callback function
 #
+
 def callback(indata, frames, time, status):
     global buffer, buffer_index
 
@@ -245,7 +257,7 @@ def callback(indata, frames, time, status):
         buffer[:overflow] = indata[-overflow:]
 
     if MODE == "event" or MODE == "combo":
-        check_level(indata, buffer_index)   # trigger saving audio if above threshold
+        check_level(indata, buffer_index)   # trigger saving audio if above threshold, 
 
     if MODE == "period" or MODE == "combo":
         check_period(indata, buffer_index)  # start saving audio if save period expired
@@ -263,37 +275,6 @@ def audio_stream():
         while stream.active:
             pass
 
-#
-# period recording functions #
-#
-def period_recording(output_filename, period=PERIOD, interval=INTERVAL, device=DEVICE_IN, rate=SAMPLE_RATE, channels=CHANNELS, subtype=_subtype, dtype=_dtype):
-    try:
-        print("* Recording for:",period," waiting for:", interval)
-        audio_data = sd.rec(int(period * rate), samplerate=rate, channels=channels, device=device, dtype=dtype)
-        for _ in range(int(period * 100)):  # Check every 1/100th of a second
-            sd.sleep(10)
-            if sd.get_status().input_overflow:
-                print('Input overflow detected while recording audio.')
-        print("* Finished recording at:      ", datetime.now())
-
-        full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
-        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=subtype)
-        print("* Finished saving:", PERIOD, "sec at:", datetime.now())
-
-    except KeyboardInterrupt:
-        print('Recording interrupted by user.')
-
-
-def period_segment_recording():
-    while True:
-        now = datetime.now()                        # get current date and time
-        timestamp = now.strftime("%Y%m%d-%H%M%S")   # convert to string and format for filename
-        print("recording from:", timestamp)
-        filename = f"{timestamp}_orig-period_{PERIOD}_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}" 
-        period_recording(filename)
-        print("time sleeping: ", INTERVAL)
-        time.sleep(INTERVAL)
-        ##play_audio(filename, DEVICE_OUT)  # debugging
 
 ###########################
 ########## MAIN ###########
