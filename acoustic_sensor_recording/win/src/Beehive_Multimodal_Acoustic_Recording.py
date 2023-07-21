@@ -52,7 +52,7 @@ period_save_thread = None
 # event recording
 SAVE_BEFORE_EVENT = 30   # seconds to save before the event
 SAVE_AFTER_EVENT = 30    # seconds to save after the event
-EVENT_CH = 1             # channel to monitor for event (0 = both, left = 1, right = 2)
+EVENT_CH = 0             # channel to monitor for event (0 = left, 1 = right, else both)
 
 # init event variables
 event_start_index = None
@@ -64,8 +64,8 @@ _subtype = None
 
 # Op Mode & ID =====================================================================================
 #MODE = "orig_period"       # keeping it around for debugging
-#MODE = "period"            # period only
-MODE = "event"             # event only
+MODE = "period"            # period only
+#MODE = "event"             # event only
 #MODE = "combo"             # period recording with event detection
 LOCATION_ID = "Zeev-Berkeley"
 HIVE_ID = "Z1"
@@ -136,6 +136,15 @@ def fake_vu_meter(value, end):
     asterisks = '*' * normalized_value
     print(asterisks.ljust(50, ' '), end=end)
 
+
+def get_level(audio_data, channel_select):
+    if channel_select == 0 or channel_select == 1:
+        audio_level = np.max(np.abs(audio_data[:,channel_select]))
+    else: # both channels
+        audio_level = np.max(np.abs(audio_data))
+
+    return audio_level
+
 #
 # period recording functions
 #
@@ -174,13 +183,16 @@ def save_period_audio():
 def check_period(audio_data, index):
     global period_start_index, period_save_thread, detected_level
 
-    audio_level = np.max(np.abs(audio_data))
+    audio_level = get_level(audio_data, EVENT_CH)
     # if modulo INTERVAL == zero then start of period
     if not int(time.time()) % INTERVAL and period_start_index is None: 
         print("period started at:", datetime.now(), "audio level:", audio_level)
         period_start_index = index 
         period_save_thread = threading.Thread(target=save_audio_for_period)
         period_save_thread.start()
+
+    if MODE == 'period':
+        fake_vu_meter(audio_level,'\r')
 
 #
 # event recording functions
@@ -218,15 +230,10 @@ def save_event_audio():
     event_start_index = None
 
 
-def check_level(audio_data, index, channel_select=EVENT_CH):
+def check_level(audio_data, index):
     global event_start_index, event_save_thread, detected_level
 
-    if channel_select == 0:
-        audio_level = np.max(np.abs(audio_data[:,:]))
-        print("both channels", channel_select)
-    else:
-        audio_level = np.max(np.abs(audio_data[:,channel_select-1]))
-        print("one channel", channel_select)
+    audio_level = get_level(audio_data, EVENT_CH)
 
     if (audio_level > THRESHOLD) and event_start_index is None:
         print("event detected at:", datetime.now(), "audio level:", audio_level)
@@ -271,6 +278,7 @@ def audio_stream():
     stream = sd.InputStream(device=DEVICE_IN, channels=CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, callback=callback)
     with stream:
         print("Start recording...")
+        print("Monitoring audio level on channel:", EVENT_CH)
         fake_vu_meter(THRESHOLD, '\n')  # mark audio threshold on the CLI for ref
         while stream.active:
             pass
