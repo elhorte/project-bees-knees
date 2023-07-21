@@ -30,7 +30,7 @@ from scipy.signal import resample_poly
 ##from pydub import AudioSegment
 
 
-THRESHOLD = 20000            # audio level threshold to be considered an event
+THRESHOLD = 24000            # audio level threshold to be considered an event
 BUFFER_SECONDS = 660        # seconds of a circular buffer
 SAMPLE_RATE = 192000         # Audio sample rate
 DEVICE_IN = 1               # Device ID of input device
@@ -279,7 +279,10 @@ def audio_stream():
     with stream:
         print("Start recording...")
         print("Monitoring audio level on channel:", EVENT_CH)
-        fake_vu_meter(THRESHOLD, '\n')  # mark audio threshold on the CLI for ref
+        if MODE == 'period':
+            fake_vu_meter(32768, '\n')  # mark max audio level on the CLI
+        else:
+            fake_vu_meter(THRESHOLD, '\n')  # mark audio event threshold on the CLI for ref
         while stream.active:
             pass
 
