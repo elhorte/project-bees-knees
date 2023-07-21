@@ -245,7 +245,7 @@ def check_level(audio_data, index):
     fake_vu_meter(audio_level,'\r') # no line feed
 
 #
-# audio stream callback function
+# audio stream and callback functions
 #
 
 def callback(indata, frames, time, status):
@@ -265,7 +265,6 @@ def callback(indata, frames, time, status):
 
     if MODE == "event" or MODE == "combo":
         check_level(indata, buffer_index)   # trigger saving audio if above threshold, 
-
     if MODE == "period" or MODE == "combo":
         check_period(indata, buffer_index)  # start saving audio if save period expired
 
@@ -281,7 +280,7 @@ def audio_stream():
         print("Monitoring audio level on channel:", EVENT_CH)
         if MODE == 'period':
             fake_vu_meter(32768, '\n')  # mark max audio level on the CLI
-        else:
+        else: # MODE == 'event' or MODE == 'combo'
             fake_vu_meter(THRESHOLD, '\n')  # mark audio event threshold on the CLI for ref
         while stream.active:
             pass
@@ -307,7 +306,7 @@ if __name__ == "__main__":
             print("Starting audio stream in event detect-only mode")
             audio_stream()
         elif MODE == 'combo':
-            print("Starting audio capture in periodic mode w/event capture")
+            print("Starting audio capture in both periodic mode and event capture")
             audio_stream()
         else:
             print("MODE not recognized")
