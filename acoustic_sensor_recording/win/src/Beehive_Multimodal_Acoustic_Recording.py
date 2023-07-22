@@ -34,27 +34,35 @@ from scipy.signal import resample_poly
 THRESHOLD = 24000            # audio level threshold to be considered an event
 BUFFER_SECONDS = 660        # seconds of a circular buffer
 SAMPLE_RATE = 192000         # Audio sample rate
-DOWNSAMPLE_RATE = 48000
 BIT_DEPTH = 16              # Audio bit depth
 CHANNELS = 2                # Number of channels
+
+CONT_SAMPLE_RATE = 48000     # For continuous audio
+CONT_BIT_DEPTH = 16              # Audio bit depth
+CONT_CHANNELS = 2                # Number of channels
+CONT_FORMAT = 'FLAC'
 
 DEVICE_IN = 1               # Device ID of input device
 DEVICE_OUT = 3              # Device ID of output device
 
-##OUTPUT_DIRECTORY = "."      # for debugging
-OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
+OUTPUT_DIRECTORY = "."      # for debugging
+##OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
 FORMAT = 'FLAC'             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
 #periodic recording
 PERIOD = 600                 # seconds of recording
 INTERVAL = 3600              # seconds between start of period, must be > period, of course
-CONTINUOUS = 1800            # seconds of continuous recording
+CONTINUOUS = 20            # seconds of continuous recording
 
-# init periodic varibles
+# init continuous recording varibles
+continuous_start_index = None
+continuous_save_thread = None
+
+# init period recording varibles
 period_start_index = None
 period_save_thread = None
 
-# event recording
+# event capture recording
 SAVE_BEFORE_EVENT = 30   # seconds to save before the event
 SAVE_AFTER_EVENT = 30    # seconds to save after the event
 EVENT_CH = 0             # channel to monitor for event (0 = left, 1 = right, else both)
@@ -69,7 +77,7 @@ _subtype = None
 
 # Op Mode & ID =====================================================================================
 MODE = "continuous"       # recording continuously at low bit rate
-MODE = "period"            # period only
+#MODE = "period"            # period only
 #MODE = "event"             # event only
 #MODE = "combo"             # period recording with event detection
 LOCATION_ID = "Zeev-Berkeley"
@@ -159,13 +167,13 @@ def save_audio_for_continuous():
 
 
 def save_continuous_audio():
-    global buffer, period_start_index, period_save_thread
+    global buffer, continuous_start_index, continuous_save_thread
 
-    if period_start_index is None:  # if this has been reset already, don't try to save
+    if continuous_start_index is None:  # if this has been reset already, don't try to save
         return
 
-    save_start_index = period_start_index % buffer_size
-    save_end_index = (period_start_index + (PERIOD * SAMPLE_RATE)) % buffer_size
+    save_start_index = continuous_start_index % buffer_size
+    save_end_index = (continuous_start_index + (PERIOD * SAMPLE_RATE)) % buffer_size
 
     # saving from a circular buffer so segments aren't necessarily contiguous
     if save_end_index > save_start_index:   # is contiguous
@@ -174,7 +182,7 @@ def save_continuous_audio():
         audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
     # Downsample audio before saving
-    audio_data = signal.resample_poly(audio_data, DOWNSAMPLE_RATE, SAMPLE_RATE)
+    audio_data = signal.resample_poly(audio_data, CONT_SAMPLE_RATE, SAMPLE_RATE)
     
     # Convert to 16-bit
     audio_data = audio_data.astype(np.int16)
@@ -182,16 +190,16 @@ def save_continuous_audio():
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_filename = f"{timestamp}_continuous_{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
-    sf.write(full_path_name, audio_data, DOWNSAMPLE_RATE, format=FORMAT, subtype=_subtype)  # use DOWNSAMPLE_RATE
+    sf.write(full_path_name, audio_data, CONT_SAMPLE_RATE, format=CONT_FORMAT, subtype=_subtype)  # use DOWNSAMPLE_RATE
 
-    print(f"Saved period audio to {full_path_name}, period: {PERIOD}, interval {INTERVAL} seconds")
+    print(f"Saved continuous audio to {full_path_name}, block size: {CONTINUOUS} seconds")
 
-    period_save_thread = None
-    period_start_index = None
+    continuous_save_thread = None
+    continuous_start_index = None
 
 
 def check_continuous(audio_data, index):
-    global period_start_index, period_save_thread, detected_level
+    global continuous_start_index, continuous_save_thread, detected_level
 
     audio_level = get_level(audio_data, EVENT_CH)
     # just keep doing it, no test
@@ -357,21 +365,18 @@ if __name__ == "__main__":
     print("Acoustic Signal Capture")
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {CHANNELS}")
     try:
-        if MODE == 'orig_period':
-            print("Starting audio stream in original period-only recording mode")
-            period_segment_recording()
+        if MODE == 'continuous':
+            print("Starting audio stream in continuous, low-sample-rate recording mode")
         elif MODE == 'period':
             print("Starting audio stream in period-only mode")
-            audio_stream()
         elif MODE == 'event':
             print("Starting audio stream in event detect-only mode")
-            audio_stream()
         elif MODE == 'combo':
             print("Starting audio capture in both periodic mode and event capture")
-            audio_stream()
         else:
             print("MODE not recognized")
             quit(-1)
+        audio_stream()
     except KeyboardInterrupt:
         print('\nRecording process stopped by user.')
     except Exception as e:
