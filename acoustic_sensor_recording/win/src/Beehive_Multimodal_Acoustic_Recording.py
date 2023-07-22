@@ -173,7 +173,7 @@ def save_continuous_audio():
         return
 
     save_start_index = continuous_start_index % buffer_size
-    save_end_index = (continuous_start_index + (PERIOD * SAMPLE_RATE)) % buffer_size
+    save_end_index = (continuous_start_index + (CONTINUOUS * SAMPLE_RATE)) % buffer_size
 
     # saving from a circular buffer so segments aren't necessarily contiguous
     if save_end_index > save_start_index:   # is contiguous
@@ -201,7 +201,7 @@ def save_continuous_audio():
 def check_continuous(audio_data, index):
     global continuous_start_index, continuous_save_thread, detected_level
 
-    audio_level = get_level(audio_data, EVENT_CH)
+    audio_level = get_level(audio_data)
     # just keep doing it, no test
     if continuous_start_index is None: 
         print("continous block started at:", datetime.now(), "audio level:", audio_level)
