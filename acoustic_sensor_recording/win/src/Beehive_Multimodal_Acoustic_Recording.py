@@ -201,7 +201,7 @@ def save_continuous_audio():
 def check_continuous(audio_data, index):
     global continuous_start_index, continuous_save_thread, detected_level
 
-    audio_level = get_level(audio_data)
+    audio_level = get_level(audio_data, EVENT_CH)
     # just keep doing it, no test
     if continuous_start_index is None: 
         print("continous block started at:", datetime.now(), "audio level:", audio_level)
