@@ -14,8 +14,6 @@
 # Reset the audio threshold level flag and event_start_time after saving audio.
 
 
-
-
 import sounddevice as sd
 import soundfile as sf
 from datetime import datetime
@@ -32,57 +30,57 @@ import os
 os.environ['NUMBA_NUM_THREADS'] = '1'
 import librosa
 
-FULL_SCALE = 2 ** 16
-THRESHOLD = 24000           # audio level threshold to be considered an event
-BUFFER_SECONDS = 660        # seconds of a circular buffer
-SAMPLE_RATE = 192000        # Audio sample rate
-BIT_DEPTH = 16              # Audio bit depth
-CHANNELS = 2                # Number of channels
-FORMAT = 'FLAC'             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
+FULL_SCALE = 2 ** 16            # just for cli vu meter level reference
+THRESHOLD = 24000               # audio level threshold to be considered an event
+BUFFER_SECONDS = 660            # seconds of a circular buffer
+SAMPLE_RATE = 192000            # Audio sample rate
+BIT_DEPTH = 16                  # Audio bit depth
+CHANNELS = 2                    # Number of channels
+FORMAT = 'FLAC'                 # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
-CONTINUOUS_SAMPLE_RATE = 48000    # For continuous audio
-CONTINUOUS_BIT_DEPTH = 16         # Audio bit depth
-CONTINUOUS_CHANNELS = 2           # Number of channels
-CONTINUOUS_FORMAT = 'MP3'
+CONTINUOUS_SAMPLE_RATE = 48000  # For continuous audio
+CONTINUOUS_BIT_DEPTH = 16       # Audio bit depth
+CONTINUOUS_CHANNELS = 2         # Number of channels
+CONTINUOUS_FORMAT = 'MP3'       # accepts mp3, flac, or wav
 
-DEVICE_IN = 1               # Device ID of input device
-DEVICE_OUT = 3              # Device ID of output device
+DEVICE_IN = 1                   # Device ID of input device
+DEVICE_OUT = 3                  # Device ID of output device
 
-OUTPUT_DIRECTORY = "."      # for debugging
+OUTPUT_DIRECTORY = "."          # for debugging
 ##OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
 
 
 #periodic & continuous recording timing
-PERIOD = 300                # seconds of recording
-INTERVAL = 1800             # seconds between start of period, must be > period, of course
-CONTINUOUS = 600            # file size in seconds of continuous recording
+PERIOD = 300                    # seconds of recording
+INTERVAL = 1800                 # seconds between start of period, must be > period, of course
+CONTINUOUS = 600                # file size in seconds of continuous recording
 
 # init continuous recording varibles
 continuous_start_index = None
 continuous_save_thread = None
-continuous_end_index = 0    # so the next start = this end
+continuous_end_index = 0        # so the next start = this end
 
 # init period recording varibles
 period_start_index = None
 period_save_thread = None
 
 # event capture recording
-SAVE_BEFORE_EVENT = 30      # seconds to save before the event
-SAVE_AFTER_EVENT = 30       # seconds to save after the event
-MONITOR_CH = 0                # channel to monitor for event (0 = left, 1 = right, else both)
+SAVE_BEFORE_EVENT = 30          # seconds to save before the event
+SAVE_AFTER_EVENT = 30           # seconds to save after the event
+MONITOR_CH = 0                  # channel to monitor for event (0 = left, 1 = right, else both)
 
 # init event variables
 event_start_index = None
 event_save_thread = None
 detected_level = None
 
-_dtype = None
+_dtype = None                   # parms sd lib cares about
 _subtype = None
 
 # Op Mode & ID =====================================================================================
-MODE_CONTINUOUS = True  # recording continuously at low bit rate
-MODE_PERIOD = True      # period only
-MODE_EVENT = False      # event only
+MODE_CONTINUOUS = True          # recording continuously to mp3 files
+MODE_PERIOD = True              # period only
+MODE_EVENT = False              # event only
 
 LOCATION_ID = "Zeev-Berkeley"
 HIVE_ID = "Z1"
@@ -165,7 +163,7 @@ def get_level(audio_data, channel_select):
 #
 # convert audio to mp3 and save to file
 #
-def numpy_to_mp3(np_array, sample_rate, full_path):
+def numpy_to_mp3(np_array, sample_rate, full_path, quality):
     # Ensure the array is formatted as int16
     int_array = np_array.astype(np.int16)
 
@@ -180,12 +178,19 @@ def numpy_to_mp3(np_array, sample_rate, full_path):
         channels=2
     )
 
-    # Export the AudioSegment instance as an MP3 file
-    audio_segment.export(full_path, format="mp3", bitrate="320k")
+    if quality >= 64 and quality <= 320:    # use constant bitrate, 64k would be the min, 320k the best
+        cbr = str(quality) + "k"
+        audio_segment.export(full_path, format="mp3", bitrate=cbr)
+    elif quality < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
+        audio_segment.export(full_path, format="mp3", parameters=["-q:a", str(quality)])
+    else:
+        print("Don't know of an mp3 mode with parameter:", quality)
+        quit(-1)
 
 #
 # continuous recording functions at low sample rate
 #
+
 def save_audio_for_continuous():
     time.sleep(CONTINUOUS)
     save_continuous_audio()
@@ -227,9 +232,12 @@ def save_continuous_audio():
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
 
     if CONTINUOUS_FORMAT == 'MP3':
-        numpy_to_mp3(audio_data, 48000, full_path_name)
-    else: # FLAC or WAV
+        numpy_to_mp3(audio_data, 48000, full_path_name, 0) # 0 = vbr, highest quality
+    elif CONTINUOUS_FORMAT == 'FLAC' or CONTINUOUS_FORMAT == 'WAV': 
         sf.write(full_path_name, audio_data, CONTINUOUS_SAMPLE_RATE, format=CONTINUOUS_FORMAT, subtype=_subtype)
+    else:
+        print("don't know about file format:", CONTINUOUS_FORMAT)
+        quit(-1)
 
     print(f"Saved continuous audio to {full_path_name}, block size: {CONTINUOUS} seconds")
 
