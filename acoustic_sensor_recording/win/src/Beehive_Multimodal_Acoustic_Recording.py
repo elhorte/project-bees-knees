@@ -14,7 +14,7 @@
 # Reset the audio threshold level flag and event_start_time after saving audio.
 
 
-from scipy import signal
+
 
 import sounddevice as sd
 import soundfile as sf
@@ -26,6 +26,7 @@ import numpy as np
 #from scipy.io.wavfile import read as wavread
 #import resampy
 #from scipy.signal import resample_poly
+#from scipy import signal
 from pydub import AudioSegment
 import os
 os.environ['NUMBA_NUM_THREADS'] = '1'
@@ -51,10 +52,10 @@ OUTPUT_DIRECTORY = "."      # for debugging
 ##OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
 
 
-#periodic recording
+#periodic & continuous recording timing
 PERIOD = 300                # seconds of recording
 INTERVAL = 1800             # seconds between start of period, must be > period, of course
-CONTINUOUS = 600            # seconds of continuous recording
+CONTINUOUS = 600            # file size in seconds of continuous recording
 
 # init continuous recording varibles
 continuous_start_index = None
@@ -242,7 +243,7 @@ def check_continuous(audio_data, index):
     audio_level = get_level(audio_data, MONITOR_CH)
     # just keep doing it, no testing
     if continuous_start_index is None: 
-        print("continous block started at:", datetime.now())
+        print("continuous block started at:", datetime.now())
         continuous_start_index = continuous_end_index 
         continuous_save_thread = threading.Thread(target=save_audio_for_continuous)
         continuous_save_thread.start()
