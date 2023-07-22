@@ -35,15 +35,6 @@ FORMAT = 'FLAC'             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between reco
 PERIOD = 60                 # seconds of recording
 INTERVAL = 300              # seconds between start of period, must be > period, of course
 
-# event recording
-SAVE_BEFORE_EVENT = 30   # seconds to save before the event
-SAVE_AFTER_EVENT = 30    # seconds to save after the event
-
-# init event variables
-event_start_index = None
-event_save_thread = None
-detected_level = None
-
 _dtype = None
 _subtype = None
 

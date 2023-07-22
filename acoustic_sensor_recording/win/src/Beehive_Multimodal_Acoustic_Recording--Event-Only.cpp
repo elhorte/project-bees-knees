@@ -91,3 +91,231 @@ As C++ and Python are very different languages, this conversion may not perform 
 Please note that audio processing in C++ can be complex and require a solid understanding of both C++ and digital audio. If you're not comfortable with C++, you might want to consider using a higher-level language or a specialized audio processing framework or tool.
 
 */
+
+// version of 7/21/23
+
+Python and C++ are quite different in nature, and some Python modules such as `sounddevice`, `soundfile`, and `numpy` do not have direct equivalents in C++. However, C++ has libraries like PortAudio for audio I/O and libsndfile for reading/writing audio files, which can be used to perform similar operations. Here's a rough idea of how the script might be translated into C++.
+
+Please note that this code is a simplified and partial translation of the Python script you provided. It does not include all the functionalities in the original Python script. For example, it does not handle FLAC files, as support for FLAC is not included in libsndfile by default. Also, threading, exceptions, and some other parts are omitted.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <cmath>
+#include <chrono>
+#include <thread>
+#include <sndfile.hh>
+#include <portaudio.h>
+
+#define SAMPLE_RATE 192000
+#define CHANNELS 2
+#define FRAMES_PER_BUFFER 1024
+#define THRESHOLD 27000
+#define SAVE_BEFORE_EVENT 30
+#define SAVE_AFTER_EVENT 30
+
+typedef struct {
+    double buffer[FRAMES_PER_BUFFER * CHANNELS];
+    int frameIndex;
+} paTestData;
+
+std::vector<double> audioBuffer;
+int eventStartIndex = -1;
+std::string OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings";
+
+static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned long framesPerBuffer,
+                          const PaStreamCallbackTimeInfo* timeInfo, PaStreamCallbackFlags statusFlags, void *userData) {
+    paTestData *data = (paTestData*)userData;
+    const double *rptr = (const double*)inputBuffer;
+    double *wptr = &data->buffer[data->frameIndex * CHANNELS];
+    long framesToCalc;
+    long i;
+    int finished;
+
+    if(data->frameIndex < FRAMES_PER_BUFFER) {
+        framesToCalc = FRAMES_PER_BUFFER - data->frameIndex;
+        finished = paContinue;
+    } else {
+        framesToCalc = framesPerBuffer;
+        finished = paComplete;
+    }
+
+    if(inputBuffer == NULL) {
+        for(i=0; i<framesToCalc; i++) {
+            *wptr++ = 0.0;
+            if(CHANNELS == 2) *wptr++ = 0.0;
+        }
+    } else {
+        for(i=0; i<framesToCalc; i++) {
+            audioBuffer.push_back(*rptr);
+            *wptr++ = *rptr++;
+            if(CHANNELS == 2) {
+                audioBuffer.push_back(*rptr);
+                *wptr++ = *rptr++;
+            }
+        }
+    }
+
+    data->frameIndex += framesToCalc;
+    if(finished) {
+        if (eventStartIndex != -1) {
+            saveEventAudio();
+        }
+    }
+    return finished;
+}
+
+void saveEventAudio() {
+    // Logic to save audio from eventStartIndex - SAVE_BEFORE_EVENT * SAMPLE_RATE to eventStartIndex + SAVE_AFTER_EVENT * SAMPLE_RATE
+    // Reset eventStartIndex to -1
+}
+
+void checkLevel() {
+    for (int i = 0; i < audioBuffer.size(); i++) {
+        if (std::abs(audioBuffer[i]) > THRESHOLD && eventStartIndex == -1) {
+            std::cout << "Event detected at: " << std::chrono::system_clock::now().time_since_epoch().count() << "audio level: " << audioBuffer[i] << "\n";
+            eventStartIndex = i;
+            std::this_thread::sleep_for(std::chrono::seconds(SAVE_AFTER_EVENT));
+        }
+    }
+}
+
+void startRecording() {
+    PaStreamParameters inputParameters;
+    PaStream *stream;
+    paTestData data;
+    PaError err = paNoError;
+
+    err = Pa_Initialize();
+    if(err != paNoError) std::cout << "Error in Pa_Initialize: " << Pa_GetErrorText(err) << "\n";
+
+    inputParameters.device = Pa_GetDefaultInputDevice();
+    if(inputParameters.device == paNoDevice) std::cout << "Error: No default input device.\n";
+
+    inputParameters.channelCount = CHANNELS;
+    inputParameters.sampleFormat = paFloat32;
+    inputParameters.suggestedLatency = Pa_GetDeviceInfo(inputParameters.device)->defaultLowInputLatency;
+    inputParameters.hostApiSpecificStreamInfo = NULL;
+
+    err = Pa_OpenStream(&stream, &inputParameters, NULL, SAMPLE_RATE, FRAMES_PER_BUFFER, paClipOff, recordCallback, &data);
+    if(err != paNoError) std::cout << "Error in Pa_OpenStream: " << Pa_GetErrorText(err) << "\n";
+
+    err = Pa_StartStream(stream);
+    if(err != paNoError) std::cout << "Error in Pa_StartStream: " << Pa_GetErrorText(err) << "\n";
+
+    while((err = Pa_IsStreamActive(stream)) == 1) {
+        checkLevel();
+    }
+
+    err = Pa_CloseStream(stream);
+    if(err != paNoError) std::cout << "Error in Pa_CloseStream: " << Pa_GetErrorText(err) << "\n";
+
+    Pa_Terminate();
+}
+
+int main() {
+    startRecording();
+    return 0;
+}
+```
+/* 
+This script initializes a PortAudio stream, then begins recording audio data. As data is recorded, it is added to a buffer, and the `checkLevel` function checks if the audio level exceeds the threshold. If it does, it triggers the save event audio function after a delay.
+
+Please note that you'll need to link against PortAudio and libsndfile when compiling this C++ code. This can be done by adding `-lportaudio -lsndfile` to your `g++` command.
+
+Also, remember that the C++ standard library does not have built-in support for working with directories, so you will need to use the appropriate OS-specific API or a library like Boost.Filesystem to create directories. 
+
+Please consider this as a starting point and you will need to modify this to meet your exact requirements.
+*/
+
+// version of 7/21/23 using a circular buffer
+
+/* Here's a basic example of how you might implement this in C++ using the PortAudio and libsndfile libraries. This code sets up a simple audio stream with PortAudio, saves incoming audio data into a circular buffer, and provides a function to save a portion of that buffer to a WAV file using libsndfile.
+*/
+
+#!/usr/bin/env c++
+
+#include <iostream>
+#include <vector>
+#include <portaudio.h>
+#include <sndfile.hh>
+
+#define SAMPLE_RATE 192000
+#define CHANNELS 2
+#define FRAMES_PER_BUFFER 1024
+#define BUFFER_SIZE 1000000
+
+std::vector<short> circularBuffer(BUFFER_SIZE);
+
+int bufferIndex = 0;
+
+int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned long framesPerBuffer,
+                   const PaStreamCallbackTimeInfo* timeInfo, PaStreamCallbackFlags statusFlags, void *userData) {
+    const short *rptr = (const short*)inputBuffer;
+    for(int i = 0; i < framesPerBuffer * CHANNELS; i++) {
+        circularBuffer[bufferIndex] = *rptr++;
+        bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
+    }
+    return paContinue;
+}
+
+void saveToFile(int start, int end, const char* filename) {
+    SF_INFO sfinfo;
+    sfinfo.channels = CHANNELS;
+    sfinfo.samplerate = SAMPLE_RATE;
+    sfinfo.format = SF_FORMAT_WAV | SF_FORMAT_PCM_16;
+
+    SndfileHandle outfile(filename, SFM_WRITE, sfinfo.format, sfinfo.channels, sfinfo.samplerate);
+
+    if(end >= start) {
+        outfile.write(&circularBuffer[start], end - start);
+    } else {
+        outfile.write(&circularBuffer[start], BUFFER_SIZE - start);
+        outfile.write(&circularBuffer[0], end);
+    }
+}
+
+int main() {
+    PaStreamParameters inputParameters;
+    PaStream *stream;
+    PaError err = paNoError;
+
+    err = Pa_Initialize();
+    if(err != paNoError) std::cout << "Error in Pa_Initialize: " << Pa_GetErrorText(err) << "\n";
+
+    inputParameters.device = Pa_GetDefaultInputDevice();
+    if(inputParameters.device == paNoDevice) std::cout << "Error: No default input device.\n";
+
+    inputParameters.channelCount = CHANNELS;
+    inputParameters.sampleFormat = paInt16;
+    inputParameters.suggestedLatency = Pa_GetDeviceInfo(inputParameters.device)->defaultLowInputLatency;
+    inputParameters.hostApiSpecificStreamInfo = NULL;
+
+    err = Pa_OpenStream(&stream, &inputParameters, NULL, SAMPLE_RATE, FRAMES_PER_BUFFER, paClipOff, recordCallback, NULL);
+    if(err != paNoError) std::cout << "Error in Pa_OpenStream: " << Pa_GetErrorText(err) << "\n";
+
+    err = Pa_StartStream(stream);
+    if(err != paNoError) std::cout << "Error in Pa_StartStream: " << Pa_GetErrorText(err) << "\n";
+
+    Pa_Sleep(5000);  // Record for 5 seconds.
+
+    err = Pa_StopStream(stream);
+    if(err != paNoError) std::cout << "Error in Pa_StopStream: " << Pa_GetErrorText(err) << "\n";
+
+    saveToFile(0, bufferIndex, "output.wav");
+
+    err = Pa_CloseStream(stream);
+    if(err != paNoError) std::cout << "Error in Pa_CloseStream: " << Pa_GetErrorText(err) << "\n";
+
+    Pa_Terminate();
+
+    return 0;
+}
+
+/*
+This program will record audio for 5 seconds, then save the audio to a WAV file. The audio is stored in a circular buffer implemented as a `std::vector`. When the buffer becomes full, the program will start overwriting the oldest data.
+The `saveToFile` function saves a specified portion of the circular buffer to a WAV file. It handles the case where the desired portion wraps around to the beginning of the buffer. 
+This program uses 16-bit integer samples, as specified in your question.
+Please note that you'll need to link against PortAudio and libsndfile when compiling this C++ code. This can be done by adding `-lportaudio -lsndfile` to your `g++` command.
+This is a basic example and doesn't include error checking or any advanced features. You'll likely need to modify it to suit your specific needs.
+*/
