@@ -42,7 +42,7 @@ CONTINUOUS_SAMPLE_RATE = 48000  # For continuous audio
 CONTINUOUS_BIT_DEPTH = 16       # Audio bit depth
 CONTINUOUS_CHANNELS = 2         # Number of channels
 CONTINUOUS_FORMAT = 'MP3'       # accepts mp3, flac, or wav
-
+CONTINUOUS_QUALITY = 320         # 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 DEVICE_IN = 1                   # Device ID of input device
 DEVICE_OUT = 3                  # Device ID of output device
 
@@ -53,7 +53,7 @@ OUTPUT_DIRECTORY = "."          # for debugging
 #periodic & continuous recording timing
 PERIOD = 300                    # seconds of recording
 INTERVAL = 1800                 # seconds between start of period, must be > period, of course
-CONTINUOUS = 600                # file size in seconds of continuous recording
+CONTINUOUS = 10                # file size in seconds of continuous recording
 
 # init continuous recording varibles
 continuous_start_index = None
@@ -163,7 +163,7 @@ def get_level(audio_data, channel_select):
 #
 # convert audio to mp3 and save to file
 #
-def numpy_to_mp3(np_array, sample_rate, full_path, quality):
+def numpy_to_mp3(np_array, sample_rate, full_path, qty=CONTINUOUS_QUALITY):
     # Ensure the array is formatted as int16
     int_array = np_array.astype(np.int16)
 
@@ -178,13 +178,13 @@ def numpy_to_mp3(np_array, sample_rate, full_path, quality):
         channels=2
     )
 
-    if quality >= 64 and quality <= 320:    # use constant bitrate, 64k would be the min, 320k the best
-        cbr = str(quality) + "k"
+    if qty >= 64 and qty <= 320:    # use constant bitrate, 64k would be the min, 320k the best
+        cbr = str(qty) + "k"
         audio_segment.export(full_path, format="mp3", bitrate=cbr)
-    elif quality < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
-        audio_segment.export(full_path, format="mp3", parameters=["-q:a", str(quality)])
+    elif qty < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
+        audio_segment.export(full_path, format="mp3", parameters=["-q:a", str(qty)])
     else:
-        print("Don't know of an mp3 mode with parameter:", quality)
+        print("Don't know of a mp3 mode with parameter:", qty)
         quit(-1)
 
 #
@@ -232,7 +232,7 @@ def save_continuous_audio():
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
 
     if CONTINUOUS_FORMAT == 'MP3':
-        numpy_to_mp3(audio_data, 48000, full_path_name, 0) # 0 = vbr, highest quality
+        numpy_to_mp3(audio_data, 48000, full_path_name) 
     elif CONTINUOUS_FORMAT == 'FLAC' or CONTINUOUS_FORMAT == 'WAV': 
         sf.write(full_path_name, audio_data, CONTINUOUS_SAMPLE_RATE, format=CONTINUOUS_FORMAT, subtype=_subtype)
     else:
