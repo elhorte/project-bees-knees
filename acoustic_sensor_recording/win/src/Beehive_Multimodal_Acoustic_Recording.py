@@ -23,7 +23,7 @@ import numpy as np
 #from scipy.io import wavfile
 #from scipy.io.wavfile import read as wavread
 #import resampy
-#from scipy.signal import resample_poly
+from scipy.signal import resample_poly
 #from scipy import signal
 from pydub import AudioSegment
 import os
@@ -41,19 +41,19 @@ FORMAT = 'FLAC'                 # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between 
 CONTINUOUS_SAMPLE_RATE = 48000  # For continuous audio
 CONTINUOUS_BIT_DEPTH = 16       # Audio bit depth
 CONTINUOUS_CHANNELS = 2         # Number of channels
-CONTINUOUS_FORMAT = 'FLAC'      # accepts mp3, flac, or wav
+CONTINUOUS_FORMAT = 'MP3'      # accepts mp3, flac, or wav
 CONTINUOUS_QUALITY = 0          # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 DEVICE_IN = 1                   # Device ID of input device
 DEVICE_OUT = 3                  # Device ID of output device
 
-##OUTPUT_DIRECTORY = "."        # for debugging
-OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
+OUTPUT_DIRECTORY = "."        # for debugging
+##OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
 
 
 #periodic & continuous recording timing
 PERIOD = 300                    # seconds of recording
 INTERVAL = 1800                 # seconds between start of period, must be > period, of course
-CONTINUOUS = 600                # file size in seconds of continuous recording
+CONTINUOUS = 10                # file size in seconds of continuous recording
 
 # init continuous recording varibles
 continuous_start_index = None
@@ -163,6 +163,70 @@ def get_level(audio_data, channel_select):
 #
 # convert audio to mp3 and save to file
 #
+'''
+def numpy_to_mp3(np_array, orig_sample_rate=192000, target_sample_rate=48000):
+
+    int_array = np_array.astype(np.int16)
+    int_array = int_array.T
+    # Resample each channel
+    resampled_array = np.array([
+        resample_poly(ch, target_sample_rate, orig_sample_rate)
+        for ch in int_array
+    ])
+    # Transpose the array back to the original shape and convert to bytes
+    byte_array = resampled_array.T.astype(np.int16).tobytes()
+
+    # Create an AudioSegment instance from the byte array
+    audio_segment = AudioSegment(
+        data=byte_array,
+        sample_width=2,
+        frame_rate=target_sample_rate,
+        channels=2
+    )
+
+    # Export the AudioSegment instance as an MP3 file with VBR
+    audio_segment.export("output.mp3", format="mp3", parameters=["-q:a", "0"])
+'''
+
+import numpy as np
+from scipy.signal import resample_poly
+from pydub import AudioSegment
+
+def numpy_to_mp3(np_array, orig_sample_rate=192000, target_sample_rate=48000):
+    #np_array = np_array.T
+
+    # Ensure the array is formatted as float64
+    float_array = np_array.astype(np.float64)
+
+    # Transpose the array to have channels as the first dimension
+    float_array = float_array.T
+
+    # Resample each channel
+    resampled_array = np.array([
+        resample_poly(ch, target_sample_rate, orig_sample_rate)
+        for ch in float_array
+    ])
+
+    # Transpose the array back to the original shape and convert to int16
+    int_array = resampled_array.T.astype(np.int16)
+
+    # Convert the array to bytes
+    byte_array = int_array.tobytes()
+
+    # Create an AudioSegment instance from the byte array
+    audio_segment = AudioSegment(
+        data=byte_array,
+        sample_width=2,
+        frame_rate=target_sample_rate,
+        channels=2
+    )
+
+    # Export the AudioSegment instance as an MP3 file with VBR
+    audio_segment.export("output.mp3", format="mp3", parameters=["-q:a", "0"])
+
+
+
+'''
 def numpy_to_mp3(np_array, sample_rate, full_path, qty=CONTINUOUS_QUALITY):
     # Ensure the array is formatted as int16
     int_array = np_array.astype(np.int16)
@@ -185,7 +249,7 @@ def numpy_to_mp3(np_array, sample_rate, full_path, qty=CONTINUOUS_QUALITY):
     else:
         print("Don't know of a mp3 mode with parameter:", qty)
         quit(-1)
-
+'''
 #
 # continuous recording functions at low sample rate
 #
@@ -231,7 +295,7 @@ def save_continuous_audio():
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
 
     if CONTINUOUS_FORMAT == 'MP3':
-        numpy_to_mp3(audio_data, 48000, full_path_name) 
+        numpy_to_mp3(audio_data) 
     elif CONTINUOUS_FORMAT == 'FLAC' or CONTINUOUS_FORMAT == 'WAV': 
         sf.write(full_path_name, audio_data, CONTINUOUS_SAMPLE_RATE, format=CONTINUOUS_FORMAT, subtype=_subtype)
     else:
@@ -465,3 +529,78 @@ def numpy_to_mp3(np_array, sample_rate):
     audio_segment.export("output.mp3", format="mp3")
 
 '''
+'''
+import numpy as np
+from scipy.signal import resample_poly
+from pydub import AudioSegment
+
+def numpy_to_mp3(np_array, orig_sample_rate, target_sample_rate, vbr_quality="2"):
+    int_array = np_array.astype(np.int16)
+    int_array = int_array.T
+    # Resample each channel
+    resampled_array = np.array([
+        resample_poly(ch, target_sample_rate, orig_sample_rate)
+        for ch in int_array
+    ])
+    # Transpose the array back to the original shape and convert to bytes
+    byte_array = resampled_array.T.astype(np.int16).tobytes()
+
+    # Create an AudioSegment instance from the byte array
+    audio_segment = AudioSegment(
+        # raw audio data (bytes)
+        data=byte_array,
+
+        # 2 byte (16 bit) samples
+        sample_width=2,
+
+        # target frame rate
+        frame_rate=target_sample_rate,
+
+        # stereo audio
+        channels=2
+    )
+
+    # Export the AudioSegment instance as an MP3 file with VBR
+    audio_segment.export("output.mp3", format="mp3", parameters=["-q:a", vbr_quality])
+'''
+# Usage example:
+# Assume 'audio_data' is your original data
+# audio_data = ...
+
+##numpy_to_mp3(audio_data, orig_sample_rate=48000, target_sample_rate=44100, vbr_quality="2")
+
+'''The actual MP3 conversion is performed by the LAME encoder. PyDub, the Python library you're using, provides a convenient and Pythonic interface to this process, but the heavy lifting is done by LAME itself.
+
+Here's a brief explanation of the process:
+
+1. PyDub takes the audio data and formats it into a form that can be understood by the LAME encoder. This includes converting the data into bytes and setting the appropriate sample width, frame rate, and number of channels.
+
+2. PyDub calls the LAME encoder with the appropriate parameters, including the quality setting for Variable Bitrate (VBR) encoding.
+
+3. LAME encodes the audio data into the MP3 format. This involves several steps, including quantization, Huffman coding, and adding MP3 headers and metadata.
+
+4. The encoded MP3 data is then written to a file, which is what the `AudioSegment.export` function does in your Python script.
+
+So, while your Python script is managing the process, the actual conversion from raw audio data to the MP3 format is done by LAME. This is why you need to have the LAME encoder installed on your system to be able to export MP3 files with PyDub.'''
+
+'''First, make sure your np_array is a 2D array where each row is a channel of audio and each column is a sample. In stereo audio, there should be two rows. If your audio is mono but in a 2D array, make sure it has two identical rows. If your np_array is a 1D array, you need to convert it to the correct 2D format before resampling.
+
+Next, the length of the output can be influenced by how the resampling is done. Both the resample function from scipy.signal and the resample function from librosa change the number of samples in the signal, which directly impacts the duration of the output. The ratio between the original and target sample rates determines the new number of samples.
+
+Lastly, let's consider the export parameters used for MP3 encoding. VBR (Variable Bit Rate) encoding allows the bit rate to vary depending on the complexity of the audio, but the duration should not be affected.'''
+
+''' print("Array Type: ", type(audio_data))
+    print("Data Type: ", audio_data.dtype)
+    print("Array Shape: ", audio_data.shape)
+    print("Number of dimensions: ", audio_data.ndim)
+    print("Total Number of elements: ", audio_data.size)
+    print("First few elements: ", audio_data[:10])
+    print(".....transposing array......")
+    audio_data = np_array.T
+    print("Array Type: ", type(audio_data))
+    print("Data Type: ", audio_data.dtype)
+    print("Array Shape: ", audio_data.shape)
+    print("Number of dimensions: ", audio_data.ndim)
+    print("Total Number of elements: ", audio_data.size)
+    print("First few elements: ", audio_data[:10])
+    print(".....transposing array......")'''
