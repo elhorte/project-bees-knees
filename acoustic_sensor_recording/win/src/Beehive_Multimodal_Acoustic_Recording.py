@@ -41,19 +41,19 @@ FORMAT = 'FLAC'                 # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between 
 CONTINUOUS_SAMPLE_RATE = 48000  # For continuous audio
 CONTINUOUS_BIT_DEPTH = 16       # Audio bit depth
 CONTINUOUS_CHANNELS = 2         # Number of channels
-CONTINUOUS_FORMAT = 'MP3'       # accepts mp3, flac, or wav
-CONTINUOUS_QUALITY = 320         # 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
+CONTINUOUS_FORMAT = 'FLAC'      # accepts mp3, flac, or wav
+CONTINUOUS_QUALITY = 0          # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 DEVICE_IN = 1                   # Device ID of input device
 DEVICE_OUT = 3                  # Device ID of output device
 
-OUTPUT_DIRECTORY = "."          # for debugging
-##OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
+##OUTPUT_DIRECTORY = "."        # for debugging
+OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
 
 
 #periodic & continuous recording timing
 PERIOD = 300                    # seconds of recording
 INTERVAL = 1800                 # seconds between start of period, must be > period, of course
-CONTINUOUS = 10                # file size in seconds of continuous recording
+CONTINUOUS = 600                # file size in seconds of continuous recording
 
 # init continuous recording varibles
 continuous_start_index = None
@@ -177,7 +177,6 @@ def numpy_to_mp3(np_array, sample_rate, full_path, qty=CONTINUOUS_QUALITY):
         frame_rate=sample_rate,
         channels=2
     )
-
     if qty >= 64 and qty <= 320:    # use constant bitrate, 64k would be the min, 320k the best
         cbr = str(qty) + "k"
         audio_segment.export(full_path, format="mp3", bitrate=cbr)
@@ -416,11 +415,11 @@ if __name__ == "__main__":
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {CHANNELS}")
     try:
         if MODE_CONTINUOUS:
-            print("Starting continuous, low-sample-rate recording mode")
+            print("Starting continuous, low-sample-rate recording mode, duration per file:", CONTINUOUS)
         if MODE_PERIOD:
-            print("Starting periodic recording mode")
+            print("Starting periodic recording mode, PERIOD every INTERVAL:", PERIOD, INTERVAL)
         if MODE_EVENT:
-            print("Starting event detect mode")
+            print("Starting event detect mode, threshold trigger:", THRESHOLD)
 
         audio_stream()
 
