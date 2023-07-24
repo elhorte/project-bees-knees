@@ -45,7 +45,7 @@ CONTINUOUS_QUALITY = 0          # for mp3 only: 0-9 sets vbr (0=best); 64-320 se
 # init recording varibles
 continuous_start_index = None
 continuous_save_thread = None
-continuous_end_index = 0        # so the next start = this end
+continuous_end_index = 0        # so that the next start = this end
 
 period_start_index = None
 period_save_thread = None
@@ -63,11 +63,11 @@ device_CH = None                # total number of channels from device
 # recording modes on/off
 MODE_CONTINUOUS = True          # recording continuously to mp3 files
 MODE_PERIOD = True              # period only
-MODE_EVENT = True               # event only
+MODE_EVENT = False               # event only
 MODE_VU = False                  # show audio level on cli
 
 # continuous recording at reduced sample rate
-CONTINUOUS = 600                # file size in seconds of continuous recording
+CONTINUOUS = 300                # file size in seconds of continuous recording
 CONTINUOUS_FORMAT = 'MP3'       # accepts mp3, flac, or wav
 
 # period recording
@@ -264,8 +264,8 @@ def check_continuous(audio_data, index):
     # just keep doing it, no testing
     if continuous_start_index is None: 
         print("continuous block started at:", datetime.now())
-        ##continuous_start_index = continuous_end_index # maybe causing overflow
-        continuous_start_index = index
+        continuous_start_index = continuous_end_index 
+        ##continuous_start_index = index
         continuous_save_thread = threading.Thread(target=save_audio_for_continuous)
         continuous_save_thread.start()
 
@@ -433,7 +433,7 @@ if __name__ == "__main__":
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {CHANNELS}")
     try:
         if MODE_CONTINUOUS:
-            print(f"Starting continuous, low-sample-rate recording mode, duration per file:{CONTINUOUS/60:.2f} minutes")
+            print(f"Starting continuous, low-sample-rate recording mode, duration per file: {CONTINUOUS/60:.2f} minutes")
         if MODE_PERIOD:
             print(f"Starting periodic recording mode, {PERIOD/60:.2f} minutes every {INTERVAL/60:.2f} minutes")
         if MODE_EVENT:
