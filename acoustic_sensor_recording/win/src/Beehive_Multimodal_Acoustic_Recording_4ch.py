@@ -169,8 +169,8 @@ def get_level(audio_data, channel_select):
     return audio_level
 
 
-# convert audio to mp3 and save to file using already downsampled data
-def pcm_to_mp3(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS_QUALITY):
+# convert audio to mp3 and save to file using downsampled data
+def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS_QUALITY):
 
     int_array = np_array.astype(np.int16)
     byte_array = int_array.tobytes()
@@ -244,7 +244,7 @@ def save_continuous_audio():
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
 
     if CONTINUOUS_FORMAT == 'MP3':
-        pcm_to_mp3(audio_data, full_path_name) 
+        pcm_to_mp3_write(audio_data, full_path_name) 
     elif CONTINUOUS_FORMAT == 'FLAC' or CONTINUOUS_FORMAT == 'WAV': 
         sf.write(full_path_name, audio_data, CONTINUOUS_SAMPLE_RATE, format=CONTINUOUS_FORMAT, subtype=_subtype)
     else:
