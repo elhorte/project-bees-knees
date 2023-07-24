@@ -64,6 +64,7 @@ device_CH = None                # total number of channels from device
 MODE_CONTINUOUS = True          # recording continuously to mp3 files
 MODE_PERIOD = True              # period only
 MODE_EVENT = True               # event only
+MODE_VU = False                  # show audio level on cli
 
 # continuous recording at reduced sample rate
 CONTINUOUS = 600                # file size in seconds of continuous recording
@@ -260,7 +261,6 @@ def save_continuous_audio():
 def check_continuous(audio_data, index):
     global continuous_start_index, continuous_save_thread, continuous_end_index
 
-    audio_level = get_level(audio_data, MONITOR_CH)
     # just keep doing it, no testing
     if continuous_start_index is None: 
         print("continuous block started at:", datetime.now())
@@ -269,7 +269,8 @@ def check_continuous(audio_data, index):
         continuous_save_thread = threading.Thread(target=save_audio_for_continuous)
         continuous_save_thread.start()
 
-    if MODE_CONTINUOUS and not MODE_EVENT:
+    if MODE_VU and MODE_CONTINUOUS and not MODE_EVENT:
+        audio_level = get_level(audio_data, MONITOR_CH)
         fake_vu_meter(audio_level,'\r')
 
 #
@@ -310,17 +311,15 @@ def save_period_audio():
 def check_period(audio_data, index):
     global period_start_index, period_save_thread, detected_level
 
-    audio_level = get_level(audio_data, MONITOR_CH)
-
     ##print("Time:", int(time.time()),"INTERVAL:", INTERVAL, "modulo:", int(time.time()) % INTERVAL)
     # if modulo INTERVAL == zero then start of period
     if not int(time.time()) % INTERVAL and period_start_index is None: 
-        print("period started at:", datetime.now(), "audio level:", audio_level)
         period_start_index = index 
         period_save_thread = threading.Thread(target=save_audio_for_period)
         period_save_thread.start()
 
-    if not MODE_CONTINUOUS and not MODE_EVENT:
+    if MODE_VU and not MODE_CONTINUOUS and not MODE_EVENT:
+        audio_level = get_level(audio_data, MONITOR_CH)
         fake_vu_meter(audio_level,'\r')
 
 #
@@ -371,7 +370,8 @@ def check_level(audio_data, index):
         event_save_thread = threading.Thread(target=save_audio_around_event)
         event_save_thread.start()
 
-    fake_vu_meter(audio_level,'\r') # no line feed
+    if MODE_VU:
+        fake_vu_meter(audio_level,'\r') 
 
 #
 # audio stream and callback functions
@@ -411,13 +411,15 @@ def audio_stream():
     with stream:
         print("Start recording...")
         print("Monitoring audio level on channel:", MONITOR_CH)
-        fake_vu_meter(FULL_SCALE, '\n')  # mark max audio level on the CLI
-        if MODE_EVENT:
-            fake_vu_meter(THRESHOLD, '\n')  # mark audio event threshold on the CLI for ref
+        if MODE_VU:
+            fake_vu_meter(FULL_SCALE, '\n')  # mark max audio level on the CLI
+            if MODE_EVENT:
+                fake_vu_meter(THRESHOLD, '\n')  # mark audio event threshold on the CLI for ref
+        else:
+            print("Audio level display on cli is off")
 
         while stream.active:
             pass
-
 
 ###########################
 ########## MAIN ###########
