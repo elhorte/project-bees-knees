@@ -32,7 +32,6 @@ import librosa
 
 
 FULL_SCALE = 2 ** 16            # just for cli vu meter level reference
-THRESHOLD = 24000               # audio level threshold to be considered an event
 BUFFER_SECONDS = 660            # seconds of a circular buffer
 SAMPLE_RATE = 192000            # Audio sample rate
 BIT_DEPTH = 16                  # Audio bit depth
@@ -77,6 +76,7 @@ INTERVAL = 1800                 # seconds between start of period, must be > per
 # event capture recording
 SAVE_BEFORE_EVENT = 30          # seconds to save before the event
 SAVE_AFTER_EVENT = 30           # seconds to save after the event
+THRESHOLD = 40000               # audio level threshold to be considered an event
 MONITOR_CH = 0                  # channel to monitor for event (if > number of chs, all channels are monitored)
 
 # hardware pointers
