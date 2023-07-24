@@ -1,7 +1,7 @@
 # background
 
 
-'''
+
 def numpy_to_mp3(np_array, sample_rate):
     # Ensure the array is formatted as int16
     int_array = np_array.astype(np.int16)
@@ -45,36 +45,30 @@ def numpy_to_mp3(np_array, orig_sample_rate, target_sample_rate, vbr_quality="2"
     audio_segment = AudioSegment(
         # raw audio data (bytes)
         data=byte_array,
-
         # 2 byte (16 bit) samples
         sample_width=2,
-
         # target frame rate
         frame_rate=target_sample_rate,
-
         # stereo audio
         channels=2
     )
 
     # Export the AudioSegment instance as an MP3 file with VBR
     audio_segment.export("output.mp3", format="mp3", parameters=["-q:a", vbr_quality])
-'''
+
 # Usage example:
 # Assume 'audio_data' is your original data
-# audio_data = ...
+# audio_data = 
 
-##numpy_to_mp3(audio_data, orig_sample_rate=48000, target_sample_rate=44100, vbr_quality="2")
+numpy_to_mp3(audio_data, orig_sample_rate=48000, target_sample_rate=44100, vbr_quality="2")
 
 '''The actual MP3 conversion is performed by the LAME encoder. PyDub, the Python library you're using, provides a convenient and Pythonic interface to this process, but the heavy lifting is done by LAME itself.
 
 Here's a brief explanation of the process:
 
 1. PyDub takes the audio data and formats it into a form that can be understood by the LAME encoder. This includes converting the data into bytes and setting the appropriate sample width, frame rate, and number of channels.
-
 2. PyDub calls the LAME encoder with the appropriate parameters, including the quality setting for Variable Bitrate (VBR) encoding.
-
 3. LAME encodes the audio data into the MP3 format. This involves several steps, including quantization, Huffman coding, and adding MP3 headers and metadata.
-
 4. The encoded MP3 data is then written to a file, which is what the `AudioSegment.export` function does in your Python script.
 
 So, while your Python script is managing the process, the actual conversion from raw audio data to the MP3 format is done by LAME. This is why you need to have the LAME encoder installed on your system to be able to export MP3 files with PyDub.'''
@@ -105,7 +99,7 @@ Lastly, let's consider the export parameters used for MP3 encoding. VBR (Variabl
 #
 # convert audio to mp3 and save to file
 #
-'''
+
 def numpy_to_mp3(np_array, orig_sample_rate=192000, target_sample_rate=48000):
 
     int_array = np_array.astype(np.int16)
@@ -169,7 +163,7 @@ def numpy_to_mp3(np_array, orig_sample_rate=192000, target_sample_rate=48000):
 '''
 # notes on python environments
 
-'''The issue seems to be with the `llvmlite` package which is a dependency of `numba`, and `numba` is in turn a dependency of `resampy`. This kind of error usually occurs due to issues with the Python environment and package installation, or the specific versions of the packages and their compatibility with each other.
+The issue seems to be with the `llvmlite` package which is a dependency of `numba`, and `numba` is in turn a dependency of `resampy`. This kind of error usually occurs due to issues with the Python environment and package installation, or the specific versions of the packages and their compatibility with each other.
 
 Here are a few steps you can try to resolve this issue:
 
