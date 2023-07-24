@@ -32,13 +32,13 @@ import librosa
 
 
 FULL_SCALE = 2 ** 16            # just for cli vu meter level reference
-THRESHOLD = 12000               # audio level threshold to be considered an event
+THRESHOLD = 24000               # audio level threshold to be considered an event
 BUFFER_SECONDS = 660            # seconds of a circular buffer
-SAMPLE_RATE = 48000            # Audio sample rate
+SAMPLE_RATE = 192000            # Audio sample rate
 BIT_DEPTH = 16                  # Audio bit depth
 FORMAT = 'FLAC'                 # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
-CONTINUOUS_SAMPLE_RATE = 44100  # For continuous audio
+CONTINUOUS_SAMPLE_RATE = 48000  # For continuous audio
 CONTINUOUS_BIT_DEPTH = 16       # Audio bit depth
 CONTINUOUS_CHANNELS = 2         # Number of channels
 CONTINUOUS_QUALITY = 0          # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
@@ -67,7 +67,7 @@ MODE_PERIOD = True              # period only
 MODE_EVENT = True               # event only
 
 # continuous recording at reduced sample rate
-CONTINUOUS = 10                # file size in seconds of continuous recording
+CONTINUOUS = 600                # file size in seconds of continuous recording
 CONTINUOUS_FORMAT = 'MP3'       # accepts mp3, flac, or wav
 
 # period recording
@@ -194,7 +194,7 @@ def pcm_to_mp3(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS_QUALI
 
 
 # resample audio to a lower sample rate using scipy library
-def resample_audio_scipy(audio_data, orig_sample_rate, target_sample_rate):
+def resample_audio(audio_data, orig_sample_rate, target_sample_rate):
     # assuming audio_data is stereo 16-bit PCM in a numpy array
     audio_data = audio_data.astype(np.float32)
     audio_data = audio_data.T
@@ -204,23 +204,6 @@ def resample_audio_scipy(audio_data, orig_sample_rate, target_sample_rate):
     # apply resampling to each channel
     for ch in range(audio_data.shape[0]):
         downsampled_data[ch] = resample(audio_data[ch], num=int(audio_data[ch].shape[0] * sample_ratio))
-
-    # transposing the downsampled_data back
-    downsampled_data = downsampled_data.T
-    audio_data = downsampled_data.astype(np.int16)
-
-    return audio_data
-
-
-def resample_audio_librosa(audio_data, orig_sample_rate, target_sample_rate):
-        # assuming audio_data is stereo 16-bit PCM in a numpy array
-    audio_data = audio_data.astype(np.float32)
-    audio_data = audio_data.T
-    downsampled_data = np.zeros((audio_data.shape[0], int(audio_data.shape[1] * target_sample_rate / orig_sample_rate)))
-
-    # apply resampling to each channel
-    for ch in range(audio_data.shape[0]):
-        downsampled_data[ch] = librosa.resample(audio_data[ch], orig_sr=orig_sample_rate, target_sr=target_sample_rate, res_type='kaiser_fast')
 
     # transposing the downsampled_data back
     downsampled_data = downsampled_data.T
@@ -254,7 +237,7 @@ def save_continuous_audio():
         audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
     # resample to lower sample rate
-    audio_data = resample_audio_scipy(audio_data, SAMPLE_RATE, CONTINUOUS_SAMPLE_RATE)
+    audio_data = resample_audio(audio_data, SAMPLE_RATE, CONTINUOUS_SAMPLE_RATE)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_filename = f"{timestamp}_continuous_{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
@@ -474,23 +457,3 @@ def play_audio(filename, device):
     sd.play(data, fs, device)
     sd.wait()
 
-
-
-from scipy.signal import resample
-
-# assuming audio_data is stereo 16-bit PCM in a numpy array
-audio_data = audio_data.astype(np.float32)
-
-# transposing the audio_data
-audio_data = audio_data.T
-
-downsampled_data = np.zeros((audio_data.shape[0], int(audio_data.shape[1] * CONTINUOUS_SAMPLE_RATE / SAMPLE_RATE)))
-
-# apply resampling to each channel
-for ch in range(audio_data.shape[0]):
-    downsampled_data[ch] = resample(audio_data[ch], num=int(audio_data[ch].shape[0] * CONTINUOUS_SAMPLE_RATE / SAMPLE_RATE))
-
-# transposing the downsampled_data back
-downsampled_data = downsampled_data.T
-
-audio_data = downsampled_data.astype(np.int16)
