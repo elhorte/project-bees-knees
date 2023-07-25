@@ -16,19 +16,14 @@
 
 import sounddevice as sd
 import soundfile as sf
-from datetime import datetime
+import datetime
 import time
 import threading
 import numpy as np
-#from scipy.io import wavfile
-#from scipy.io.wavfile import read as wavread
-#import resampy
 from scipy.signal import resample
-#from scipy import signal
 from pydub import AudioSegment
 import os
 os.environ['NUMBA_NUM_THREADS'] = '1'
-import librosa
 
 
 FULL_SCALE = 2 ** 16            # just for cli vu meter level reference
@@ -58,25 +53,28 @@ _dtype = None                   # parms sd lib cares about
 _subtype = None
 device_CH = None                # total number of channels from device
 
+current_time = None
+time_of_day_thread = None
+
 # Control Panel =====================================================================================
 
 # recording modes on/off
 MODE_CONTINUOUS = True          # recording continuously to mp3 files
-CONTINUOUS_TIMER = False         # use a timer to start and stop continuous recording
-CONTINUOUS_START = datetime.time(9, 0, 0)
-CONTINUOUS_END = datetime.time(22, 0, 0)
+CONTINUOUS_TIMER = True         # use a timer to start and stop time of day of continuous recording
+CONTINUOUS_START = datetime.time(4, 0, 0)
+CONTINUOUS_END = datetime.time(23, 0, 0)
 
-MODE_PERIOD = True              # period only
-PERIOD_TIMER = False             # use a timer to start and stop period recording
-PERIOD_START = datetime.time(9, 0, 0)
-PERIOD_END = datetime.time(22, 0, 0)
+MODE_PERIOD = True              # period recording
+PERIOD_TIMER = True             # use a timer to start and stop time of day of period recording
+PERIOD_START = datetime.time(4, 0, 0)
+PERIOD_END = datetime.time(20, 0, 0)
 
-MODE_EVENT = True               # event only
-EVENT_TIMER = False              # use a timer to start and stop event recording
+MODE_EVENT = True               # event recording
+EVENT_TIMER = False             # use a timer to start and stop time of day of event recording
 EVENT_START = datetime.time(9, 0, 0)
 EVENT_END = datetime.time(22, 0, 0)
 
-MODE_VU = False                  # show audio level on cli
+MODE_VU = True                  # show audio level on cli
 
 # continuous recording at reduced sample rate
 CONTINUOUS = 300                # file size in seconds of continuous recording
@@ -93,9 +91,9 @@ THRESHOLD = 40000               # audio level threshold to be considered an even
 MONITOR_CH = 0                  # channel to monitor for event (if > number of chs, all channels are monitored)
 
 # hardware pointers
-DEVICE_IN = 16                   # Device ID of input device
+DEVICE_IN = 1                   # Device ID of input device
 DEVICE_OUT = 3                  # Device ID of output device
-CHANNELS = 4                    # Number of channels
+CHANNELS = 2                    # Number of channels
 
 ##OUTPUT_DIRECTORY = "."        # for debugging
 OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
@@ -106,64 +104,61 @@ HIVE_ID = "Z1"
 
 # ==================================================================================================
 
+# audio buffers and variables
+buffer_size = int(BUFFER_SECONDS * SAMPLE_RATE)
+buffer = np.zeros((buffer_size, CHANNELS), dtype=_dtype)
+buffer_index = 0
+
 ### startup housekeeping ###
 
-def initialization():
-    global buffer, buffer_index, _dtype, buffer_size, _subtype, device_CH
+# Check on parms
+if (SAVE_BEFORE_EVENT + SAVE_AFTER_EVENT) * 1.2 > BUFFER_SECONDS:
+    print("The buffer is not large enough to hold the maximum amount of audio that can be saved.")
+    print("Reduce SAVE_DURATION_BEFORE and/or SAVE_DURATION_AFTER or increase the size of the circular buffer 'BUFFER_SECONDS'")
+    quit(-1)
 
-    # Check on parms
-    if (SAVE_BEFORE_EVENT + SAVE_AFTER_EVENT) * 1.2 > BUFFER_SECONDS:
-        print("The buffer is not large enough to hold the maximum amount of audio that can be saved.")
-        print("Reduce SAVE_DURATION_BEFORE and/or SAVE_DURATION_AFTER or increase the size of the circular buffer 'BUFFER_SECONDS'")
-        quit(-1)
+if (PERIOD) * 1.1 > BUFFER_SECONDS:
+    print("The buffer is not large enough to hold the maximum amount of audio that can be saved.")
+    print("Reduce PERIOD or increase the size of the circular buffer 'BUFFER_SECONDS'")
+    quit(-1)
 
-    if (PERIOD) * 1.1 > BUFFER_SECONDS:
-        print("The buffer is not large enough to hold the maximum amount of audio that can be saved.")
-        print("Reduce PERIOD or increase the size of the circular buffer 'BUFFER_SECONDS'")
-        quit(-1)
-
-    # Check on input device parms or if input device even exits
-    try:
-        device_info = sd.query_devices(DEVICE_IN)  
-        device_CH = device_info['max_input_channels'] 
-        if CHANNELS > device_CH:
-            print(f"The device only has {device_CH} channel(s) but requires {CHANNELS} channels.")
-            print("These are the available devices: \n", sd.query_devices())
-            quit(-1)
-        ##device_SR = device_info['default_samplerate'] 
-        ##if device_SR != SAMPLE_RATE:
-        ##    print(f"The device sample rate {device_SR} is not equal to the required 'SAMPLE_RATE' of {SAMPLE_RATE}")
-        ##    quit(-1)
-    except Exception as e:
-        print(f"An error occurred while attempting to access the input device: {e}")
+# Check on input device parms or if input device even exits
+try:
+    device_info = sd.query_devices(DEVICE_IN)  
+    device_CH = device_info['max_input_channels'] 
+    if CHANNELS > device_CH:
+        print(f"The device only has {device_CH} channel(s) but requires {CHANNELS} channels.")
         print("These are the available devices: \n", sd.query_devices())
         quit(-1)
+    ##device_SR = device_info['default_samplerate'] 
+    ##if device_SR != SAMPLE_RATE:
+    ##    print(f"The device sample rate {device_SR} is not equal to the required 'SAMPLE_RATE' of {SAMPLE_RATE}")
+    ##    quit(-1)
+except Exception as e:
+    print(f"An error occurred while attempting to access the input device: {e}")
+    print("These are the available devices: \n", sd.query_devices())
+    quit(-1)
 
-    # Create the output directory if it doesn't exist
-    try:
-        os.makedirs(OUTPUT_DIRECTORY, exist_ok=True)
-    except Exception as e:
-        print(f"An error occurred while trying to make or find output directory: {e}")
-        quit(-1)
+# Create the output directory if it doesn't exist
+try:
+    os.makedirs(OUTPUT_DIRECTORY, exist_ok=True)
+except Exception as e:
+    print(f"An error occurred while trying to make or find output directory: {e}")
+    quit(-1)
 
-    # translate human to machine
-    if BIT_DEPTH == 16:
-        _dtype = 'int16'
-        _subtype = 'PCM_16'
-    elif BIT_DEPTH == 24:
-        _dtype = 'int24'
-        _subtype = 'PCM_24'
-    elif BIT_DEPTH == 32:
-        _dtype = 'int32' 
-        _subtype = 'PCM_32'
-    else:
-        print("The bit depth is not supported: ", BIT_DEPTH)
-        quit(-1)
-
-    # audio buffers and variables
-    buffer_size = int(BUFFER_SECONDS * SAMPLE_RATE)
-    buffer = np.zeros((buffer_size, CHANNELS), dtype=_dtype)
-    buffer_index = 0
+# translate human to machine
+if BIT_DEPTH == 16:
+    _dtype = 'int16'
+    _subtype = 'PCM_16'
+elif BIT_DEPTH == 24:
+    _dtype = 'int24'
+    _subtype = 'PCM_24'
+elif BIT_DEPTH == 32:
+    _dtype = 'int32' 
+    _subtype = 'PCM_32'
+else:
+    print("The bit depth is not supported: ", BIT_DEPTH)
+    quit(-1)
 
 
 # Print a string of asterisks, ending with only a carriage return to overwrite the line
@@ -182,7 +177,6 @@ def get_level(audio_data, channel_select):
 
     return audio_level
 
-
 # convert audio to mp3 and save to file using downsampled data
 def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS_QUALITY):
 
@@ -196,7 +190,6 @@ def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS
         frame_rate=sample_rate,
         channels=2
     )
-
     if quality >= 64 and quality <= 320:    # use constant bitrate, 64k would be the min, 320k the best
         cbr = str(quality) + "k"
         audio_segment.export(full_path, format="mp3", bitrate=cbr)
@@ -205,7 +198,6 @@ def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS
     else:
         print("Don't know of a mp3 mode with parameter:", quality)
         quit(-1)
-
 
 # resample audio to a lower sample rate using scipy library
 def resample_audio(audio_data, orig_sample_rate, target_sample_rate):
@@ -224,18 +216,16 @@ def resample_audio(audio_data, orig_sample_rate, target_sample_rate):
     audio_data = downsampled_data.astype(np.int16)
 
     return audio_data
-
 #
 # continuous recording functions at low sample rate
 #
-
 def save_audio_for_continuous():
     time.sleep(CONTINUOUS)
     save_continuous_audio()
 
 
 def save_continuous_audio():
-    global buffer, continuous_start_index, continuous_save_thread, continuous_end_index
+    global buffer, continuous_start_index, continuous_save_thread, continuous_end_index, current_time
 
     if continuous_start_index is None:  # if this has been reset already, don't try to save
         return
@@ -253,7 +243,7 @@ def save_continuous_audio():
     # resample to lower sample rate
     audio_data = resample_audio(audio_data, SAMPLE_RATE, CONTINUOUS_SAMPLE_RATE)
 
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}_{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
 
@@ -274,24 +264,20 @@ def save_continuous_audio():
 def check_continuous(audio_data, index):
     global continuous_start_index, continuous_save_thread, continuous_end_index
 
-    current_time = datetime.datetime.now().time()
     # just keep doing it, no testing
-    if CONTINUOUS_TIMER <= current_time < CONTINUOUS_END:
-        if continuous_start_index is None: 
-            print("continuous block started at:", datetime.now())
-            continuous_start_index = continuous_end_index 
-            ##continuous_start_index = index
-            continuous_save_thread = threading.Thread(target=save_audio_for_continuous)
-            continuous_save_thread.start()
+    if continuous_start_index is None: 
+        print("continuous block started at:", datetime.datetime.now())
+        continuous_start_index = continuous_end_index 
+        ##continuous_start_index = index
+        continuous_save_thread = threading.Thread(target=save_audio_for_continuous)
+        continuous_save_thread.start()
 
-        if MODE_VU and MODE_CONTINUOUS and not MODE_EVENT:
-            audio_level = get_level(audio_data, MONITOR_CH)
-            fake_vu_meter(audio_level,'\r')
-
+    if MODE_VU and MODE_CONTINUOUS and not MODE_EVENT:
+        audio_level = get_level(audio_data, MONITOR_CH)
+        fake_vu_meter(audio_level,'\r')
 #
 # period recording functions
 #
-
 def save_audio_for_period():
     time.sleep(PERIOD)
     save_period_audio()
@@ -312,7 +298,7 @@ def save_period_audio():
     else:                                   # ain't contiguous
         audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     output_filename = f"{timestamp}_period_{SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CHANNELS}_{PERIOD}_every_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
     sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
@@ -326,23 +312,19 @@ def save_period_audio():
 def check_period(audio_data, index):
     global period_start_index, period_save_thread, detected_level
 
-    current_time = datetime.datetime.now().time()
     ##print("Time:", int(time.time()),"INTERVAL:", INTERVAL, "modulo:", int(time.time()) % INTERVAL)
     # if modulo INTERVAL == zero then start of period
-    if PERIOD_TIMER <= current_time < PERIOD_END:
-        if not int(time.time()) % INTERVAL and period_start_index is None: 
-            period_start_index = index 
-            period_save_thread = threading.Thread(target=save_audio_for_period)
-            period_save_thread.start()
+    if not int(time.time()) % INTERVAL and period_start_index is None: 
+        period_start_index = index 
+        period_save_thread = threading.Thread(target=save_audio_for_period)
+        period_save_thread.start()
 
     if MODE_VU and not MODE_CONTINUOUS and not MODE_EVENT:
         audio_level = get_level(audio_data, MONITOR_CH)
         fake_vu_meter(audio_level,'\r')
-
 #
 # event recording functions
 #
-
 def save_audio_around_event():
     time.sleep(SAVE_AFTER_EVENT)
     save_event_audio()
@@ -363,8 +345,7 @@ def save_event_audio():
     else:                                   # ain't contiguous
         audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    threshold_tag = int(THRESHOLD/1000)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     output_filename = f"{timestamp}_event_{detected_level}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
     sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
@@ -377,28 +358,23 @@ def save_event_audio():
 
 def check_level(audio_data, index):
     global event_start_index, event_save_thread, detected_level
+   
+    audio_level = get_level(audio_data, MONITOR_CH)
 
-    current_time = datetime.datetime.now().time()
+    if (audio_level > THRESHOLD) and event_start_index is None:
+        print("event detected at:", datetime.datetime.now(), "audio level:", audio_level)
+        detected_level = audio_level
+        event_start_index = index
+        event_save_thread = threading.Thread(target=save_audio_around_event)
+        event_save_thread.start()
 
-    if EVENT_TIMER <= current_time < EVENT_END:
-        audio_level = get_level(audio_data, MONITOR_CH)
-
-        if (audio_level > THRESHOLD) and event_start_index is None:
-            print("event detected at:", datetime.now(), "audio level:", audio_level)
-            detected_level = audio_level
-            event_start_index = index
-            event_save_thread = threading.Thread(target=save_audio_around_event)
-            event_save_thread.start()
-
-        if MODE_VU:
-            fake_vu_meter(audio_level,'\r') 
-
+    if MODE_VU:
+        fake_vu_meter(audio_level,'\r') 
 #
 # audio stream and callback functions
 #
-
 def callback(indata, frames, time, status):
-    global buffer, buffer_index
+    global buffer, buffer_index, current_time
 
     if status:
         print("Callback status:", status)
@@ -415,17 +391,36 @@ def callback(indata, frames, time, status):
         print("Buffer overflow, data lost:", overflow)
 
     if MODE_EVENT:
-        check_level(indata, buffer_index)   # trigger saving audio if above threshold, 
+        if EVENT_TIMER and not (EVENT_START <= current_time < EVENT_END):
+            pass
+        else:
+            check_level(indata, buffer_index) 
     if MODE_PERIOD:
-        check_period(indata, buffer_index)  # start saving audio if save period expired
+        if PERIOD_TIMER and not (PERIOD_START <= current_time < PERIOD_END):
+            pass
+        else:
+            check_period(indata, buffer_index)  
     if MODE_CONTINUOUS:
-        check_continuous(indata, buffer_index)  # start saving audio if save period expired
+        if CONTINUOUS_TIMER and not (CONTINUOUS_START <= current_time < CONTINUOUS_END):
+            pass
+        else:
+            check_continuous(indata, buffer_index)  
 
     buffer_index = (buffer_index + data_len) % buffer_size
 
 
+stop_event = threading.Event()
+
+def get_time_of_day():
+    global current_time
+
+    while not stop_event.is_set():
+        current_time = datetime.datetime.now().time()
+        time.sleep(1)
+
+
 def audio_stream():
-    global buffer, buffer_index, _dtype
+    global buffer, buffer_index, _dtype, time_of_day_thread
 
     stream = sd.InputStream(device=DEVICE_IN, channels=CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, callback=callback)
     with stream:
@@ -438,8 +433,12 @@ def audio_stream():
         else:
             print("Audio level display on cli is off")
 
+        time_of_day_thread = threading.Thread(target=get_time_of_day)
+        time_of_day_thread.start()
+
         while stream.active:
             pass
+
 
 ###########################
 ########## MAIN ###########
@@ -447,23 +446,36 @@ def audio_stream():
 
 if __name__ == "__main__":
 
-    initialization()
-
     print("Acoustic Signal Capture")
     print("buffer size in seconds: ", BUFFER_SECONDS)
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {CHANNELS}")
     try:
         if MODE_CONTINUOUS:
             print(f"Starting continuous, low-sample-rate recording mode, duration per file: {CONTINUOUS/60:.2f} minutes")
+            if CONTINUOUS_TIMER:
+                print(f"    Operational between: {CONTINUOUS_START} and {CONTINUOUS_END}")
+            else:
+                print("    Timer off")
         if MODE_PERIOD:
             print(f"Starting periodic recording mode, {PERIOD/60:.2f} minutes every {INTERVAL/60:.2f} minutes")
+            if PERIOD_TIMER:
+                print(f"    Operational between: {PERIOD_START} and {PERIOD_END}")
+            else:
+                print("    Timer off")
         if MODE_EVENT:
             print(f"Starting event detect mode, threshold trigger: {THRESHOLD},  time before: {SAVE_BEFORE_EVENT} sec, time after: {SAVE_AFTER_EVENT} sec")
+            if EVENT_TIMER:
+                print(f"    Operational between: {EVENT_START} and {EVENT_END}")
+            else:
+                print("    Timer off")
 
         audio_stream()
 
     except KeyboardInterrupt:
         print('\nRecording process stopped by user.')
+        stop_event.set()
+        time_of_day_thread.join() 
+        
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
         quit(-1)         # quit with error
@@ -486,68 +498,3 @@ def get_device_info(device_id):
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Input Channels: {}'.format(device_info['max_input_channels']))
 
-
-'''
-import sounddevice as sd
-import numpy as np
-
-# Sample rate and device index or name
-sample_rate = 44100  # Replace with your desired sample rate
-usb_device_index_or_name = "Your USB class 2 audio device index or name"  # Replace with your device index or name
-
-def audio_callback(indata, frames, time, status):
-    """This will be called for each block of audio."""
-    print(indata)
-
-try:
-    with sd.InputStream(device=usb_device_index_or_name, channels=2, callback=audio_callback,
-                        samplerate=sample_rate, dtype=np.int16):
-        print('Starting audio stream...')
-        sd.sleep(10000)  # This will capture audio for 10 seconds
-        print('Audio stream finished.')
-except Exception as e:
-    print("Error: {0}".format(e))
-'''
-
-
-import datetime
-import time
-import threading
-
-def task():
-    while True:
-        print("Running task...")
-        time.sleep(1)  # Replace this with your actual task
-
-def main():
-    # Define the start and stop times (24-hour format)
-    start_time = datetime.time(9, 0, 0)  # 9:00 AM
-    stop_time = datetime.time(17, 0, 0)  # 5:00 PM
-
-    thread = None
-
-    while True:
-        current_time = datetime.datetime.now().time()
-        
-        if start_time <= current_time < stop_time:
-            # If within working hours and thread is not already running, start it
-            if thread is None or not thread.is_alive():
-                print("Starting thread...")
-                thread = threading.Thread(target=task)
-                thread.start()
-        else:
-            # If outside working hours and thread is running, stop it
-            if thread is not None and thread.is_alive():
-                print("Stopping thread...")
-                thread.join()  # Wait for the thread to finish
-                thread = None
-
-        time.sleep(60)  # Check every minute
-
-if __name__ == "__main__":
-    main()
-
-
-'''In this example, the script continuously checks the current time every minute. If it's between 9:00 AM and 5:00 PM and the thread is not running, it starts the thread. If it's outside those hours and the thread is running, it stops the thread.
-
-Note that this example assumes that the task function has a way to exit its loop when the thread is joined, otherwise thread.join() will hang indefinitely. If your task doesn't naturally exit, you might want to use a threading.Event object to signal the thread to exit, or use a different method to stop the thread. This is a bit more complex and depends on the specifics of your task.'''
