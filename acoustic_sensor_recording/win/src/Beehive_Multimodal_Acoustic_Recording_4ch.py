@@ -32,7 +32,7 @@ import librosa
 
 
 FULL_SCALE = 2 ** 16            # just for cli vu meter level reference
-BUFFER_SECONDS = 660            # seconds of a circular buffer
+BUFFER_SECONDS = 1800            # seconds of a circular buffer
 SAMPLE_RATE = 192000            # Audio sample rate
 BIT_DEPTH = 16                  # Audio bit depth
 FORMAT = 'FLAC'                 # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
@@ -430,6 +430,7 @@ if __name__ == "__main__":
     initialization()
 
     print("Acoustic Signal Capture")
+    print("buffer size in seconds: ", BUFFER_SECONDS)
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {CHANNELS}")
     try:
         if MODE_CONTINUOUS:
@@ -459,3 +460,31 @@ def play_audio(filename, device):
     sd.play(data, fs, device)
     sd.wait()
 
+
+def get_device_info(device_id):
+    device_info = sd.query_devices(device_id)  # Replace with your device index
+    print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
+    print('Max Input Channels: {}'.format(device_info['max_input_channels']))
+
+
+'''
+import sounddevice as sd
+import numpy as np
+
+# Sample rate and device index or name
+sample_rate = 44100  # Replace with your desired sample rate
+usb_device_index_or_name = "Your USB class 2 audio device index or name"  # Replace with your device index or name
+
+def audio_callback(indata, frames, time, status):
+    """This will be called for each block of audio."""
+    print(indata)
+
+try:
+    with sd.InputStream(device=usb_device_index_or_name, channels=2, callback=audio_callback,
+                        samplerate=sample_rate, dtype=np.int16):
+        print('Starting audio stream...')
+        sd.sleep(10000)  # This will capture audio for 10 seconds
+        print('Audio stream finished.')
+except Exception as e:
+    print("Error: {0}".format(e))
+'''
