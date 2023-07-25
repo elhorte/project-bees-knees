@@ -62,8 +62,20 @@ device_CH = None                # total number of channels from device
 
 # recording modes on/off
 MODE_CONTINUOUS = True          # recording continuously to mp3 files
+CONTINUOUS_TIMER = False         # use a timer to start and stop continuous recording
+CONTINUOUS_START = "04:00"
+CONTINUOUS_END = "23:00"
+
 MODE_PERIOD = True              # period only
-MODE_EVENT = False               # event only
+PERIOD_TIMER = False             # use a timer to start and stop period recording
+PERIOD_START = "04:00"
+PERIOD_END = "23:00"
+
+MODE_EVENT = True               # event only
+EVENT_TIMER = False              # use a timer to start and stop event recording
+EVENT_START = "04:00"
+EVENT_END = "23:00"
+
 MODE_VU = False                  # show audio level on cli
 
 # continuous recording at reduced sample rate
@@ -81,9 +93,9 @@ THRESHOLD = 40000               # audio level threshold to be considered an even
 MONITOR_CH = 0                  # channel to monitor for event (if > number of chs, all channels are monitored)
 
 # hardware pointers
-DEVICE_IN = 1                   # Device ID of input device
+DEVICE_IN = 16                   # Device ID of input device
 DEVICE_OUT = 3                  # Device ID of output device
-CHANNELS = 2                    # Number of channels
+CHANNELS = 4                    # Number of channels
 
 ##OUTPUT_DIRECTORY = "."        # for debugging
 OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
@@ -116,6 +128,7 @@ def initialization():
         device_CH = device_info['max_input_channels'] 
         if CHANNELS > device_CH:
             print(f"The device only has {device_CH} channel(s) but requires {CHANNELS} channels.")
+            print("These are the available devices: \n", sd.query_devices())
             quit(-1)
         ##device_SR = device_info['default_samplerate'] 
         ##if device_SR != SAMPLE_RATE:
@@ -241,7 +254,7 @@ def save_continuous_audio():
     audio_data = resample_audio(audio_data, SAMPLE_RATE, CONTINUOUS_SAMPLE_RATE)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_continuous_{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
+    output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}_{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
 
     if CONTINUOUS_FORMAT == 'MP3':
@@ -298,7 +311,7 @@ def save_period_audio():
         audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_period_{PERIOD}_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+    output_filename = f"{timestamp}_period_{SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CHANNELS}_{PERIOD}_every_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
     sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
 
@@ -488,3 +501,46 @@ try:
 except Exception as e:
     print("Error: {0}".format(e))
 '''
+
+'''
+import datetime
+import time
+import threading
+
+def task():
+    while True:
+        print("Running task...")
+        time.sleep(1)  # Replace this with your actual task
+
+def main():
+    # Define the start and stop times (24-hour format)
+    start_time = datetime.time(9, 0, 0)  # 9:00 AM
+    stop_time = datetime.time(17, 0, 0)  # 5:00 PM
+
+    thread = None
+
+    while True:
+        current_time = datetime.datetime.now().time()
+        
+        if start_time <= current_time < stop_time:
+            # If within working hours and thread is not already running, start it
+            if thread is None or not thread.is_alive():
+                print("Starting thread...")
+                thread = threading.Thread(target=task)
+                thread.start()
+        else:
+            # If outside working hours and thread is running, stop it
+            if thread is not None and thread.is_alive():
+                print("Stopping thread...")
+                thread.join()  # Wait for the thread to finish
+                thread = None
+
+        time.sleep(60)  # Check every minute
+
+if __name__ == "__main__":
+    main()
+'''
+
+'''In this example, the script continuously checks the current time every minute. If it's between 9:00 AM and 5:00 PM and the thread is not running, it starts the thread. If it's outside those hours and the thread is running, it stops the thread.
+
+Note that this example assumes that the task function has a way to exit its loop when the thread is joined, otherwise thread.join() will hang indefinitely. If your task doesn't naturally exit, you might want to use a threading.Event object to signal the thread to exit, or use a different method to stop the thread. This is a bit more complex and depends on the specifics of your task.'''
