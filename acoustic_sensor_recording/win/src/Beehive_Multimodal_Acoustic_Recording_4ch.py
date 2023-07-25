@@ -63,18 +63,18 @@ device_CH = None                # total number of channels from device
 # recording modes on/off
 MODE_CONTINUOUS = True          # recording continuously to mp3 files
 CONTINUOUS_TIMER = False         # use a timer to start and stop continuous recording
-CONTINUOUS_START = "04:00"
-CONTINUOUS_END = "23:00"
+CONTINUOUS_START = datetime.time(9, 0, 0)
+CONTINUOUS_END = datetime.time(22, 0, 0)
 
 MODE_PERIOD = True              # period only
 PERIOD_TIMER = False             # use a timer to start and stop period recording
-PERIOD_START = "04:00"
-PERIOD_END = "23:00"
+PERIOD_START = datetime.time(9, 0, 0)
+PERIOD_END = datetime.time(22, 0, 0)
 
 MODE_EVENT = True               # event only
 EVENT_TIMER = False              # use a timer to start and stop event recording
-EVENT_START = "04:00"
-EVENT_END = "23:00"
+EVENT_START = datetime.time(9, 0, 0)
+EVENT_END = datetime.time(22, 0, 0)
 
 MODE_VU = False                  # show audio level on cli
 
@@ -274,17 +274,19 @@ def save_continuous_audio():
 def check_continuous(audio_data, index):
     global continuous_start_index, continuous_save_thread, continuous_end_index
 
+    current_time = datetime.datetime.now().time()
     # just keep doing it, no testing
-    if continuous_start_index is None: 
-        print("continuous block started at:", datetime.now())
-        continuous_start_index = continuous_end_index 
-        ##continuous_start_index = index
-        continuous_save_thread = threading.Thread(target=save_audio_for_continuous)
-        continuous_save_thread.start()
+    if CONTINUOUS_TIMER <= current_time < CONTINUOUS_END:
+        if continuous_start_index is None: 
+            print("continuous block started at:", datetime.now())
+            continuous_start_index = continuous_end_index 
+            ##continuous_start_index = index
+            continuous_save_thread = threading.Thread(target=save_audio_for_continuous)
+            continuous_save_thread.start()
 
-    if MODE_VU and MODE_CONTINUOUS and not MODE_EVENT:
-        audio_level = get_level(audio_data, MONITOR_CH)
-        fake_vu_meter(audio_level,'\r')
+        if MODE_VU and MODE_CONTINUOUS and not MODE_EVENT:
+            audio_level = get_level(audio_data, MONITOR_CH)
+            fake_vu_meter(audio_level,'\r')
 
 #
 # period recording functions
@@ -324,12 +326,14 @@ def save_period_audio():
 def check_period(audio_data, index):
     global period_start_index, period_save_thread, detected_level
 
+    current_time = datetime.datetime.now().time()
     ##print("Time:", int(time.time()),"INTERVAL:", INTERVAL, "modulo:", int(time.time()) % INTERVAL)
     # if modulo INTERVAL == zero then start of period
-    if not int(time.time()) % INTERVAL and period_start_index is None: 
-        period_start_index = index 
-        period_save_thread = threading.Thread(target=save_audio_for_period)
-        period_save_thread.start()
+    if PERIOD_TIMER <= current_time < PERIOD_END:
+        if not int(time.time()) % INTERVAL and period_start_index is None: 
+            period_start_index = index 
+            period_save_thread = threading.Thread(target=save_audio_for_period)
+            period_save_thread.start()
 
     if MODE_VU and not MODE_CONTINUOUS and not MODE_EVENT:
         audio_level = get_level(audio_data, MONITOR_CH)
@@ -374,17 +378,20 @@ def save_event_audio():
 def check_level(audio_data, index):
     global event_start_index, event_save_thread, detected_level
 
-    audio_level = get_level(audio_data, MONITOR_CH)
+    current_time = datetime.datetime.now().time()
 
-    if (audio_level > THRESHOLD) and event_start_index is None:
-        print("event detected at:", datetime.now(), "audio level:", audio_level)
-        detected_level = audio_level
-        event_start_index = index
-        event_save_thread = threading.Thread(target=save_audio_around_event)
-        event_save_thread.start()
+    if EVENT_TIMER <= current_time < EVENT_END:
+        audio_level = get_level(audio_data, MONITOR_CH)
 
-    if MODE_VU:
-        fake_vu_meter(audio_level,'\r') 
+        if (audio_level > THRESHOLD) and event_start_index is None:
+            print("event detected at:", datetime.now(), "audio level:", audio_level)
+            detected_level = audio_level
+            event_start_index = index
+            event_save_thread = threading.Thread(target=save_audio_around_event)
+            event_save_thread.start()
+
+        if MODE_VU:
+            fake_vu_meter(audio_level,'\r') 
 
 #
 # audio stream and callback functions
@@ -502,7 +509,7 @@ except Exception as e:
     print("Error: {0}".format(e))
 '''
 
-'''
+
 import datetime
 import time
 import threading
@@ -539,7 +546,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-'''
+
 
 '''In this example, the script continuously checks the current time every minute. If it's between 9:00 AM and 5:00 PM and the thread is not running, it starts the thread. If it's outside those hours and the thread is running, it stops the thread.
 
