@@ -21,9 +21,13 @@ import time
 import threading
 import numpy as np
 from scipy.signal import resample
+import matplotlib.pyplot as plt
+from scipy.fft import rfft, rfftfreq
 from pydub import AudioSegment
 import os
 os.environ['NUMBA_NUM_THREADS'] = '1'
+import keyboard
+
 
 
 FULL_SCALE = 2 ** 16            # just for cli vu meter level reference
@@ -91,7 +95,7 @@ THRESHOLD = 40000               # audio level threshold to be considered an even
 MONITOR_CH = 0                  # channel to monitor for event (if > number of chs, all channels are monitored)
 
 # hardware pointers
-DEVICE_IN = 1                   # Device ID of input device
+DEVICE_IN = 1                  # Device ID of input device - 16 for 4ch audio I/F
 DEVICE_OUT = 3                  # Device ID of output device
 CHANNELS = 2                    # Number of channels
 
@@ -161,6 +165,10 @@ else:
     quit(-1)
 
 
+# #############################################################
+# VU meter to visualize audio level on the CLI
+# #############################################################
+
 # Print a string of asterisks, ending with only a carriage return to overwrite the line
 # value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
 def fake_vu_meter(value, end):
@@ -176,6 +184,11 @@ def get_level(audio_data, channel_select):
         audio_level = np.max(np.abs(audio_data))
 
     return audio_level
+
+
+# #############################################################
+# Audio conversion functions
+# #############################################################
 
 # convert audio to mp3 and save to file using downsampled data
 def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS_QUALITY):
@@ -199,6 +212,7 @@ def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS
         print("Don't know of a mp3 mode with parameter:", quality)
         quit(-1)
 
+
 # resample audio to a lower sample rate using scipy library
 def resample_audio(audio_data, orig_sample_rate, target_sample_rate):
     # assuming audio_data is stereo 16-bit PCM in a numpy array
@@ -216,6 +230,45 @@ def resample_audio(audio_data, orig_sample_rate, target_sample_rate):
     audio_data = downsampled_data.astype(np.int16)
 
     return audio_data
+
+
+# #############################################################
+# signal processing functions
+# #############################################################
+
+
+def plot_fft_audio():
+    # Constants
+    FFT_DURATION = 3  # Duration in seconds
+    N = SAMPLE_RATE * FFT_DURATION  # Number of samples
+
+    # Record audio
+    print("Recording...")
+    myrecording = sd.rec(int(N), samplerate=SAMPLE_RATE, channels=1)
+    sd.wait()  # Wait until recording is finished
+    print("Recording finished.")
+
+    # Perform FFT
+    yf = rfft(myrecording.flatten())
+    xf = rfftfreq(N, 1 / SAMPLE_RATE)
+
+    # Define bucket width
+    bucket_width = 1000  # Hz
+    bucket_size = int(bucket_width * N / SAMPLE_RATE)  # Number of indices per bucket
+
+    # Average buckets
+    buckets = np.array([yf[i:i+bucket_size].mean() for i in range(0, len(yf), bucket_size)])
+    bucket_freqs = np.array([xf[i:i+bucket_size].mean() for i in range(0, len(xf), bucket_size)])
+
+    # Plot results
+    plt.plot(bucket_freqs, np.abs(buckets))
+    plt.show()
+
+
+# #############################################################
+# recording functions in various modes
+# #############################################################
+
 #
 # continuous recording functions at low sample rate
 #
@@ -275,9 +328,11 @@ def check_continuous(audio_data, index):
     if MODE_VU and MODE_CONTINUOUS and not MODE_EVENT:
         audio_level = get_level(audio_data, MONITOR_CH)
         fake_vu_meter(audio_level,'\r')
+
 #
 # period recording functions
 #
+
 def save_audio_for_period():
     time.sleep(PERIOD)
     save_period_audio()
@@ -322,9 +377,11 @@ def check_period(audio_data, index):
     if MODE_VU and not MODE_CONTINUOUS and not MODE_EVENT:
         audio_level = get_level(audio_data, MONITOR_CH)
         fake_vu_meter(audio_level,'\r')
+
 #
 # event recording functions
 #
+
 def save_audio_around_event():
     time.sleep(SAVE_AFTER_EVENT)
     save_event_audio()
@@ -358,7 +415,7 @@ def save_event_audio():
 
 def check_level(audio_data, index):
     global event_start_index, event_save_thread, detected_level
-   
+
     audio_level = get_level(audio_data, MONITOR_CH)
 
     if (audio_level > THRESHOLD) and event_start_index is None:
@@ -370,9 +427,13 @@ def check_level(audio_data, index):
 
     if MODE_VU:
         fake_vu_meter(audio_level,'\r') 
+
 #
-# audio stream and callback functions
+# #############################################################
+# audio stream callback functions
+# ############################################################
 #
+
 def callback(indata, frames, time, status):
     global buffer, buffer_index, current_time
 
@@ -380,9 +441,9 @@ def callback(indata, frames, time, status):
         print("Callback status:", status)
 
     data_len = len(indata)
+    
     # managing a circular buffer
     if buffer_index + data_len <= buffer_size:
-
         buffer[buffer_index:buffer_index + data_len] = indata
     else:
         overflow = (buffer_index + data_len) - buffer_size
@@ -391,17 +452,19 @@ def callback(indata, frames, time, status):
         print("Buffer overflow, data lost:", overflow)
 
     if MODE_EVENT:
-        if EVENT_TIMER and not (EVENT_START <= current_time < EVENT_END):
+        if EVENT_TIMER and not (EVENT_START <= current_time <= EVENT_END):
             pass
         else:
             check_level(indata, buffer_index) 
+
     if MODE_PERIOD:
-        if PERIOD_TIMER and not (PERIOD_START <= current_time < PERIOD_END):
+        if PERIOD_TIMER and not (PERIOD_START <= current_time <= PERIOD_END):
             pass
         else:
-            check_period(indata, buffer_index)  
+            check_period(indata, buffer_index) 
+
     if MODE_CONTINUOUS:
-        if CONTINUOUS_TIMER and not (CONTINUOUS_START <= current_time < CONTINUOUS_END):
+        if CONTINUOUS_TIMER and not (CONTINUOUS_START <= current_time <= CONTINUOUS_END):
             pass
         else:
             check_continuous(indata, buffer_index)  
@@ -444,8 +507,7 @@ def audio_stream():
 ########## MAIN ###########
 ###########################
 
-if __name__ == "__main__":
-
+def main():
     print("Acoustic Signal Capture")
     print("buffer size in seconds: ", BUFFER_SECONDS)
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {CHANNELS}")
@@ -468,6 +530,8 @@ if __name__ == "__main__":
                 print(f"    Operational between: {EVENT_START} and {EVENT_END}")
             else:
                 print("    Timer off")
+        
+        keyboard.on_press_key("f", lambda _: plot_fft_audio())  # call audio_fft_method when 'f' is pressed
 
         audio_stream()
 
@@ -480,6 +544,9 @@ if __name__ == "__main__":
         print(f"An error occurred while attempting to execute this script: {e}")
         quit(-1)         # quit with error
 
+
+if __name__ == "__main__":
+    main()
 
 ##########################  
 # utilities
@@ -497,4 +564,5 @@ def get_device_info(device_id):
     device_info = sd.query_devices(device_id)  # Replace with your device index
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Input Channels: {}'.format(device_info['max_input_channels']))
+
 
