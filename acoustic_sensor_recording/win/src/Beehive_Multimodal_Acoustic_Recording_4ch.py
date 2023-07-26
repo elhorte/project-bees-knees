@@ -58,9 +58,11 @@ _subtype = None
 device_CH = None                # total number of channels from device
 
 current_time = None
-time_of_day_thread = None
 
-kill_thread = False             # 
+time_of_day_thread = None
+intercom_thread = None
+stop_tod_event = threading.Event()
+stop_intercom_event = threading.Event()
 
 # Control Panel =====================================================================================
 
@@ -314,14 +316,24 @@ def show_audio_device_list():
     print(sd.query_devices())
 
 
+def start_intercom():
+    global intercom_thread
+
+    print("Starting intercom, listening to channel 0")
+    intercom_thread=threading.Thread(target=intercom)
+    intercom_thread.start()
+
+
 def stop_intercom():
-    global kill_thread
-    kill_thread = True
-    print("Kill signal sent")
+    global intercom_thread
+
+    stop_intercom_event.set()
+    intercom_thread.join()
+    print("\nintercom stopped")
 
 
 def intercom():
-    global _dtype, SAMPLE_RATE, CHANNELS, DEVICE_IN, DEVICE_OUT, MODE_VU
+    global SAMPLE_RATE, CHANNELS, MODE_VU
 
     # first, stop the vu meter if it's running
     vu_mode = MODE_VU
@@ -329,16 +341,12 @@ def intercom():
 
     # Create a buffer to hold the audio data
     buffer = np.zeros((SAMPLE_RATE,))
-
-    # The channel to listen to (can be changed with number keypresses)
     channel_to_listen_to = [0]
 
     # Callback function to handle audio input
     def callback_input(indata, frames, time, status):
         # Only process audio from the designated channel
         channel_data = indata[:, channel_to_listen_to[0]]
-
-        # Add the data from the designated channel to the buffer
         buffer[:frames] = channel_data
 
     # Callback function to handle audio output
@@ -349,7 +357,7 @@ def intercom():
 
     # Function to switch the channel being listened to
     def switch_channel(channel):
-        print(f"\nswitching to channel: {channel}", end='\r')
+        print(f" switching to channel: {channel}", end='\r')
         channel_to_listen_to[0] = channel
 
     # Set up hotkeys for switching channels
@@ -361,9 +369,9 @@ def intercom():
         sd.OutputStream(callback=callback_output, channels=CHANNELS, samplerate=SAMPLE_RATE):
         # The streams are now open and the callback function will be called every time there is audio input and output
         # We'll just use a blocking wait here for simplicity
-        while not kill_thread:
+        while not stop_intercom_event.is_set():
             sd.sleep(100)
-        ##input("Press Enter to stop:")
+
         print("Stopping intercom...")
         MODE_VU = vu_mode   # restore vu mode
 
@@ -575,12 +583,10 @@ def callback(indata, frames, time, status):
     buffer_index = (buffer_index + data_len) % buffer_size
 
 
-stop_event = threading.Event()
-
 def get_time_of_day():
     global current_time
     # this thread just keeps track of the time of day every second
-    while not stop_event.is_set():
+    while not stop_tod_event.is_set():
         current_time = datetime.datetime.now().time()
         time.sleep(1)
 
@@ -644,7 +650,7 @@ def main():
         # one shot process to listen live to individual audio channels
         #   usage: press i then press 0, 1, 2, or 3 to listen to that channel, press enter to stop
         #   needs to be on a separate thread so it doesn't block the main thread and keyboard bindings will work
-        keyboard.on_press_key("i", lambda _: threading.Thread(target=intercom).start())
+        keyboard.on_press_key("i", lambda _: start_intercom())
         # Set the termination flag and exit when 'x' is pressed
         keyboard.on_press_key("x", lambda _: stop_intercom())
 
@@ -653,7 +659,7 @@ def main():
 
     except KeyboardInterrupt:
         print('\nRecording process stopped by user.')
-        stop_event.set()    # stop the time_of_day_thread
+        stop_tod_event.set()    # stop the time_of_day_thread
         time_of_day_thread.join() 
         
     except Exception as e:
