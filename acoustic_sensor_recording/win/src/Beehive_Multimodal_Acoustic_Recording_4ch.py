@@ -28,19 +28,6 @@ import os
 os.environ['NUMBA_NUM_THREADS'] = '1'
 import keyboard
 
-
-
-FULL_SCALE = 2 ** 16            # just for cli vu meter level reference
-BUFFER_SECONDS = 1800            # seconds of a circular buffer
-SAMPLE_RATE = 192000            # Audio sample rate
-BIT_DEPTH = 16                  # Audio bit depth
-FORMAT = 'FLAC'                 # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
-
-CONTINUOUS_SAMPLE_RATE = 48000  # For continuous audio
-CONTINUOUS_BIT_DEPTH = 16       # Audio bit depth
-CONTINUOUS_CHANNELS = 2         # Number of channels
-CONTINUOUS_QUALITY = 0          # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
-
 # init recording varibles
 continuous_start_index = None
 continuous_save_thread = None
@@ -66,42 +53,49 @@ stop_intercom_event = threading.Event()
 
 # Control Panel =====================================================================================
 
-# recording modes on/off
+# hardware pointers
+DEVICE_IN = 1                               # Device ID of input device - 16 for 4ch audio I/F
+DEVICE_OUT = 3                              # Device ID of output device
+CHANNELS = 2                                # Number of channels
+
+FULL_SCALE = 2 ** 16                        # just for cli vu meter level reference
+BUFFER_SECONDS = 1000                       # seconds of a circular buffer
+SAMPLE_RATE = 192000                        # Audio sample rate
+BIT_DEPTH = 16                              # Audio bit depth
+FORMAT = 'FLAC'                             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
+
+CONTINUOUS_SAMPLE_RATE = 48000              # For continuous audio
+CONTINUOUS_BIT_DEPTH = 16                   # Audio bit depth
+CONTINUOUS_CHANNELS = 2                     # Number of channels
+CONTINUOUS_QUALITY = 0                      # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
+CONTINUOUS_FORMAT = 'MP3'                   # accepts mp3, flac, or wav
+
+
 MODE_CONTINUOUS = True                      # recording continuously to mp3 files
 CONTINUOUS_TIMER = True                     # use a timer to start and stop time of day of continuous recording
 CONTINUOUS_START = datetime.time(4, 0, 0)   # time of day to start recording hr, min, sec
 CONTINUOUS_END = datetime.time(23, 0, 0)    # time of day to stop recording hr, min, sec
+CONTINUOUS = 900                            # file size in seconds of continuous recording
 
 MODE_PERIOD = True                          # period recording
 PERIOD_TIMER = True                         # use a timer to start and stop time of day of period recording
 PERIOD_START = datetime.time(4, 0, 0)
 PERIOD_END = datetime.time(20, 0, 0)
+PERIOD = 300                                # seconds of recording
+INTERVAL = 1800                             # seconds between start of period, must be > period, of course
 
 MODE_EVENT = True                           # event recording
 EVENT_TIMER = False                         # use a timer to start and stop time of day of event recording
 EVENT_START = datetime.time(9, 0, 0)
 EVENT_END = datetime.time(22, 0, 0)
-
-MODE_VU = True                              # show audio level on cli
-
-# continuous recording at reduced sample rate
-CONTINUOUS = 300                            # file size in seconds of continuous recording
-CONTINUOUS_FORMAT = 'MP3'                   # accepts mp3, flac, or wav
-
-# period recording
-PERIOD = 300                                # seconds of recording
-INTERVAL = 1800                             # seconds between start of period, must be > period, of course
-
-# event capture recording
 SAVE_BEFORE_EVENT = 30                      # seconds to save before the event
 SAVE_AFTER_EVENT = 30                       # seconds to save after the event
 THRESHOLD = 40000                           # audio level threshold to be considered an event
 MONITOR_CH = 0                              # channel to monitor for event (if > number of chs, all channels are monitored)
 
-# hardware pointers
-DEVICE_IN = 1                               # Device ID of input device - 16 for 4ch audio I/F
-DEVICE_OUT = 3                              # Device ID of output device
-CHANNELS = 2                                # Number of channels
+MODE_VU = True                              # show audio level on cli
+
+
 
 ##OUTPUT_DIRECTORY = "."                    # for debugging
 OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
@@ -597,8 +591,9 @@ def audio_stream():
     stream = sd.InputStream(device=DEVICE_IN, channels=CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, callback=callback)
     with stream:
         print("Start recording...")
-        print("Monitoring audio level on channel:", MONITOR_CH)
+
         if MODE_VU:
+            print("VU meter monitoring channel:", MONITOR_CH)
             fake_vu_meter(FULL_SCALE, '\n')  # mark max audio level on the CLI
             if MODE_EVENT:
                 fake_vu_meter(THRESHOLD, '\n')  # mark audio event threshold on the CLI for ref
@@ -617,8 +612,8 @@ def audio_stream():
 ###########################
 
 def main():
-    print("Acoustic Signal Capture")
-    print("buffer size in seconds: ", BUFFER_SECONDS)
+    print("Acoustic Signal Capture\n")
+    print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {CHANNELS}")
     # show mode status
     try:
