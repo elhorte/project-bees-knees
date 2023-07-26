@@ -60,6 +60,8 @@ device_CH = None                # total number of channels from device
 current_time = None
 time_of_day_thread = None
 
+kill_thread = False             # 
+
 # Control Panel =====================================================================================
 
 # recording modes on/off
@@ -166,27 +168,6 @@ else:
 
 
 # #############################################################
-# VU meter to visualize audio level on the CLI
-# #############################################################
-
-# Print a string of asterisks, ending with only a carriage return to overwrite the line
-# value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
-def fake_vu_meter(value, end):
-    normalized_value = int(value / 1000)
-    asterisks = '*' * normalized_value
-    print(asterisks.ljust(50, ' '), end=end)
-
-
-def get_level(audio_data, channel_select):
-    if channel_select <= device_CH:
-        audio_level = np.max(np.abs(audio_data[:,channel_select]))
-    else: # both channels
-        audio_level = np.max(np.abs(audio_data))
-
-    return audio_level
-
-
-# #############################################################
 # Audio conversion functions
 # #############################################################
 
@@ -235,6 +216,22 @@ def resample_audio(audio_data, orig_sample_rate, target_sample_rate):
 # #############################################################
 # signal display functions
 # #############################################################
+
+# Print a string of asterisks, ending with only a carriage return to overwrite the line
+# value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
+def fake_vu_meter(value, end):
+    normalized_value = int(value / 1000)
+    asterisks = '*' * normalized_value
+    print(asterisks.ljust(50, ' '), end=end)
+
+
+def get_level(audio_data, channel_select):
+    if channel_select <= device_CH:
+        audio_level = np.max(np.abs(audio_data[:,channel_select]))
+    else: # both channels
+        audio_level = np.max(np.abs(audio_data))
+
+    return audio_level
 
 
 def plot_fft_audio():
@@ -317,6 +314,12 @@ def show_audio_device_list():
     print(sd.query_devices())
 
 
+def stop_intercom():
+    global kill_thread
+    kill_thread = True
+    print("Kill signal sent")
+
+
 def intercom():
     global _dtype, SAMPLE_RATE, CHANNELS, DEVICE_IN, DEVICE_OUT, MODE_VU
 
@@ -346,7 +349,7 @@ def intercom():
 
     # Function to switch the channel being listened to
     def switch_channel(channel):
-        print(f"Switching to channel {channel}")
+        print(f"\nswitching to channel: {channel}", end='\r')
         channel_to_listen_to[0] = channel
 
     # Set up hotkeys for switching channels
@@ -358,13 +361,11 @@ def intercom():
         sd.OutputStream(callback=callback_output, channels=CHANNELS, samplerate=SAMPLE_RATE):
         # The streams are now open and the callback function will be called every time there is audio input and output
         # We'll just use a blocking wait here for simplicity
-        ##while not stop_event.is_set():
-        input("Press Enter to stop:")
+        while not kill_thread:
+            sd.sleep(100)
+        ##input("Press Enter to stop:")
+        print("Stopping intercom...")
         MODE_VU = vu_mode   # restore vu mode
-
-
-def stop_intercom():
-    stop_event.set()
 
 
 # #############################################################
@@ -642,7 +643,10 @@ def main():
         keyboard.on_press_key("d", lambda _: show_audio_device_list()) 
         # one shot process to listen live to individual audio channels
         #   usage: press i then press 0, 1, 2, or 3 to listen to that channel, press enter to stop
-        keyboard.on_press_key("i", lambda _: intercom())  
+        #   needs to be on a separate thread so it doesn't block the main thread and keyboard bindings will work
+        keyboard.on_press_key("i", lambda _: threading.Thread(target=intercom).start())
+        # Set the termination flag and exit when 'x' is pressed
+        keyboard.on_press_key("x", lambda _: stop_intercom())
 
         # continuous recording process
         audio_stream()
