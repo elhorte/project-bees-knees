@@ -63,43 +63,43 @@ time_of_day_thread = None
 # Control Panel =====================================================================================
 
 # recording modes on/off
-MODE_CONTINUOUS = True          # recording continuously to mp3 files
-CONTINUOUS_TIMER = True         # use a timer to start and stop time of day of continuous recording
-CONTINUOUS_START = datetime.time(4, 0, 0)
-CONTINUOUS_END = datetime.time(23, 0, 0)
+MODE_CONTINUOUS = True                      # recording continuously to mp3 files
+CONTINUOUS_TIMER = True                     # use a timer to start and stop time of day of continuous recording
+CONTINUOUS_START = datetime.time(4, 0, 0)   # time of day to start recording hr, min, sec
+CONTINUOUS_END = datetime.time(23, 0, 0)    # time of day to stop recording hr, min, sec
 
-MODE_PERIOD = True              # period recording
-PERIOD_TIMER = True             # use a timer to start and stop time of day of period recording
+MODE_PERIOD = True                          # period recording
+PERIOD_TIMER = True                         # use a timer to start and stop time of day of period recording
 PERIOD_START = datetime.time(4, 0, 0)
 PERIOD_END = datetime.time(20, 0, 0)
 
-MODE_EVENT = True               # event recording
-EVENT_TIMER = False             # use a timer to start and stop time of day of event recording
+MODE_EVENT = True                           # event recording
+EVENT_TIMER = False                         # use a timer to start and stop time of day of event recording
 EVENT_START = datetime.time(9, 0, 0)
 EVENT_END = datetime.time(22, 0, 0)
 
-MODE_VU = True                  # show audio level on cli
+MODE_VU = True                              # show audio level on cli
 
 # continuous recording at reduced sample rate
-CONTINUOUS = 300                # file size in seconds of continuous recording
-CONTINUOUS_FORMAT = 'MP3'       # accepts mp3, flac, or wav
+CONTINUOUS = 300                            # file size in seconds of continuous recording
+CONTINUOUS_FORMAT = 'MP3'                   # accepts mp3, flac, or wav
 
 # period recording
-PERIOD = 300                    # seconds of recording
-INTERVAL = 1800                 # seconds between start of period, must be > period, of course
+PERIOD = 300                                # seconds of recording
+INTERVAL = 1800                             # seconds between start of period, must be > period, of course
 
 # event capture recording
-SAVE_BEFORE_EVENT = 30          # seconds to save before the event
-SAVE_AFTER_EVENT = 30           # seconds to save after the event
-THRESHOLD = 40000               # audio level threshold to be considered an event
-MONITOR_CH = 0                  # channel to monitor for event (if > number of chs, all channels are monitored)
+SAVE_BEFORE_EVENT = 30                      # seconds to save before the event
+SAVE_AFTER_EVENT = 30                       # seconds to save after the event
+THRESHOLD = 40000                           # audio level threshold to be considered an event
+MONITOR_CH = 0                              # channel to monitor for event (if > number of chs, all channels are monitored)
 
 # hardware pointers
-DEVICE_IN = 1                  # Device ID of input device - 16 for 4ch audio I/F
-DEVICE_OUT = 3                  # Device ID of output device
-CHANNELS = 2                    # Number of channels
+DEVICE_IN = 1                               # Device ID of input device - 16 for 4ch audio I/F
+DEVICE_OUT = 3                              # Device ID of output device
+CHANNELS = 2                                # Number of channels
 
-##OUTPUT_DIRECTORY = "."        # for debugging
+##OUTPUT_DIRECTORY = "."                    # for debugging
 OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
 
 # location and hive ID
@@ -233,7 +233,7 @@ def resample_audio(audio_data, orig_sample_rate, target_sample_rate):
 
 
 # #############################################################
-# signal processing functions
+# signal display functions
 # #############################################################
 
 
@@ -263,6 +263,108 @@ def plot_fft_audio():
     # Plot results
     plt.plot(bucket_freqs, np.abs(buckets))
     plt.show()
+
+
+# plot 'n' seconds of audio of each channels for an oscope view
+def plot_oscope_audio(): 
+    # Constants
+    TRACE_DURATION = 10  # Duration in seconds
+    GAIN_DB = 20  # Gain in dB
+
+    # Convert gain from dB to linear scale
+    GAIN = 10 ** (GAIN_DB / 20)
+
+    # Record audio
+    print("Recording...")
+    myrecording = sd.rec(int(SAMPLE_RATE * TRACE_DURATION), samplerate=SAMPLE_RATE, channels=CHANNELS)
+    sd.wait()  # Wait until recording is finished
+    print("Recording finished.")
+
+    # Apply gain
+    myrecording *= GAIN
+
+    # Plot results
+    plt.figure()
+
+    # Assume we have 2 channels
+    for i in range(2):
+        plt.subplot(2, 1, i + 1)
+        plt.plot(myrecording[:, i])
+        plt.title(f"Channel {i + 1}")
+
+    plt.tight_layout()
+    plt.show()
+
+##########################  
+# utilities
+##########################
+
+# for debugging
+def play_audio(filename, device):
+    print("* Playing back")
+    data, fs = sf.read(filename)
+    sd.play(data, fs, device)
+    sd.wait()
+
+
+def show_audio_device_info(device_id):
+    device_info = sd.query_devices(device_id)  # Replace with your device index
+    print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
+    print('Max Input Channels: {}'.format(device_info['max_input_channels']))
+
+
+def show_audio_device_list():
+    print(sd.query_devices())
+
+
+def intercom():
+    global _dtype, SAMPLE_RATE, CHANNELS, DEVICE_IN, DEVICE_OUT, MODE_VU
+
+    # first, stop the vu meter if it's running
+    vu_mode = MODE_VU
+    MODE_VU = False
+
+    # Create a buffer to hold the audio data
+    buffer = np.zeros((SAMPLE_RATE,))
+
+    # The channel to listen to (can be changed with number keypresses)
+    channel_to_listen_to = [0]
+
+    # Callback function to handle audio input
+    def callback_input(indata, frames, time, status):
+        # Only process audio from the designated channel
+        channel_data = indata[:, channel_to_listen_to[0]]
+
+        # Add the data from the designated channel to the buffer
+        buffer[:frames] = channel_data
+
+    # Callback function to handle audio output
+    def callback_output(outdata, frames, time, status):
+        # Play back the audio from the buffer
+        outdata[:, 0] = buffer[:frames]  # Play back on the first channel
+        outdata[:, 1] = buffer[:frames]  # Play back on the second channel
+
+    # Function to switch the channel being listened to
+    def switch_channel(channel):
+        print(f"Switching to channel {channel}")
+        channel_to_listen_to[0] = channel
+
+    # Set up hotkeys for switching channels
+    for i in range(CHANNELS):
+        keyboard.add_hotkey(str(i), lambda channel=i: switch_channel(channel))
+
+    # Open an input stream and an output stream with the callback function
+    with sd.InputStream(callback=callback_input, channels=CHANNELS, samplerate=SAMPLE_RATE), \
+        sd.OutputStream(callback=callback_output, channels=CHANNELS, samplerate=SAMPLE_RATE):
+        # The streams are now open and the callback function will be called every time there is audio input and output
+        # We'll just use a blocking wait here for simplicity
+        ##while not stop_event.is_set():
+        input("Press Enter to stop:")
+        MODE_VU = vu_mode   # restore vu mode
+
+
+def stop_intercom():
+    stop_event.set()
 
 
 # #############################################################
@@ -441,7 +543,7 @@ def callback(indata, frames, time, status):
         print("Callback status:", status)
 
     data_len = len(indata)
-    
+
     # managing a circular buffer
     if buffer_index + data_len <= buffer_size:
         buffer[buffer_index:buffer_index + data_len] = indata
@@ -476,7 +578,7 @@ stop_event = threading.Event()
 
 def get_time_of_day():
     global current_time
-
+    # this thread just keeps track of the time of day every second
     while not stop_event.is_set():
         current_time = datetime.datetime.now().time()
         time.sleep(1)
@@ -511,6 +613,7 @@ def main():
     print("Acoustic Signal Capture")
     print("buffer size in seconds: ", BUFFER_SECONDS)
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {CHANNELS}")
+    # show mode status
     try:
         if MODE_CONTINUOUS:
             print(f"Starting continuous, low-sample-rate recording mode, duration per file: {CONTINUOUS/60:.2f} minutes")
@@ -530,14 +633,23 @@ def main():
                 print(f"    Operational between: {EVENT_START} and {EVENT_END}")
             else:
                 print("    Timer off")
-        
-        keyboard.on_press_key("f", lambda _: plot_fft_audio())  # call audio_fft_method when 'f' is pressed
 
+        # one shot process to see fft
+        keyboard.on_press_key("f", lambda _: plot_fft_audio())  
+        # one shot process to see oscope
+        keyboard.on_press_key("o", lambda _: plot_oscope_audio()) 
+        # one shot process to see device list
+        keyboard.on_press_key("d", lambda _: show_audio_device_list()) 
+        # one shot process to listen live to individual audio channels
+        #   usage: press i then press 0, 1, 2, or 3 to listen to that channel, press enter to stop
+        keyboard.on_press_key("i", lambda _: intercom())  
+
+        # continuous recording process
         audio_stream()
 
     except KeyboardInterrupt:
         print('\nRecording process stopped by user.')
-        stop_event.set()
+        stop_event.set()    # stop the time_of_day_thread
         time_of_day_thread.join() 
         
     except Exception as e:
@@ -547,22 +659,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-##########################  
-# utilities
-##########################
-
-# for debugging
-def play_audio(filename, device):
-    print("* Playing back")
-    data, fs = sf.read(filename)
-    sd.play(data, fs, device)
-    sd.wait()
-
-
-def get_device_info(device_id):
-    device_info = sd.query_devices(device_id)  # Replace with your device index
-    print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
-    print('Max Input Channels: {}'.format(device_info['max_input_channels']))
-
-
