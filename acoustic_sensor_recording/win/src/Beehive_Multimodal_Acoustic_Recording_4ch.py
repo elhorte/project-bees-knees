@@ -641,9 +641,7 @@ def main():
         keyboard.on_press_key("o", lambda _: plot_oscope_audio()) 
         # one shot process to see device list
         keyboard.on_press_key("d", lambda _: show_audio_device_list()) 
-        # one shot process to listen live to individual audio channels
-        #   usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
-        #   needs to be on a separate thread so it doesn't block the main thread and keyboard bindings will work
+        # usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
         keyboard.on_press_key("i", lambda _: toggle_intercom())
 
         # continuous recording process
