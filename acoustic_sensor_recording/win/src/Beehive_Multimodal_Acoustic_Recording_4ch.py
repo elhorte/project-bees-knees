@@ -27,6 +27,7 @@ from pydub import AudioSegment
 import os
 os.environ['NUMBA_NUM_THREADS'] = '1'
 import keyboard
+import msvcrt
 
 # init recording varibles
 continuous_start_index = None
@@ -50,6 +51,9 @@ time_of_day_thread = None
 intercom_thread = None
 stop_tod_event = threading.Event()
 stop_intercom_event = threading.Event()
+stop_continuous_event = threading.Event()
+
+monitor_channel = 0
 
 # #############################################################
 # #### Control Panel ##########################################
@@ -87,11 +91,11 @@ INTERVAL = 1800                             # seconds between start of period, m
 
 MODE_EVENT = True                           # event recording
 EVENT_TIMER = False                         # use a timer to start and stop time of day of event recording
-EVENT_START = datetime.time(9, 0, 0)
+EVENT_START = datetime.time(4, 0, 0)
 EVENT_END = datetime.time(22, 0, 0)
 SAVE_BEFORE_EVENT = 30                      # seconds to save before the event
 SAVE_AFTER_EVENT = 30                       # seconds to save after the event
-THRESHOLD = 20000                           # audio level threshold to be considered an event
+THRESHOLD = 40000                           # audio level threshold to be considered an event
 MONITOR_CH = 0                              # channel to monitor for event (if > number of chs, all channels are monitored)
 
 MODE_VU = False                              # show audio level on cli
@@ -218,43 +222,51 @@ def fake_vu_meter(value, end):
     print(asterisks.ljust(50, ' '), end=end)
 
 
-def get_level(audio_data, channel_select):
-    if channel_select <= device_CH:
-        audio_level = np.max(np.abs(audio_data[:,channel_select]))
-    else: # both channels
+def get_level(audio_data):
+    global monitor_channel, device_CH
+
+    ##print("channel_to_listen_to", monitor_channel)
+    channel = monitor_channel
+    if channel <= device_CH:
+        audio_level = np.max(np.abs(audio_data[:,channel]))
+    else: # all channels
         audio_level = np.max(np.abs(audio_data))
 
     return audio_level
 
 
 def toggle_vu_meter():
-    global MODE_VU
+    global MODE_VU, monitor_channel
 
     if MODE_VU:
         print("\nStopping VU meter")
         MODE_VU = False
     else:
         # mark max audio level on the CLI
-        print("\nVU meter monitoring channel:", MONITOR_CH)
+        print("\nVU meter monitoring channel:", monitor_channel)
         normalized_value = int(FULL_SCALE / 1000)
         asterisks = '*' * (normalized_value - 11)
         print("fullscale:",asterisks.ljust(50, ' '))
+
         if MODE_EVENT:
             # mark audio event threshold on the CLI for ref
             normalized_value = int(THRESHOLD / 1000)
             asterisks = '*' * (normalized_value - 11)
             print("threshold:",asterisks.ljust(50, ' '))
+
         MODE_VU = True
 
 
 def plot_fft_audio():
+    global monitor_channel
+
     # Constants
     FFT_DURATION = 3  # Duration in seconds
     N = SAMPLE_RATE * FFT_DURATION  # Number of samples
 
     # Record audio
     print("Recording...")
-    myrecording = sd.rec(int(N), samplerate=SAMPLE_RATE, channels=1)
+    myrecording = sd.rec(int(N), samplerate=SAMPLE_RATE, channels=monitor_channel)
     sd.wait()  # Wait until recording is finished
     print("Recording finished.")
 
@@ -343,20 +355,20 @@ def toggle_intercom():
 
 
 def intercom():
-    global SAMPLE_RATE, CHANNELS, MODE_VU
+    global SAMPLE_RATE, CHANNELS, MODE_VU, monitor_channel
 
     # first, stop the vu meter if it's running
-    vu_mode = MODE_VU
-    MODE_VU = False
+    ##vu_mode = MODE_VU
+    ##MODE_VU = False
 
     # Create a buffer to hold the audio data
     buffer = np.zeros((SAMPLE_RATE,))
-    channel_to_listen_to = [0]
+    channel = monitor_channel
 
     # Callback function to handle audio input
     def callback_input(indata, frames, time, status):
         # Only process audio from the designated channel
-        channel_data = indata[:, channel_to_listen_to[0]]
+        channel_data = indata[:, channel]
         buffer[:frames] = channel_data
 
     # Callback function to handle audio output
@@ -367,8 +379,9 @@ def intercom():
 
     # Function to switch the channel being listened to
     def switch_channel(channel):
+        global monitor_channel
         print(f" switching to channel: {channel}", end='\r')
-        channel_to_listen_to[0] = channel
+        monitor_channel = channel
 
     # Set up hotkeys for switching channels
     for i in range(CHANNELS):
@@ -383,7 +396,7 @@ def intercom():
             sd.sleep(100)
 
         print("Stopping intercom...")
-        MODE_VU = vu_mode   # restore vu mode
+        ##MODE_VU = vu_mode   # restore vu mode
 
 
 # #############################################################
@@ -417,7 +430,8 @@ def save_continuous_audio():
     audio_data = resample_audio(audio_data, SAMPLE_RATE, CONTINUOUS_SAMPLE_RATE)
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}_{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
+    output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}\
+        _{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
 
     if CONTINUOUS_FORMAT == 'MP3':
@@ -436,7 +450,7 @@ def save_continuous_audio():
 
 def check_continuous(audio_data, index):
     global continuous_start_index, continuous_save_thread, continuous_end_index
-
+    
     # just keep doing it, no testing
     if continuous_start_index is None: 
         print("continuous block started at:", datetime.datetime.now())
@@ -444,10 +458,6 @@ def check_continuous(audio_data, index):
         ##continuous_start_index = index
         continuous_save_thread = threading.Thread(target=save_audio_for_continuous)
         continuous_save_thread.start()
-
-    if MODE_VU and MODE_CONTINUOUS and not MODE_EVENT:
-        audio_level = get_level(audio_data, MONITOR_CH)
-        fake_vu_meter(audio_level,'\r')
 
 #
 # period recording functions
@@ -474,7 +484,8 @@ def save_period_audio():
         audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_period_{SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CHANNELS}_{PERIOD}_every_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+    output_filename = f"{timestamp}_period_{SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CHANNELS}\
+        _{PERIOD}_every_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
     sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
 
@@ -493,10 +504,6 @@ def check_period(audio_data, index):
         period_start_index = index 
         period_save_thread = threading.Thread(target=save_audio_for_period)
         period_save_thread.start()
-
-    if MODE_VU and not MODE_CONTINUOUS and not MODE_EVENT:
-        audio_level = get_level(audio_data, MONITOR_CH)
-        fake_vu_meter(audio_level,'\r')
 
 #
 # event recording functions
@@ -523,11 +530,13 @@ def save_event_audio():
         audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_event_{detected_level}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+    output_filename = f"{timestamp}_event_{detected_level}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}\
+        _{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
     sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
 
-    print(f"Saved evemt audio to {full_path_name}, audio threshold level: {detected_level}, duration: {audio_data.shape[0] / SAMPLE_RATE} seconds")
+    print(f"Saved evemt audio to {full_path_name}, audio threshold level: {detected_level}, \
+        duration: {audio_data.shape[0] / SAMPLE_RATE} seconds")
 
     event_save_thread = None
     event_start_index = None
@@ -536,7 +545,7 @@ def save_event_audio():
 def check_level(audio_data, index):
     global event_start_index, event_save_thread, detected_level
 
-    audio_level = get_level(audio_data, MONITOR_CH)
+    audio_level = get_level(audio_data)
 
     if (audio_level > THRESHOLD) and event_start_index is None:
         print("event detected at:", datetime.datetime.now(), "audio level:", audio_level)
@@ -544,9 +553,6 @@ def check_level(audio_data, index):
         event_start_index = index
         event_save_thread = threading.Thread(target=save_audio_around_event)
         event_save_thread.start()
-
-    if MODE_VU:
-        fake_vu_meter(audio_level,'\r') 
 
 #
 # #############################################################
@@ -587,7 +593,11 @@ def callback(indata, frames, time, status):
         if CONTINUOUS_TIMER and not (CONTINUOUS_START <= current_time <= CONTINUOUS_END):
             pass
         else:
-            check_continuous(indata, buffer_index)  
+            check_continuous(indata, buffer_index)
+
+    if MODE_VU:
+        audio_level = get_level(indata)
+        fake_vu_meter(audio_level,'\r')
 
     buffer_index = (buffer_index + data_len) % buffer_size
 
@@ -601,7 +611,7 @@ def get_time_of_day():
 
 
 def audio_stream():
-    global buffer, buffer_index, _dtype, time_of_day_thread
+    global buffer, buffer_index, _dtype, time_of_day_thread, stop_program
 
     stream = sd.InputStream(device=DEVICE_IN, channels=CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, callback=callback)
     with stream:
@@ -610,8 +620,56 @@ def audio_stream():
         time_of_day_thread = threading.Thread(target=get_time_of_day)
         time_of_day_thread.start()
 
-        while stream.active:
+        while stream.active and not stop_program[0]:
             pass
+
+
+# Create a shared variable
+stop_program = [False]
+
+def clear_input_buffer():
+    while msvcrt.kbhit():
+        msvcrt.getch()
+
+def stop_all():
+    global stop_program
+
+    ##clear_input_buffer()
+    print("\n\nStopping all processes...\n")
+
+    if continuous_save_thread is not None:
+        continuous_save_thread.join()
+        print("continuous_save_thread stopped")
+    else:
+        print("continuous_save_thread already stopped")
+
+    if period_save_thread is not None:
+        period_save_thread.join()
+        print("period_save_thread stopped")
+    else:
+        print("period_save_thread already stopped")
+
+    if event_save_thread is not None:
+        event_save_thread.join()
+        print("event_save_thread stopped")
+    else:
+        print("event_save_thread already stopped")
+
+    if time_of_day_thread is not None:
+        stop_tod_event.set()            # stop the time_of_day_thread
+        time_of_day_thread.join() 
+        print("time_of_day_thread stopped")
+
+    if intercom_thread is not None:
+        stop_intercom_event.set()       # stop the intercom_thread
+        intercom_thread.join()
+        print("intercom_thread stopped")
+    else:
+        print("intercom_thread already stopped")
+
+    print("\nHopefully we have turned off all the lights...")
+    stop_program[0] = True
+
 
 
 ###########################
@@ -619,9 +677,12 @@ def audio_stream():
 ###########################
 
 def main():
+    global time_of_day_thread, intercom_thread, stop_tod_event, stop_intercom_event
+
     print("Acoustic Signal Capture\n")
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {CHANNELS}")
+
     # show mode status
     try:
         if MODE_CONTINUOUS:
@@ -637,37 +698,77 @@ def main():
             else:
                 print("    Timer off")
         if MODE_EVENT:
-            print(f"Starting event detect mode, threshold trigger: {THRESHOLD},  time before: {SAVE_BEFORE_EVENT} sec, time after: {SAVE_AFTER_EVENT} sec")
+            print(f"Starting event detect mode, threshold trigger: {THRESHOLD},  time before: {SAVE_BEFORE_EVENT} sec\
+                , time after: {SAVE_AFTER_EVENT} sec")
             if EVENT_TIMER:
                 print(f"    Operational between: {EVENT_START} and {EVENT_END}")
             else:
                 print("    Timer off")
 
         # beehive management utilities
-        #
+        
         # one shot process to see fft
-        keyboard.on_press_key("f", lambda _: plot_fft_audio())  
+        keyboard.on_press_key("f", lambda _: plot_fft_audio(), suppress=True)   
         # one shot process to see oscope
-        keyboard.on_press_key("o", lambda _: plot_oscope_audio()) 
+        keyboard.on_press_key("o", lambda _: plot_oscope_audio(), suppress=True) 
         # one shot process to see device list
-        keyboard.on_press_key("d", lambda _: show_audio_device_list()) 
+        keyboard.on_press_key("d", lambda _: show_audio_device_list(), suppress=True) 
         # usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
-        keyboard.on_press_key("i", lambda _: toggle_intercom())
+        keyboard.on_press_key("i", lambda _: toggle_intercom(), suppress=True)
         # usage: press v to start cli vu meter, press v again to stop
-        keyboard.on_press_key("v", lambda _: toggle_vu_meter())
+        keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
+        # usage: press q to stop all processes
+        keyboard.on_press_key("q", lambda _: stop_all(), suppress=True)
 
-        # continuous recording process
         audio_stream()
 
     except KeyboardInterrupt:
         print('\nRecording process stopped by user.')
-        stop_tod_event.set()    # stop the time_of_day_thread
-        time_of_day_thread.join() 
-        
+
+        if time_of_day_thread is not None:
+            #print("time_of_day_thread", time_of_day_thread.is_alive())
+            stop_tod_event.set()            # stop the time_of_day_thread
+            time_of_day_thread.join() 
+
+        if intercom_thread is not None:
+            #print("intercom_thread", intercom_thread.is_alive())
+            stop_intercom_event.set()       # stop the intercom_thread
+            intercom_thread.join()
+
+    #except ExitProgram:
+    #    print("Exiting program from class")
+    #    quit(-1)
+
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
-        quit(-1)                # quit with error
+        quit(-1) 
 
 
 if __name__ == "__main__":
     main()
+
+
+# #############################################################
+
+
+def monitor_vu_channel():
+    # Create a variable to hold the current channel
+    current_channel = [0]
+
+    def get_level(audio_data):
+        # Use the current channel to get the audio level
+        if current_channel[0] <= device_CH:
+            audio_level = np.max(np.abs(audio_data[:, current_channel[0]]))
+        else: # both channels
+            audio_level = np.max(np.abs(audio_data))
+
+        return audio_level
+
+    # Function to switch the current channel
+    def switch_channel(channel):
+        print(f"Switching to channel {channel}")
+        current_channel[0] = channel
+
+    # Set up hotkeys for switching channels
+    for i in range(device_CH + 1):  # Assuming device_CH is the number of channels
+        keyboard.add_hotkey(str(i), lambda channel=i: switch_channel(channel))
