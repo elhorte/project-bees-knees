@@ -310,20 +310,19 @@ def show_audio_device_list():
     print(sd.query_devices())
 
 
-def start_intercom():
+def toggle_intercom():
     global intercom_thread
 
-    print("Starting intercom, listening to channel 0")
-    intercom_thread=threading.Thread(target=intercom)
-    intercom_thread.start()
-
-
-def stop_intercom():
-    global intercom_thread
-
-    stop_intercom_event.set()
-    intercom_thread.join()
-    print("\nintercom stopped")
+    if intercom_thread is None or not intercom_thread.is_alive():
+        print("Starting intercom, listening to channel 0")
+        intercom_thread = threading.Thread(target=intercom)
+        intercom_thread.start()
+    else:
+        stop_intercom_event.set()
+        intercom_thread.join()
+        print("\nIntercom stopped")
+        intercom_thread = None
+        stop_intercom_event.clear()
 
 
 def intercom():
@@ -643,11 +642,9 @@ def main():
         # one shot process to see device list
         keyboard.on_press_key("d", lambda _: show_audio_device_list()) 
         # one shot process to listen live to individual audio channels
-        #   usage: press i then press 0, 1, 2, or 3 to listen to that channel, press enter to stop
+        #   usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
         #   needs to be on a separate thread so it doesn't block the main thread and keyboard bindings will work
-        keyboard.on_press_key("i", lambda _: start_intercom())
-        # Set the termination flag and exit when 'x' is pressed
-        keyboard.on_press_key("x", lambda _: stop_intercom())
+        keyboard.on_press_key("i", lambda _: toggle_intercom())
 
         # continuous recording process
         audio_stream()
