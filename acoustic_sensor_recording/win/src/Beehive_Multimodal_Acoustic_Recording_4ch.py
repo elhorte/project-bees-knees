@@ -51,7 +51,9 @@ intercom_thread = None
 stop_tod_event = threading.Event()
 stop_intercom_event = threading.Event()
 
-# Control Panel =====================================================================================
+# #############################################################
+# #### Control Panel ##########################################
+# #############################################################
 
 # hardware pointers
 DEVICE_IN = 1                               # Device ID of input device - 16 for 4ch audio I/F
@@ -70,12 +72,11 @@ CONTINUOUS_CHANNELS = 2                     # Number of channels
 CONTINUOUS_QUALITY = 0                      # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 CONTINUOUS_FORMAT = 'MP3'                   # accepts mp3, flac, or wav
 
-
 MODE_CONTINUOUS = True                      # recording continuously to mp3 files
 CONTINUOUS_TIMER = True                     # use a timer to start and stop time of day of continuous recording
 CONTINUOUS_START = datetime.time(4, 0, 0)   # time of day to start recording hr, min, sec
 CONTINUOUS_END = datetime.time(23, 0, 0)    # time of day to stop recording hr, min, sec
-CONTINUOUS = 900                            # file size in seconds of continuous recording
+CONTINUOUS = 300                            # file size in seconds of continuous recording
 
 MODE_PERIOD = True                          # period recording
 PERIOD_TIMER = True                         # use a timer to start and stop time of day of period recording
@@ -93,9 +94,7 @@ SAVE_AFTER_EVENT = 30                       # seconds to save after the event
 THRESHOLD = 40000                           # audio level threshold to be considered an event
 MONITOR_CH = 0                              # channel to monitor for event (if > number of chs, all channels are monitored)
 
-MODE_VU = True                              # show audio level on cli
-
-
+MODE_VU = False                              # show audio level on cli
 
 ##OUTPUT_DIRECTORY = "."                    # for debugging
 OUTPUT_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
@@ -162,7 +161,6 @@ else:
     print("The bit depth is not supported: ", BIT_DEPTH)
     quit(-1)
 
-
 # #############################################################
 # Audio conversion functions
 # #############################################################
@@ -188,7 +186,6 @@ def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS
     else:
         print("Don't know of a mp3 mode with parameter:", quality)
         quit(-1)
-
 
 # resample audio to a lower sample rate using scipy library
 def resample_audio(audio_data, orig_sample_rate, target_sample_rate):
@@ -228,6 +225,17 @@ def get_level(audio_data, channel_select):
         audio_level = np.max(np.abs(audio_data))
 
     return audio_level
+
+
+def toggle_vu_meter():
+    global MODE_VU
+
+    if MODE_VU:
+        print("\nStopping VU meter")
+        MODE_VU = False
+    else:
+        print("\nStarting VU meter")
+        MODE_VU = True
 
 
 def plot_fft_audio():
@@ -372,7 +380,6 @@ def intercom():
 # #############################################################
 # recording functions in various modes
 # #############################################################
-
 #
 # continuous recording functions at low sample rate
 #
@@ -635,6 +642,8 @@ def main():
             else:
                 print("    Timer off")
 
+        # beehive management utilities
+        #
         # one shot process to see fft
         keyboard.on_press_key("f", lambda _: plot_fft_audio())  
         # one shot process to see oscope
@@ -643,6 +652,8 @@ def main():
         keyboard.on_press_key("d", lambda _: show_audio_device_list()) 
         # usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
         keyboard.on_press_key("i", lambda _: toggle_intercom())
+        # usage: press v to start cli vu meter, press v again to stop
+        keyboard.on_press_key("v", lambda _: toggle_vu_meter())
 
         # continuous recording process
         audio_stream()
@@ -654,7 +665,7 @@ def main():
         
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
-        quit(-1)         # quit with error
+        quit(-1)                # quit with error
 
 
 if __name__ == "__main__":
