@@ -91,7 +91,7 @@ EVENT_START = datetime.time(9, 0, 0)
 EVENT_END = datetime.time(22, 0, 0)
 SAVE_BEFORE_EVENT = 30                      # seconds to save before the event
 SAVE_AFTER_EVENT = 30                       # seconds to save after the event
-THRESHOLD = 40000                           # audio level threshold to be considered an event
+THRESHOLD = 20000                           # audio level threshold to be considered an event
 MONITOR_CH = 0                              # channel to monitor for event (if > number of chs, all channels are monitored)
 
 MODE_VU = False                              # show audio level on cli
@@ -234,7 +234,16 @@ def toggle_vu_meter():
         print("\nStopping VU meter")
         MODE_VU = False
     else:
-        print("\nStarting VU meter")
+        # mark max audio level on the CLI
+        print("\nVU meter monitoring channel:", MONITOR_CH)
+        normalized_value = int(FULL_SCALE / 1000)
+        asterisks = '*' * (normalized_value - 11)
+        print("fullscale:",asterisks.ljust(50, ' '))
+        if MODE_EVENT:
+            # mark audio event threshold on the CLI for ref
+            normalized_value = int(THRESHOLD / 1000)
+            asterisks = '*' * (normalized_value - 11)
+            print("threshold:",asterisks.ljust(50, ' '))
         MODE_VU = True
 
 
@@ -597,14 +606,6 @@ def audio_stream():
     stream = sd.InputStream(device=DEVICE_IN, channels=CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, callback=callback)
     with stream:
         print("Start recording...")
-
-        if MODE_VU:
-            print("VU meter monitoring channel:", MONITOR_CH)
-            fake_vu_meter(FULL_SCALE, '\n')  # mark max audio level on the CLI
-            if MODE_EVENT:
-                fake_vu_meter(THRESHOLD, '\n')  # mark audio event threshold on the CLI for ref
-        else:
-            print("Audio level display on cli is off")
 
         time_of_day_thread = threading.Thread(target=get_time_of_day)
         time_of_day_thread.start()
