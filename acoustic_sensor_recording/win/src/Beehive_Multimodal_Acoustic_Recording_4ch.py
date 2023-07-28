@@ -28,6 +28,7 @@ import os
 os.environ['NUMBA_NUM_THREADS'] = '1'
 import keyboard
 import msvcrt
+import TestPyQT5
 
 # init recording varibles
 continuous_start_index = None
@@ -60,13 +61,13 @@ monitor_channel = 0
 # #############################################################
 
 # hardware pointers
-DEVICE_IN = 10                               # Device ID of input device - 16 for 4ch audio I/F
-DEVICE_OUT = 7                              # Device ID of output device
-CHANNELS = 1                                # Number of channels
+DEVICE_IN = 11                               # Device ID of input device - 16 for 4ch audio I/F
+DEVICE_OUT = 10                             # Device ID of output device
+CHANNELS = 2                                # Number of channels
 
 FULL_SCALE = 2 ** 16                        # just for cli vu meter level reference
 BUFFER_SECONDS = 1000                       # seconds of a circular buffer
-SAMPLE_RATE = 44100                        # Audio sample rate
+SAMPLE_RATE = 48000                        # Audio sample rate
 BIT_DEPTH = 16                              # Audio bit depth
 FORMAT = 'FLAC'                             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
@@ -773,69 +774,3 @@ def monitor_vu_channel():
     for i in range(device_CH + 1):  # Assuming device_CH is the number of channels
         keyboard.add_hotkey(str(i), lambda channel=i: switch_channel(channel))
 
-
-# =============================================================
-#
-#  PyQT5 UI
-#
-# =============================================================
-
-from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget
-
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super(MainWindow, self).__init__()
-
-        self.setWindowTitle("PyQT Buttons Example")
-
-        # Create the buttons
-        self.vu_meter_button = QPushButton("Toggle VU Meter")
-        self.intercom_button = QPushButton("Toggle Intercom")
-        self.oscope_button = QPushButton("Plot Oscope")
-        self.fft_button = QPushButton("Plot FFT")
-
-        # Connect the buttons to their corresponding functions
-        self.vu_meter_button.clicked.connect(self.toggle_vu_meter)
-        self.intercom_button.clicked.connect(self.toggle_intercom)
-        self.oscope_button.clicked.connect(self.plot_oscope)
-        self.fft_button.clicked.connect(self.plot_fft)
-
-        # Arrange the buttons vertically
-        layout = QVBoxLayout()
-        layout.addWidget(self.vu_meter_button)
-        layout.addWidget(self.intercom_button)
-        layout.addWidget(self.oscope_button)
-        layout.addWidget(self.fft_button)
-
-        # Create a central widget (required for QMainWindow)
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-
-        # Set the layout on the central widget
-        central_widget.setLayout(layout)
-
-    def toggle_vu_meter(self):
-        print("Toggling VU Meter")
-        # Replace with your actual function
-
-    def toggle_intercom(self):
-        print("Toggling Intercom")
-        # Replace with your actual function
-
-    def plot_oscope(self):
-        print("Plotting Oscope")
-        # Replace with your actual function
-
-    def plot_fft(self):
-        print("Plotting FFT")
-        # Replace with your actual function
-
-# Create the Qt Application
-app = QApplication([])
-
-# Create and show the main window
-window = MainWindow()
-window.show()
-
-# Run the main Qt loop
-app.exec()
