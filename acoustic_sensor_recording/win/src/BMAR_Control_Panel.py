@@ -146,7 +146,7 @@ window = MainWindow()
 window.show()
 
 # Run the main Qt loop
-app.exec()
+#app.exec()
 
 # rest of your code ...
 
