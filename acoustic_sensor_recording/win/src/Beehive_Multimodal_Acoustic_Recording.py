@@ -85,6 +85,17 @@ stop_program = [False]
 # #### Control Panel ##########################################
 # #############################################################
 
+# modes
+MODE_CONTINUOUS = True                      # recording continuously to mp3 files
+CONTINUOUS_TIMER = True                     # use a timer to start and stop time of day of continuous recording
+MODE_PERIOD = True                          # period recording
+PERIOD_TIMER = True                         # use a timer to start and stop time of day of period recording
+MODE_EVENT = True                           # event recording
+EVENT_TIMER = False                         # use a timer to start and stop time of day of event recording
+MODE_VU = False                             # show audio level on cli
+MODE_FFT_PERIODIC_RECORD = True             # record fft periodically
+KB_or_CP = 'KB'                             # use keyboard or control panel (PyQT5) to control program
+
 # hardware pointers
 DEVICE_IN = 1                              # Device ID of input device - 16 for 4ch audio I/F
 DEVICE_OUT = 4                            # Device ID of output device
@@ -102,21 +113,15 @@ CONTINUOUS_CHANNELS = 2                     # Number of channels
 CONTINUOUS_QUALITY = 0                      # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 CONTINUOUS_FORMAT = 'MP3'                   # accepts mp3, flac, or wav
 
-MODE_CONTINUOUS = True                      # recording continuously to mp3 files
-CONTINUOUS_TIMER = True                     # use a timer to start and stop time of day of continuous recording
 CONTINUOUS_START = datetime.time(4, 0, 0)   # time of day to start recording hr, min, sec
 CONTINUOUS_END = datetime.time(23, 0, 0)    # time of day to stop recording hr, min, sec
 CONTINUOUS = 300                            # file size in seconds of continuous recording
 
-MODE_PERIOD = True                          # period recording
-PERIOD_TIMER = True                         # use a timer to start and stop time of day of period recording
 PERIOD_START = datetime.time(4, 0, 0)
 PERIOD_END = datetime.time(20, 0, 0)
 PERIOD = 300                                # seconds of recording
 INTERVAL = 1800                             # seconds between start of period, must be > period, of course
 
-MODE_EVENT = True                           # event recording
-EVENT_TIMER = False                         # use a timer to start and stop time of day of event recording
 EVENT_START = datetime.time(4, 0, 0)
 EVENT_END = datetime.time(22, 0, 0)
 SAVE_BEFORE_EVENT = 30                      # seconds to save before the event
@@ -125,10 +130,6 @@ THRESHOLD = 40000                           # audio level threshold to be consid
 MONITOR_CH = 0                              # channel to monitor for event (if > number of chs, all channels are monitored)
 
 # instrumentation parms
-MODE_VU = False                             # show audio level on cli
-
-MODE_FFT_PERIODIC_RECORD = True             # record fft periodically
-
 FFT_BINS = 900                              # number of bins for fft
 FFT_BW = 1000                               # bandwidth of each bucket in hertz
 FFT_DURATION = 3                            # seconds of audio to show on fft
@@ -270,11 +271,11 @@ def fake_vu_meter(value, end):
 
 
 def get_level(audio_data):
-    global monitor_channel, device_CH
+    global monitor_channel
 
     ##print("channel_to_listen_to", monitor_channel)
     channel = monitor_channel
-    if channel <= device_CH:
+    if channel <= monitor_channel:
         audio_level = np.max(np.abs(audio_data[:,channel]))
     else: # all channels
         audio_level = np.max(np.abs(audio_data))
@@ -380,6 +381,7 @@ def plot_and_save_fft():
         ##plt.show()
 
         # Wait for the desired time interval before recording and plotting again
+        # not using time.sleep() alone because it blocks the main thread
         t = interval
         while t > 0:
             time.sleep(1)
@@ -390,21 +392,23 @@ def plot_and_save_fft():
 
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
 def plot_oscope_audio(): 
+    global monitor_channel
+
     # Constants
     TRACE_DURATION = 10  # Duration in seconds
     GAIN_DB = 20  # Gain in dB
 
     # Convert gain from dB to linear scale
-    GAIN = 10 ** (GAIN_DB / 20)
+    gain = 10 ** (GAIN_DB / 20)
 
     # Record audio
     print("Recording...")
-    myrecording = sd.rec(int(SAMPLE_RATE * TRACE_DURATION), samplerate=SAMPLE_RATE, channels=CHANNELS)
+    myrecording = sd.rec(int(SAMPLE_RATE * TRACE_DURATION), samplerate=SAMPLE_RATE, channels=monitor_channel)
     sd.wait()  # Wait until recording is finished
     print("Recording finished.")
 
     # Apply gain
-    myrecording *= GAIN
+    myrecording *= gain
 
     # Plot results
     plt.figure()
@@ -534,8 +538,7 @@ def save_continuous_audio():
     # resample to lower sample rate
     audio_data = resample_audio(audio_data, SAMPLE_RATE, CONTINUOUS_SAMPLE_RATE)
 
-    output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}\
-        _{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
+    output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}_{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
     full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
 
     if CONTINUOUS_FORMAT == 'MP3':
@@ -557,7 +560,7 @@ def check_continuous(audio_data, index):
     
     # just keep doing it, no testing
     if continuous_start_index is None and not stop_continuous_event.is_set(): 
-        print("continuous block started at:", datetime.datetime.now())
+        print("continuous block started at:", current_time)
         continuous_start_index = continuous_end_index 
         save_audio_for_continuous()
 
@@ -653,7 +656,7 @@ def check_level(audio_data, index):
     audio_level = get_level(audio_data)
 
     if (audio_level > THRESHOLD) and event_start_index is None and not stop_event_event.is_set():
-        print("event detected at:", datetime.datetime.now(), "audio level:", audio_level)
+        print("event detected at:", current_time, "audio level:", audio_level)
         detected_level = audio_level
         event_start_index = index
         save_audio_around_event()
@@ -732,7 +735,7 @@ def audio_stream():
         # Create and start the thread
         if MODE_FFT_PERIODIC_RECORD:
             fft_periodic_plot_thread = threading.Thread(target=plot_and_save_fft) 
-            fft_periodic_plot_thread.daemon = True  # Daemonize the thread so it will be terminated when the main program ends
+            fft_periodic_plot_thread.daemon = True  
             fft_periodic_plot_thread.start()
 
         # Create and start the thread
@@ -743,7 +746,7 @@ def audio_stream():
             else:
                 print("    Timer off")
             continuous_save_thread = threading.Thread(target=save_audio_for_continuous)
-            continuous_save_thread.daemon = True  # Daemonize the thread so it will be terminated when the main program ends
+            continuous_save_thread.daemon = True  
             continuous_save_thread.start()
 
         # Create and start the thread
@@ -754,13 +757,12 @@ def audio_stream():
             else:
                 print("    Timer off")
             period_save_thread = threading.Thread(target=save_audio_for_period)
-            period_save_thread.daemon = True  # Daemonize the thread so it will be terminated when the main program ends
+            period_save_thread.daemon = True 
             period_save_thread.start()
 
         # Create and start the thread
         if MODE_EVENT:
-            print(f"Starting event detect mode, threshold trigger: {THRESHOLD},  time before: {SAVE_BEFORE_EVENT} sec\
-                , time after: {SAVE_AFTER_EVENT} sec")
+            print(f"Starting event detect mode, threshold trigger: {THRESHOLD}, time before: {SAVE_BEFORE_EVENT} sec, time after: {SAVE_AFTER_EVENT} sec")
             if EVENT_TIMER:
                 print(f"    Operational between: {EVENT_START} and {EVENT_END}")
             else:
@@ -836,44 +838,43 @@ def main():
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {CHANNELS}")
 
     try:
-        # beehive keyboard triggered management utilities
-        # one shot process to see fft
-        keyboard.on_press_key("f", lambda _: plot_fft_audio(), suppress=True)   
-        # one shot process to see oscope
-        keyboard.on_press_key("o", lambda _: plot_oscope_audio(), suppress=True) 
-        # one shot process to see device list
-        keyboard.on_press_key("d", lambda _: show_audio_device_list(), suppress=True) 
-        # usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
-        keyboard.on_press_key("i", lambda _: toggle_intercom(), suppress=True)
-        # usage: press v to start cli vu meter, press v again to stop
-        keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
-        # usage: press q to stop all processes
-        keyboard.on_press_key("q", lambda _: signal_stop_all(), suppress=True)
-        # usage: press t to see all threads
-        keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
+        if KB_or_CP == 'KB':
+            # beehive keyboard triggered management utilities
+            # one shot process to see fft
+            keyboard.on_press_key("f", lambda _: plot_fft_audio(), suppress=True)   
+            # one shot process to see oscope
+            keyboard.on_press_key("o", lambda _: plot_oscope_audio(), suppress=True) 
+            # one shot process to see device list
+            keyboard.on_press_key("d", lambda _: show_audio_device_list(), suppress=True) 
+            # usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
+            keyboard.on_press_key("i", lambda _: toggle_intercom(), suppress=True)
+            # usage: press v to start cli vu meter, press v again to stop
+            keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
+            # usage: press q to stop all processes
+            keyboard.on_press_key("q", lambda _: signal_stop_all(), suppress=True)
+            # usage: press t to see all threads
+            keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
 
         audio_stream()
 
         stop_all()
 
-        # Get the list of all currently active hooks
-        hooks_before = list(keyboard._hooks.values())
-        print("keyboard hooks before:",hooks_before)
-        
-        # Unhook all hooks
-        keyboard.unhook_all()
+        if KB_or_CP == 'KB':
+            # Unhook all hooks
+            keyboard.unhook_all()
 
-        # Get the list of all currently active hooks after unhooking
-        hooks_after = list(keyboard._hooks.values())
+            # Get the list of all currently active hooks after unhooking
+            hooks_after = list(keyboard._hooks.values())
 
-        # If unhook_all worked, hooks_after should be empty
-        if len(hooks_after) == 0:
-            print("All hooks unhooked successfully")
-        else:
-            print("Some hooks were not unhooked")
-            print("\nHopefully we have turned off all the lights...")
+            # If unhook_all worked, hooks_after should be empty
+            if len(hooks_after) == 0:
+                print("All hooks unhooked successfully")
+            else:
+                print("Some hooks were not unhooked")
+
+        print("\nHopefully we have turned off all the lights...")
             
-    except KeyboardInterrupt:
+    except KeyboardInterrupt: # ctrl-c in windows
         print('\nRecording process stopped by user.')
         stop_all()
 
