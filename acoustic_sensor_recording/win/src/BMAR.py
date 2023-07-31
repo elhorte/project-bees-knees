@@ -100,7 +100,7 @@ PERIOD_TIMER = True                         # use a timer to start and stop time
 MODE_EVENT = True                           # event recording
 EVENT_TIMER = False                         # use a timer to start and stop time of day of event recording
 MODE_VU = False                             # show audio level on cli
-MODE_FFT_PERIODIC_RECORD = True             # record fft periodically
+MODE_FFT_PERIODIC_RECORD = False             # record fft periodically
 KB_or_CP = "KB"                             # use keyboard or control panel (PyQT5) to control program
 
 # hardware pointers
@@ -504,7 +504,7 @@ def intercom():
         # The streams are now open and the callback function will be called every time there is audio input and output
         # We'll just use a blocking wait here for simplicity
         while not stop_intercom_event.is_set():
-            sd.sleep(100)
+            sd.sleep(1)
 
         print("Stopping intercom...")
         ##MODE_VU = vu_mode   # restore vu mode
@@ -575,7 +575,7 @@ def check_continuous(audio_data, index):
         continuous_start_index = continuous_end_index 
         save_audio_for_continuous()
     else:
-        print("stop_continuous_event was set in check_continuous")
+        print("check_continuous exited with event flag")
 
 # #######################################
 # period recording functions
@@ -625,6 +625,8 @@ def check_period(audio_data, index):
         if not int(time.time()) % INTERVAL and period_start_index is None: 
             period_start_index = index 
             save_audio_for_period()
+    else:
+        print("check_period exited with event flag")
 
 # ####################################
 # event recording functions
@@ -675,6 +677,8 @@ def check_level(audio_data, index):
             detected_level = audio_level
             event_start_index = index
             save_audio_for_event()
+    else:
+        print("check_level exited with event flag")
 
 #
 # #############################################################
@@ -683,7 +687,7 @@ def check_level(audio_data, index):
 #
 
 def callback(indata, frames, time, status):
-    global buffer, buffer_index, current_time, MODE_VU
+    global buffer, buffer_index, current_time
 
     if status:
         print("Callback status:", status)
@@ -699,23 +703,23 @@ def callback(indata, frames, time, status):
         buffer[:overflow] = indata[-overflow:]
         print("Buffer overflow, data lost:", overflow)
 
-    if MODE_CONTINUOUS:
-        if CONTINUOUS_TIMER and not (CONTINUOUS_START <= current_time <= CONTINUOUS_END):
+    if MODE_EVENT:
+        if EVENT_TIMER and not (EVENT_START <= current_time <= EVENT_END):
             pass
         else:
-            check_continuous(indata, buffer_index)
+            check_level(indata, buffer_index) 
 
     if MODE_PERIOD:
         if PERIOD_TIMER and not (PERIOD_START <= current_time <= PERIOD_END):
             pass
         else:
             check_period(indata, buffer_index) 
-            
-    if MODE_EVENT:
-        if EVENT_TIMER and not (EVENT_START <= current_time <= EVENT_END):
+
+    if MODE_CONTINUOUS:
+        if CONTINUOUS_TIMER and not (CONTINUOUS_START <= current_time <= CONTINUOUS_END):
             pass
         else:
-            check_level(indata, buffer_index) 
+            check_continuous(indata, buffer_index)
 
     if MODE_VU:
         audio_level = get_level(indata)
@@ -737,7 +741,7 @@ def clear_input_buffer():
 
 
 def stop_all():
-    global stop_program, continuous_save_thread, period_save_thread, event_save_thread
+    global stop_program, continuous_save_thread, period_save_thread, event_save_thread, time_of_day_thread, stop_tod_event
 
     print("\n\nStopping all threads...\n")
 
@@ -764,10 +768,14 @@ def stop_all():
                 stop_event_event.set()
                 t.join
                 print("event stopped ***")                
-
+        if "get_time_of_day" in t.name:
+            if t.is_alive():
+                stop_tod_event.set()
+                t.join
+                print("tod stopped ***")       
 
 def audio_stream():
-    global buffer, buffer_index, _dtype, time_of_day_thread, stop_program, oscope_process
+    global buffer, buffer_index, _dtype, time_of_day_thread, stop_program
 
     stream = sd.InputStream(device=DEVICE_IN, channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, callback=callback)
 
@@ -779,6 +787,7 @@ def audio_stream():
             fft_periodic_plot_process = multiprocessing.Process(target=plot_and_save_fft) 
             fft_periodic_plot_process.daemon = True  
             fft_periodic_plot_process.start()
+            print("started fft_periodic_plot_process")
 
         # Create and start the thread
         if MODE_CONTINUOUS:
@@ -822,8 +831,6 @@ def audio_stream():
 
         print("Stopped audio_stream...")
 
-
-
 ###########################
 ########## MAIN ###########
 ###########################
@@ -840,6 +847,7 @@ def main():
         trigger_fft_event
         one_shot_fft_process = multiprocessing.Process(target=plot_fft)
         one_shot_fft_process.start()
+        # fft one shot returns here when plot window is closed by user
         one_shot_fft_process.join()
         print("exit fft")
 
@@ -847,6 +855,7 @@ def main():
     def trigger_oscope():
         oscope_process = multiprocessing.Process(target=plot_oscope)
         oscope_process.start()
+        # oscope returns here when plot window is closed by user
         oscope_process.join()
         print("exit oscope")
 
