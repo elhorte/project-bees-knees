@@ -46,7 +46,7 @@ detected_level = None
 
 _dtype = None                   # parms sd lib cares about
 _subtype = None
-device_CH = None                # total number of channels from device
+device_ch = None                # total number of channels from device
 
 current_time = None
 
@@ -62,7 +62,7 @@ stop_tod_event = threading.Event()
 stop_intercom_event = threading.Event()
 stop_fft_periodic_plot_event = threading.Event()
 
-oscope_process = None
+oscope_proc = None
 trigger_oscope_event = threading.Event()
 trigger_fft_event = threading.Event()
 
@@ -85,7 +85,7 @@ SAMPLE_RATE = 192000                         # Audio sample rate
 BIT_DEPTH = 16                              # Audio bit depth
 FORMAT = 'FLAC'                             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
-CONTINUOUS_SAMPLE_RATE = 48000              # For continuous audio
+CONTINUOUS_SAMPLE_RATE = 48000              # For CONTINUOUS_DURATION audio
 CONTINUOUS_BIT_DEPTH = 16                   # Audio bit depth
 CONTINUOUS_CHANNELS = 1                     # Number of channels
 CONTINUOUS_QUALITY = 0                      # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
@@ -95,7 +95,7 @@ MODE_CONTINUOUS = True                      # recording continuously to mp3 file
 CONTINUOUS_TIMER = True                     # use a timer to start and stop time of day of continuous recording
 CONTINUOUS_START = datetime.time(4, 0, 0)   # time of day to start recording hr, min, sec
 CONTINUOUS_END = datetime.time(23, 0, 0)    # time of day to stop recording hr, min, sec
-CONTINUOUS = 300                            # file size in seconds of continuous recording
+CONTINUOUS_DURATION = 300                            # file size in seconds of continuous recording
 
 MODE_PERIOD = True                          # period recording
 PERIOD_TIMER = True                         # use a timer to start and stop time of day of period recording
@@ -156,9 +156,9 @@ if (PERIOD) * 1.1 > BUFFER_SECONDS:
 # Check on input device parms or if input device even exits
 try:
     device_info = sd.query_devices(DEVICE_IN)  
-    device_CH = device_info['max_input_channels'] 
-    if DEVICE_CHANNELS > device_CH:
-        print(f"The device only has {device_CH} channel(s) but requires {DEVICE_CHANNELS} channels.")
+    device_ch = device_info['max_input_channels'] 
+    if DEVICE_CHANNELS > device_ch:
+        print(f"The device only has {device_ch} channel(s) but requires {DEVICE_CHANNELS} channels.")
         print("These are the available devices: \n", sd.query_devices())
         quit(-1)
     ##device_SR = device_info['default_samplerate'] 
@@ -249,11 +249,11 @@ def fake_vu_meter(value, end):
 
 
 def get_level(audio_data):
-    global monitor_channel, device_CH
+    global monitor_channel, device_ch
 
     ##print("channel_to_listen_to", monitor_channel)
     channel = monitor_channel
-    if channel <= device_CH:
+    if channel <= device_ch:
         audio_level = np.max(np.abs(audio_data[:,channel]))
     else: # all channels
         audio_level = np.max(np.abs(audio_data))
@@ -490,7 +490,7 @@ def toggle_intercom():
 # continuous recording functions at low sample rate
 #
 def save_audio_for_continuous():
-    t = CONTINUOUS
+    t = CONTINUOUS_DURATION
     while t > 0 and not stop_continuous_event.is_set():
         time.sleep(1)
         t -= 1
@@ -498,13 +498,15 @@ def save_audio_for_continuous():
 
 
 def save_continuous_audio():
-    global buffer, continuous_start_index, continuous_save_thread, continuous_end_index, current_time
+    global buffer, continuous_start_index, continuous_end_index, current_time
+    global CONTINUOUS_DURATION, SAMPLE_RATE, CONTINUOUS_SAMPLE_RATE, OUTPUT_DIRECTORY, CONTINUOUS_FORMAT 
+    global CONTINUOUS_CHANNELS, BIT_DEPTH, LOCATION_ID, HIVE_ID
 
     if continuous_start_index is None:  # if this has been reset already, don't try to save
         return
 
     save_start_index = continuous_start_index % buffer_size
-    save_end_index = (continuous_start_index + (CONTINUOUS * SAMPLE_RATE)) % buffer_size
+    save_end_index = (continuous_start_index + (CONTINUOUS_DURATION * SAMPLE_RATE)) % buffer_size
     continuous_end_index = save_end_index
 
     # saving from a circular buffer so segments aren't necessarily contiguous
@@ -517,7 +519,7 @@ def save_continuous_audio():
     audio_data = resample_audio(audio_data, SAMPLE_RATE, CONTINUOUS_SAMPLE_RATE)
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}_{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
+    output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}_{CONTINUOUS_DURATION}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
 
     if CONTINUOUS_FORMAT == 'MP3':
@@ -528,7 +530,7 @@ def save_continuous_audio():
         print("don't know about file format:", CONTINUOUS_FORMAT)
         quit(-1)
 
-    print(f"Saved continuous audio to {full_path_name}, block size: {CONTINUOUS} seconds")
+    print(f"Saved continuous audio to {full_path_name}, block size: {CONTINUOUS_DURATION} seconds")
     continuous_start_index = None
     
 
@@ -556,6 +558,8 @@ def save_audio_for_period():
 
 def save_period_audio():
     global buffer, period_start_index, period_save_thread
+    global SAMPLE_RATE, PERIOD, INTERVAL, OUTPUT_DIRECTORY, FORMAT, _subtype, BIT_DEPTH, DEVICE_CHANNELS
+    global LOCATION_ID, HIVE_ID
 
     if period_start_index is None:  # if this has been reset already, don't try to save
         return
@@ -784,18 +788,20 @@ def main():
 
     def trigger_fft():
         trigger_fft_event
-        one_shot_fft_process = multiprocessing.Process(target=plot_fft)
-        one_shot_fft_process.start()
+        one_shot_fft_proc = multiprocessing.Process(target=plot_fft)
+        one_shot_fft_proc.start()
         # fft one shot returns here when plot window is closed by user
-        one_shot_fft_process.join()
+        one_shot_fft_proc.terminate()
+        one_shot_fft_proc.join()
         print("exit fft")
 
 
     def trigger_oscope():
-        oscope_process = multiprocessing.Process(target=plot_oscope)
-        oscope_process.start()
+        oscope_proc = multiprocessing.Process(target=plot_oscope)
+        oscope_proc.start()
         # oscope returns here when plot window is closed by user
-        oscope_process.join()
+        oscope_proc.terminate()
+        oscope_proc.join()
         print("exit oscope")
 
     # Create and start the thread for time of day
