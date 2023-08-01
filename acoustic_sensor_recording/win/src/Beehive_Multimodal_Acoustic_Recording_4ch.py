@@ -71,7 +71,7 @@ stop_program = [False]
 # #############################################################
 
 # hardware pointers
-DEVICE_IN = 15                              # Device ID of input device - 16 for 4ch audio I/F
+DEVICE_IN = 17                              # Device ID of input device - 16 for 4ch audio I/F
 DEVICE_OUT = 14                            # Device ID of output device
 CHANNELS = 2                                # Number of channels
 
@@ -83,7 +83,7 @@ FORMAT = 'FLAC'                             # 'WAV' or 'FLAC'INTERVAL = 0 # seco
 
 CONTINUOUS_SAMPLE_RATE = 48000              # For continuous audio
 CONTINUOUS_BIT_DEPTH = 16                   # Audio bit depth
-CONTINUOUS_CHANNELS = 2                     # Number of channels
+CONTINUOUS_CHANNELS = 1                     # Number of channels
 CONTINUOUS_QUALITY = 0                      # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 CONTINUOUS_FORMAT = 'MP3'                   # accepts mp3, flac, or wav
 
@@ -190,7 +190,7 @@ else:
 # #############################################################
 
 # convert audio to mp3 and save to file using downsampled data
-def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS_QUALITY):
+def pcm_to_mp3_write(np_array, full_path, sample_rate=48000, quality=CONTINUOUS_QUALITY, channels=CONTINUOUS_CHANNELS):
 
     int_array = np_array.astype(np.int16)
     byte_array = int_array.tobytes()
@@ -200,7 +200,7 @@ def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS
         data=byte_array,
         sample_width=2,
         frame_rate=sample_rate,
-        channels=2
+        channels=channels
     )
     if quality >= 64 and quality <= 320:    # use constant bitrate, 64k would be the min, 320k the best
         cbr = str(quality) + "k"
@@ -502,21 +502,19 @@ def save_continuous_audio():
     audio_data = resample_audio(audio_data, SAMPLE_RATE, CONTINUOUS_SAMPLE_RATE)
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}\
-        _{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
+    output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}_{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
 
     if CONTINUOUS_FORMAT == 'MP3':
         pcm_to_mp3_write(audio_data, full_path_name) 
     elif CONTINUOUS_FORMAT == 'FLAC' or CONTINUOUS_FORMAT == 'WAV': 
-        sf.write(full_path_name, audio_data, CONTINUOUS_SAMPLE_RATE, format=CONTINUOUS_FORMAT, subtype=_subtype)
+        sf.write(full_path_name, audio_data, CONTINUOUS_SAMPLE_RATE, format=CONTINUOUS_FORMAT, subtype=_subtype, channels=CONTINUOUS_CHANNELS)
     else:
         print("don't know about file format:", CONTINUOUS_FORMAT)
         quit(-1)
 
     print(f"Saved continuous audio to {full_path_name}, block size: {CONTINUOUS} seconds")
 
-    continuous_save_thread = None
     continuous_start_index = None
 
 
@@ -559,14 +557,12 @@ def save_period_audio():
         audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_period_{SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CHANNELS}\
-        _{PERIOD}_every_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+    output_filename = f"{timestamp}_period_{SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CHANNELS}_{PERIOD}_every_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
     sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
 
     print(f"Saved period audio to {full_path_name}, period: {PERIOD}, interval {INTERVAL} seconds")
 
-    period_save_thread = None
     period_start_index = None
 
 
@@ -608,15 +604,12 @@ def save_event_audio():
         audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_event_{detected_level}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}\
-        _{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+    output_filename = f"{timestamp}_event_{detected_level}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
     full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
     sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
 
-    print(f"Saved evemt audio to {full_path_name}, audio threshold level: {detected_level}, \
-        duration: {audio_data.shape[0] / SAMPLE_RATE} seconds")
+    print(f"Saved evemt audio to {full_path_name}, audio threshold level: {detected_level}, duration: {audio_data.shape[0] / SAMPLE_RATE} seconds")
 
-    event_save_thread = None
     event_start_index = None
 
 
@@ -687,7 +680,10 @@ def get_time_of_day():
         current_time = datetime.datetime.now().time()
         time.sleep(1)
 
-
+def list_all_threads():
+    for thread in threading.enumerate():
+        print(f"Thread name: {thread.name}, Thread ID: {thread.ident}, Alive: {thread.is_alive()}")
+        
 def signal_stop_all():
     global stop_program
 
@@ -712,8 +708,8 @@ def audio_stream():
         time_of_day_thread.start()
 
         # Create and start the thread
-        fft_periodic_plot_thread = threading.Thread(target=plot_and_save_fft) 
-        fft_periodic_plot_thread.start()
+        ##fft_periodic_plot_thread = threading.Thread(target=plot_and_save_fft) 
+        ##fft_periodic_plot_thread.start()
 
         while stream.active and not stop_program[0]:
             pass
@@ -793,8 +789,7 @@ def main():
             else:
                 print("    Timer off")
         if MODE_EVENT:
-            print(f"Starting event detect mode, threshold trigger: {THRESHOLD},  time before: {SAVE_BEFORE_EVENT} sec\
-                , time after: {SAVE_AFTER_EVENT} sec")
+            print(f"Starting event detect mode, threshold trigger: {THRESHOLD}, time before: {SAVE_BEFORE_EVENT} sec, time after: {SAVE_AFTER_EVENT} sec")
             if EVENT_TIMER:
                 print(f"    Operational between: {EVENT_START} and {EVENT_END}")
             else:
@@ -814,6 +809,8 @@ def main():
         keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
         # usage: press q to stop all processes
         keyboard.on_press_key("q", lambda _: signal_stop_all(), suppress=True)
+        # usage: press t to see all threads
+        keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
 
         audio_stream()
         stop_all()
