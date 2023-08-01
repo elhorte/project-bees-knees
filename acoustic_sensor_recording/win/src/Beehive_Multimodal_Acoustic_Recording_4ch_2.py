@@ -554,7 +554,7 @@ def save_continuous_audio():
     # resample to lower sample rate
     audio_data = resample_audio(audio_data, SAMPLE_RATE, CONTINUOUS_SAMPLE_RATE)
 
-    output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}_{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
+    output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}_{CONTINUOUS_DURATION}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
     full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
 
     with lock:
@@ -805,7 +805,7 @@ def audio_stream():
 
         # Create and start the thread
         if MODE_CONTINUOUS:
-            print(f"Starting continuous, low-sample-rate recording mode, duration per file: {CONTINUOUS/60:.2f} minutes")
+            print(f"Starting continuous, low-sample-rate recording mode, duration per file: {CONTINUOUS_DURATION/60:.2f} minutes")
             if CONTINUOUS_TIMER:
                 print(f"    Operational between: {CONTINUOUS_START} and {CONTINUOUS_END}")
             else:
