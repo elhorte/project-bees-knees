@@ -26,7 +26,7 @@ from scipy.signal import resample
 from scipy.fft import rfft, rfftfreq
 from pydub import AudioSegment
 import os
-#os.environ['NUMBA_NUM_THREADS'] = '1'
+##os.environ['NUMBA_NUM_THREADS'] = '1'
 import keyboard
 import atexit
 import msvcrt
@@ -48,30 +48,27 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
-
 # init recording varibles
 continuous_start_index = None
-continuous_save_thread = None
 continuous_end_index = 0        # so that the next start = this end
-
 period_start_index = None
-period_save_thread = None
-
 event_start_index = None
-event_save_thread = None
 detected_level = None
 
-_dtype = None                   # parms sd lib cares about
-_subtype = None
-device_CH = None                # total number of channels from device
-
-current_time = None
-timestamp = None
-
+# threads
+continuous_save_thread = None
+period_save_thread = None
+event_save_thread = None
 time_of_day_thread = None
-intercom_thread = None
-fft_periodic_plot_thread = None
 
+# procs
+oscope_proc = None
+intercom_proc = None
+fft_periodic_plot_proc = None
+one_shot_fft_proc = None
+oscope_proc = None   
+
+# event flags
 stop_continuous_event = threading.Event()
 stop_period_event = threading.Event()
 stop_event_event = threading.Event()
@@ -80,12 +77,16 @@ stop_tod_event = threading.Event()
 stop_intercom_event = threading.Event()
 stop_fft_periodic_plot_event = threading.Event()
 
-monitor_channel = 0
-
-oscope_process = None
 trigger_oscope_event = threading.Event()
 trigger_fft_event = threading.Event()
 
+# misc globals
+_dtype = None                   # parms sd lib cares about
+_subtype = None
+device_ch = None                # total number of channels from device
+current_time = None
+timestamp = None
+monitor_channel = 0
 stop_program = [False]
 
 # #############################################################
@@ -177,9 +178,9 @@ if (PERIOD) * 1.1 > BUFFER_SECONDS:
 # Check on input device parms or if input device even exits
 try:
     device_info = sd.query_devices(DEVICE_IN)  
-    device_CH = device_info['max_input_channels'] 
-    if DEVICE_CHANNELS > device_CH:
-        print(f"The device only has {device_CH} channel(s) but requires {DEVICE_CHANNELS} channels.")
+    device_ch = device_info['max_input_channels'] 
+    if DEVICE_CHANNELS > device_ch:
+        print(f"The device only has {device_ch} channel(s) but requires {DEVICE_CHANNELS} channels.")
         print("These are the available devices: \n", sd.query_devices())
         quit(-1)
     ##device_SR = device_info['default_samplerate'] 
@@ -226,7 +227,7 @@ def get_time_of_day():
 # #############################################################
 
 # convert audio to mp3 and save to file using downsampled data
-def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS_QUALITY, channels=CONTINUOUS_CHANNELS):
+def pcm_to_mp3_write(np_array, full_path):
 
     int_array = np_array.astype(np.int16)
     byte_array = int_array.tobytes()
@@ -235,16 +236,16 @@ def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS
     audio_segment = AudioSegment(
         data=byte_array,
         sample_width=2,
-        frame_rate=sample_rate,
-        channels=channels
+        frame_rate=CONTINUOUS_SAMPLE_RATE,
+        channels=CONTINUOUS_CHANNELS
     )
-    if quality >= 64 and quality <= 320:    # use constant bitrate, 64k would be the min, 320k the best
-        cbr = str(quality) + "k"
+    if CONTINUOUS_QUALITY >= 64 and CONTINUOUS_QUALITY <= 320:    # use constant bitrate, 64k would be the min, 320k the best
+        cbr = str(CONTINUOUS_QUALITY) + "k"
         audio_segment.export(full_path, format="mp3", bitrate=cbr)
-    elif quality < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
+    elif CONTINUOUS_QUALITY < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
         audio_segment.export(full_path, format="mp3", parameters=["-q:a", "0"])
     else:
-        print("Don't know of a mp3 mode with parameter:", quality)
+        print("Don't know of a mp3 mode with parameter:", CONTINUOUS_QUALITY)
         quit(-1)
 
 # resample audio to a lower sample rate using scipy library
@@ -268,6 +269,7 @@ def resample_audio(audio_data, orig_sample_rate, target_sample_rate):
 
     return audio_data
 
+
 # #############################################################
 # signal display functions
 # #############################################################
@@ -281,10 +283,11 @@ def fake_vu_meter(value, end):
 
 
 def get_level(audio_data):
-    global monitor_channel
+    global monitor_channel, device_ch
+
     ##print("channel_to_listen_to", monitor_channel)
     channel = monitor_channel
-    if channel <= monitor_channel:
+    if channel <= device_ch:
         audio_level = np.max(np.abs(audio_data[:,channel]))
     else: # all channels
         audio_level = np.max(np.abs(audio_data))
@@ -322,7 +325,7 @@ def plot_fft():
     # Convert gain from dB to linear scale
     gain = 10 ** (FFT_GAIN / 20)
     # Record audio
-    print("Recording fft one shot...")
+    print("Recording audio for fft one shot...")
     myrecording = sd.rec(int(N), samplerate=SAMPLE_RATE, channels=1)
     sd.wait()  # Wait until recording is finished
     myrecording *= gain
@@ -350,7 +353,7 @@ def plot_fft():
     plt.show()
 
 
-# continuous fft plot of audio in a thread
+# continuous fft plot of audio in a separate process
 def plot_and_save_fft():
     global monitor_channel, FFT_GAIN, FFT_INTERVAL
 
@@ -361,11 +364,11 @@ def plot_and_save_fft():
 
     while not stop_fft_periodic_plot_event.is_set():
         # Record audio
-        print("Recording fft periodic...")
+        print("Recording audio for auto fft...")
         myrecording = sd.rec(int(N), samplerate=SAMPLE_RATE, channels=1)
         sd.wait()  # Wait until recording is finished
         myrecording *= gain
-        print("Recording fft interval finished.")
+        print("Recording auto fft finished.")
 
         # Perform FFT
         yf = rfft(myrecording.flatten())
@@ -406,17 +409,17 @@ def plot_and_save_fft():
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
 def plot_oscope(): 
     # Constants
-    TRACE_DURATION = 10             # Duration in seconds
-    GAIN_DB = 20  # Gain in dB
-    
+    TRACE_DURATION = 10     # Duration in seconds
+    GAIN_DB = 20            # Gain in dB
+
     # Convert gain from dB to linear scale
     gain = 10 ** (GAIN_DB / 20)
 
     # Record audio
-    print("Recording oscope...")
+    print("Recording audio for oscope traces...")
     myrecording = sd.rec(int(SAMPLE_RATE * TRACE_DURATION), samplerate=SAMPLE_RATE, channels=DEVICE_CHANNELS)
-    sd.wait()                       # Wait until recording is finished
-    print("Recording oscope finished.")
+    sd.wait()  # Wait until recording is finished
+    print("Recording finished.")
 
     myrecording *= gain
     plt.figure()
@@ -434,10 +437,6 @@ def plot_oscope():
 ##########################  
 # utilities
 ##########################
-
-def list_all_threads():
-    for thread in threading.enumerate():
-        print(f"Thread name: {thread.name}, Thread ID: {thread.ident}, Alive: {thread.is_alive()}")
 
 # for debugging
 def play_audio(filename, device):
@@ -457,23 +456,8 @@ def show_audio_device_list():
     print(sd.query_devices())
 
 
-def toggle_intercom():
-    global intercom_thread
-
-    if intercom_thread is None or not intercom_thread.is_alive():
-        print("Starting intercom, listening to channel 0")
-        intercom_thread = threading.Thread(target=intercom)
-        intercom_thread.daemon = True  # Daemonize the thread so it will be terminated when the main program ends
-        intercom_thread.start()
-    else:
-        stop_intercom_event.set()
-        intercom_thread.join()
-        print("\nIntercom stopped")
-        stop_intercom_event.clear()
-
-
 def intercom():
-    global SAMPLE_RATE, DEVICE_CHANNELS, MODE_VU, monitor_channel
+    global monitor_channel
 
     # Create a buffer to hold the audio data
     buffer = np.zeros((SAMPLE_RATE,))
@@ -510,7 +494,28 @@ def intercom():
             sd.sleep(1)
 
         print("Stopping intercom...")
-        ##MODE_VU = vu_mode   # restore vu mode
+
+def stop_intercom():
+    global intercom_proc
+
+    if intercom_proc is not None:
+        stop_intercom_event.set()
+        intercom_proc.terminate()
+        intercom_proc.join()            # make sure its stopped, hate zombies
+
+
+def toggle_intercom():
+    global intercom_proc
+
+    if intercom_proc is None:
+        print("Starting intercom...")
+        print("listening to channel 0",  end='\r')
+        intercom_proc = multiprocessing.Process(target=intercom)
+        intercom_proc.start()
+    else:
+        stop_intercom()
+        print("\nIntercom stopped")
+        intercom_proc = None
 
 
 # #############################################################
@@ -522,7 +527,7 @@ def intercom():
 # ####################################################
 
 def save_audio_for_continuous():
-    t = CONTINUOUS
+    t = CONTINUOUS_DURATION
     while t > 0:
         time.sleep(1)
         t -= 1
@@ -777,6 +782,15 @@ def stop_all():
                 t.join
                 print("tod stopped ***")       
 
+    stop_fft_periodic_plot_event.set()
+    if fft_periodic_plot_proc is not None:
+        fft_periodic_plot_proc.join()
+
+    stop_intercom()
+    keyboard.unhook_all()
+    print("\nHopefully we have turned off all the lights...")
+
+
 def audio_stream():
     global buffer, buffer_index, _dtype, time_of_day_thread, stop_program
 
@@ -848,24 +862,26 @@ def main():
 
     def trigger_fft():
         trigger_fft_event
-        one_shot_fft_process = multiprocessing.Process(target=plot_fft)
-        one_shot_fft_process.start()
+        one_shot_fft_proc = multiprocessing.Process(target=plot_fft)
+        one_shot_fft_proc.start()
         # fft one shot returns here when plot window is closed by user
-        one_shot_fft_process.join()
+        one_shot_fft_proc.terminate()
+        one_shot_fft_proc.join()
         print("exit fft")
 
 
     def trigger_oscope():
-        oscope_process = multiprocessing.Process(target=plot_oscope)
-        oscope_process.start()
+        oscope_proc = multiprocessing.Process(target=plot_oscope)
+        oscope_proc.start()
         # oscope returns here when plot window is closed by user
-        oscope_process.join()
+        oscope_proc.terminate()
+        oscope_proc.join()
         print("exit oscope")
 
 
     # Create and start the thread for time of day
     time_of_day_thread = threading.Thread(target=get_time_of_day)
-    time_of_day_thread.daemon = True  # Daemonize the thread so it will be terminated when the main program ends
+    time_of_day_thread.daemon = True 
     time_of_day_thread.start()
 
     try:
@@ -888,7 +904,7 @@ def main():
 
         audio_stream()
 
-        if KB_or_CP == 'KB':
+        if KB_or_CP == "KB":
             # Unhook all hooks
             keyboard.unhook_all()
 
