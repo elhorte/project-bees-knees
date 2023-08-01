@@ -48,7 +48,6 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
-
 # init recording varibles
 continuous_start_index = None
 continuous_end_index = 0        # so that the next start = this end
@@ -76,6 +75,7 @@ stop_event_event = threading.Event()
 stop_tod_event = threading.Event()
 stop_intercom_event = threading.Event()
 stop_fft_periodic_plot_event = threading.Event()
+
 trigger_oscope_event = threading.Event()
 trigger_fft_event = threading.Event()
 
@@ -95,9 +95,9 @@ stop_program = [False]
 # modes
 MODE_CONTINUOUS = True                      # recording continuously to mp3 files
 CONTINUOUS_TIMER = True                     # use a timer to start and stop time of day of continuous recording
-MODE_PERIOD = True                          # period recording
+MODE_PERIOD = False                          # period recording
 PERIOD_TIMER = True                         # use a timer to start and stop time of day of period recording
-MODE_EVENT = True                           # event recording
+MODE_EVENT = False                           # event recording
 EVENT_TIMER = False                         # use a timer to start and stop time of day of event recording
 MODE_VU = False                             # show audio level on cli
 MODE_FFT_PERIODIC_RECORD = False             # record fft periodically
@@ -116,18 +116,18 @@ FORMAT = "FLAC"                             # 'WAV' or 'FLAC'INTERVAL = 0 # seco
 
 CONTINUOUS_SAMPLE_RATE = 48000              # For continuous audio
 CONTINUOUS_BIT_DEPTH = 16                   # Audio bit depth
-CONTINUOUS_CHANNELS = 1                     # Number of channels
-CONTINUOUS_QUALITY = 0                      # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
+CONTINUOUS_CHANNELS = 2                     # Number of channels
+CONTINUOUS_QUALITY = 320                      # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 CONTINUOUS_FORMAT = "MP3"                   # accepts mp3, flac, or wav
 
 CONTINUOUS_START = datetime.time(4, 0, 0)   # time of day to start recording hr, min, sec
 CONTINUOUS_END = datetime.time(23, 0, 0)    # time of day to stop recording hr, min, sec
-CONTINUOUS_DURATION = 300                            # file size in seconds of continuous recording
+CONTINUOUS_DURATION = 30                            # file size in seconds of continuous recording
 
 PERIOD_START = datetime.time(4, 0, 0)
 PERIOD_END = datetime.time(20, 0, 0)
-PERIOD = 30                                # seconds of recording
-INTERVAL = 60                             # seconds between start of period, must be > period, of course
+PERIOD = 35                                # seconds of recording
+INTERVAL = 45                             # seconds between start of period, must be > period, of course
 
 EVENT_START = datetime.time(4, 0, 0)
 EVENT_END = datetime.time(22, 0, 0)
@@ -226,7 +226,7 @@ def get_time_of_day():
 # #############################################################
 
 # convert audio to mp3 and save to file using downsampled data
-def pcm_to_mp3_write(np_array, full_path, sample_rate=48000, quality=CONTINUOUS_QUALITY, channels=CONTINUOUS_CHANNELS):
+def pcm_to_mp3_write(np_array, full_path):
 
     int_array = np_array.astype(np.int16)
     byte_array = int_array.tobytes()
@@ -235,16 +235,16 @@ def pcm_to_mp3_write(np_array, full_path, sample_rate=48000, quality=CONTINUOUS_
     audio_segment = AudioSegment(
         data=byte_array,
         sample_width=2,
-        frame_rate=sample_rate,
-        channels=channels
+        frame_rate=CONTINUOUS_SAMPLE_RATE,
+        channels=CONTINUOUS_CHANNELS
     )
-    if quality >= 64 and quality <= 320:    # use constant bitrate, 64k would be the min, 320k the best
-        cbr = str(quality) + "k"
+    if CONTINUOUS_QUALITY >= 64 and CONTINUOUS_QUALITY <= 320:    # use constant bitrate, 64k would be the min, 320k the best
+        cbr = str(CONTINUOUS_QUALITY) + "k"
         audio_segment.export(full_path, format="mp3", bitrate=cbr)
-    elif quality < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
+    elif CONTINUOUS_QUALITY < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
         audio_segment.export(full_path, format="mp3", parameters=["-q:a", "0"])
     else:
-        print("Don't know of a mp3 mode with parameter:", quality)
+        print("Don't know of a mp3 mode with parameter:", CONTINUOUS_QUALITY)
         quit(-1)
 
 # resample audio to a lower sample rate using scipy library
@@ -435,7 +435,6 @@ def plot_oscope():
 # utilities
 ##########################
 
-
 # for debugging
 def play_audio(filename, device):
     print("* Playing back")
@@ -516,9 +515,9 @@ def toggle_intercom():
         intercom_proc = None
 
 
-# #############################################################
+# ####################################################
 # recording functions in various modes
-# #############################################################
+# ####################################################
 
 # ####################################################
 # continuous recording functions at low sample rate
@@ -529,38 +528,40 @@ def save_audio_for_continuous():
     while t > 0:
         time.sleep(1)
         t -= 1
+        ##print("t = ", t)
         if stop_continuous_event.is_set():
             print("stop_continuous_event was set in save_audio_for_continuous")
             return
+    print("calling save_continuous_audio()")
     save_continuous_audio()
 
 
 def save_continuous_audio():
     global buffer, continuous_start_index, continuous_end_index, current_time
-
+    print("entering save_continuous_audio(), continuous_start_index:", continuous_start_index)
     if continuous_start_index is None:  # if this has been reset already, don't try to save
         return
 
     save_start_index = continuous_start_index % buffer_size
     save_end_index = (continuous_start_index + (CONTINUOUS_DURATION * SAMPLE_RATE)) % buffer_size
     continuous_end_index = save_end_index
-
+    print("saving size:", save_start_index, save_end_index, "at:", timestamp)
     # saving from a circular buffer so segments aren't necessarily contiguous
     if save_end_index > save_start_index:   # is contiguous
         audio_data = buffer[save_start_index:save_end_index]
     else:                                   # ain't contiguous
         audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
-
+    print("about to resample:", len(audio_data), "at:", timestamp)
     # resample to lower sample rate
     audio_data = resample_audio(audio_data, SAMPLE_RATE, CONTINUOUS_SAMPLE_RATE)
-
+    print("using mp3 parms:", CONTINUOUS_FORMAT, CONTINUOUS_SAMPLE_RATE, CONTINUOUS_CHANNELS, CONTINUOUS_QUALITY)
     output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}_{CONTINUOUS_DURATION}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
     full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
-
+    print("ready to write continuous at:", timestamp)
     with lock:
-        if CONTINUOUS_FORMAT == 'MP3':
+        if CONTINUOUS_FORMAT == "MP3":
             pcm_to_mp3_write(audio_data, full_path_name) 
-        elif CONTINUOUS_FORMAT == 'FLAC' or CONTINUOUS_FORMAT == 'WAV': 
+        elif CONTINUOUS_FORMAT == "FLAC" or CONTINUOUS_FORMAT == "WAV": 
             sf.write(full_path_name, audio_data, CONTINUOUS_SAMPLE_RATE, format=CONTINUOUS_FORMAT, subtype=_subtype)
         else:
             print("don't know about file format:", CONTINUOUS_FORMAT)
@@ -575,22 +576,25 @@ def check_continuous(audio_data, index):
     
     if not stop_continuous_event.is_set():
         # just keep doing it, no testing
-        ##if continuous_start_index is None and not stop_continuous_event.is_set(): 
-        print("continuous block started at:", current_time)
-        continuous_start_index = continuous_end_index 
-        save_audio_for_continuous()
+        if continuous_start_index is None and not stop_continuous_event.is_set(): 
+            print("continuous block started at:", current_time)
+            continuous_start_index = continuous_end_index 
+            save_audio_for_continuous()
     else:
         print("check_continuous exited with event flag")
 
 # #######################################
 # period recording functions
-#
+# #######################################
+
 def save_audio_for_period():
     t = PERIOD
-    while t > 0 and not stop_period_event.is_set():
+    while t > 0:
         time.sleep(1)
         t -= 1
-    print("t=",t)
+        if stop_period_event.is_set():
+            return
+    print("period t =", t)
     save_period_audio()
 
 
@@ -625,8 +629,8 @@ def check_period(audio_data, index):
     # if modulo INTERVAL == zero then start of period
     if not int(time.time()) % INTERVAL and period_start_index is None and not stop_period_event.is_set(): 
         period_start_index = index 
-        period_save_thread = threading.Thread(target=save_audio_for_period)
-        period_save_thread.start()
+        ##period_save_thread = threading.Thread(target=save_audio_for_period)
+        ##period_save_thread.start()
 
 # #######################################
 # event recording functions
