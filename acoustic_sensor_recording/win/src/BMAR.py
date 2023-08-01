@@ -26,14 +26,14 @@ from scipy.signal import resample
 from scipy.fft import rfft, rfftfreq
 from pydub import AudioSegment
 import os
-os.environ['NUMBA_NUM_THREADS'] = '1'
+#os.environ['NUMBA_NUM_THREADS'] = '1'
 import keyboard
 import atexit
 import msvcrt
-##import TestPyQT5
 import signal
 import sys
 import warnings
+##import TestPyQT5
 
 lock = threading.Lock()
 
@@ -112,13 +112,13 @@ FULL_SCALE = 2 ** 16                        # just for cli vu meter level refere
 BUFFER_SECONDS = 1000                       # seconds of a circular buffer
 SAMPLE_RATE = 192000                        # Audio sample rate
 BIT_DEPTH = 16                              # Audio bit depth
-FORMAT = 'FLAC'                             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
+FORMAT = "FLAC"                             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
 CONTINUOUS_SAMPLE_RATE = 48000              # For continuous audio
 CONTINUOUS_BIT_DEPTH = 16                   # Audio bit depth
-CONTINUOUS_CHANNELS = 2                     # Number of channels
+CONTINUOUS_CHANNELS = 1                     # Number of channels
 CONTINUOUS_QUALITY = 0                      # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
-CONTINUOUS_FORMAT = 'MP3'                   # accepts mp3, flac, or wav
+CONTINUOUS_FORMAT = "MP3"                   # accepts mp3, flac, or wav
 
 CONTINUOUS_START = datetime.time(4, 0, 0)   # time of day to start recording hr, min, sec
 CONTINUOUS_END = datetime.time(23, 0, 0)    # time of day to stop recording hr, min, sec
@@ -226,7 +226,7 @@ def get_time_of_day():
 # #############################################################
 
 # convert audio to mp3 and save to file using downsampled data
-def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS_QUALITY):
+def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS_QUALITY, channels=CONTINUOUS_CHANNELS):
 
     int_array = np_array.astype(np.int16)
     byte_array = int_array.tobytes()
@@ -236,7 +236,7 @@ def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS
         data=byte_array,
         sample_width=2,
         frame_rate=sample_rate,
-        channels=1
+        channels=channels
     )
     if quality >= 64 and quality <= 320:    # use constant bitrate, 64k would be the min, 320k the best
         cbr = str(quality) + "k"
@@ -249,9 +249,12 @@ def pcm_to_mp3_write(np_array, full_path, sample_rate=48000,  quality=CONTINUOUS
 
 # resample audio to a lower sample rate using scipy library
 def resample_audio(audio_data, orig_sample_rate, target_sample_rate):
+    # check if audio_data needs to be transposed
+    if audio_data.shape[0] < audio_data.shape[1]:
+        audio_data = audio_data.T
+
     # assuming audio_data is stereo 16-bit PCM in a numpy array
     audio_data = audio_data.astype(np.float32)
-    audio_data = audio_data.T
     sample_ratio = target_sample_rate / orig_sample_rate
     downsampled_data = np.zeros((audio_data.shape[0], int(audio_data.shape[1] * sample_ratio)))
 
