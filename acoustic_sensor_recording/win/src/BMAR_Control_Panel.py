@@ -1,9 +1,11 @@
 #Here's a basic example of how you could add a settings button and a new settings window with some controls. The settings window is quite basic for now, but you could extend it with more sophisticated controls (e.g., checkboxes, dropdown menus, sliders, etc.) as needed.
 
-from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QGridLayout
-from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QGridLayout,QMenu, QAction, QSystemTrayIcon
+from PyQt5.QtGui import QIcon, QFont
+from PyQt5.QtCore import Qt, QSize, QObject, pyqtSignal, QDateTime, QDate, QTime, QTimer
+from utils import showNotification, screenshot, getDateTime
+
+import os; os.chdir(os.path.dirname(sys.argv[0]))
 
 class SettingsWindow(QMainWindow):
     def __init__(self):
@@ -40,7 +42,6 @@ class SettingsWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         central_widget.setLayout(layout)
-
 
 
 class MainWindow(QMainWindow):
@@ -144,6 +145,27 @@ app = QApplication([])
 # Create and show the main window
 window = MainWindow()
 window.show()
+
+
+# #####################################################
+# start up stuff
+# #####################################################
+
+QApplication.setQuitOnLastWindowClosed(False)
+qIcon = QIcon('icons/bmar.png')
+app.setWindowIcon(qIcon)
+
+bmar = BMARFullscreen()
+
+showNotification('BMAR', 'Running in the background')
+
+tray = QSystemTrayIcon()
+if tray.isSystemTrayAvailable():
+    tray.setIcon(QIcon('icons/bmar.png'))
+    tray.setVisible(True)
+    tray.show()
+
+
 
 # Run the main Qt loop
 #app.exec()
