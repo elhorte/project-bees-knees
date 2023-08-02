@@ -94,11 +94,11 @@ stop_program = [False]
 # #############################################################
 
 # modes
-MODE_CONTINUOUS = True                      # recording continuously to mp3 files
+MODE_CONTINUOUS = False                      # recording continuously to mp3 files
 CONTINUOUS_TIMER = True                     # use a timer to start and stop time of day of continuous recording
 MODE_PERIOD = True                          # period recording
 PERIOD_TIMER = True                         # use a timer to start and stop time of day of period recording
-MODE_EVENT = True                           # event recording
+MODE_EVENT = False                           # event recording
 EVENT_TIMER = False                         # use a timer to start and stop time of day of event recording
 MODE_VU = False                             # show audio level on cli
 MODE_FFT_PERIODIC_RECORD = False             # record fft periodically
@@ -492,8 +492,8 @@ def intercom():
         # We'll just use a blocking wait here for simplicity
         while not stop_intercom_event.is_set():
             sd.sleep(1)
-
         print("Stopping intercom...")
+
 
 def stop_intercom():
     global intercom_proc
@@ -571,6 +571,8 @@ def save_continuous_audio():
     print(f"Saved continuous audio to {full_path_name}, block size: {CONTINUOUS_DURATION} seconds")
 
     continuous_start_index = None
+    continuous_save_thread.terminate()        
+    continuous_save_thread.join()     
 
 
 def check_continuous(audio_data, index):
@@ -581,6 +583,8 @@ def check_continuous(audio_data, index):
         ##if continuous_start_index is None and not stop_continuous_event.is_set(): 
         print("continuous block started at:", current_time)
         continuous_start_index = continuous_end_index 
+        continuous_save_thread = threading.Thread(target=save_audio_for_continuous)
+        continuous_save_thread.start()        
         save_audio_for_continuous()
     else:
         print("check_continuous exited with event flag")
@@ -622,16 +626,20 @@ def save_period_audio():
     print(f"Saved period audio to {full_path_name}, period: {PERIOD}, interval {INTERVAL} seconds")
 
     period_start_index = None
+    save_audio_for_period.terminate()
+    save_audio_for_period.join()
 
 
 def check_period(audio_data, index):
-    global period_start_index, period_save_thread, detected_level
+    global period_start_index, period_save_thread
 
     ##print("Time:", int(time.time()),"INTERVAL:", INTERVAL, "modulo:", int(time.time()) % INTERVAL)
     if not stop_period_event.is_set():
         # if modulo INTERVAL == zero then start of period
         if not int(time.time()) % INTERVAL and period_start_index is None: 
-            period_start_index = index 
+            period_start_index = index
+            period_save_thread = threading.Thread(target=save_audio_for_period)
+            period_save_thread.start()            
             save_audio_for_period()
     else:
         print("check_period exited with event flag")
@@ -673,6 +681,8 @@ def save_event_audio():
     print(f"Saved evemt audio to {full_path_name}, audio threshold level: {detected_level}, duration: {audio_data.shape[0] / SAMPLE_RATE} seconds")
 
     event_start_index = None
+    save_audio_for_event.terminate()
+    save_audio_for_event.join()
 
 
 def check_level(audio_data, index):
@@ -684,6 +694,8 @@ def check_level(audio_data, index):
             print("event detected at:", current_time, "audio level:", audio_level)
             detected_level = audio_level
             event_start_index = index
+            continuous_save_thread = threading.Thread(target=save_audio_for_event)
+            continuous_save_thread.start()
             save_audio_for_event()
     else:
         print("check_level exited with event flag")
@@ -760,7 +772,7 @@ def stop_all():
 
     for t in threading.enumerate():
         print("thread name:", t)
-   
+
         if "save_audio_for_continuous" in t.name:
             if t.is_alive():
                 stop_continuous_event.set()
@@ -793,6 +805,7 @@ def stop_all():
 
 def audio_stream():
     global buffer, buffer_index, _dtype, time_of_day_thread, stop_program
+    global fft_periodic_plot_proc
 
     stream = sd.InputStream(device=DEVICE_IN, channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, callback=callback)
 
@@ -801,9 +814,9 @@ def audio_stream():
 
         # Create and start the process, note: using mp because matplotlib wants in be in the mainprocess threqad
         if MODE_FFT_PERIODIC_RECORD:
-            fft_periodic_plot_process = multiprocessing.Process(target=plot_and_save_fft) 
-            fft_periodic_plot_process.daemon = True  
-            fft_periodic_plot_process.start()
+            fft_periodic_plot_proc = multiprocessing.Process(target=plot_and_save_fft) 
+            fft_periodic_plot_proc.daemon = True  
+            fft_periodic_plot_proc.start()
             print("started fft_periodic_plot_process")
 
         # Create and start the thread
@@ -813,9 +826,6 @@ def audio_stream():
                 print(f"    Operational between: {CONTINUOUS_START} and {CONTINUOUS_END}")
             else:
                 print("    Timer off")
-            continuous_save_thread = threading.Thread(target=save_audio_for_continuous)
-            ##continuous_save_thread.daemon = True  
-            continuous_save_thread.start()
 
         # Create and start the thread
         if MODE_PERIOD:
@@ -824,9 +834,6 @@ def audio_stream():
                 print(f"    Operational between: {PERIOD_START} and {PERIOD_END}")
             else:
                 print("    Timer off")
-            period_save_thread = threading.Thread(target=save_audio_for_period)
-            ##period_save_thread.daemon = True 
-            period_save_thread.start()
 
         # Create and start the thread
         if MODE_EVENT:
@@ -835,9 +842,6 @@ def audio_stream():
                 print(f"    Operational between: {EVENT_START} and {EVENT_END}")
             else:
                 print("    Timer off")
-            event_save_thread = threading.Thread(target=save_audio_for_event)
-            ##event_save_thread.daemon = True  # Daemonize the thread so it will be terminated when the main program ends
-            event_save_thread.start()
 
         while stream.active and not stop_program[0]:
             pass

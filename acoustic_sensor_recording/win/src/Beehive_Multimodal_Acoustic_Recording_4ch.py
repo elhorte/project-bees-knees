@@ -46,7 +46,7 @@ detected_level = None
 
 _dtype = None                   # parms sd lib cares about
 _subtype = None
-device_CH = None                # total number of channels from device
+device_ch = None                # total number of channels from device
 
 current_time = None
 
@@ -150,9 +150,9 @@ if (PERIOD) * 1.1 > BUFFER_SECONDS:
 # Check on input device parms or if input device even exits
 try:
     device_info = sd.query_devices(DEVICE_IN)  
-    device_CH = device_info['max_input_channels'] 
-    if CHANNELS > device_CH:
-        print(f"The device only has {device_CH} channel(s) but requires {CHANNELS} channels.")
+    device_ch = device_info['max_input_channels'] 
+    if CHANNELS > device_ch:
+        print(f"The device only has {device_ch} channel(s) but requires {CHANNELS} channels.")
         print("These are the available devices: \n", sd.query_devices())
         quit(-1)
     ##device_SR = device_info['default_samplerate'] 
@@ -243,11 +243,11 @@ def fake_vu_meter(value, end):
 
 
 def get_level(audio_data):
-    global monitor_channel, device_CH
+    global monitor_channel, device_ch
 
     ##print("channel_to_listen_to", monitor_channel)
     channel = monitor_channel
-    if channel <= device_CH:
+    if channel <= device_ch:
         audio_level = np.max(np.abs(audio_data[:,channel]))
     else: # all channels
         audio_level = np.max(np.abs(audio_data))
@@ -839,7 +839,7 @@ def monitor_vu_channel():
 
     def get_level(audio_data):
         # Use the current channel to get the audio level
-        if current_channel[0] <= device_CH:
+        if current_channel[0] <= device_ch:
             audio_level = np.max(np.abs(audio_data[:, current_channel[0]]))
         else: # both channels
             audio_level = np.max(np.abs(audio_data))
@@ -852,6 +852,6 @@ def monitor_vu_channel():
         current_channel[0] = channel
 
     # Set up hotkeys for switching channels
-    for i in range(device_CH + 1):  # Assuming device_CH is the number of channels
+    for i in range(device_ch + 1):  # Assuming device_ch is the number of channels
         keyboard.add_hotkey(str(i), lambda channel=i: switch_channel(channel))
 '''
