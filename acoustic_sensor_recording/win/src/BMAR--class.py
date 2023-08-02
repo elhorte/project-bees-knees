@@ -567,17 +567,15 @@ def save_continuous_audio():
     output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}_{CONTINUOUS_DURATION}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
     full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
 
-    with lock:
-        if CONTINUOUS_FORMAT == 'MP3':
-            pcm_to_mp3_write(audio_data, full_path_name) 
-        elif CONTINUOUS_FORMAT == 'FLAC' or CONTINUOUS_FORMAT == 'WAV': 
-            sf.write(full_path_name, audio_data, CONTINUOUS_SAMPLE_RATE, format=CONTINUOUS_FORMAT, subtype=_subtype)
-        else:
-            print("don't know about file format:", CONTINUOUS_FORMAT)
-            quit(-1)
+    if CONTINUOUS_FORMAT == 'MP3':
+        pcm_to_mp3_write(audio_data, full_path_name) 
+    elif CONTINUOUS_FORMAT == 'FLAC' or CONTINUOUS_FORMAT == 'WAV': 
+        sf.write(full_path_name, audio_data, CONTINUOUS_SAMPLE_RATE, format=CONTINUOUS_FORMAT, subtype=_subtype)
+    else:
+        print("don't know about file format:", CONTINUOUS_FORMAT)
+        quit(-1)
 
     print(f"Saved continuous audio to {full_path_name}, block size: {CONTINUOUS_DURATION} seconds")
-
     continuous_start_index = None 
 
 
@@ -627,11 +625,10 @@ def save_period_audio():
 
     output_filename = f"{timestamp}_period_{SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{DEVICE_CHANNELS}_{PERIOD}_every_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
     full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
-    with lock:
-        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
+  
+    sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
 
     print(f"Saved period audio to {full_path_name}, period: {PERIOD}, interval {INTERVAL} seconds")
-
     period_start_index = None
 
 
@@ -651,19 +648,6 @@ def check_period(audio_data, index):
 # ####################################
 # event recording functions
 # ####################################
-
-
-def get_level(audio_data):
-    global monitor_channel, device_ch
-
-    ##print("channel_to_listen_to", monitor_channel)
-    channel = monitor_channel
-    if channel <= device_ch:
-        audio_level = np.max(np.abs(audio_data[:,channel]))
-    else: # all channels
-        audio_level = np.max(np.abs(audio_data))
-
-    return audio_level
 
 
 def save_audio_for_event():
@@ -693,22 +677,27 @@ def save_event_audio():
 
     output_filename = f"{timestamp}_event_{detected_level}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
     full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
-    with lock:
-        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
+
+    sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
 
     print(f"Saved evemt audio to {full_path_name}, audio threshold level: {detected_level}, duration: {audio_data.shape[0] / SAMPLE_RATE} seconds")
-
     event_start_index = None
 
 
 def check_event(audio_data, index):
-    global event_start_index, event_save_thread, detected_level
+    global event_start_index, event_save_thread, detected_level, monitor_channel, device_ch
     # test if mode is enabled and, if using timer, check if in bounds
     if MODE_EVENT:
         if EVENT_TIMER and not (EVENT_START <= current_time <= EVENT_END):
             pass
         elif not stop_event_event.is_set():
-            audio_level = get_level(audio_data)
+            ##print("channel_to_monitor for events", monitor_channel)
+            channel = monitor_channel
+            if channel <= device_ch:
+                audio_level = np.max(np.abs(audio_data[:,channel]))
+            else: # all channels
+                audio_level = np.max(np.abs(audio_data))
+
             if (audio_level > EVENT_THRESHOLD) and event_start_index is None:
                 print("event detected at:", current_time, "audio level:", audio_level)
                 detected_level = audio_level
