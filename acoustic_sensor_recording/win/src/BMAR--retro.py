@@ -611,7 +611,7 @@ def save_audio_for_period():
 
 
 def save_period_audio():
-    global buffer, period_start_index, period_save_thread
+    global buffer, buffer_size, period_start_index, period_save_thread
 
     if period_start_index is None:  # if this has been reset already, don't try to save
         return
