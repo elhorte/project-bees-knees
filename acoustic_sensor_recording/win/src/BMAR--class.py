@@ -33,6 +33,7 @@ import msvcrt
 import signal
 import sys
 import warnings
+import queue
 ##import TestPyQT5
 
 lock = threading.Lock()
@@ -91,8 +92,6 @@ timestamp = None
 monitor_channel = 0
 stop_program = [False]
 
-buffer_index = 0
-
 # #############################################################
 # #### Control Panel ##########################################
 # #############################################################
@@ -109,9 +108,9 @@ MODE_FFT_PERIODIC_RECORD = True             # record fft periodically
 KB_or_CP = "KB"                             # use keyboard or control panel (PyQT5) to control program
 
 # hardware pointers
-DEVICE_IN = 1                              # Device ID of input device - 17 Scarlett, 16 for 4ch audio I/F
-DEVICE_OUT = 4                             # Device ID of output device - 14 Scarlett
-DEVICE_CHANNELS = 2                                # Number of channels
+DEVICE_IN = 17                              # Device ID for WASAPI: 17 Scarlett & Behringer ch, 16 for 4ch audio I/F
+DEVICE_OUT = 15                             # Device ID for WASAPI: 14 Scarlett, 15 Behringer 4ch, 4 for mme
+DEVICE_CHANNELS = 4                         # Number of channels
 
 FULL_SCALE = 2 ** 16                        # just for cli vu meter level reference
 BUFFER_SECONDS = 1000                       # seconds of a circular buffer
@@ -123,11 +122,11 @@ CONTINUOUS_SAMPLE_RATE = 48000              # For continuous audio
 CONTINUOUS_BIT_DEPTH = 16                   # Audio bit depth
 CONTINUOUS_CHANNELS = 1                     # Number of channels
 CONTINUOUS_QUALITY = 0                      # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
-CONTINUOUS_FORMAT = "FLAC"                   # accepts mp3, flac, or wav
+CONTINUOUS_FORMAT = "FLAC"                  # accepts mp3, flac, or wav
 
 CONTINUOUS_START = datetime.time(4, 0, 0)   # time of day to start recording hr, min, sec
 CONTINUOUS_END = datetime.time(23, 0, 0)    # time of day to stop recording hr, min, sec
-CONTINUOUS_DURATION = 30                            # file size in seconds of continuous recording
+CONTINUOUS_DURATION = 30                    # file size in seconds of continuous recording
 
 PERIOD_START = datetime.time(4, 0, 0)
 PERIOD_END = datetime.time(20, 0, 0)
@@ -138,7 +137,7 @@ EVENT_START = datetime.time(4, 0, 0)
 EVENT_END = datetime.time(22, 0, 0)
 SAVE_BEFORE_EVENT = 30                      # seconds to save before the event
 SAVE_AFTER_EVENT = 30                       # seconds to save after the event
-EVENT_THRESHOLD = 20000                           # audio level threshold to be considered an event
+EVENT_THRESHOLD = 20000                     # audio level threshold to be considered an event
 MONITOR_CH = 0                              # channel to monitor for event (if > number of chs, all channels are monitored)
 
 # instrumentation parms
@@ -218,14 +217,6 @@ else:
     quit(-1)
 
 
-def get_time_of_day():
-    global current_time, timestamp
-    # this thread just keeps track of the time of day every second
-    while not stop_tod_event.is_set():
-        current_time = datetime.datetime.now().time()
-        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        time.sleep(1)
-
 # #############################################################
 # Audio conversion functions
 # #############################################################
@@ -287,19 +278,20 @@ def plot_oscope():
     # Convert gain from dB to linear scale
     gain = 10 ** (GAIN_DB / 20)
 
+    show_ch = 2
     # Record audio
-    print("Recording audio for oscope traces...")
-    myrecording = sd.rec(int(SAMPLE_RATE * TRACE_DURATION), samplerate=SAMPLE_RATE, channels=DEVICE_CHANNELS)
+    print("Recording audio for oscope traces for ch count:", show_ch)
+    orecording = sd.rec(int(SAMPLE_RATE * TRACE_DURATION), samplerate=SAMPLE_RATE, channels=show_ch)
     sd.wait()  # Wait until recording is finished
     print("Recording oscope finished.")
 
-    myrecording *= gain
+    orecording *= gain
     plt.figure()
 
     # Plot number of channels
-    for i in range(DEVICE_CHANNELS):
+    for i in range(show_ch):
         plt.subplot(2, 1, i + 1)
-        plt.plot(myrecording[:, i])
+        plt.plot(orecording[:, i])
         plt.title(f"Channel {i + 1}")
 
     plt.tight_layout()
@@ -408,14 +400,19 @@ def play_audio(filename, device):
     sd.wait()
 
 
-def show_audio_device_info(device_id):
-    device_info = sd.query_devices(device_id)  # Replace with your device index
+def show_audio_device_info_for_defaults():
+    device_info = sd.query_devices(DEVICE_IN)  # Replace with your device index
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Input Channels: {}'.format(device_info['max_input_channels']))
+    device_info = sd.query_devices(DEVICE_OUT)  # Replace with your device index
+    print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
+    print('Max Output Channels: {}'.format(device_info['max_output_channels']))
 
 
 def show_audio_device_list():
     print(sd.query_devices())
+    print(f"\nCurrent device in: {DEVICE_IN}, device out: {DEVICE_OUT}\n")
+    show_audio_device_info_for_defaults()
 
 
 # Print a string of asterisks, ending with only a carriage return to overwrite the line
@@ -438,7 +435,7 @@ def vu_meter(stop_vu_queue, asterisks):
         ##print(f"Audio level: {audio_level}, Normalized value: {normalized_value}")
         print(asterisks.value.ljust(50, ' '), end='\r')
 
-    with sd.InputStream(callback=callback_input, channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE):
+    with sd.InputStream(callback=callback_input, channels=2, samplerate=SAMPLE_RATE):
         while not stop_vu_queue.get():
             ##sd.sleep(1)
             ##print(asterisks.value.ljust(50, ' '), end='\r')
@@ -710,8 +707,6 @@ def check_event(audio_data, index):
 # ############################################################
 #
 
-import queue
-
 # Create a Queue to hold the audio data.
 audio_data_queue = queue.Queue()
 buffer_index_queue = queue.Queue()
@@ -793,10 +788,24 @@ def start_all_WT():
     periodic_recording_WT.start()
     event_recording_WT.start()
 
+
+
+
+# #############################################################
+# shutdown functions
+# ############################################################
+
+
+def list_all_threads():
+    for thread in threading.enumerate():
+        print(f"Thread name: {thread.name}, Thread ID: {thread.ident}, Alive: {thread.is_alive()}")
+
+
 def wait_for_queues():
     # Wait for all items in the queue to be processed
     audio_data_queue.join()
     buffer_index_queue.join()
+
 
 def stop_all_WT():
     # Stop the worker threads
@@ -807,15 +816,6 @@ def stop_all_WT():
     continuous_recording_WT.join()
     periodic_recording_WT.join()
     event_recording_WT.join()
-
-
-# #############################################################
-# shutdown functions
-# ############################################################
-
-def list_all_threads():
-    for thread in threading.enumerate():
-        print(f"Thread name: {thread.name}, Thread ID: {thread.ident}, Alive: {thread.is_alive()}")
 
 
 def signal_stop_all():
@@ -878,12 +878,21 @@ def stop_all():
 ###########################
 
 def main():
-    global time_of_day_thread, one_shot_fft_proc, intercom_proc, oscope_proc, stop_tod_event, stop_intercom_event, monitor_channel
+    global time_of_day_thread, one_shot_fft_proc, fft_periodic_plot_proc, intercom_proc, oscope_proc, stop_tod_event 
+    global stop_intercom_event, monitor_channel, current_time, timestamp
 
     print("Acoustic Signal Capture\n")
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {DEVICE_CHANNELS}")
 
+    def get_time_of_day():
+        global current_time, timestamp
+        # this thread just keeps track of the time of day every second
+        while not stop_tod_event.is_set():
+            current_time = datetime.datetime.now().time()
+            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            time.sleep(1)
+            
     # Create and start the thread for time of day
     time_of_day_thread = threading.Thread(target=get_time_of_day)
     time_of_day_thread.daemon = True 
