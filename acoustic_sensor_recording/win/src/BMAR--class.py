@@ -108,8 +108,8 @@ MODE_FFT_PERIODIC_RECORD = True             # record fft periodically
 KB_or_CP = "KB"                             # use keyboard or control panel (PyQT5) to control program
 
 # hardware pointers
-DEVICE_IN = 17                              # Device ID for WASAPI: 17 Scarlett & Behringer ch, 16 for 4ch audio I/F
-DEVICE_OUT = 15                             # Device ID for WASAPI: 14 Scarlett, 15 Behringer 4ch, 4 for mme
+DEVICE_IN = 17                              # WASAPI: 17 Scarlett 2ch & Behr 4ch, 16 Behr 2ch, 1 for mme
+DEVICE_OUT = 15                             # WASAPI: 14 Scarlett, 15 Behr 4ch, 14 Behr 2ch, 4 for mme
 DEVICE_CHANNELS = 4                         # Number of channels
 
 FULL_SCALE = 2 ** 16                        # just for cli vu meter level reference
