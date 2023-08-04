@@ -14,10 +14,12 @@ import os
 # Parameters
 sample_rate = 192000
 blocksize = 1024  # Number of frames processed at a time
-duration_1 = 300  # Duration for the first thread
-duration_2 = 100  # Duration for the second thread
-wait_2 = 400  # Waiting time for the second thread
+duration_1 = 30  # Duration for the first thread
+duration_2 = 10  # Duration for the second thread
+wait_2 = 40  # Waiting time for the second thread
 downsample_rate = 48000  # Downsample rate for the first thread
+stop_program = [False]  # Flag to stop the program
+
 
 # Audio queue
 audio_queue = queue.Queue()
@@ -34,7 +36,7 @@ def worker(duration, wait, thread_id, downsample=False):
         for _ in range(int(duration * sample_rate / blocksize)):
             audio_data.extend(audio_queue.get())
         audio_data = np.array(audio_data)
-
+        print(f'Thread {thread_id}: {audio_data.shape}')
         if downsample:
             # Select the first two channels
             audio_data = audio_data[:, :2]
@@ -52,7 +54,17 @@ def worker(duration, wait, thread_id, downsample=False):
             time.sleep(wait)
 
 # Start recording
-with sd.InputStream(callback=callback, channels=4, samplerate=sample_rate, blocksize=blocksize):
+stream = sd.InputStream(device=1, channels=2, samplerate=sample_rate, dtype='int16', blocksize=blocksize, callback=callback)
+
+with stream:
+    print("Start audio_stream...")
     # Worker threads
     threading.Thread(target=worker, args=(duration_1, 0, 1, True)).start()  # The first thread downsamples and saves as MP3
     threading.Thread(target=worker, args=(duration_2, wait_2 - duration_2, 2)).start()
+
+    while stream.active and not stop_program[0]:
+        pass
+    
+    ##stop_all()
+    stream.stop()
+    print("Stopped audio_stream...")
