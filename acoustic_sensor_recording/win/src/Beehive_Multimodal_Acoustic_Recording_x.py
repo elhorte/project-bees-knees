@@ -168,53 +168,10 @@ def get_level(audio_data, channel_select):
 #
 # continuous recording functions at low sample rate
 #
-def save_audio_for_continuous():
-    t = CONTINUOUS
-    while t > 0:
-        time.sleep(1)
-        t -= 1
-        if stop_continuous_event.is_set():
-            print("stop_continuous_event was set in save_audio_for_continuous")
-            return
-    save_continuous_audio()
 
+def check_continuous(index):
+    global continuous_start_index, continuous_last_end_index, detected_level, buffer
 
-def save_continuous_audio():
-    global buffer, continuous_start_index, continuous_last_end_index, continuous_save_thread
-
-    if continuous_start_index is None:  # if this has been reset already, don't try to save
-        return
-
-    save_start_index = continuous_last_end_index % buffer_size
-    save_end_index = (continuous_start_index + (CONTINUOUS * SAMPLE_RATE)) % buffer_size
-
-    # saving from a circular buffer so segments aren't necessarily contiguous
-    if save_end_index > save_start_index:   # is contiguous
-        audio_data = buffer[save_start_index:save_end_index]
-    else:                                   # ain't contiguous
-        audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
-    # Downsample audio before saving
-    audio_data = signal.resample_poly(audio_data, CONT_SAMPLE_RATE, SAMPLE_RATE)
-    
-    # Convert to 16-bit
-    audio_data = audio_data.astype(np.int16)
-
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_continuous_{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
-    full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
-    sf.write(full_path_name, audio_data, CONT_SAMPLE_RATE, format=CONT_FORMAT, subtype=_subtype)  # use DOWNSAMPLE_RATE
-
-    print(f"Saved continuous audio to {full_path_name}, block size: {CONTINUOUS} seconds")
-
-    continuous_last_end_index = save_end_index   # save the end index for the next block starting point
-    continuous_save_thread = None
-    continuous_start_index = None
-
-
-def check_continuous(audio_data, index):
-    global continuous_start_index, continuous_save_thread, detected_level
-
-    audio_level = get_level(audio_data, EVENT_CH)
     # just keep doing it, no test
     if continuous_start_index is None: 
         print("continous block started at:", datetime.now(), "audio level:", audio_level)
@@ -222,107 +179,84 @@ def check_continuous(audio_data, index):
             continuous_start_index = index 
         else:
             continuous_start_index = continuous_last_end_index
+        # recording time per file
+        t = CONTINUOUS
+        while t > 0:
+            time.sleep(1)
+            t -= 1
+            if stop_continuous_event.is_set():
+                print("stop_continuous_event was set in save_audio_for_continuous")
+                return
 
-        if continuous_save_thread is None:
-            continuous_save_thread = threading.Thread(target=save_audio_for_continuous)
-            continuous_save_thread.start()
+            if continuous_start_index is None:  # if this has been reset already, don't try to save
+                return
+
+            save_start_index = continuous_last_end_index % buffer_size
+            save_end_index = (continuous_start_index + (CONTINUOUS * SAMPLE_RATE)) % buffer_size
+
+            # saving from a circular buffer so segments aren't necessarily contiguous
+            if save_end_index > save_start_index:   # is contiguous
+                audio_data = buffer[save_start_index:save_end_index]
+            else:                                   # ain't contiguous
+                audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+            # Downsample audio before saving
+            audio_data = signal.resample_poly(audio_data, CONT_SAMPLE_RATE, SAMPLE_RATE)
+            
+            # Convert to 16-bit
+            audio_data = audio_data.astype(np.int16)
+
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            output_filename = f"{timestamp}_continuous_{CONTINUOUS}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+            full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
+            sf.write(full_path_name, audio_data, CONT_SAMPLE_RATE, format=CONT_FORMAT, subtype=_subtype)  # use DOWNSAMPLE_RATE
+
+            print(f"Saved continuous audio to {full_path_name}, block size: {CONTINUOUS} seconds")
+
+            continuous_last_end_index = save_end_index   # save the end index for the next block starting point
+            continuous_start_index = None
 
 #
 # period recording functions
 #
 
-def save_audio_for_period():
-    t = PERIOD
-    while t > 0:
-        time.sleep(1)
-        t -= 1
-        if stop_period_event.is_set():
-            return
-    save_period_audio()
+def check_period(index):
+    global period_start_index, detected_level, buffer
 
-
-def save_period_audio():
-    global buffer, period_start_index, period_save_thread
-
-    if period_start_index is None:  # if this has been reset already, don't try to save
-        return
-
-    save_start_index = period_start_index % buffer_size
-    save_end_index = (period_start_index + (PERIOD * SAMPLE_RATE)) % buffer_size
-
-    # saving from a circular buffer so segments aren't necessarily contiguous
-    if save_end_index > save_start_index:   # is contiguous
-        audio_data = buffer[save_start_index:save_end_index]
-    else:                                   # ain't contiguous
-        audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
-
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_filename = f"{timestamp}_period_{PERIOD}_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
-    full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
-    sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
-
-    print(f"Saved period audio to {full_path_name}, period: {PERIOD}, interval {INTERVAL} seconds")
-
-    period_save_thread = None
-    period_start_index = None
-
-
-def check_period(audio_data, index):
-    global period_start_index, period_save_thread, detected_level
-
-    audio_level = get_level(audio_data, EVENT_CH)
     # if modulo INTERVAL == zero then start of period
     if not int(time.time()) % INTERVAL and period_start_index is None: 
-        print("period started at:", datetime.now(), "audio level:", audio_level)
+        ##print("period started at:", datetime.now())
         period_start_index = index 
+        # wait PERIOD seconds to accumulate audio
+        t = PERIOD
+        while t > 0:
+            time.sleep(1)
+            t -= 1
+            if stop_period_event.is_set():
+                return
 
-    if True: ## period_save_thread is None:
-        period_save_thread = threading.Thread(target=save_audio_for_period)
-        period_save_thread.start()
+        save_start_index = period_start_index % buffer_size
+        save_end_index = (period_start_index + (PERIOD * SAMPLE_RATE)) % buffer_size
+
+        # saving from a circular buffer so segments aren't necessarily contiguous
+        if save_end_index > save_start_index:   # is contiguous
+            audio_data = buffer[save_start_index:save_end_index]
+        else:                                   # ain't contiguous
+            audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        output_filename = f"{timestamp}_period_{PERIOD}_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+        full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
+        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
+
+        print(f"Saved period audio to {full_path_name}, period: {PERIOD}, interval {INTERVAL} seconds")
+
+        period_start_index = None
 
 #
 # event recording functions
 #
-
-def save_audio_around_event():
-    t = SAVE_AFTER_EVENT        # seconds of audio to save after an event is detected
-    while t > 0:
-        time.sleep(1)
-        t -= 1
-        if stop_event_event.is_set():   # is the program trying to shutdown?
-            return
-    save_event_audio()
-
-
-def save_event_audio():
-    global buffer, event_start_index, event_save_thread, detected_level
-
-    if event_start_index is None:  # if this has been reset already, don't try to save
-        return
-
-    save_start_index = (event_start_index - SAVE_BEFORE_EVENT * SAMPLE_RATE) % buffer_size
-    save_end_index = (event_start_index + SAVE_AFTER_EVENT * SAMPLE_RATE) % buffer_size
-
-    # saving from a circular buffer so segments aren't necessarily contiguous
-    if save_end_index > save_start_index:   # is contiguous
-        audio_data = buffer[save_start_index:save_end_index]
-    else:                                   # ain't contiguous
-        audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
-
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    threshold_tag = int(THRESHOLD/1000)
-    output_filename = f"{timestamp}_event_{detected_level}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
-    full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
-    sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
-
-    print(f"Saved evemt audio to {full_path_name}, audio threshold level: {detected_level}, duration: {audio_data.shape[0] / SAMPLE_RATE} seconds")
-
-    event_save_thread = None
-    event_start_index = None
-
-
-def check_level(audio_data, index):
-    global event_start_index, event_save_thread, detected_level
+def check_event(index):
+    global event_start_index, detected_level, buffer
 
     audio_level = get_level(audio_data, EVENT_CH)
 
@@ -331,13 +265,48 @@ def check_level(audio_data, index):
         detected_level = audio_level
         event_start_index = index
 
-    if event_save_thread is None:
-        event_save_thread = threading.Thread(target=save_audio_around_event)
-        event_save_thread.start()
+        t = SAVE_AFTER_EVENT        # seconds of audio to save after an event is detected
+        while t > 0:
+            time.sleep(1)
+            t -= 1
+            if stop_event_event.is_set():   # is the program trying to shutdown?
+                return
+
+        save_start_index = (event_start_index - SAVE_BEFORE_EVENT * SAMPLE_RATE) % buffer_size
+        save_end_index = (event_start_index + SAVE_AFTER_EVENT * SAMPLE_RATE) % buffer_size
+
+        # saving from a circular buffer so segments aren't necessarily contiguous
+        if save_end_index > save_start_index:   # is contiguous
+            audio_data = buffer[save_start_index:save_end_index]
+        else:                                   # ain't contiguous
+            audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+        output_filename = f"{timestamp}_event_{detected_level}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+        full_path_name = os.path.join(OUTPUT_DIRECTORY, output_filename)
+        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
+
+        print(f"Saved evemt audio to {full_path_name}, audio threshold level: {detected_level}, duration: {audio_data.shape[0] / SAMPLE_RATE} seconds")
+
+        event_start_index = None
 
 #
 # audio stream and callback functions
 #
+
+if continuous_save_thread is None:
+    continuous_save_thread = threading.Thread(target=check_continuous)
+    continuous_save_thread.start()
+
+if period_save_thread is None:
+    period_save_thread = threading.Thread(target=check_period)
+    period_save_thread.start()
+
+if event_save_thread is None:
+    event_save_thread = threading.Thread(target=check_event)
+    event_save_thread.start()
+
 
 def callback(indata, frames, time, status):
     global buffer, buffer_index
@@ -354,12 +323,12 @@ def callback(indata, frames, time, status):
         buffer[buffer_index:] = indata[:-overflow]
         buffer[:overflow] = indata[-overflow:]
 
-    if MODE == "event" or MODE == "combo":
-        check_level(indata, buffer_index)   # trigger saving audio if above threshold, 
-    if MODE == "period" or MODE == "combo":
-        check_period(indata, buffer_index)  # start saving audio if save period expired
-    if MODE == "continuous" or MODE == "combo":
-        check_continuous(indata, buffer_index)  # start saving audio if save period expired
+    if MODE == "event":
+        check_event(buffer_index)   # trigger saving audio if above threshold, 
+    if MODE == "period":
+        check_period(buffer_index)  # start saving audio if save period expired
+    if MODE == "continuous":
+        check_continuous(buffer_index)  # start saving audio if save period expired
 
     buffer_index = (buffer_index + data_len) % buffer_size
 
@@ -371,13 +340,9 @@ def audio_stream():
     with stream:
         print("Start recording...")
         print("Monitoring audio level on channel:", EVENT_CH)
-        if MODE == 'period':
-            fake_vu_meter(32768, '\n')  # mark max audio level on the CLI
-        else: # MODE == 'event' or MODE == 'combo'
-            fake_vu_meter(THRESHOLD, '\n')  # mark audio event threshold on the CLI for ref
+
         while stream.active:
             pass
-
 
 ###########################
 ########## MAIN ###########
@@ -407,7 +372,6 @@ if __name__ == "__main__":
         print('\nRecording process stopped by user.')
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
-
 
 
 ##########################  
