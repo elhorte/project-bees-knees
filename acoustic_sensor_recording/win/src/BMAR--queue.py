@@ -758,10 +758,10 @@ def audio_stream():
 
 
 class WorkerThread(threading.Thread):
-    def __init__(self, data_queue, buffer_index, func):
+    def __init__(self, data_queue, func):
         super(WorkerThread, self).__init__()
         self.audio_data_queue = audio_data_queue
-        self.buffer_index_queue = buffer_index_queue
+        ##self.buffer_index_queue = buffer_index_queue
         self.daemon = True
         self.func = func
         self.start()
@@ -769,18 +769,18 @@ class WorkerThread(threading.Thread):
     def run(self):
         while True:
             audio_data = self.audio_data_queue.get()
-            buffer_index = self.buffer_index_queue.get()
+            ##buffer_index = self.buffer_index_queue.get()
             if audio_data is None:
                 break
-            self.func(audio_data, buffer_index)
+            self.func(audio_data)
             self.audio_data_queue.task_done()
-            self.buffer_index_queue.task_done()
+            ##self.buffer_index_queue.task_done()
 
 
 # Create 3 worker threads
-continuous_recording_WT = WorkerThread(audio_data_queue, buffer_index_queue, check_continuous)
-periodic_recording_WT = WorkerThread(audio_data_queue, buffer_index_queue, check_period)
-event_recording_WT = WorkerThread(audio_data_queue, buffer_index_queue, check_event)
+continuous_recording_WT = WorkerThread(audio_data_queue, check_continuous)
+periodic_recording_WT = WorkerThread(audio_data_queue, check_period)
+event_recording_WT = WorkerThread(audio_data_queue, check_event)
 
 
 def start_all_WT():
