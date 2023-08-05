@@ -594,10 +594,11 @@ def recording_worker_thread(period, interval, thread_id, file_format):
     global buffer, buffer_size, buffer_index
 
     while not stop_recording_event.is_set():
-        
-        period_start_index = buffer_index 
-            
+
         print(f"{thread_id} recording started at:", datetime.datetime.now())
+
+        period_start_index = buffer_index 
+
         # wait PERIOD seconds to accumulate audio
         t = period
         while t > 0:
@@ -607,6 +608,7 @@ def recording_worker_thread(period, interval, thread_id, file_format):
                 return
         
         period_end_index = buffer_index 
+
         print("recording length:", period_end_index - period_start_index)
 
         save_start_index = period_start_index % buffer_size
@@ -617,7 +619,7 @@ def recording_worker_thread(period, interval, thread_id, file_format):
         else:                                   # ain't contiguous
             audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
-        if file_format == "mp3":
+        if file_format == "MP3":
             # Downsample audio before saving
             audio_data = signal.resample_poly(audio_data, CONTINUOUS_SAMPLE_RATE, SAMPLE_RATE)
             # Convert to 16-bit
