@@ -33,6 +33,7 @@ import msvcrt
 import signal
 import sys
 import warnings
+import queue
 ##import TestPyQT5
 
 lock = threading.Lock()
@@ -62,11 +63,11 @@ event_save_thread = None
 time_of_day_thread = None
 
 # procs
+vu_proc = None
 oscope_proc = None
 intercom_proc = None
 fft_periodic_plot_proc = None
-one_shot_fft_proc = None
-oscope_proc = None   
+one_shot_fft_proc = None  
 
 # event flags
 stop_continuous_event = threading.Event()
@@ -74,6 +75,7 @@ stop_period_event = threading.Event()
 stop_event_event = threading.Event()
 
 stop_tod_event = threading.Event()
+stop_vu_event = threading.Event()
 stop_intercom_event = threading.Event()
 stop_fft_periodic_plot_event = threading.Event()
 
@@ -83,6 +85,7 @@ trigger_fft_event = threading.Event()
 # misc globals
 _dtype = None                   # parms sd lib cares about
 _subtype = None
+asterisks = '*'
 device_ch = None                # total number of channels from device
 current_time = None
 timestamp = None
@@ -94,24 +97,24 @@ stop_program = [False]
 # #############################################################
 
 # modes
-MODE_CONTINUOUS = False                      # recording continuously to mp3 files
-CONTINUOUS_TIMER = True                     # use a timer to start and stop time of day of continuous recording
+MODE_CONTINUOUS = True                      # recording continuously to mp3 files
+CONTINUOUS_TIMER = False                     # use a timer to start and stop time of day of continuous recording
 MODE_PERIOD = True                          # period recording
-PERIOD_TIMER = True                         # use a timer to start and stop time of day of period recording
-MODE_EVENT = False                           # event recording
+PERIOD_TIMER = False                         # use a timer to start and stop time of day of period recording
+MODE_EVENT = True                           # event recording
 EVENT_TIMER = False                         # use a timer to start and stop time of day of event recording
-MODE_VU = False                             # show audio level on cli
-MODE_FFT_PERIODIC_RECORD = False             # record fft periodically
+
+MODE_FFT_PERIODIC_RECORD = True             # record fft periodically
 KB_or_CP = "KB"                             # use keyboard or control panel (PyQT5) to control program
 
 # hardware pointers
-DEVICE_IN = 17                              # Device ID of input device - 17 Scarlett, 16 for 4ch audio I/F
-DEVICE_OUT = 14                             # Device ID of output device - 14 Scarlett
-DEVICE_CHANNELS = 2                                # Number of channels
+DEVICE_IN = 10                              # WASAPI: 17 Scarlett 2ch & Behr 4ch, 16 Behr 2ch, 1 for mme
+DEVICE_OUT = 9                             # WASAPI: 14 Scarlett, 15 Behr 4ch, 14 Behr 2ch, 4 for mme
+DEVICE_CHANNELS = 2                         # Number of channels
 
 FULL_SCALE = 2 ** 16                        # just for cli vu meter level reference
 BUFFER_SECONDS = 1000                       # seconds of a circular buffer
-SAMPLE_RATE = 192000                        # Audio sample rate
+SAMPLE_RATE = 48000                        # Audio sample rate
 BIT_DEPTH = 16                              # Audio bit depth
 FORMAT = "FLAC"                             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
@@ -119,22 +122,22 @@ CONTINUOUS_SAMPLE_RATE = 48000              # For continuous audio
 CONTINUOUS_BIT_DEPTH = 16                   # Audio bit depth
 CONTINUOUS_CHANNELS = 1                     # Number of channels
 CONTINUOUS_QUALITY = 0                      # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
-CONTINUOUS_FORMAT = "MP3"                   # accepts mp3, flac, or wav
+CONTINUOUS_FORMAT = "FLAC"                  # accepts mp3, flac, or wav
 
 CONTINUOUS_START = datetime.time(4, 0, 0)   # time of day to start recording hr, min, sec
 CONTINUOUS_END = datetime.time(23, 0, 0)    # time of day to stop recording hr, min, sec
-CONTINUOUS_DURATION = 300                            # file size in seconds of continuous recording
+CONTINUOUS_DURATION = 30                    # file size in seconds of continuous recording
 
 PERIOD_START = datetime.time(4, 0, 0)
 PERIOD_END = datetime.time(20, 0, 0)
-PERIOD = 300                                # seconds of recording
-INTERVAL = 1800                             # seconds between start of period, must be > period, of course
+PERIOD = 20                                # seconds of recording
+INTERVAL = 40                             # seconds between start of period, must be > period, of course
 
 EVENT_START = datetime.time(4, 0, 0)
 EVENT_END = datetime.time(22, 0, 0)
 SAVE_BEFORE_EVENT = 30                      # seconds to save before the event
 SAVE_AFTER_EVENT = 30                       # seconds to save after the event
-THRESHOLD = 40000                           # audio level threshold to be considered an event
+EVENT_THRESHOLD = 20000                     # audio level threshold to be considered an event
 MONITOR_CH = 0                              # channel to monitor for event (if > number of chs, all channels are monitored)
 
 # instrumentation parms
@@ -214,14 +217,6 @@ else:
     quit(-1)
 
 
-def get_time_of_day():
-    global current_time, timestamp
-    # this thread just keeps track of the time of day every second
-    while not stop_tod_event.is_set():
-        current_time = datetime.datetime.now().time()
-        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        time.sleep(1)
-
 # #############################################################
 # Audio conversion functions
 # #############################################################
@@ -274,53 +269,40 @@ def resample_audio(audio_data, orig_sample_rate, target_sample_rate):
 # signal display functions
 # #############################################################
 
-# Print a string of asterisks, ending with only a carriage return to overwrite the line
-# value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
-def fake_vu_meter(value, end):
-    normalized_value = int(value / 1000)
-    asterisks = '*' * normalized_value
-    print(asterisks.ljust(50, ' '), end=end)
+# single-shot plot of 'n' seconds of audio of each channels for an oscope view
+def plot_oscope(): 
+    # Constants
+    TRACE_DURATION = 10     # Duration in seconds
+    GAIN_DB = 20            # Gain in dB
 
+    # Convert gain from dB to linear scale
+    gain = 10 ** (GAIN_DB / 20)
 
-def get_level(audio_data):
-    global monitor_channel, device_ch
+    show_ch = 2
+    # Record audio
+    print("Recording audio for oscope traces for ch count:", show_ch)
+    orecording = sd.rec(int(SAMPLE_RATE * TRACE_DURATION), samplerate=SAMPLE_RATE, channels=show_ch)
+    sd.wait()  # Wait until recording is finished
+    print("Recording oscope finished.")
 
-    ##print("channel_to_listen_to", monitor_channel)
-    channel = monitor_channel
-    if channel <= device_ch:
-        audio_level = np.max(np.abs(audio_data[:,channel]))
-    else: # all channels
-        audio_level = np.max(np.abs(audio_data))
+    orecording *= gain
+    plt.figure()
 
-    return audio_level
+    # Plot number of channels
+    for i in range(show_ch):
+        plt.subplot(2, 1, i + 1)
+        plt.plot(orecording[:, i])
+        plt.title(f"Channel {i + 1}")
 
+    plt.tight_layout()
+    plt.show()
+    print("press any key to continue...")
 
-def toggle_vu_meter():
-    global MODE_VU, monitor_channel
-
-    if MODE_VU:
-        print("\nStopping VU meter")
-        MODE_VU = False
-    else:
-        # mark max audio level on the CLI
-        print("\nVU meter monitoring channel:", monitor_channel)
-        normalized_value = int(FULL_SCALE / 1000)
-        asterisks = '*' * (normalized_value - 11)
-        print("fullscale:",asterisks.ljust(50, ' '))
-
-        if MODE_EVENT:
-            # mark audio event threshold on the CLI for ref
-            normalized_value = int(THRESHOLD / 1000)
-            asterisks = '*' * (normalized_value - 11)
-            print("threshold:",asterisks.ljust(50, ' '))
-
-        MODE_VU = True
 
 # single-shot fft plot of audio
 def plot_fft():
-    global monitor_channel, FFT_INTERVAL, FFT_GAIN  
+    global monitor_channel
 
-    interval = FFT_INTERVAL * 60    # convert to seconds, time betwwen ffts
     N = SAMPLE_RATE * FFT_DURATION  # Number of samples
     # Convert gain from dB to linear scale
     gain = 10 ** (FFT_GAIN / 20)
@@ -351,7 +333,7 @@ def plot_fft():
     plt.grid(True)
 
     plt.show()
-
+    print("press any key to continue...")
 
 # continuous fft plot of audio in a separate process
 def plot_and_save_fft():
@@ -406,34 +388,6 @@ def plot_and_save_fft():
     print("Exiting fft periodic")
 
 
-# single-shot plot of 'n' seconds of audio of each channels for an oscope view
-def plot_oscope(): 
-    # Constants
-    TRACE_DURATION = 10     # Duration in seconds
-    GAIN_DB = 20            # Gain in dB
-
-    # Convert gain from dB to linear scale
-    gain = 10 ** (GAIN_DB / 20)
-
-    # Record audio
-    print("Recording audio for oscope traces...")
-    myrecording = sd.rec(int(SAMPLE_RATE * TRACE_DURATION), samplerate=SAMPLE_RATE, channels=DEVICE_CHANNELS)
-    sd.wait()  # Wait until recording is finished
-    print("Recording finished.")
-
-    myrecording *= gain
-    plt.figure()
-
-    # Plot number of channels
-    for i in range(DEVICE_CHANNELS):
-        plt.subplot(2, 1, i + 1)
-        plt.plot(myrecording[:, i])
-        plt.title(f"Channel {i + 1}")
-
-    plt.tight_layout()
-    plt.show()
-
-
 ##########################  
 # utilities
 ##########################
@@ -446,14 +400,78 @@ def play_audio(filename, device):
     sd.wait()
 
 
-def show_audio_device_info(device_id):
-    device_info = sd.query_devices(device_id)  # Replace with your device index
+def show_audio_device_info_for_defaults():
+    device_info = sd.query_devices(DEVICE_IN)  # Replace with your device index
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Input Channels: {}'.format(device_info['max_input_channels']))
+    device_info = sd.query_devices(DEVICE_OUT)  # Replace with your device index
+    print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
+    print('Max Output Channels: {}'.format(device_info['max_output_channels']))
 
 
 def show_audio_device_list():
     print(sd.query_devices())
+    print(f"\nCurrent device in: {DEVICE_IN}, device out: {DEVICE_OUT}\n")
+    show_audio_device_info_for_defaults()
+
+
+# Print a string of asterisks, ending with only a carriage return to overwrite the line
+# value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
+def vu_meter(stop_vu_queue, asterisks):
+    global monitor_channel, device_ch
+
+    buffer = np.zeros((SAMPLE_RATE,))
+
+    def callback_input(indata, frames, time, status):
+        global monitor_channel
+        # Only process audio from the designated channel
+        channel_data = indata[:, monitor_channel]
+        buffer[:frames] = channel_data
+
+        audio_level = np.max(np.abs(channel_data))
+        normalized_value = int((audio_level / 1.0) * 50)  # scale based on max value of 1.0, and multiply by 50 for the length of the asterisks bar
+
+        asterisks.value = '*' * normalized_value
+        ##print(f"Audio level: {audio_level}, Normalized value: {normalized_value}")
+        print(asterisks.value.ljust(50, ' '), end='\r')
+
+    with sd.InputStream(callback=callback_input, channels=2, samplerate=SAMPLE_RATE):
+        while not stop_vu_queue.get():
+            ##sd.sleep(1)
+            ##print(asterisks.value.ljust(50, ' '), end='\r')
+            pass
+        print("Stopping vu...")
+
+
+def stop_vu(vu_proc, stop_vu_event):
+    if vu_proc is not None:
+        stop_vu_event.set()
+        vu_proc.join()            # make sure its stopped, hate zombies
+
+
+def toggle_vu_meter():
+    global vu_proc, monitor_channel, asterisks, stop_vu_queue
+
+    if vu_proc is None:
+        print("\nVU meter monitoring channel:", monitor_channel)
+        manager = multiprocessing.Manager()
+        stop_vu_queue = multiprocessing.Queue()
+        asterisks = manager.Value(str, '*' * 50)
+
+        print("fullscale:",asterisks.value.ljust(50, ' '))
+
+        if MODE_EVENT:
+            normalized_value = int(EVENT_THRESHOLD / 1000)
+            asterisks.value = '*' * normalized_value
+            print("threshold:",asterisks.value.ljust(50, ' '))
+
+        vu_proc = multiprocessing.Process(target=vu_meter, args=(stop_vu_queue, asterisks))
+        vu_proc.start()
+    else:
+        stop_vu_queue.put(True)
+        vu_proc.join()
+        print("\nvu stopped")
+        vu_proc = None
 
 
 def intercom():
@@ -474,16 +492,6 @@ def intercom():
         # Play back the audio from the buffer
         outdata[:, 0] = buffer[:frames]  # Play back on the first channel
         outdata[:, 1] = buffer[:frames]  # Play back on the second channel
-
-    # Function to switch the channel being listened to
-    def switch_channel(channel):
-        global monitor_channel
-        print(f" switching to channel: {channel}", end='\r')
-        monitor_channel = channel
-
-    # Set up hotkeys for switching channels
-    for i in range(DEVICE_CHANNELS):
-        keyboard.add_hotkey(str(i), lambda channel=i: switch_channel(channel))
 
     # Open an input stream and an output stream with the callback function
     with sd.InputStream(callback=callback_input, channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE), \
@@ -518,13 +526,10 @@ def toggle_intercom():
         intercom_proc = None
 
 
-# #############################################################
-# recording functions in various modes
-# #############################################################
-
 # ####################################################
 # continuous recording functions at low sample rate
 # ####################################################
+
 
 def save_audio_for_continuous():
     t = CONTINUOUS_DURATION
@@ -554,99 +559,90 @@ def save_continuous_audio():
         audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
     # resample to lower sample rate
-    audio_data = resample_audio(audio_data, SAMPLE_RATE, CONTINUOUS_SAMPLE_RATE)
+    ##audio_data = resample_audio(audio_data, SAMPLE_RATE, CONTINUOUS_SAMPLE_RATE)
 
     output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}_{CONTINUOUS_DURATION}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
     full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
 
-    with lock:
-        if CONTINUOUS_FORMAT == 'MP3':
-            pcm_to_mp3_write(audio_data, full_path_name) 
-        elif CONTINUOUS_FORMAT == 'FLAC' or CONTINUOUS_FORMAT == 'WAV': 
-            sf.write(full_path_name, audio_data, CONTINUOUS_SAMPLE_RATE, format=CONTINUOUS_FORMAT, subtype=_subtype)
-        else:
-            print("don't know about file format:", CONTINUOUS_FORMAT)
-            quit(-1)
+    if CONTINUOUS_FORMAT == 'MP3':
+        pcm_to_mp3_write(audio_data, full_path_name) 
+    elif CONTINUOUS_FORMAT == 'FLAC' or CONTINUOUS_FORMAT == 'WAV': 
+        sf.write(full_path_name, audio_data, CONTINUOUS_SAMPLE_RATE, format=CONTINUOUS_FORMAT, subtype=_subtype)
+    else:
+        print("don't know about file format:", CONTINUOUS_FORMAT)
+        quit(-1)
 
     print(f"Saved continuous audio to {full_path_name}, block size: {CONTINUOUS_DURATION} seconds")
-
-    continuous_start_index = None
-    continuous_save_thread.terminate()        
-    continuous_save_thread.join()     
+    continuous_start_index = None 
 
 
 def check_continuous(audio_data, index):
     global continuous_start_index, continuous_save_thread, continuous_end_index, stop_continuous_event
-    
-    if not stop_continuous_event.is_set():
-        # just keep doing it, no testing
-        ##if continuous_start_index is None and not stop_continuous_event.is_set(): 
-        print("continuous block started at:", current_time)
-        continuous_start_index = continuous_end_index 
-        continuous_save_thread = threading.Thread(target=save_audio_for_continuous)
-        continuous_save_thread.start()        
-        save_audio_for_continuous()
-    else:
-        print("check_continuous exited with event flag")
+    # test if mode is enabled and, if using timer, check if in bounds
+    if MODE_CONTINUOUS:
+        if CONTINUOUS_TIMER and not (CONTINUOUS_START <= current_time <= CONTINUOUS_END):
+            pass
+        elif not stop_continuous_event.is_set():
+            # just keep doing it, no testing
+            ##if continuous_start_index is None and not stop_continuous_event.is_set(): 
+            print("continuous block started at:", current_time)
+            continuous_start_index = continuous_end_index 
+            save_audio_for_continuous()
+
 
 # #######################################
 # period recording functions
 # #######################################
 
-def save_audio_for_period():
-    t = PERIOD
-    while t > 0:
-        time.sleep(1)
-        t -= 1
-        if stop_period_event.is_set():
-            return
-    save_period_audio()
 
-
-def save_period_audio():
-    global buffer, period_start_index, period_save_thread
-
-    if period_start_index is None:  # if this has been reset already, don't try to save
-        return
-
-    save_start_index = period_start_index % buffer_size
-    save_end_index = (period_start_index + (PERIOD * SAMPLE_RATE)) % buffer_size
-
-    # saving from a circular buffer so segments aren't necessarily contiguous
-    if save_end_index > save_start_index:   # is contiguous
-        audio_data = buffer[save_start_index:save_end_index]
-    else:                                   # ain't contiguous
-        audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
-
-    output_filename = f"{timestamp}_period_{SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{DEVICE_CHANNELS}_{PERIOD}_every_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
-    full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
-    with lock:
-        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
-
-    print(f"Saved period audio to {full_path_name}, period: {PERIOD}, interval {INTERVAL} seconds")
-
-    period_start_index = None
-    save_audio_for_period.terminate()
-    save_audio_for_period.join()
-
-
-def check_period(audio_data, index):
+def check_period(audio_data, buffer_index):
     global period_start_index, period_save_thread
+    # test if mode is enabled and, if using timer, check if in bounds
+    if MODE_PERIOD:
+        if PERIOD_TIMER and not (PERIOD_START <= current_time <= PERIOD_END):
+            return
+        elif not stop_period_event.is_set():
 
-    ##print("Time:", int(time.time()),"INTERVAL:", INTERVAL, "modulo:", int(time.time()) % INTERVAL)
-    if not stop_period_event.is_set():
-        # if modulo INTERVAL == zero then start of period
-        if not int(time.time()) % INTERVAL and period_start_index is None: 
-            period_start_index = index
-            period_save_thread = threading.Thread(target=save_audio_for_period)
-            period_save_thread.start()            
-            save_audio_for_period()
-    else:
-        print("check_period exited with event flag")
+            print("dtype is: ", audio_data.dtype)
+
+            # if modulo INTERVAL == zero then start of period
+            if not int(time.time()) % INTERVAL and period_start_index is None: 
+                period_start_index = buffer_index
+                # keep recording for PERIOD seconds
+                t = PERIOD
+                while t > 0:
+                    time.sleep(1)
+                    t -= 1
+                    if stop_period_event.is_set():
+                        return
+        
+                save_start_index = period_start_index % buffer_size
+                save_end_index = (period_start_index + (PERIOD * SAMPLE_RATE)) % buffer_size
+
+                # saving from a circular buffer so segments aren't necessarily contiguous
+                if save_end_index > save_start_index:   # is contiguous
+                    audio_data = buffer[save_start_index:save_end_index]
+                else:                                   # ain't contiguous
+                    audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+
+                if True:
+                    print("audio_data shape:", audio_data.shape)
+                    print("audio_data dtype:", audio_data.dtype)
+
+                output_filename = f"{timestamp}_period_{SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{DEVICE_CHANNELS}_{PERIOD}_every_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+                full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
+
+                sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
+
+                print(f"Saved period audio to {full_path_name}, period: {PERIOD}, interval {INTERVAL} seconds")
+                period_start_index = None
+
+
 
 # ####################################
 # event recording functions
 # ####################################
+
 
 def save_audio_for_event():
     t = SAVE_AFTER_EVENT        # seconds of audio to save after an event is detected
@@ -675,36 +671,42 @@ def save_event_audio():
 
     output_filename = f"{timestamp}_event_{detected_level}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
     full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
-    with lock:
-        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
+
+    sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FORMAT, subtype=_subtype)
 
     print(f"Saved evemt audio to {full_path_name}, audio threshold level: {detected_level}, duration: {audio_data.shape[0] / SAMPLE_RATE} seconds")
-
     event_start_index = None
-    save_audio_for_event.terminate()
-    save_audio_for_event.join()
 
 
-def check_level(audio_data, index):
-    global event_start_index, event_save_thread, detected_level
+def check_event(audio_data, index):
+    global event_start_index, event_save_thread, detected_level, monitor_channel, device_ch
+    # test if mode is enabled and, if using timer, check if in bounds
+    if MODE_EVENT:
+        if EVENT_TIMER and not (EVENT_START <= current_time <= EVENT_END):
+            pass
+        elif not stop_event_event.is_set():
+            ##print("channel_to_monitor for events", monitor_channel)
+            channel = monitor_channel
+            if channel <= device_ch:
+                audio_level = np.max(np.abs(audio_data[:,channel]))
+            else: # all channels
+                audio_level = np.max(np.abs(audio_data))
 
-    if not stop_event_event.is_set():
-        audio_level = get_level(audio_data)
-        if (audio_level > THRESHOLD) and event_start_index is None:
-            print("event detected at:", current_time, "audio level:", audio_level)
-            detected_level = audio_level
-            event_start_index = index
-            continuous_save_thread = threading.Thread(target=save_audio_for_event)
-            continuous_save_thread.start()
-            save_audio_for_event()
-    else:
-        print("check_level exited with event flag")
+            if (audio_level > EVENT_THRESHOLD) and event_start_index is None:
+                print("event detected at:", current_time, "audio level:", audio_level)
+                detected_level = audio_level
+                event_start_index = index
+                save_audio_for_event()
 
 #
 # #############################################################
-# audio stream callback functions
+# audio stream processing functions
 # ############################################################
 #
+
+# Create a Queue to hold the audio data.
+audio_data_queue = queue.Queue()
+buffer_index_queue = queue.Queue()
 
 def callback(indata, frames, time, status):
     global buffer, buffer_index, current_time
@@ -723,29 +725,98 @@ def callback(indata, frames, time, status):
         buffer[:overflow] = indata[-overflow:]
         print("Buffer overflow, data lost:", overflow)
 
-    if MODE_EVENT:
-        if EVENT_TIMER and not (EVENT_START <= current_time <= EVENT_END):
-            pass
-        else:
-            check_level(indata, buffer_index) 
-
-    if MODE_PERIOD:
-        if PERIOD_TIMER and not (PERIOD_START <= current_time <= PERIOD_END):
-            pass
-        else:
-            check_period(indata, buffer_index) 
-
-    if MODE_CONTINUOUS:
-        if CONTINUOUS_TIMER and not (CONTINUOUS_START <= current_time <= CONTINUOUS_END):
-            pass
-        else:
-            check_continuous(indata, buffer_index)
-
-    if MODE_VU:
-        audio_level = get_level(indata)
-        fake_vu_meter(audio_level,'\r')
-
     buffer_index = (buffer_index + data_len) % buffer_size
+
+    if True:
+        print("indata shape:", indata.shape)
+        print("indata dtype:", indata.dtype)
+
+    audio_data_queue.put(indata)
+    buffer_index_queue.put(buffer_index)
+
+
+def audio_stream():
+    global buffer, buffer_index, _dtype, time_of_day_thread, stop_program
+    global fft_periodic_plot_proc
+
+    stream = sd.InputStream(device=DEVICE_IN, channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, callback=callback)
+
+    with stream:
+        print("Start audio_stream...")
+
+        while stream.active and not stop_program[0]:
+            pass
+        
+        stop_all()
+        stream.stop()
+        print("Stopped audio_stream...")
+
+
+# ##########################################
+# WorkerThreads
+# ##########################################
+
+
+class WorkerThread(threading.Thread):
+    def __init__(self, data_queue, func):
+        super(WorkerThread, self).__init__()
+        self.audio_data_queue = audio_data_queue
+        ##self.buffer_index_queue = buffer_index_queue
+        self.daemon = True
+        self.func = func
+        self.start()
+
+    def run(self):
+        while True:
+            audio_data = self.audio_data_queue.get()
+            ##buffer_index = self.buffer_index_queue.get()
+            if audio_data is None:
+                break
+            self.func(audio_data)
+            self.audio_data_queue.task_done()
+            ##self.buffer_index_queue.task_done()
+
+
+# Create 3 worker threads
+continuous_recording_WT = WorkerThread(audio_data_queue, check_continuous)
+periodic_recording_WT = WorkerThread(audio_data_queue, check_period)
+event_recording_WT = WorkerThread(audio_data_queue, check_event)
+
+
+def start_all_WT():
+    # Start the worker threads
+    continuous_recording_WT.start()
+    periodic_recording_WT.start()
+    event_recording_WT.start()
+
+
+
+
+# #############################################################
+# shutdown functions
+# ############################################################
+
+
+def list_all_threads():
+    for thread in threading.enumerate():
+        print(f"Thread name: {thread.name}, Thread ID: {thread.ident}, Alive: {thread.is_alive()}")
+
+
+def wait_for_queues():
+    # Wait for all items in the queue to be processed
+    audio_data_queue.join()
+    buffer_index_queue.join()
+
+
+def stop_all_WT():
+    # Stop the worker threads
+    continuous_recording_WT.put(None)
+    periodic_recording_WT.put(None)
+    event_recording_WT.put(None)
+
+    continuous_recording_WT.join()
+    periodic_recording_WT.join()
+    event_recording_WT.join()
 
 
 def signal_stop_all():
@@ -803,92 +874,70 @@ def stop_all():
     print("\nHopefully we have turned off all the lights...")
 
 
-def audio_stream():
-    global buffer, buffer_index, _dtype, time_of_day_thread, stop_program
-    global fft_periodic_plot_proc
-
-    stream = sd.InputStream(device=DEVICE_IN, channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, callback=callback)
-
-    with stream:
-        print("Start audio_stream...")
-
-        # Create and start the process, note: using mp because matplotlib wants in be in the mainprocess threqad
-        if MODE_FFT_PERIODIC_RECORD:
-            fft_periodic_plot_proc = multiprocessing.Process(target=plot_and_save_fft) 
-            fft_periodic_plot_proc.daemon = True  
-            fft_periodic_plot_proc.start()
-            print("started fft_periodic_plot_process")
-
-        # Create and start the thread
-        if MODE_CONTINUOUS:
-            print(f"Starting continuous, low-sample-rate recording mode, duration per file: {CONTINUOUS_DURATION/60:.2f} minutes")
-            if CONTINUOUS_TIMER:
-                print(f"    Operational between: {CONTINUOUS_START} and {CONTINUOUS_END}")
-            else:
-                print("    Timer off")
-
-        # Create and start the thread
-        if MODE_PERIOD:
-            print(f"Starting periodic recording mode, {PERIOD/60:.2f} minutes every {INTERVAL/60:.2f} minutes")
-            if PERIOD_TIMER:
-                print(f"    Operational between: {PERIOD_START} and {PERIOD_END}")
-            else:
-                print("    Timer off")
-
-        # Create and start the thread
-        if MODE_EVENT:
-            print(f"Starting event detect mode, threshold trigger: {THRESHOLD}, time before: {SAVE_BEFORE_EVENT} sec, time after: {SAVE_AFTER_EVENT} sec")
-            if EVENT_TIMER:
-                print(f"    Operational between: {EVENT_START} and {EVENT_END}")
-            else:
-                print("    Timer off")
-
-        while stream.active and not stop_program[0]:
-            pass
-        
-        stop_all()
-        stream.stop()
-        print("Stopped audio_stream...")
-
-
 ###########################
 ########## MAIN ###########
 ###########################
 
 def main():
-    global time_of_day_thread, intercom_thread, stop_tod_event, stop_intercom_event
+    global time_of_day_thread, one_shot_fft_proc, fft_periodic_plot_proc, intercom_proc, oscope_proc, stop_tod_event 
+    global stop_intercom_event, monitor_channel, current_time, timestamp
 
     print("Acoustic Signal Capture\n")
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FORMAT}; Channels: {DEVICE_CHANNELS}")
 
-
-    def trigger_fft():
-        trigger_fft_event
-        one_shot_fft_proc = multiprocessing.Process(target=plot_fft)
-        one_shot_fft_proc.start()
-        # fft one shot returns here when plot window is closed by user
-        one_shot_fft_proc.terminate()
-        one_shot_fft_proc.join()
-        print("exit fft")
-
-
-    def trigger_oscope():
-        oscope_proc = multiprocessing.Process(target=plot_oscope)
-        oscope_proc.start()
-        # oscope returns here when plot window is closed by user
-        oscope_proc.terminate()
-        oscope_proc.join()
-        print("exit oscope")
-
-
+    def get_time_of_day():
+        global current_time, timestamp
+        # this thread just keeps track of the time of day every second
+        while not stop_tod_event.is_set():
+            current_time = datetime.datetime.now().time()
+            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            time.sleep(1)
+            
     # Create and start the thread for time of day
     time_of_day_thread = threading.Thread(target=get_time_of_day)
     time_of_day_thread.daemon = True 
     time_of_day_thread.start()
 
+        # Create and start the process, note: using mp because matplotlib wants in be in the mainprocess threqad
+    if MODE_FFT_PERIODIC_RECORD:
+        fft_periodic_plot_proc = multiprocessing.Process(target=plot_and_save_fft) 
+        fft_periodic_plot_proc.daemon = True  
+        fft_periodic_plot_proc.start()
+        print("started fft_periodic_plot_process")
+
+    def trigger_fft():
+        one_shot_fft_proc = multiprocessing.Process(target=plot_fft)
+        one_shot_fft_proc.start()
+        input()
+        # fft one shot returns here when plot window is closed by user
+        one_shot_fft_proc.terminate()
+        one_shot_fft_proc.join()
+        print("exit fft")
+
+    def trigger_oscope():
+        oscope_proc = multiprocessing.Process(target=plot_oscope)
+        oscope_proc.start()
+        input()
+        # oscope returns here when plot window is closed by user
+        oscope_proc.terminate()
+        oscope_proc.join()
+        print("exit oscope")
+
+    # Function to switch the channel being listened to
+    def switch_channel(channel):
+        global monitor_channel
+
+        print(f" switching to channel: {channel}", end='\r')
+        monitor_channel = channel
+
     try:
         if KB_or_CP == 'KB':
+
+            # Set up hotkeys for switching channels
+            for i in range(DEVICE_CHANNELS):
+                keyboard.add_hotkey(str(i), lambda channel=i: switch_channel(channel))
+
             # beehive keyboard triggered management utilities
             # one shot process to see fft
             keyboard.on_press_key("f", lambda _: trigger_fft(), suppress=True)   
@@ -905,20 +954,34 @@ def main():
             # usage: press t to see all threads
             keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
 
+        # process info
+        if MODE_CONTINUOUS:
+            print(f"Starting continuous, low-sample-rate recording mode, duration per file: {CONTINUOUS_DURATION/60:.2f} minutes")
+            if CONTINUOUS_TIMER:
+                print(f"    Operational between: {CONTINUOUS_START} and {CONTINUOUS_END}")
+            else:
+                print("    Timer off")
+
+        if MODE_PERIOD:
+            print(f"Starting periodic recording mode, {PERIOD/60:.2f} minutes every {INTERVAL/60:.2f} minutes")
+            if PERIOD_TIMER:
+                print(f"    Operational between: {PERIOD_START} and {PERIOD_END}")
+            else:
+                print("    Timer off")
+
+        if MODE_EVENT:
+            print(f"Starting event detect mode, threshold trigger: {EVENT_THRESHOLD}, time before: {SAVE_BEFORE_EVENT} sec, time after: {SAVE_AFTER_EVENT} sec")
+            if EVENT_TIMER:
+                print(f"    Operational between: {EVENT_START} and {EVENT_END}")
+            else:
+                print("    Timer off")
+                
+        # Start the audio stream
         audio_stream()
 
         if KB_or_CP == "KB":
             # Unhook all hooks
             keyboard.unhook_all()
-
-            # Get the list of all currently active hooks after unhooking
-            hooks_after = list(keyboard._hooks.values())
-
-            # If unhook_all worked, hooks_after should be empty
-            if len(hooks_after) == 0:
-                print("All hooks unhooked successfully")
-            else:
-                print("Some hooks were not unhooked")
 
         print("\nHopefully we have turned off all the lights...")
             
@@ -932,7 +995,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # Register the stop_all function to be called when the script exits
-
     main()
-    ##atexit.register(stop_all)
