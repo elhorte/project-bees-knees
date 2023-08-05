@@ -72,8 +72,7 @@ fft_periodic_plot_proc = None
 one_shot_fft_proc = None  
 
 # event flags
-stop_continuous_event = threading.Event()
-stop_period_event = threading.Event()
+stop_recording_event = threading.Event()
 stop_event_event = threading.Event()
 
 stop_tod_event = threading.Event()
@@ -94,17 +93,20 @@ current_time = None
 timestamp = None
 monitor_channel = 0
 stop_program = [False]
+buffer_size = None
+buffer = None
+buffer_index = None
 
 # #############################################################
 # #### Control Panel ##########################################
 # #############################################################
 
 # modes
-MODE_CONTINUOUS = True                      # recording continuously to mp3 files
+MODE_CONTINUOUS = False                      # recording continuously to mp3 files
 CONTINUOUS_TIMER = False                     # use a timer to start and stop time of day of continuous recording
 MODE_PERIOD = True                          # period recording
 PERIOD_TIMER = False                         # use a timer to start and stop time of day of period recording
-MODE_EVENT = True                           # event recording
+MODE_EVENT = False                           # event recording
 EVENT_TIMER = False                         # use a timer to start and stop time of day of event recording
 
 MODE_FFT_PERIODIC_RECORD = True             # record fft periodically
@@ -119,10 +121,10 @@ FULL_SCALE = 2 ** 16                        # just for cli vu meter level refere
 BUFFER_SECONDS = 1000                       # seconds of a circular buffer
 SAMPLE_RATE = 192000                        # Audio sample rate
 BIT_DEPTH = 16                              # Audio bit depth
-FILE_FORMAT = "FLAC"                             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
+FILE_FORMAT = "WAV"                             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
 CONTINUOUS_SAMPLE_RATE = 48000              # For continuous audio
-CONTINUOUS_BIT_DEPTH = 16                   # Audio bit depth
+CONTINUOUS_BIT_DEPTH = 16                   # Audio bit depthv
 CONTINUOUS_CHANNELS = 1                     # Number of channels
 CONTINUOUS_QUALITY = 0                      # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 CONTINUOUS_FORMAT = "FLAC"                  # accepts mp3, flac, or wav
@@ -133,8 +135,8 @@ CONTINUOUS_DURATION = 30                    # file size in seconds of continuous
 
 PERIOD_START = datetime.time(4, 0, 0)
 PERIOD_END = datetime.time(20, 0, 0)
-PERIOD = 20                                # seconds of recording
-INTERVAL = 40                             # seconds between start of period, must be > period, of course
+PERIOD_RECORD = 20                                # seconds of recording
+PERIOD_INTERVAL = 40                             # seconds between start of period, must be > period, of course
 
 EVENT_START = datetime.time(4, 0, 0)
 EVENT_END = datetime.time(22, 0, 0)
@@ -162,11 +164,6 @@ LOCATION_ID = "Zeev-Berkeley"
 HIVE_ID = "Z1"
 
 # ==================================================================================================
-
-# audio buffers and variables
-buffer_size = int(BUFFER_SECONDS * SAMPLE_RATE)
-buffer = np.zeros((buffer_size, DEVICE_CHANNELS), dtype=_dtype)
-buffer_index = 0
 
 ### startup housekeeping ###
 
@@ -529,104 +526,163 @@ def toggle_intercom():
         intercom_proc = None
 
 
+# ##################################################
+# WORKER THREADS #
+# ##################################################
+
+#
+# recording functions
+#
+
+def recording_worker_thread(period, interval, thread_id, file_format):
+    global buffer, buffer_size, buffer_index
+    
+    while not stop_recording_event.is_set:
+
+        period_start_index = buffer_index 
+            
+        print(f"{thread_id} recording started at:", datetime.datetime.now())
+        # wait PERIOD seconds to accumulate audio
+        t = period
+        while t > 0:
+            time.sleep(1)
+            t -= 1
+            if stop_recording_event.is_set():
+                return
+        
+        period_end_index = buffer_index 
+
+        save_start_index = period_start_index % buffer_size
+        save_end_index = period_end_index % buffer_size
+        # saving from a circular buffer so segments aren't necessarily contiguous
+        if save_end_index > save_start_index:   # is contiguous
+            audio_data = buffer[save_start_index:save_end_index]
+        else:                                   # ain't contiguous
+            audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+
+        if file_format == "mp3":
+            # Downsample audio before saving
+            audio_data = signal.resample_poly(audio_data, CONTINUOUS_SAMPLE_RATE, SAMPLE_RATE)
+            # Convert to 16-bit
+            audio_data = audio_data.astype(np.int16)
+            
+        print("some audio data:", audio_data[0:20])
+        print("audio_data shape:", audio_data.shape)
+        input("press to continue")
+        ##sd.play(audio_data, SAMPLE_RATE, DEVICE_OUT)
+        ##sd.wait()
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        output_filename = f"{timestamp}{thread_id}_{period}_{interval}_{LOCATION_ID}_{HIVE_ID}.{file_format.lower()}"
+        full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
+
+        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=file_format)
+
+        print(f"Saved {thread_id} audio to {full_path_name}, period: {period}, interval {interval} seconds")
+
+        # wait PERIOD seconds to accumulate audio
+        t = interval - period
+        while t > 0:
+            time.sleep(1)
+            t -= 1
+            if stop_recording_event.is_set():
+                return
+
+#
+# event recording functions
+#
+
+def get_event(audio_data):
+    global monitor_channel
+    ##print("monitoring channel:", monitor_channel)
+    if monitor_channel <= DEVICE_CHANNELS:
+        audio_level = np.max(np.abs(audio_data[:,monitor_channel]))
+    else: # all channels
+        audio_level = np.max(np.abs(audio_data))
+
+    global event_start_index, detected_level, buffer
+
+    audio_level = get_level(indata, monitor_channel)
+
+    if (audio_level > EVENT_THRESHOLD) and event_start_index is None:
+        print("event detected at:", datetime.datetime.now(), "audio level:", audio_level)
+        detected_level = audio_level
+        event_start_index = index
+
+
+#
+# audio stream and callback functions
+#
+
+if False: #continuous_save_thread is None:
+    continuous_save_thread = threading.Thread(target=check_continuous)
+    continuous_save_thread.start()
+
+if True: #period_worker_thread is None:
+    print("starting period_worker_thread")
+    threading.Thread(target=recording_worker_thread, args=(PERIOD_RECORD, PERIOD_INTERVAL, "Period", "mp3")).start()
+
+if False: # event_save_thread is None:
+    event_save_thread = threading.Thread(target=event_worker_thread)
+    event_save_thread.start()
+
+
+#
 # #############################################################
-# simplified threaded functions
+# audio stream & callback functions
 # ############################################################
+#
+
+# audio buffers and variables
+buffer_size = int(BUFFER_SECONDS * SAMPLE_RATE)
+buffer = np.zeros((buffer_size, DEVICE_CHANNELS), dtype=_dtype)
+buffer_index = 0
+buffer_wrap = False
+blocksize = 8196
+buffer_wrap_event = threading.Event()
+
+# Audio queue
+##audio_queue = queue.Queue()
+##index_queue = queue.Queue()
+
+
+def callback(indata, frames, time, status):
+    global buffer, buffer_index, current_time
+    ##print("callback", indata.shape, frames, time, status)
+    if status:
+        print("Callback status:", status)
+
+    data_len = len(indata)
+
+    # managing the circular buffer
+    if buffer_index + data_len <= buffer_size:
+        buffer[buffer_index:buffer_index + data_len] = indata
+        buffer_wrap_event.clear()
+    else:
+        overflow = (buffer_index + data_len) - buffer_size
+        buffer[buffer_index:] = indata[:-overflow]
+        buffer[:overflow] = indata[-overflow:]
+        buffer_wrap_event.set()
+
+    # Cast to int16 for 16-bit audio
+    ##audio_queue.put(indata.astype(np.int16).copy())
+    #index_queue.put(buffer_index.copy())
+
+    buffer_index = (buffer_index + data_len) % buffer_size
+
 
 def audio_stream():
+    global stop_program
 
-    # Parameters
-    blocksize = 8196  # Number of frames processed at a time
-    downsample_rate = 48000  # Downsample rate for the first thread
-
-    # Audio queue
-    audio_queue = queue.Queue()
-    index_queue = queue.Queue()
-
-    # Callback function to feed the queue
-    def callback(indata, frames, time, status):
-        # Cast to int16 for 16-bit audio
-        audio_queue.put(indata.astype(np.int16).copy())
-        index_queue.put(buffer_index.copy())
-
-    # Worker thread function to save audio
-    def worker(duration, wait, thread_id, downsample=False):
-        
-        while True:
-            audio_data = []
-            for _ in range(int(duration * SAMPLE_RATE / blocksize)):
-                audio_data.extend(audio_queue.get())
-            ##audio_data = np.array(audio_data)
-
-            ##print(f"Thread {thread_id} received {audio_data.shape[0]} samples.")
-
-            if wait == 0:
-                output_filename = f"{timestamp}_continuous_{CONTINUOUS_SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{CONTINUOUS_CHANNELS}_{CONTINUOUS_DURATION}_{LOCATION_ID}_{HIVE_ID}.{CONTINUOUS_FORMAT.lower()}"
-            else:
-                output_filename = f"{timestamp}_period_{SAMPLE_RATE/1000:.0F}_{BIT_DEPTH}_{DEVICE_CHANNELS}_{PERIOD}_every_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FILE_FORMAT.lower()}"
-
-            full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
-
-            if downsample:
-                # Select the first two channels
-                audio_data = audio_data[:, :2]
-                # Downsample
-                audio_data = resample_poly(audio_data, up=1, down=int(SAMPLE_RATE / downsample_rate))
-                # Save as WAV
-                wav_file = f'output_{thread_id}_{int(time.time())}.wav'
-                write(wav_file, downsample_rate, audio_data)
-                # Convert to MP3 with lame
-                os.system(f'lame --quiet -b 192 {wav_file} output_{thread_id}_{int(time.time())}.mp3')
-                os.remove(wav_file)  # Remove the temporary WAV file
-                ##print("saved mp3:", wav_file)
-            else:
-                sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FILE_FORMAT, subtype=_subtype)
-                ##write(f'output_{thread_id}_{int(time.time())}.wav', SAMPLE_RATE, audio_data)
-                ##print("saved wav:", wav_file)
-            if wait > 0:
-                # not using time.sleep() alone because it blocks the thread
-                t = wait
-                while t > 0:
-                    time.sleep(1)
-                    t -= 1
-                    if stop_worker_event.is_set():
-                        return
-
-
-    # Worker thread function to save audio
-    def worker_ffmpeg(duration, wait, thread_id, downsample=False):
-        while True:
-            audio_data = []
-            for _ in range(int(duration * SAMPLE_RATE / blocksize)):
-                audio_data.extend(audio_queue.get())
-            audio_data = np.array(audio_data)
-            print(f'Thread {thread_id}: {audio_data.shape}')
-            if downsample:
-                # Select the first two channels
-                audio_data = audio_data[:, :2]
-                # Downsample
-                audio_data = resample(audio_data, int(duration * downsample_rate))
-                # Convert to PyDub AudioSegment and export as MP3
-                audio = AudioSegment(audio_data.tobytes(), frame_rate=downsample_rate, channels=2, sample_width=audio_data.dtype.itemsize)
-                audio.export(f'output_{thread_id}_{int(time.time())}.mp3', format='mp3')
-            else:
-                write(f'output_{thread_id}_{int(time.time())}.wav', SAMPLE_RATE, audio_data)
-            if wait > 0:
-                time.sleep(wait)
-
-    # Start recording
-    stream = sd.InputStream(device=1, channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE, dtype='int16', blocksize=blocksize, callback=callback)
+    stream = sd.InputStream(device=DEVICE_IN, channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE, dtype=_dtype, blocksize=blocksize, callback=callback)
 
     with stream:
         print("Start audio_stream...")
-        # Worker threads
-        threading.Thread(target=worker, args=(CONTINUOUS_DURATION, 0, 1, True)).start()  # The first thread downsamples and saves as MP3
-        threading.Thread(target=worker, args=(PERIOD, INTERVAL - PERIOD, 2)).start()
 
         while stream.active and not stop_program[0]:
             pass
         
-        ##stop_all()
+        stop_all()
         stream.stop()
         print("Stopped audio_stream...")
 
@@ -694,7 +750,6 @@ def stop_all():
     stop_intercom()
     keyboard.unhook_all()
     print("\nHopefully we have turned off all the lights...")
-
 
 ###########################
 ########## MAIN ###########

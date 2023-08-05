@@ -72,8 +72,7 @@ fft_periodic_plot_proc = None
 one_shot_fft_proc = None  
 
 # event flags
-stop_continuous_event = threading.Event()
-stop_period_event = threading.Event()
+stop_recording_event = threading.Event()
 stop_event_event = threading.Event()
 
 stop_tod_event = threading.Event()
@@ -136,8 +135,8 @@ CONTINUOUS_DURATION = 30                    # file size in seconds of continuous
 
 PERIOD_START = datetime.time(4, 0, 0)
 PERIOD_END = datetime.time(20, 0, 0)
-PERIOD = 20                                # seconds of recording
-INTERVAL = 40                             # seconds between start of period, must be > period, of course
+PERIOD_RECORD = 20                                # seconds of recording
+PERIOD_INTERVAL = 40                             # seconds between start of period, must be > period, of course
 
 EVENT_START = datetime.time(4, 0, 0)
 EVENT_END = datetime.time(22, 0, 0)
@@ -534,7 +533,7 @@ def toggle_intercom():
 # continuous recording functions at low sample rate
 #
 
-def check_continuous(index):
+def call_continuous(index):
     global continuous_start_index, continuous_last_end_index, detected_level, buffer
 
     # just keep doing it, no test
@@ -549,7 +548,7 @@ def check_continuous(index):
         while t > 0:
             time.sleep(1)
             t -= 1
-            if stop_continuous_event.is_set():
+            if stop_recording_event.is_set():
                 print("stop_continuous_event was set in save_audio_for_continuous")
                 return
 
@@ -584,57 +583,59 @@ def check_continuous(index):
 # period recording functions
 #
 
-def check_period(index):
-    global period_start_index
-    # if modulo INTERVAL == zero then start of period
-    if not int(time.time()) % INTERVAL and period_start_index is None: 
-        period_start_index = index 
-        period_worker_thread()
+def recording_worker_thread(period, interval, file_format):
+    global buffer, buffer_size
+    
+    while not stop_recording_event.is_set:
 
-
-def period_worker_thread():
-        global buffer, period_start_index
-
-        if period_start_index is None:
-            return
-        
+        period_start_index = index_queue.get() 
+            
         print("period started at:", datetime.datetime.now())
         # wait PERIOD seconds to accumulate audio
-        t = PERIOD
+        t = period
         while t > 0:
             time.sleep(1)
             t -= 1
-            if stop_period_event.is_set():
+            if stop_recording_event.is_set():
                 return
-            
-        save_start_index = period_start_index % buffer_size
-        save_end_index = (period_start_index + (PERIOD * SAMPLE_RATE)) % buffer_size
+        
+        period_end_index = index_queue.get() 
 
+        save_start_index = period_start_index % buffer_size
+        save_end_index = period_end_index % buffer_size
         # saving from a circular buffer so segments aren't necessarily contiguous
         if save_end_index > save_start_index:   # is contiguous
-            audio_data = buffer[save_start_index-10000:save_end_index+10000]
+            audio_data = buffer[save_start_index:save_end_index]
         else:                                   # ain't contiguous
             audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+
         print("some audio data:", audio_data[0:20])
         print("audio_data shape:", audio_data.shape)
         input("press to continue")
         sd.play(audio_data, SAMPLE_RATE, DEVICE_OUT)
         sd.wait()
+
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        output_filename = f"{timestamp}_period_{PERIOD}_{INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{FILE_FORMAT.lower()}"
+        output_filename = f"{timestamp}_period_{PERIOD_RECORD}_{PERIOD_INTERVAL}_{LOCATION_ID}_{HIVE_ID}.{file_format.lower()}"
         full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
 
-        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FILE_FORMAT)
+        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=file_format)
 
-        print(f"Saved period audio to {full_path_name}, period: {PERIOD}, interval {INTERVAL} seconds")
+        print(f"Saved period audio to {full_path_name}, period: {period}, interval {interval} seconds")
 
-        period_start_index = None
+        # wait PERIOD seconds to accumulate audio
+        t = interval
+        while t > 0:
+            time.sleep(1)
+            t -= 1
+            if stop_recording_event.is_set():
+                return
 
 #
 # event recording functions
 #
 
-def get_level(audio_data):
+def get_event(audio_data):
     global monitor_channel
     ##print("monitoring channel:", monitor_channel)
     if monitor_channel <= DEVICE_CHANNELS:
@@ -681,7 +682,7 @@ def event_worker_thread(detected_level, event_start_index):
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-    output_filename = f"{timestamp}_event_{detected_level}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FORMAT.lower()}"
+    output_filename = f"{timestamp}_event_{detected_level}_{SAVE_BEFORE_EVENT}_{SAVE_AFTER_EVENT}_{LOCATION_ID}_{HIVE_ID}.{FILE_FORMAT.lower()}"
     full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
     sf.write(full_path_name, audio_data, SAMPLE_RATE, format=FILE_FORMAT, subtype=_subtype)
 
@@ -699,7 +700,7 @@ if False: #continuous_save_thread is None:
 
 if True: #period_worker_thread is None:
     print("starting period_worker_thread")
-    period_WT = threading.Thread(target=period_worker_thread).start()
+    period_WT = threading.Thread(target=recording_worker_thread, args=PERIOD_RECORD, PERIOD_INTERVAL,, thread_id, downsample=False ).start()
 
 if False: # event_save_thread is None:
     event_save_thread = threading.Thread(target=event_worker_thread)
@@ -716,8 +717,14 @@ if False: # event_save_thread is None:
 buffer_size = int(BUFFER_SECONDS * SAMPLE_RATE)
 buffer = np.zeros((buffer_size, DEVICE_CHANNELS), dtype=_dtype)
 buffer_index = 0
-
+buffer_wrap = False
 blocksize = 8196
+buffer_wrap_event = threading.Event()
+
+# Audio queue
+audio_queue = queue.Queue()
+index_queue = queue.Queue()
+
 
 def callback(indata, frames, time, status):
     global buffer, buffer_index, current_time
@@ -727,32 +734,19 @@ def callback(indata, frames, time, status):
 
     data_len = len(indata)
 
-    # managing a circular buffer
+    # managing the circular buffer
     if buffer_index + data_len <= buffer_size:
         buffer[buffer_index:buffer_index + data_len] = indata
+        buffer_wrap_event.clear()
     else:
         overflow = (buffer_index + data_len) - buffer_size
         buffer[buffer_index:] = indata[:-overflow]
         buffer[:overflow] = indata[-overflow:]
-        print("Buffer overflow, data lost:", overflow)
+        buffer_wrap_event.set()
 
-    if MODE_CONTINUOUS:
-        if CONTINUOUS_TIMER and not (CONTINUOUS_START <= current_time <= CONTINUOUS_END):
-            pass
-        else:
-            check_continuous(buffer_index)
-
-    if MODE_PERIOD:
-        if PERIOD_TIMER and not (PERIOD_START <= current_time <= PERIOD_END):
-            pass
-        else:
-            check_period(buffer_index) 
-            
-    if MODE_EVENT:
-        if EVENT_TIMER and not (EVENT_START <= current_time <= EVENT_END):
-            pass
-        else:
-            check_event(indata, buffer_index) 
+    # Cast to int16 for 16-bit audio
+    ##audio_queue.put(indata.astype(np.int16).copy())
+    index_queue.put(buffer_index.copy())
 
     buffer_index = (buffer_index + data_len) % buffer_size
 
