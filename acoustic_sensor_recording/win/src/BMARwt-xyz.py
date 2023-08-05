@@ -173,7 +173,7 @@ if (SAVE_BEFORE_EVENT + SAVE_AFTER_EVENT) * 1.2 > BUFFER_SECONDS:
     print("Reduce SAVE_DURATION_BEFORE and/or SAVE_DURATION_AFTER or increase the size of the circular buffer 'BUFFER_SECONDS'")
     quit(-1)
 
-if (PERIOD) * 1.1 > BUFFER_SECONDS:
+if ((CONTINUOUS_DURATION * 1.1) > BUFFER_SECONDS) or ((PERIOD_RECORD * 1.1) > BUFFER_SECONDS):
     print("The buffer is not large enough to hold the maximum amount of audio that can be saved.")
     print("Reduce PERIOD or increase the size of the circular buffer 'BUFFER_SECONDS'")
     quit(-1)
@@ -525,108 +525,6 @@ def toggle_intercom():
         print("\nIntercom stopped")
         intercom_proc = None
 
-
-# ##################################################
-# WORKER THREADS #
-# ##################################################
-
-#
-# recording functions
-#
-
-def recording_worker_thread(period, interval, thread_id, file_format):
-    global buffer, buffer_size, buffer_index
-    
-    while not stop_recording_event.is_set:
-
-        period_start_index = buffer_index 
-            
-        print(f"{thread_id} recording started at:", datetime.datetime.now())
-        # wait PERIOD seconds to accumulate audio
-        t = period
-        while t > 0:
-            time.sleep(1)
-            t -= 1
-            if stop_recording_event.is_set():
-                return
-        
-        period_end_index = buffer_index 
-
-        save_start_index = period_start_index % buffer_size
-        save_end_index = period_end_index % buffer_size
-        # saving from a circular buffer so segments aren't necessarily contiguous
-        if save_end_index > save_start_index:   # is contiguous
-            audio_data = buffer[save_start_index:save_end_index]
-        else:                                   # ain't contiguous
-            audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
-
-        if file_format == "mp3":
-            # Downsample audio before saving
-            audio_data = signal.resample_poly(audio_data, CONTINUOUS_SAMPLE_RATE, SAMPLE_RATE)
-            # Convert to 16-bit
-            audio_data = audio_data.astype(np.int16)
-            
-        print("some audio data:", audio_data[0:20])
-        print("audio_data shape:", audio_data.shape)
-        input("press to continue")
-        ##sd.play(audio_data, SAMPLE_RATE, DEVICE_OUT)
-        ##sd.wait()
-
-        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        output_filename = f"{timestamp}{thread_id}_{period}_{interval}_{LOCATION_ID}_{HIVE_ID}.{file_format.lower()}"
-        full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
-
-        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=file_format)
-
-        print(f"Saved {thread_id} audio to {full_path_name}, period: {period}, interval {interval} seconds")
-
-        # wait PERIOD seconds to accumulate audio
-        t = interval - period
-        while t > 0:
-            time.sleep(1)
-            t -= 1
-            if stop_recording_event.is_set():
-                return
-
-#
-# event recording functions
-#
-
-def get_event(audio_data):
-    global monitor_channel
-    ##print("monitoring channel:", monitor_channel)
-    if monitor_channel <= DEVICE_CHANNELS:
-        audio_level = np.max(np.abs(audio_data[:,monitor_channel]))
-    else: # all channels
-        audio_level = np.max(np.abs(audio_data))
-
-    global event_start_index, detected_level, buffer
-
-    audio_level = get_level(indata, monitor_channel)
-
-    if (audio_level > EVENT_THRESHOLD) and event_start_index is None:
-        print("event detected at:", datetime.datetime.now(), "audio level:", audio_level)
-        detected_level = audio_level
-        event_start_index = index
-
-
-#
-# audio stream and callback functions
-#
-
-if False: #continuous_save_thread is None:
-    continuous_save_thread = threading.Thread(target=check_continuous)
-    continuous_save_thread.start()
-
-if True: #period_worker_thread is None:
-    print("starting period_worker_thread")
-    threading.Thread(target=recording_worker_thread, args=(PERIOD_RECORD, PERIOD_INTERVAL, "Period", "mp3")).start()
-
-if False: # event_save_thread is None:
-    event_save_thread = threading.Thread(target=event_worker_thread)
-    event_save_thread.start()
-
-
 #
 # #############################################################
 # audio stream & callback functions
@@ -685,6 +583,104 @@ def audio_stream():
         stop_all()
         stream.stop()
         print("Stopped audio_stream...")
+
+
+# ##################################################
+# WORKER THREADS #
+# ##################################################
+
+
+def recording_worker_thread(period, interval, thread_id, file_format):
+    global buffer, buffer_size, buffer_index
+
+    while not stop_recording_event.is_set():
+        
+        period_start_index = buffer_index 
+            
+        print(f"{thread_id} recording started at:", datetime.datetime.now())
+        # wait PERIOD seconds to accumulate audio
+        t = period
+        while t > 0:
+            time.sleep(1)
+            t -= 1
+            if stop_recording_event.is_set():
+                return
+        
+        period_end_index = buffer_index 
+        print("recording length:", period_end_index - period_start_index)
+
+        save_start_index = period_start_index % buffer_size
+        save_end_index = period_end_index % buffer_size
+        # saving from a circular buffer so segments aren't necessarily contiguous
+        if save_end_index > save_start_index:   # is contiguous
+            audio_data = buffer[save_start_index:save_end_index]
+        else:                                   # ain't contiguous
+            audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+
+        if file_format == "mp3":
+            # Downsample audio before saving
+            audio_data = signal.resample_poly(audio_data, CONTINUOUS_SAMPLE_RATE, SAMPLE_RATE)
+            # Convert to 16-bit
+            audio_data = audio_data.astype(np.int16)
+            
+        print("some audio data:", audio_data[0:20])
+        print("audio_data shape:", audio_data.shape)
+
+        ##sd.play(audio_data, SAMPLE_RATE, DEVICE_OUT)
+        ##sd.wait()
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        output_filename = f"{timestamp}_{thread_id}_{period}_{interval}_{LOCATION_ID}_{HIVE_ID}.{file_format.lower()}"
+        full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
+
+        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=file_format)
+
+        print(f"Saved {thread_id} audio to {full_path_name}, period: {period}, interval {interval} seconds")
+
+        # wait PERIOD seconds to accumulate audio
+        t = interval - period
+        while t > 0:
+            time.sleep(1)
+            t -= 1
+            if stop_recording_event.is_set():
+                return
+
+#
+# event recording functions
+#
+
+def get_event(audio_data):
+    global monitor_channel
+    ##print("monitoring channel:", monitor_channel)
+    if monitor_channel <= DEVICE_CHANNELS:
+        audio_level = np.max(np.abs(audio_data[:,monitor_channel]))
+    else: # all channels
+        audio_level = np.max(np.abs(audio_data))
+
+    global event_start_index, detected_level, buffer
+
+    audio_level = get_level(indata, monitor_channel)
+
+    if (audio_level > EVENT_THRESHOLD) and event_start_index is None:
+        print("event detected at:", datetime.datetime.now(), "audio level:", audio_level)
+        detected_level = audio_level
+        event_start_index = index
+
+#
+# audio stream and callback functions
+#
+
+if False: #continuous_save_thread is None:
+    continuous_save_thread = threading.Thread(target=check_continuous)
+    continuous_save_thread.start()
+
+if True: #period_worker_thread is None:
+    print("starting recording_worker_thread")
+    threading.Thread(target=recording_worker_thread, args=(PERIOD_RECORD, PERIOD_INTERVAL, "Period", "FLAC")).start()
+
+if False: # event_save_thread is None:
+    event_save_thread = threading.Thread(target=event_worker_thread)
+    event_save_thread.start()
 
 
 # #############################################################
