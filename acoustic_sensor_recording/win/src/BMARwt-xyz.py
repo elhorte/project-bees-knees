@@ -531,6 +531,10 @@ def toggle_intercom():
 # ############################################################
 #
 
+# Audio queue
+##audio_queue = queue.Queue()
+##index_queue = queue.Queue()
+
 # audio buffers and variables
 buffer_size = int(BUFFER_SECONDS * SAMPLE_RATE)
 buffer = np.zeros((buffer_size, DEVICE_CHANNELS), dtype=_dtype)
@@ -539,13 +543,15 @@ buffer_wrap = False
 blocksize = 8196
 buffer_wrap_event = threading.Event()
 
-# Audio queue
-##audio_queue = queue.Queue()
-##index_queue = queue.Queue()
+recording_start_index = None
+thread_id = "Continuous"
+period = 300
+interval = 0
+file_format = "FLAC"
 
 
 def callback(indata, frames, time, status):
-    global buffer, buffer_index, current_time
+    global buffer, buffer_index, current_time, timestamp, recording_start_index
     ##print("callback", indata.shape, frames, time, status)
     if status:
         print("Callback status:", status)
@@ -562,9 +568,31 @@ def callback(indata, frames, time, status):
         buffer[:overflow] = indata[-overflow:]
         buffer_wrap_event.set()
 
-    # Cast to int16 for 16-bit audio
-    ##audio_queue.put(indata.astype(np.int16).copy())
-    #index_queue.put(buffer_index.copy())
+    # cast to int16 for 16-bit audio
+    # audio_save_buff = indata.astype(np.int16).copy()
+
+    if recording_start_index is None:
+        recording_start_index = buffer_index 
+
+    if buffer_index >= (recording_start_index + (SAMPLE_RATE * period)):
+        recording_end_index = buffer_index
+        save_start_index = recording_start_index % buffer_size
+        save_end_index = recording_end_index % buffer_size
+
+        # saving from a circular buffer so segments aren't necessarily contiguous
+        if save_end_index > save_start_index:   # is contiguous
+            audio_data = buffer[save_start_index:save_end_index]
+        else:                                   # ain't contiguous
+            audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+
+        ##timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        output_filename = f"{timestamp}_{thread_id}_{period}_{interval}_{LOCATION_ID}_{HIVE_ID}.{file_format.lower()}"
+        full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
+
+        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=file_format)
+        print(f"Saved {thread_id} audio to {full_path_name}, period: {period}, interval {interval} seconds")
+    
+        recording_start_index = None
 
     buffer_index = (buffer_index + data_len) % buffer_size
 
@@ -676,7 +704,7 @@ if False: #continuous_save_thread is None:
     continuous_save_thread = threading.Thread(target=check_continuous)
     continuous_save_thread.start()
 
-if True: #period_worker_thread is None:
+if False: #period_worker_thread is None:
     print("starting recording_worker_thread")
     threading.Thread(target=recording_worker_thread, args=(PERIOD_RECORD, PERIOD_INTERVAL, "Period", "FLAC")).start()
 
@@ -720,21 +748,12 @@ def stop_all():
     for t in threading.enumerate():
         print("thread name:", t)
 
-        if "save_audio_for_continuous" in t.name:
+        if "recording_worker_thread" in t.name:
             if t.is_alive():
                 stop_continuous_event.set()
                 t.join
                 print("continuous stopped ***")  
-        if "save_audio_for_period" in t.name:
-            if t.is_alive():
-                stop_period_event.set()
-                t.join
-                print("period stopped ***")
-        if "save_audio_for_event" in t.name:
-            if t.is_alive():
-                stop_event_event.set()
-                t.join
-                print("event stopped ***")                
+
         if "get_time_of_day" in t.name:
             if t.is_alive():
                 stop_tod_event.set()
@@ -749,9 +768,20 @@ def stop_all():
     keyboard.unhook_all()
     print("\nHopefully we have turned off all the lights...")
 
+
 ###########################
 ########## MAIN ###########
 ###########################
+
+
+def get_time_of_day():
+    global current_time, timestamp
+    # this thread just keeps track of the time of day every second
+    while not stop_tod_event.is_set():
+        current_time = datetime.datetime.now().time()
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        time.sleep(1)
+
 
 def main():
     global time_of_day_thread, one_shot_fft_proc, fft_periodic_plot_proc, intercom_proc, oscope_proc, stop_tod_event 
@@ -760,14 +790,6 @@ def main():
     print("Acoustic Signal Capture\n")
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
     print(f"Sample Rate: {SAMPLE_RATE}; File Format: {FILE_FORMAT}; Channels: {DEVICE_CHANNELS}")
-
-    def get_time_of_day():
-        global current_time, timestamp
-        # this thread just keeps track of the time of day every second
-        while not stop_tod_event.is_set():
-            current_time = datetime.datetime.now().time()
-            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            time.sleep(1)
             
     # Create and start the thread for time of day
     time_of_day_thread = threading.Thread(target=get_time_of_day)
