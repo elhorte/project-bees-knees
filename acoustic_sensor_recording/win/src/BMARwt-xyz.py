@@ -113,9 +113,9 @@ MODE_FFT_PERIODIC_RECORD = True             # record fft periodically
 KB_or_CP = "KB"                             # use keyboard or control panel (PyQT5) to control program
 
 # hardware pointers
-DEVICE_IN = 1                              # WASAPI: 17 Scarlett 2ch & Behr 4ch, 16 Behr 2ch, 1 for mme
-DEVICE_OUT = 3                             # WASAPI: 14 Scarlett, 15 Behr 4ch, 14 Behr 2ch, 4 for mme
-DEVICE_CHANNELS = 2                         # Number of channels
+DEVICE_IN = 16                              # WASAPI: 17 Scarlett 2ch, 16 Behr 4ch, 16 Behr 2ch, 1 for mme
+DEVICE_OUT = 14                             # WASAPI: 14 Scarlett, 14 Behr 4ch, 14 Behr 2ch, 4 for mme
+DEVICE_CHANNELS = 4                         # Number of channels
 
 FULL_SCALE = 2 ** 16                        # just for cli vu meter level reference
 BUFFER_SECONDS = 1000                       # seconds of a circular buffer
@@ -400,19 +400,28 @@ def play_audio(filename, device):
     sd.wait()
 
 
-def show_audio_device_info_for_defaults():
-    device_info = sd.query_devices(DEVICE_IN)  # Replace with your device index
+def show_audio_device_info_for_DEVICE_IN_OUT():
+    device_info = sd.query_devices(DEVICE_IN)  
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Input Channels: {}'.format(device_info['max_input_channels']))
-    device_info = sd.query_devices(DEVICE_OUT)  # Replace with your device index
+    device_info = sd.query_devices(DEVICE_OUT)  
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Output Channels: {}'.format(device_info['max_output_channels']))
 
 
+def show_audio_device_info_for_defaults():
+    print("\nsounddevices default device info:")
+    default_input_info = sd.query_devices(kind='input')
+    default_output_info = sd.query_devices(kind='output')
+    print(f"\nDefault Input Device: {default_input_info}")
+    print(f"Default Output Device: {default_output_info}\n")
+
+
 def show_audio_device_list():
     print(sd.query_devices())
-    print(f"\nCurrent device in: {DEVICE_IN}, device out: {DEVICE_OUT}\n")
     show_audio_device_info_for_defaults()
+    print(f"\nCurrent device in: {DEVICE_IN}, device out: {DEVICE_OUT}\n")
+    show_audio_device_info_for_DEVICE_IN_OUT()
 
 
 # Print a string of asterisks, ending with only a carriage return to overwrite the line
@@ -494,8 +503,9 @@ def intercom():
         outdata[:, 1] = buffer[:frames]  # Play back on the second channel
 
     # Open an input stream and an output stream with the callback function
-    with sd.InputStream(callback=callback_input, channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE), \
-        sd.OutputStream(callback=callback_output, channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE):
+    ## , channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE
+    with sd.InputStream(callback=callback_input, device=DEVICE_IN, channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE), \
+        sd.OutputStream(callback=callback_output, device=3, channels=2, samplerate=44100):
         # The streams are now open and the callback function will be called every time there is audio input and output
         # We'll just use a blocking wait here for simplicity
         while not stop_intercom_event.is_set():
@@ -548,10 +558,10 @@ thread_id = "Continuous"
 period = 300
 interval = 0
 file_format = "FLAC"
-
+record_start = None
 
 def callback(indata, frames, time, status):
-    global buffer, buffer_index, current_time, timestamp, recording_start_index
+    global buffer, buffer_index, current_time, timestamp, recording_start_index, record_start
     ##print("callback", indata.shape, frames, time, status)
     if status:
         print("Callback status:", status)
@@ -572,10 +582,14 @@ def callback(indata, frames, time, status):
     # audio_save_buff = indata.astype(np.int16).copy()
 
     if recording_start_index is None:
+        print("recording started at:", timestamp)
         recording_start_index = buffer_index 
+        record_start = datetime.datetime.now()
 
-    if buffer_index >= (recording_start_index + (SAMPLE_RATE * period)):
+    if datetime.datetime.now() > record_start + datetime.timedelta(seconds=period):
+        print("recording ended at:", timestamp)
         recording_end_index = buffer_index
+
         save_start_index = recording_start_index % buffer_size
         save_end_index = recording_end_index % buffer_size
 
@@ -678,7 +692,7 @@ def recording_worker_thread(period, interval, thread_id, file_format):
 #
 # event recording functions
 #
-
+'''
 def get_event(audio_data):
     global monitor_channel
     ##print("monitoring channel:", monitor_channel)
@@ -695,7 +709,7 @@ def get_event(audio_data):
         print("event detected at:", datetime.datetime.now(), "audio level:", audio_level)
         detected_level = audio_level
         event_start_index = index
-
+'''
 #
 # audio stream and callback functions
 #
