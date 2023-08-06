@@ -86,6 +86,9 @@ trigger_oscope_event = threading.Event()
 trigger_fft_event = threading.Event()
 stop_worker_event = threading.Event()
 
+# queues
+stop_vu_queue = None
+
 # misc globals
 _dtype = None                   # parms sd lib cares about
 _subtype = None
@@ -331,7 +334,8 @@ def plot_and_save_fft():
         plt.plot(bucket_freqs, np.abs(buckets))
         plt.xlabel('Frequency (Hz)')
         plt.ylabel('Amplitude')
-        plt.title('FFT Plot')
+        plt.title('FFT Plot monitoring ch: ' + str(monitor_channel + 1) + ' of ' + str(SOUND_CHS) + ' channels')
+
         plt.grid(True)
 
         # processes can't see timestamp from the thread, so get it again
@@ -387,11 +391,10 @@ def show_audio_device_list():
     print(f"\nCurrent device in: {SOUND_IN}, device out: {SOUND_OUT}\n")
     show_audio_device_info_for_SOUND_IN_OUT()
 
-
 # Print a string of asterisks, ending with only a carriage return to overwrite the line
 # value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
 def vu_meter(stop_vu_queue, asterisks):
-    global monitor_channel, device_ch, stop_vu_event
+    global monitor_channel, device_ch
 
     buffer = np.zeros((PRIMARY_SAMPLE_RATE,))
 
@@ -423,7 +426,7 @@ def stop_vu(vu_proc, stop_vu_event):
 
 
 def toggle_vu_meter():
-    global vu_proc, monitor_channel, asterisks
+    global vu_proc, monitor_channel, asterisks, stop_vu_queue
 
     if vu_proc is None:
         print("\nVU meter monitoring channel:", monitor_channel)
@@ -605,7 +608,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
                     return
             
             period_end_index = buffer_index 
-            ##print(f"Recording length in worker thread: {period_end_index - period_start_index}, after {period} seconds")
+            ##print(f"Recording length in worker thread: {period_end_index - period_start_index}, after {record_period} seconds")
             save_start_index = period_start_index % buffer_size
             save_end_index = period_end_index % buffer_size
 
@@ -619,7 +622,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
                 # resample to lower sample rate
                 audio_data = downsample_audio(audio_data, PRIMARY_SAMPLE_RATE, target_sample_rate)
 
-            output_filename = f"{timestamp}_{thread_id}_{period}_{interval}_{LOCATION_ID}_{HIVE_ID}.{file_format.lower()}"
+            output_filename = f"{timestamp}_{thread_id}_{record_period}_{interval}_{LOCATION_ID}_{HIVE_ID}.{file_format.lower()}"
             full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
 
             if file_format.upper() == 'MP3':
@@ -631,9 +634,9 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
             else:
                 sf.write(full_path_name, audio_data, target_sample_rate, format=file_format.upper())
 
-            print(f"Saved {thread_id} audio to {full_path_name}, period: {period}, interval {interval} seconds")
-            # wait PERIOD seconds to accumulate audio
-            t = interval - period
+            print(f"Saved {thread_id} audio to {full_path_name}, period: {record_period}, interval {interval} seconds")
+            # wait "interval" seconds before starting recording again
+            t = interval
             while t > 0:
                 time.sleep(1)
                 t -= 1
@@ -835,6 +838,7 @@ def main():
         if KB_or_CP == "KB":
             # Unhook all hooks
             keyboard.unhook_all()
+            clear_input_buffer()
 
         print("\nHopefully we have turned off all the lights...")
             
