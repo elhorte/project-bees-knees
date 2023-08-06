@@ -53,7 +53,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 # init recording varibles
 continuous_start_index = None
-continuous_end_index = 0        # so that the next start = this end
+continuous_end_index = 0        
 period_start_index = None
 event_start_index = None
 detected_level = None
@@ -91,7 +91,7 @@ asterisks = '*'
 device_ch = None                # total number of channels from device
 current_time = None
 timestamp = None
-monitor_channel = 0
+monitor_channel = 0             # '1 of n' mic to monitor by test functions
 stop_program = [False]
 buffer_size = None
 buffer = None
@@ -101,24 +101,42 @@ buffer_index = None
 # #### Control Panel ##########################################
 # #############################################################
 
-# modes
-MODE_CONTINUOUS = False                      # recording continuously to mp3 files
-CONTINUOUS_TIMER = False                     # use a timer to start and stop time of day of continuous recording
+# mode controls
+MODE_CONTINUOUS = False                     # recording continuously to mp3 files
+CONTINUOUS_TIMER = False                    # use a timer to start and stop time of day of continuous recording
 MODE_PERIOD = True                          # period recording
-PERIOD_TIMER = False                         # use a timer to start and stop time of day of period recording
-MODE_EVENT = False                           # event recording
+PERIOD_TIMER = False                        # use a timer to start and stop time of day of period recording
+MODE_EVENT = False                          # event recording
 EVENT_TIMER = False                         # use a timer to start and stop time of day of event recording
 
 MODE_FFT_PERIODIC_RECORD = True             # record fft periodically
 KB_or_CP = "KB"                             # use keyboard or control panel (PyQT5) to control program
 
-# hardware pointers
-DEVICE_IN = 16                              # WASAPI: 17 Scarlett 2ch, 16 Behr 4ch, 16 Behr 2ch, 1 for mme
-DEVICE_OUT = 14                             # WASAPI: 14 Scarlett, 14 Behr 4ch, 14 Behr 2ch, 4 for mme
-DEVICE_CHANNELS = 4                         # Number of channels
+# audio hardware config:
+device_id = 3                               
 
-FULL_SCALE = 2 ** 16                        # just for cli vu meter level reference
-BUFFER_SECONDS = 1000                       # seconds of a circular buffer
+if device_id == 0:                          # win mme, 2 ch only
+    DEVICE_IN = 1                           
+    DEVICE_OUT = 3                          
+    DEVICE_CHANNELS = 2            
+elif device_id == 1:                        # WASAPI: Scarlett 2ch
+    DEVICE_IN = 17                                              
+    DEVICE_OUT = 14                             
+    DEVICE_CHANNELS = 2   
+elif device_id == 2:                        # WASAPI: Behringer 2ch
+    DEVICE_IN = 16                              
+    DEVICE_OUT = 14                         
+    DEVICE_CHANNELS = 2                
+elif device_id == 3:                        # WASAPI: Behringer 4ch
+    DEVICE_IN = 18                              
+    DEVICE_OUT = 14                             
+    DEVICE_CHANNELS = 4                
+else:                                       # default
+    DEVICE_IN = 1                              
+    DEVICE_OUT = 3                             
+    DEVICE_CHANNELS = 2 
+
+# audio parameters:
 SAMPLE_RATE = 192000                        # Audio sample rate
 BIT_DEPTH = 16                              # Audio bit depth
 FILE_FORMAT = "WAV"                             # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
@@ -129,6 +147,7 @@ CONTINUOUS_CHANNELS = 1                     # Number of channels
 CONTINUOUS_QUALITY = 0                      # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 CONTINUOUS_FORMAT = "FLAC"                  # accepts mp3, flac, or wav
 
+# recording types controls:
 CONTINUOUS_START = datetime.time(4, 0, 0)   # time of day to start recording hr, min, sec
 CONTINUOUS_END = datetime.time(23, 0, 0)    # time of day to stop recording hr, min, sec
 CONTINUOUS_DURATION = 30                    # file size in seconds of continuous recording
@@ -155,6 +174,9 @@ FFT_INTERVAL = 30                           # minutes between ffts
 OSCOPE_DURATION = 10                        # seconds of audio to show on oscope
 OSCOPE_GAIN = 20                            # gain in dB for oscope
 
+FULL_SCALE = 2 ** 16                        # just for cli vu meter level reference
+BUFFER_SECONDS = 1000                       # time length of circular buffer 
+
 ##SIGNAL_DIRECTORY = "."                    # for debugging
 SIGNAL_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
 PLOT_DIRECTORY = "D:/OneDrive/data/Zeev/plots"
@@ -166,17 +188,6 @@ HIVE_ID = "Z1"
 # ==================================================================================================
 
 ### startup housekeeping ###
-
-# Check on parms
-if (SAVE_BEFORE_EVENT + SAVE_AFTER_EVENT) * 1.2 > BUFFER_SECONDS:
-    print("The buffer is not large enough to hold the maximum amount of audio that can be saved.")
-    print("Reduce SAVE_DURATION_BEFORE and/or SAVE_DURATION_AFTER or increase the size of the circular buffer 'BUFFER_SECONDS'")
-    quit(-1)
-
-if ((CONTINUOUS_DURATION * 1.1) > BUFFER_SECONDS) or ((PERIOD_RECORD * 1.1) > BUFFER_SECONDS):
-    print("The buffer is not large enough to hold the maximum amount of audio that can be saved.")
-    print("Reduce PERIOD or increase the size of the circular buffer 'BUFFER_SECONDS'")
-    quit(-1)
 
 # Check on input device parms or if input device even exits
 try:
@@ -215,7 +226,6 @@ elif BIT_DEPTH == 32:
 else:
     print("The bit depth is not supported: ", BIT_DEPTH)
     quit(-1)
-
 
 # #############################################################
 # Audio conversion functions
@@ -293,6 +303,7 @@ def plot_oscope():
         plt.subplot(2, 1, i + 1)
         plt.plot(orecording[:, i])
         plt.title(f"Channel {i + 1}")
+        plt.ylim(-0.5, 0.5)
 
     plt.tight_layout()
     plt.show()
@@ -505,9 +516,9 @@ def intercom():
     # Open an input stream and an output stream with the callback function
     ## , channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE
     with sd.InputStream(callback=callback_input, device=DEVICE_IN, channels=DEVICE_CHANNELS, samplerate=SAMPLE_RATE), \
-        sd.OutputStream(callback=callback_output, device=3, channels=2, samplerate=44100):
+        sd.OutputStream(callback=callback_output, device=3, channels=2, samplerate=44100):  
         # The streams are now open and the callback function will be called every time there is audio input and output
-        # We'll just use a blocking wait here for simplicity
+        # In Windows, output is set to the soundmapper output which bypasses the ADC/DAC encoder device.
         while not stop_intercom_event.is_set():
             sd.sleep(1)
         print("Stopping intercom...")
@@ -632,9 +643,10 @@ def audio_stream():
 # ##################################################
 
 
-def recording_worker_thread(period, interval, thread_id, file_format):
+def recording_worker_thread(period, interval, thread_id, file_format, target_sample_rate):
     global buffer, buffer_size, buffer_index
 
+    samplerate = SAMPLE_RATE
     while not stop_recording_event.is_set():
 
         print(f"{thread_id} recording started at:", datetime.datetime.now())
@@ -661,23 +673,18 @@ def recording_worker_thread(period, interval, thread_id, file_format):
         else:                                   # ain't contiguous
             audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
-        if file_format == "MP3":
-            # Downsample audio before saving
-            audio_data = signal.resample_poly(audio_data, CONTINUOUS_SAMPLE_RATE, SAMPLE_RATE)
-            # Convert to 16-bit
-            audio_data = audio_data.astype(np.int16)
+        if target_sample_rate < SAMPLE_RATE:
+            # resample to lower sample rate
+            audio_data = resample_audio(audio_data, SAMPLE_RATE, target_sample_rate)
             
-        print("some audio data:", audio_data[0:20])
-        print("audio_data shape:", audio_data.shape)
-
-        ##sd.play(audio_data, SAMPLE_RATE, DEVICE_OUT)
-        ##sd.wait()
-
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         output_filename = f"{timestamp}_{thread_id}_{period}_{interval}_{LOCATION_ID}_{HIVE_ID}.{file_format.lower()}"
         full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
 
-        sf.write(full_path_name, audio_data, SAMPLE_RATE, format=file_format)
+        if file_format.lower() == 'mp3':
+            pcm_to_mp3_write(audio_data, full_path_name)
+        else:
+            sf.write(full_path_name, audio_data, samplerate, format=file_format.upper())
 
         print(f"Saved {thread_id} audio to {full_path_name}, period: {period}, interval {interval} seconds")
 
@@ -718,9 +725,9 @@ if False: #continuous_save_thread is None:
     continuous_save_thread = threading.Thread(target=check_continuous)
     continuous_save_thread.start()
 
-if False: #period_worker_thread is None:
+if True: #period_worker_thread is None:
     print("starting recording_worker_thread")
-    threading.Thread(target=recording_worker_thread, args=(PERIOD_RECORD, PERIOD_INTERVAL, "Period", "FLAC")).start()
+    threading.Thread(target=recording_worker_thread, args=(PERIOD_RECORD, PERIOD_INTERVAL, "Lower_sr", CONTINUOUS_FORMAT, CONTINUOUS_SAMPLE_RATE)).start()
 
 if False: # event_save_thread is None:
     event_save_thread = threading.Thread(target=event_worker_thread)
