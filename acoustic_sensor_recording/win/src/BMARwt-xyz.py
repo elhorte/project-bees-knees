@@ -26,6 +26,8 @@ from scipy.io.wavfile import write
 from scipy.signal import resample
 from scipy.fft import rfft, rfftfreq
 from scipy.signal import resample_poly
+from scipy.signal import decimate
+from scipy.signal import butter, filtfilt
 from pydub import AudioSegment
 import os
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
@@ -113,7 +115,7 @@ MODE_FFT_PERIODIC_RECORD = True             # record fft periodically
 KB_or_CP = "KB"                             # use keyboard or control panel (PyQT5) to control program
 
 # audio hardware config:
-device_id = 3                               
+device_id = 0                               
 
 if device_id == 0:                          # win mme, 2 ch only
     DEVICE_IN = 1                           
@@ -143,9 +145,9 @@ FILE_FORMAT = "WAV"                             # 'WAV' or 'FLAC'INTERVAL = 0 # 
 
 CONTINUOUS_SAMPLE_RATE = 48000              # For continuous audio
 CONTINUOUS_BIT_DEPTH = 16                   # Audio bit depthv
-CONTINUOUS_CHANNELS = 1                     # Number of channels
+CONTINUOUS_CHANNELS = 2                     # Number of channels
 CONTINUOUS_QUALITY = 0                      # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
-CONTINUOUS_FORMAT = "FLAC"                  # accepts mp3, flac, or wav
+CONTINUOUS_FORMAT = "MP3"                  # accepts mp3, flac, or wav
 
 # recording types controls:
 CONTINUOUS_START = datetime.time(4, 0, 0)   # time of day to start recording hr, min, sec
@@ -226,53 +228,6 @@ elif BIT_DEPTH == 32:
 else:
     print("The bit depth is not supported: ", BIT_DEPTH)
     quit(-1)
-
-# #############################################################
-# Audio conversion functions
-# #############################################################
-
-# convert audio to mp3 and save to file using downsampled data
-def pcm_to_mp3_write(np_array, full_path):
-
-    int_array = np_array.astype(np.int16)
-    byte_array = int_array.tobytes()
-
-    # Create an AudioSegment instance from the byte array
-    audio_segment = AudioSegment(
-        data=byte_array,
-        sample_width=2,
-        frame_rate=CONTINUOUS_SAMPLE_RATE,
-        channels=CONTINUOUS_CHANNELS
-    )
-    if CONTINUOUS_QUALITY >= 64 and CONTINUOUS_QUALITY <= 320:    # use constant bitrate, 64k would be the min, 320k the best
-        cbr = str(CONTINUOUS_QUALITY) + "k"
-        audio_segment.export(full_path, format="mp3", bitrate=cbr)
-    elif CONTINUOUS_QUALITY < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
-        audio_segment.export(full_path, format="mp3", parameters=["-q:a", "0"])
-    else:
-        print("Don't know of a mp3 mode with parameter:", CONTINUOUS_QUALITY)
-        quit(-1)
-
-# resample audio to a lower sample rate using scipy library
-def resample_audio(audio_data, orig_sample_rate, target_sample_rate):
-    # check if audio_data needs to be transposed
-    if audio_data.shape[0] < audio_data.shape[1]:
-        audio_data = audio_data.T
-
-    # assuming audio_data is stereo 16-bit PCM in a numpy array
-    audio_data = audio_data.astype(np.float32)
-    sample_ratio = target_sample_rate / orig_sample_rate
-    downsampled_data = np.zeros((audio_data.shape[0], int(audio_data.shape[1] * sample_ratio)))
-
-    # apply resampling to each channel
-    for ch in range(audio_data.shape[0]):
-        downsampled_data[ch] = resample(audio_data[ch], num=int(audio_data[ch].shape[0] * sample_ratio))
-
-    # transposing the downsampled_data back
-    downsampled_data = downsampled_data.T
-    audio_data = downsampled_data.astype(np.int16)
-
-    return audio_data
 
 
 # #############################################################
@@ -552,10 +507,6 @@ def toggle_intercom():
 # ############################################################
 #
 
-# Audio queue
-##audio_queue = queue.Queue()
-##index_queue = queue.Queue()
-
 # audio buffers and variables
 buffer_size = int(BUFFER_SECONDS * SAMPLE_RATE)
 buffer = np.zeros((buffer_size, DEVICE_CHANNELS), dtype=_dtype)
@@ -570,6 +521,125 @@ period = 300
 interval = 0
 file_format = "FLAC"
 record_start = None
+
+# #############################################################
+# Audio conversion functions
+# #############################################################
+
+# convert audio to mp3 and save to file using downsampled data
+def pcm_to_mp3_write(np_array, full_path):
+
+    int_array = np_array.astype(np.int16)
+    byte_array = int_array.tobytes()
+
+    # Create an AudioSegment instance from the byte array
+    audio_segment = AudioSegment(
+        data=byte_array,
+        sample_width=2,
+        frame_rate=CONTINUOUS_SAMPLE_RATE,
+        channels=CONTINUOUS_CHANNELS
+    )
+    if CONTINUOUS_QUALITY >= 64 and CONTINUOUS_QUALITY <= 320:    # use constant bitrate, 64k would be the min, 320k the best
+        cbr = str(CONTINUOUS_QUALITY) + "k"
+        audio_segment.export(full_path, format="mp3", bitrate=cbr)
+    elif CONTINUOUS_QUALITY < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
+        audio_segment.export(full_path, format="mp3", parameters=["-q:a", "0"])
+    else:
+        print("Don't know of a mp3 mode with parameter:", CONTINUOUS_QUALITY)
+        quit(-1)
+
+# downsample audio to a lower sample rate
+def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
+    # Convert audio to float for processing
+    audio_float = audio_data.astype(np.float32) / np.iinfo(np.int16).max
+    downsample_ratio = int(orig_sample_rate / target_sample_rate)
+
+    # Define an anti-aliasing filter
+    nyq = 0.5 * orig_sample_rate
+    low = 0.5 * target_sample_rate
+    low = low / nyq
+    b, a = butter(5, low, btype='low')
+
+    # If audio is stereo, split channels
+    if audio_float.shape[1] == 2:
+        left_channel = audio_float[:, 0]
+        right_channel = audio_float[:, 1]
+    else:
+        # If not stereo, duplicate the mono channel
+        left_channel = audio_float.ravel()
+        right_channel = audio_float.ravel()
+
+    # Apply the filter and downsample for each channel
+    left_filtered = filtfilt(b, a, left_channel)
+    right_filtered = filtfilt(b, a, right_channel)
+
+    left_downsampled = left_filtered[::downsample_ratio]
+    right_downsampled = right_filtered[::downsample_ratio]
+
+    # Combine the two channels back into a stereo array
+    downsampled_audio_float = np.column_stack((left_downsampled, right_downsampled))
+
+    # Convert back to int16
+    downsampled_audio = (downsampled_audio_float * np.iinfo(np.int16).max).astype(np.int16)
+    return downsampled_audio
+
+# 
+# WORKER THREADS #
+#
+
+def recording_worker_thread(period, interval, thread_id, file_format, target_sample_rate):
+    global buffer, buffer_size, buffer_index, timestamp, stop_recording_event
+
+    samplerate = SAMPLE_RATE
+    while not stop_recording_event.is_set():
+        print(f"0. {thread_id} recording started at:", datetime.datetime.now())
+
+        period_start_index = buffer_index 
+        # wait PERIOD seconds to accumulate audio
+        t = period
+        while t > 0:
+            time.sleep(1)
+            t -= 1
+            if stop_recording_event.is_set():
+                return
+        
+        period_end_index = buffer_index 
+        ##print(f"Recording length in worker thread: {period_end_index - period_start_index}, after {period} seconds")
+        save_start_index = period_start_index % buffer_size
+        save_end_index = period_end_index % buffer_size
+
+        # saving from a circular buffer so segments aren't necessarily contiguous
+        if save_end_index > save_start_index:   # is contiguous
+            audio_data = buffer[save_start_index:save_end_index]
+        else:                                   # ain't contiguous
+            audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+
+        if target_sample_rate < SAMPLE_RATE:
+            # resample to lower sample rate
+            audio_data = downsample_audio(audio_data, SAMPLE_RATE, target_sample_rate)
+
+        output_filename = f"{timestamp}_{thread_id}_{period}_{interval}_{LOCATION_ID}_{HIVE_ID}.{file_format.lower()}"
+        full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
+
+        if file_format.upper() == 'MP3':
+            if target_sample_rate == 44100 or target_sample_rate == 48000:
+                pcm_to_mp3_write(audio_data, full_path_name)
+            else:
+                print("mp3 only supports 44.1k and 48k sample rates")
+                quit(-1)
+        else:
+            sf.write(full_path_name, audio_data, target_sample_rate, format=file_format.upper())
+
+        print(f"Saved {thread_id} audio to {full_path_name}, period: {period}, interval {interval} seconds")
+
+        # wait PERIOD seconds to accumulate audio
+        t = interval - period
+        while t > 0:
+            time.sleep(1)
+            t -= 1
+            if stop_recording_event.is_set():
+                return
+
 
 def callback(indata, frames, time, status):
     global buffer, buffer_index, current_time, timestamp, recording_start_index, record_start
@@ -588,9 +658,6 @@ def callback(indata, frames, time, status):
         buffer[buffer_index:] = indata[:-overflow]
         buffer[:overflow] = indata[-overflow:]
         buffer_wrap_event.set()
-
-    # cast to int16 for 16-bit audio
-    # audio_save_buff = indata.astype(np.int16).copy()
 
     if recording_start_index is None:
         print("recording started at:", timestamp)
@@ -630,108 +697,15 @@ def audio_stream():
     with stream:
         print("Start audio_stream...")
 
+        print("starting recording_worker_thread")
+        threading.Thread(target=recording_worker_thread, args=(PERIOD_RECORD, PERIOD_INTERVAL, "Lower_sr", CONTINUOUS_FORMAT, CONTINUOUS_SAMPLE_RATE)).start()
+
         while stream.active and not stop_program[0]:
             pass
         
         stop_all()
         stream.stop()
         print("Stopped audio_stream...")
-
-
-# ##################################################
-# WORKER THREADS #
-# ##################################################
-
-
-def recording_worker_thread(period, interval, thread_id, file_format, target_sample_rate):
-    global buffer, buffer_size, buffer_index
-
-    samplerate = SAMPLE_RATE
-    while not stop_recording_event.is_set():
-
-        print(f"{thread_id} recording started at:", datetime.datetime.now())
-
-        period_start_index = buffer_index 
-
-        # wait PERIOD seconds to accumulate audio
-        t = period
-        while t > 0:
-            time.sleep(1)
-            t -= 1
-            if stop_recording_event.is_set():
-                return
-        
-        period_end_index = buffer_index 
-
-        print("recording length:", period_end_index - period_start_index)
-
-        save_start_index = period_start_index % buffer_size
-        save_end_index = period_end_index % buffer_size
-        # saving from a circular buffer so segments aren't necessarily contiguous
-        if save_end_index > save_start_index:   # is contiguous
-            audio_data = buffer[save_start_index:save_end_index]
-        else:                                   # ain't contiguous
-            audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
-
-        if target_sample_rate < SAMPLE_RATE:
-            # resample to lower sample rate
-            audio_data = resample_audio(audio_data, SAMPLE_RATE, target_sample_rate)
-            
-        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        output_filename = f"{timestamp}_{thread_id}_{period}_{interval}_{LOCATION_ID}_{HIVE_ID}.{file_format.lower()}"
-        full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
-
-        if file_format.lower() == 'mp3':
-            pcm_to_mp3_write(audio_data, full_path_name)
-        else:
-            sf.write(full_path_name, audio_data, samplerate, format=file_format.upper())
-
-        print(f"Saved {thread_id} audio to {full_path_name}, period: {period}, interval {interval} seconds")
-
-        # wait PERIOD seconds to accumulate audio
-        t = interval - period
-        while t > 0:
-            time.sleep(1)
-            t -= 1
-            if stop_recording_event.is_set():
-                return
-
-#
-# event recording functions
-#
-'''
-def get_event(audio_data):
-    global monitor_channel
-    ##print("monitoring channel:", monitor_channel)
-    if monitor_channel <= DEVICE_CHANNELS:
-        audio_level = np.max(np.abs(audio_data[:,monitor_channel]))
-    else: # all channels
-        audio_level = np.max(np.abs(audio_data))
-
-    global event_start_index, detected_level, buffer
-
-    audio_level = get_level(indata, monitor_channel)
-
-    if (audio_level > EVENT_THRESHOLD) and event_start_index is None:
-        print("event detected at:", datetime.datetime.now(), "audio level:", audio_level)
-        detected_level = audio_level
-        event_start_index = index
-'''
-#
-# audio stream and callback functions
-#
-
-if False: #continuous_save_thread is None:
-    continuous_save_thread = threading.Thread(target=check_continuous)
-    continuous_save_thread.start()
-
-if True: #period_worker_thread is None:
-    print("starting recording_worker_thread")
-    threading.Thread(target=recording_worker_thread, args=(PERIOD_RECORD, PERIOD_INTERVAL, "Lower_sr", CONTINUOUS_FORMAT, CONTINUOUS_SAMPLE_RATE)).start()
-
-if False: # event_save_thread is None:
-    event_save_thread = threading.Thread(target=event_worker_thread)
-    event_save_thread.start()
 
 
 # #############################################################
