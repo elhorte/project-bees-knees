@@ -745,7 +745,7 @@ def stop_all():
 
         if "recording_worker_thread" in t.name:
             if t.is_alive():
-                stop_continuous_event.set()
+                stop_recording_event.set()
                 t.join
                 print("continuous stopped ***")  
 
