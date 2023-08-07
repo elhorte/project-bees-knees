@@ -99,6 +99,7 @@ buffer_size = None
 buffer = None
 buffer_index = None
 
+
 # #############################################################
 # #### Control Panel ##########################################
 # #############################################################
@@ -112,7 +113,7 @@ MODE_FFT_PERIODIC_RECORD = True     # record fft periodically
 KB_or_CP = 'KB'                    # use keyboard or control panel (PyQT5) to control program
 
 # audio hardware config:
-device_id = 0                               
+device_id = 3                               
 
 if device_id == 0:                  # windows mme, 2 ch only
     SOUND_IN = 1                           
@@ -127,7 +128,7 @@ elif device_id == 2:                # WASAPI: Behringer 2ch
     SOUND_OUT = 14                         
     SOUND_CHS = 2                
 elif device_id == 3:                # WASAPI: Behringer 4ch
-    SOUND_IN = 18                              
+    SOUND_IN = 16                              
     SOUND_OUT = 14                             
     SOUND_CHS = 4                
 else:                               # default
@@ -179,42 +180,6 @@ OSCOPE_GAIN = 20                                # gain in dB for oscope
 FULL_SCALE = 2 ** 16                            # just for cli vu meter level reference
 BUFFER_SECONDS = 1000                           # time length of circular buffer 
 
-##SIGNAL_DIRECTORY = "."                        # for debugging
-SIGNAL_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
-PLOT_DIRECTORY = "D:/OneDrive/data/Zeev/plots"
-
-# location and hive ID
-LOCATION_ID = "Zeev-Berkeley"
-HIVE_ID = "Z1"
-
-# ==================================================================================================
-
-### startup housekeeping ###
-
-# Check on input device parms or if input device even exits
-try:
-    device_info = sd.query_devices(SOUND_IN)  
-    device_ch = device_info['max_input_channels'] 
-    if SOUND_CHS > device_ch:
-        print(f"The device only has {device_ch} channel(s) but requires {SOUND_CHS} channels.")
-        print("These are the available devices: \n", sd.query_devices())
-        quit(-1)
-    ##device_SR = device_info['default_samplerate'] 
-    ##if device_SR != PRIMARY_SAMPLE_RATE:
-    ##    print(f"The device sample rate {device_SR} is not equal to the required 'PRIMARY_SAMPLE_RATE' of {PRIMARY_SAMPLE_RATE}")
-    ##    quit(-1)
-except Exception as e:
-    print(f"An error occurred while attempting to access the input device: {e}")
-    print("These are the available devices: \n", sd.query_devices())
-    quit(-1)
-
-# Create the output directory if it doesn't exist
-try:
-    os.makedirs(SIGNAL_DIRECTORY, exist_ok=True)
-except Exception as e:
-    print(f"An error occurred while trying to make or find output directory: {e}")
-    quit(-1)
-
 # translate human to machine
 if PRIMARY_BIT_DEPTH == 16:
     _dtype = 'int16'
@@ -229,6 +194,15 @@ else:
     print("The bit depth is not supported: ", PRIMARY_BIT_DEPTH)
     quit(-1)
 
+##SIGNAL_DIRECTORY = "."                        # for debugging
+SIGNAL_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
+PLOT_DIRECTORY = "D:/OneDrive/data/Zeev/plots"
+
+# location and hive ID
+LOCATION_ID = "Zeev-Berkeley"
+HIVE_ID = "Z1"
+
+# ==================================================================================================
 
 # #############################################################
 # signal display functions
@@ -258,7 +232,6 @@ def plot_oscope():
 
     plt.tight_layout()
     plt.show()
-
 
 
 # single-shot fft plot of audio
@@ -370,7 +343,8 @@ def show_audio_device_info_for_SOUND_IN_OUT():
     device_info = sd.query_devices(SOUND_OUT)  
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Output Channels: {}'.format(device_info['max_output_channels']))
-
+    print()
+    print()
 
 def show_audio_device_info_for_defaults():
     print("\nsounddevices default device info:")
@@ -422,7 +396,7 @@ def stop_vu(vu_proc, stop_vu_event):
 
 def toggle_vu_meter():
     global vu_proc, monitor_channel, asterisks, stop_vu_queue
-    
+
     keyboard.write('\b')
 
     if vu_proc is None:
@@ -445,6 +419,7 @@ def toggle_vu_meter():
         vu_proc.join()
         print("\nvu stopped")
         vu_proc = None
+        keyboard.write('\b')
 
 
 def intercom():
@@ -756,7 +731,30 @@ def main():
     print("Acoustic Signal Capture\n")
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
     print(f"Sample Rate: {PRIMARY_SAMPLE_RATE}; File Format: {PRIMARY_FILE_FORMAT}; Channels: {SOUND_CHS}")
-            
+    
+    # Check on input device parms or if input device even exits
+    try:
+        print("These are the available devices: \n")
+        show_audio_device_list()
+        device_info = sd.query_devices(SOUND_IN)  
+        device_ch = device_info['max_input_channels'] 
+        if SOUND_CHS > device_ch:
+            print(f"The device only has {device_ch} channel(s) but requires {SOUND_CHS} channels.")
+            print("These are the available devices: \n", sd.query_devices())
+            quit(-1)
+
+    except Exception as e:
+        print(f"An error occurred while attempting to access the input device: {e}")
+        quit(-1)
+
+    # Create the output directory if it doesn't exist
+    try:
+        os.makedirs(SIGNAL_DIRECTORY, exist_ok=True)
+        os.makedirs(PLOT_DIRECTORY, exist_ok=True)
+    except Exception as e:
+        print(f"An error occurred while trying to make or find output directory: {e}")
+        quit(-1)
+
     # Create and start the process, note: using mp because matplotlib wants in be in the mainprocess threqad
     if MODE_FFT_PERIODIC_RECORD:
         fft_periodic_plot_proc = multiprocessing.Process(target=plot_and_save_fft) 
