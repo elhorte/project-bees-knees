@@ -61,10 +61,7 @@ event_start_index = None
 detected_level = None
 
 # threads
-continuous_save_thread = None
-period_save_thread = None
-event_save_thread = None
-time_of_day_thread = None
+recording_worker_thread = None
 
 # procs
 vu_proc = None
@@ -112,7 +109,7 @@ MODE_PERIOD = True                 # period recording
 MODE_EVENT = False                  # event recording
 MODE_FFT_PERIODIC_RECORD = True     # record fft periodically
 
-KB_or_CP = "KB"                     # use keyboard or control panel (PyQT5) to control program
+KB_or_CP = 'KB'                    # use keyboard or control panel (PyQT5) to control program
 
 # audio hardware config:
 device_id = 0                               
@@ -166,6 +163,8 @@ SAVE_BEFORE_EVENT = 30                          # seconds to save before the eve
 SAVE_AFTER_EVENT = 30                           # seconds to save after the event
 EVENT_THRESHOLD = 20000                         # audio level threshold to be considered an event
 MONITOR_CH = 0                                  # channel to monitor for event (if > number of chs, all channels are monitored)
+TRACE_DURATION = 10                            # seconds of audio to show on oscope
+OSCOPE_GAIN_DB = 20                             # Gain in dB of audio level for oscope 
 
 # instrumentation parms
 FFT_BINS = 900                                  # number of bins for fft
@@ -237,13 +236,10 @@ else:
 
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
 def plot_oscope(): 
-    # Constants
-    TRACE_DURATION = 10     # Duration in seconds
-    GAIN_DB = 20            # Gain in dB
+    global monitor_channel
 
     # Convert gain from dB to linear scale
-    gain = 10 ** (GAIN_DB / 20)
-
+    gain = 10 ** (OSCOPE_GAIN_DB / 20)
     # Record audio
     print("Recording audio for oscope traces for ch count:", SOUND_CHS)
     o_recording = sd.rec(int(PRIMARY_SAMPLE_RATE * TRACE_DURATION), samplerate=PRIMARY_SAMPLE_RATE, channels=SOUND_CHS)
@@ -251,8 +247,8 @@ def plot_oscope():
     print("Recording oscope finished.")
 
     o_recording *= gain
-    plt.figure()
 
+    plt.figure()
     # Plot number of channels
     for i in range(SOUND_CHS):
         plt.subplot(2, 1, i + 1)
@@ -262,7 +258,7 @@ def plot_oscope():
 
     plt.tight_layout()
     plt.show()
-    print("press any key to continue...")
+
 
 
 # single-shot fft plot of audio
@@ -278,7 +274,6 @@ def plot_fft():
     sd.wait()  # Wait until recording is finished
     myrecording *= gain
     print("Recording fft finished.")
-
     # Perform FFT
     yf = rfft(myrecording.flatten())
     xf = rfftfreq(N, 1 / PRIMARY_SAMPLE_RATE)
@@ -297,9 +292,9 @@ def plot_fft():
     plt.ylabel('Amplitude')
     plt.title('FFT Plot monitoring ch: ' + str(monitor_channel + 1) + ' of ' + str(SOUND_CHS) + ' channels')
     plt.grid(True)
-
     plt.show()
     print("press any key to continue...")
+
 
 # continuous fft plot of audio in a separate process
 def plot_and_save_fft():
@@ -312,7 +307,16 @@ def plot_and_save_fft():
 
     while not stop_fft_periodic_plot_event.is_set():
         # Record audio
-        print("Recording audio for auto fft...")
+        print(f"Recording audio for auto fft in {FFT_INTERVAL} minutes...")
+        # Wait for the desired time interval before recording and plotting again
+        # not using time.sleep() alone because it blocks the main thread
+        t = interval
+        while t > 0:
+            time.sleep(1)
+            t -= 1
+            if stop_fft_periodic_plot_event.is_set():
+                return
+            
         myrecording = sd.rec(int(N), samplerate=PRIMARY_SAMPLE_RATE, channels=monitor_channel + 1)
         sd.wait()  # Wait until recording is finished
         myrecording *= gain
@@ -338,21 +342,12 @@ def plot_and_save_fft():
 
         plt.grid(True)
 
-        # processes can't see timestamp from the thread, so get it again
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         # Save plot to disk with a unique filename based on current time
         output_filename = f"{timestamp}_fft_{PRIMARY_SAMPLE_RATE/1000:.0F}_{PRIMARY_BIT_DEPTH}_{monitor_channel}_{LOCATION_ID}_{HIVE_ID}.png"
         full_path_name = os.path.join(PLOT_DIRECTORY, output_filename)
         plt.savefig(full_path_name)
 
-        # Wait for the desired time interval before recording and plotting again
-        # not using time.sleep() alone because it blocks the main thread
-        t = interval
-        while t > 0:
-            time.sleep(1)
-            t -= 1
-            if stop_fft_periodic_plot_event.is_set():
-                return
     print("Exiting fft periodic")
 
 
@@ -427,6 +422,8 @@ def stop_vu(vu_proc, stop_vu_event):
 
 def toggle_vu_meter():
     global vu_proc, monitor_channel, asterisks, stop_vu_queue
+    
+    keyboard.write('\b')
 
     if vu_proc is None:
         print("\nVU meter monitoring channel:", monitor_channel)
@@ -586,7 +583,7 @@ def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
 #
 
 def recording_worker_thread(record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
-    global buffer, buffer_size, buffer_index, timestamp, stop_recording_event
+    global buffer, buffer_size, buffer_index, stop_recording_event
 
     if start_tod is None:
         print(f"{thread_id} is reconding continuously")
@@ -594,6 +591,8 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
     samplerate = PRIMARY_SAMPLE_RATE
 
     while not stop_recording_event.is_set():
+
+        current_time = datetime.datetime.now().time()
 
         if start_tod is None or (start_tod <= current_time <= end_tod):        
             print(f"{thread_id} recording started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec")
@@ -622,6 +621,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
                 # resample to lower sample rate
                 audio_data = downsample_audio(audio_data, PRIMARY_SAMPLE_RATE, target_sample_rate)
 
+            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             output_filename = f"{timestamp}_{thread_id}_{record_period}_{interval}_{LOCATION_ID}_{HIVE_ID}.{file_format.lower()}"
             full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
 
@@ -645,7 +645,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
 
 
 def callback(indata, frames, time, status):
-    global buffer, buffer_index, current_time, timestamp
+    global buffer, buffer_index
     ##print("callback", indata.shape, frames, time, status)
     if status:
         print("Callback status:", status)
@@ -718,7 +718,7 @@ def clear_input_buffer():
 
 
 def stop_all():
-    global stop_program, time_of_day_thread, stop_tod_event, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc, stop_intercom_event, stop_vu_event
+    global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc, stop_intercom_event, stop_vu_event
 
     print("\n\nStopping all threads...\n")
 
@@ -736,12 +736,6 @@ def stop_all():
                 t.join
                 print("continuous stopped ***")  
 
-        if "get_time_of_day" in t.name:
-            if t.is_alive():
-                stop_tod_event.set()
-                t.join
-                print("tod stopped ***")       
-
     stop_fft_periodic_plot_event.set()
     if fft_periodic_plot_proc is not None:
         fft_periodic_plot_proc.join()
@@ -756,70 +750,76 @@ def stop_all():
 ###########################
 
 
-def get_time_of_day():
-    global current_time, timestamp
-    # this thread just keeps track of the time of day every second
-    while not stop_tod_event.is_set():
-        current_time = datetime.datetime.now().time()
-        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        time.sleep(1)
-
-
 def main():
-    global time_of_day_thread, fft_periodic_plot_proc, monitor_channel
+    global time_of_day_thread, fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel
 
     print("Acoustic Signal Capture\n")
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
     print(f"Sample Rate: {PRIMARY_SAMPLE_RATE}; File Format: {PRIMARY_FILE_FORMAT}; Channels: {SOUND_CHS}")
             
-    # Create and start the thread for time of day
-    time_of_day_thread = threading.Thread(target=get_time_of_day)
-    time_of_day_thread.daemon = True 
-    time_of_day_thread.start()
-
-        # Create and start the process, note: using mp because matplotlib wants in be in the mainprocess threqad
+    # Create and start the process, note: using mp because matplotlib wants in be in the mainprocess threqad
     if MODE_FFT_PERIODIC_RECORD:
         fft_periodic_plot_proc = multiprocessing.Process(target=plot_and_save_fft) 
         fft_periodic_plot_proc.daemon = True  
         fft_periodic_plot_proc.start()
         print("started fft_periodic_plot_process")
 
+    def trigger_oscope():
+        oscope_proc = multiprocessing.Process(target=plot_oscope)
+        oscope_proc.start()
+        keyboard.write('\b')
+        time.sleep(TRACE_DURATION + 3)
+        input("Press any key to continue...")
+        # oscope returns here when plot window is closed by user
+        print("exit oscope")
+        oscope_proc.terminate()
+        oscope_proc.join()
+
+
     def trigger_fft():
         one_shot_fft_proc = multiprocessing.Process(target=plot_fft)
         one_shot_fft_proc.start()
+        keyboard.write('\b')
         input()
         # fft one shot returns here when plot window is closed by user
+        ##print("one_shot_fft_proc.is_alive():", one_shot_fft_proc.is_alive())
+        ##if one_shot_fft_proc.is_alive():
         one_shot_fft_proc.terminate()
         one_shot_fft_proc.join()
         print("exit fft")
 
-    def trigger_oscope():
-        oscope_proc = multiprocessing.Process(target=plot_oscope)
-        oscope_proc.start()
-        input()
-        # oscope returns here when plot window is closed by user
-        oscope_proc.terminate()
-        oscope_proc.join()
-        print("exit oscope")
 
     # Function to switch the channel being listened to
-    def switch_channel(channel):
+    def change_monitor_channel():
         global monitor_channel
 
-        print(f" switching to channel: {channel}", end='\r')
-        monitor_channel = channel
+        ##keyboard.write('\b')  # backspace to erase the current keystroke on the cli
+        print("\npress 'esc' to exit monitor channel selection")
+        print(f"\nChannel {monitor_channel+1} is active, {SOUND_CHS} are available: select a channel:") #, end='\r')
+        keyboard.write('\b')
+        while True:
+            while msvcrt.kbhit():
+                key = msvcrt.getch().decode('utf-8')
+                if key.isdigit():
+                    key_int = int(key)
+                    if key_int >= 1 and key_int <= SOUND_CHS:
+                        monitor_channel = key_int - 1
+                        print(f"Now monitoring: {monitor_channel+1}")
+                    else:
+                        print(f"Sound device has only {SOUND_CHS} channels")
+
+                if key == '\x1b':       # escape
+                    print("exiting monitor channel selection")
+                    return
+            time.sleep(1)
 
     try:
         if KB_or_CP == 'KB':
 
-            # Set up hotkeys for switching channels
-            for i in range(SOUND_CHS):
-                keyboard.add_hotkey(str(i), lambda channel=i: switch_channel(channel))
-
             # beehive keyboard triggered management utilities
             # one shot process to see fft
             keyboard.on_press_key("f", lambda _: trigger_fft(), suppress=True)   
-            # one shot process to see oscope
+            # one shot process to view oscope
             keyboard.on_press_key("o", lambda _: trigger_oscope(), suppress=True) 
             # one shot process to see device list
             keyboard.on_press_key("d", lambda _: show_audio_device_list(), suppress=True) 
@@ -831,7 +831,9 @@ def main():
             keyboard.on_press_key("q", lambda _: signal_stop_all(), suppress=True)
             # usage: press t to see all threads
             keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
-
+            # usage: press m to select channel to monitor
+            keyboard.on_press_key("m", lambda _: change_monitor_channel(), suppress=True)
+            
         # Start the audio stream
         audio_stream()
 
