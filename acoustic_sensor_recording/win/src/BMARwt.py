@@ -38,6 +38,8 @@ import signal
 import sys
 import warnings
 import queue
+import librosa
+import librosa.display
 ##import TestPyQT5
 
 lock = threading.Lock()
@@ -113,7 +115,7 @@ MODE_FFT_PERIODIC_RECORD = True     # record fft periodically
 KB_or_CP = 'KB'                    # use keyboard or control panel (PyQT5) to control program
 
 # audio hardware config:
-device_id = 3                               
+device_id = 0                               
 
 if device_id == 0:                  # windows mme, 2 ch only
     SOUND_IN = 1                           
@@ -202,7 +204,113 @@ PLOT_DIRECTORY = "D:/OneDrive/data/Zeev/plots"
 LOCATION_ID = "Zeev-Berkeley"
 HIVE_ID = "Z1"
 
+output_image_path = "."
+spectrogram_audio_path = os.path.join(SIGNAL_DIRECTORY, "test.flac")
+
 # ==================================================================================================
+
+##########################  
+# misc utilities
+##########################
+
+# interruptable sleep
+def sleep(seconds, stop_sleep_event):
+    for i in range(seconds):
+        if stop_sleep_event.is_set():
+            return
+        time.sleep(1)
+
+
+# for debugging
+def play_audio(filename, device):
+    print("* Playing back")
+    data, fs = sf.read(filename)
+    sd.play(data, fs, device)
+    sd.wait()
+
+
+def show_audio_device_info_for_SOUND_IN_OUT():
+    device_info = sd.query_devices(SOUND_IN)  
+    print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
+    print('Max Input Channels: {}'.format(device_info['max_input_channels']))
+    device_info = sd.query_devices(SOUND_OUT)  
+    print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
+    print('Max Output Channels: {}'.format(device_info['max_output_channels']))
+    print()
+    print()
+
+def show_audio_device_info_for_defaults():
+    print("\nsounddevices default device info:")
+    default_input_info = sd.query_devices(kind='input')
+    default_output_info = sd.query_devices(kind='output')
+    print(f"\nDefault Input Device: {default_input_info}")
+    print(f"Default Output Device: {default_output_info}\n")
+
+
+def show_audio_device_list():
+    print(sd.query_devices())
+    show_audio_device_info_for_defaults()
+    print(f"\nCurrent device in: {SOUND_IN}, device out: {SOUND_OUT}\n")
+    show_audio_device_info_for_SOUND_IN_OUT()
+
+# #############################################################
+# Audio conversion functions
+# #############################################################
+
+# convert audio to mp3 and save to file using downsampled data
+def pcm_to_mp3_write(np_array, full_path):
+
+    int_array = np_array.astype(np.int16)
+    byte_array = int_array.tobytes()
+
+    # Create an AudioSegment instance from the byte array
+    audio_segment = AudioSegment(
+        data=byte_array,
+        sample_width=2,
+        frame_rate=AUDIO_MONITOR_SAMPLE_RATE,
+        channels=AUDIO_MONITOR_CHANNELS
+    )
+    if AUDIO_MONITOR_QUALITY >= 64 and AUDIO_MONITOR_QUALITY <= 320:    # use constant bitrate, 64k would be the min, 320k the best
+        cbr = str(AUDIO_MONITOR_QUALITY) + "k"
+        audio_segment.export(full_path, format="mp3", bitrate=cbr)
+    elif AUDIO_MONITOR_QUALITY < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
+        audio_segment.export(full_path, format="mp3", parameters=["-q:a", "0"])
+    else:
+        print("Don't know of a mp3 mode with parameter:", AUDIO_MONITOR_QUALITY)
+        quit(-1)
+
+# downsample audio to a lower sample rate
+def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
+    # Convert audio to float for processing
+    audio_float = audio_data.astype(np.float32) / np.iinfo(np.int16).max
+    downsample_ratio = int(orig_sample_rate / target_sample_rate)
+
+    # Define an anti-aliasing filter
+    nyq = 0.5 * orig_sample_rate
+    low = 0.5 * target_sample_rate
+    low = low / nyq
+    b, a = butter(5, low, btype='low')
+
+    # If audio is stereo, split channels
+    if audio_float.shape[1] == 2:
+        left_channel = audio_float[:, 0]
+        right_channel = audio_float[:, 1]
+    else:
+        # If not stereo, duplicate the mono channel
+        left_channel = audio_float.ravel()
+        right_channel = audio_float.ravel()
+
+    # Apply the Nyquist filter for each channel
+    left_filtered = filtfilt(b, a, left_channel)
+    right_filtered = filtfilt(b, a, right_channel)
+    # and downsample each channel 
+    left_downsampled = left_filtered[::downsample_ratio]
+    right_downsampled = right_filtered[::downsample_ratio]
+    # Combine the two channels back into a stereo array
+    downsampled_audio_float = np.column_stack((left_downsampled, right_downsampled))
+    # Convert back to int16
+    downsampled_audio = (downsampled_audio_float * np.iinfo(np.int16).max).astype(np.int16)
+    return downsampled_audio
 
 # #############################################################
 # signal display functions
@@ -266,7 +374,35 @@ def plot_fft():
     plt.title('FFT Plot monitoring ch: ' + str(monitor_channel + 1) + ' of ' + str(SOUND_CHS) + ' channels')
     plt.grid(True)
     plt.show()
-    print("press any key to continue...")
+
+
+# one-shot spectrogram plot of audio in a separate process
+def plot_spectrogram(audio_path=spectrogram_audio_path, output_image_path=output_image_path, y_axis_type='log', y_decimal_places=2):
+    # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
+    y, sr = librosa.load(audio_path, sr=None, duration=120)
+    
+    # Compute the spectrogram
+    D = librosa.amplitude_to_db(abs(librosa.stft(y)), ref=np.max)
+    
+    # Plot the spectrogram
+    plt.figure(figsize=(10, 4))
+    
+    if y_axis_type == 'log':
+        librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='log')
+    elif y_axis_type == 'lin':
+        librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='linear')
+    else:
+        raise ValueError("y_axis_type must be 'log' or 'linear'")
+    
+    # Adjust y-ticks to be in kilohertz and have the specified number of decimal places
+    y_ticks = plt.gca().get_yticks()
+    plt.gca().set_yticklabels(['{:.{}f} kHz'.format(tick/1000, y_decimal_places) for tick in y_ticks])
+    
+    plt.colorbar(format='%+2.0f dB')
+    plt.title('Spectrogram')
+    plt.tight_layout()
+    ##plt.savefig(output_image_path, dpi=300)
+    plt.show()
 
 
 # continuous fft plot of audio in a separate process
@@ -282,13 +418,7 @@ def plot_and_save_fft():
         # Record audio
         print(f"Recording audio for auto fft in {FFT_INTERVAL} minutes...")
         # Wait for the desired time interval before recording and plotting again
-        # not using time.sleep() alone because it blocks the main thread
-        t = interval
-        while t > 0:
-            time.sleep(1)
-            t -= 1
-            if stop_fft_periodic_plot_event.is_set():
-                return
+        sleep(interval, stop_fft_periodic_plot_event)
             
         myrecording = sd.rec(int(N), samplerate=PRIMARY_SAMPLE_RATE, channels=monitor_channel + 1)
         sd.wait()  # Wait until recording is finished
@@ -323,42 +453,6 @@ def plot_and_save_fft():
 
     print("Exiting fft periodic")
 
-
-##########################  
-# utilities
-##########################
-
-# for debugging
-def play_audio(filename, device):
-    print("* Playing back")
-    data, fs = sf.read(filename)
-    sd.play(data, fs, device)
-    sd.wait()
-
-
-def show_audio_device_info_for_SOUND_IN_OUT():
-    device_info = sd.query_devices(SOUND_IN)  
-    print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
-    print('Max Input Channels: {}'.format(device_info['max_input_channels']))
-    device_info = sd.query_devices(SOUND_OUT)  
-    print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
-    print('Max Output Channels: {}'.format(device_info['max_output_channels']))
-    print()
-    print()
-
-def show_audio_device_info_for_defaults():
-    print("\nsounddevices default device info:")
-    default_input_info = sd.query_devices(kind='input')
-    default_output_info = sd.query_devices(kind='output')
-    print(f"\nDefault Input Device: {default_input_info}")
-    print(f"Default Output Device: {default_output_info}\n")
-
-
-def show_audio_device_list():
-    print(sd.query_devices())
-    show_audio_device_info_for_defaults()
-    print(f"\nCurrent device in: {SOUND_IN}, device out: {SOUND_OUT}\n")
-    show_audio_device_info_for_SOUND_IN_OUT()
 
 # Print a string of asterisks, ending with only a carriage return to overwrite the line
 # value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
@@ -494,70 +588,20 @@ interval = 0
 file_format = "FLAC"
 record_start = None
 
-# #############################################################
-# Audio conversion functions
-# #############################################################
-
-# convert audio to mp3 and save to file using downsampled data
-def pcm_to_mp3_write(np_array, full_path):
-
-    int_array = np_array.astype(np.int16)
-    byte_array = int_array.tobytes()
-
-    # Create an AudioSegment instance from the byte array
-    audio_segment = AudioSegment(
-        data=byte_array,
-        sample_width=2,
-        frame_rate=AUDIO_MONITOR_SAMPLE_RATE,
-        channels=AUDIO_MONITOR_CHANNELS
-    )
-    if AUDIO_MONITOR_QUALITY >= 64 and AUDIO_MONITOR_QUALITY <= 320:    # use constant bitrate, 64k would be the min, 320k the best
-        cbr = str(AUDIO_MONITOR_QUALITY) + "k"
-        audio_segment.export(full_path, format="mp3", bitrate=cbr)
-    elif AUDIO_MONITOR_QUALITY < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
-        audio_segment.export(full_path, format="mp3", parameters=["-q:a", "0"])
-    else:
-        print("Don't know of a mp3 mode with parameter:", AUDIO_MONITOR_QUALITY)
-        quit(-1)
-
-# downsample audio to a lower sample rate
-def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
-    # Convert audio to float for processing
-    audio_float = audio_data.astype(np.float32) / np.iinfo(np.int16).max
-    downsample_ratio = int(orig_sample_rate / target_sample_rate)
-
-    # Define an anti-aliasing filter
-    nyq = 0.5 * orig_sample_rate
-    low = 0.5 * target_sample_rate
-    low = low / nyq
-    b, a = butter(5, low, btype='low')
-
-    # If audio is stereo, split channels
-    if audio_float.shape[1] == 2:
-        left_channel = audio_float[:, 0]
-        right_channel = audio_float[:, 1]
-    else:
-        # If not stereo, duplicate the mono channel
-        left_channel = audio_float.ravel()
-        right_channel = audio_float.ravel()
-
-    # Apply the Nyquist filter for each channel
-    left_filtered = filtfilt(b, a, left_channel)
-    right_filtered = filtfilt(b, a, right_channel)
-    # and downsample each channel 
-    left_downsampled = left_filtered[::downsample_ratio]
-    right_downsampled = right_filtered[::downsample_ratio]
-    # Combine the two channels back into a stereo array
-    downsampled_audio_float = np.column_stack((left_downsampled, right_downsampled))
-    # Convert back to int16
-    downsampled_audio = (downsampled_audio_float * np.iinfo(np.int16).max).astype(np.int16)
-    return downsampled_audio
-
 # 
-# WORKER THREAD #
+# ### WORKER THREAD ########################################################
 #
 
 def recording_worker_thread(record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
+    #
+    # recording_period is the length of time to record in seconds
+    # interval is the time between recordings in seconds
+    # thread_id is a string to identify the thread
+    # file_format is the format to save the audio file as
+    # target_sample_rate is the sample rate to save the audio file as
+    # start_tod is the time of day to start recording, if None, record continuously
+    # end_tod is the time of day to stop recording, if None, record continuously
+    #
     global buffer, buffer_size, buffer_index, stop_recording_event
 
     if start_tod is None:
@@ -574,13 +618,8 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
 
             period_start_index = buffer_index 
             # wait PERIOD seconds to accumulate audio
-            t = record_period
-            while t > 0:
-                time.sleep(1)
-                t -= 1
-                if stop_recording_event.is_set():
-                    return
-            
+            sleep(record_period, stop_recording_event)
+
             period_end_index = buffer_index 
             ##print(f"Recording length in worker thread: {period_end_index - period_start_index}, after {record_period} seconds")
             save_start_index = period_start_index % buffer_size
@@ -609,14 +648,11 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
             else:
                 sf.write(full_path_name, audio_data, target_sample_rate, format=file_format.upper())
 
-            print(f"Saved {thread_id} audio to {full_path_name}, period: {record_period}, interval {interval} seconds")
+            if not stop_recording_event.is_set():
+                print(f"Saved {thread_id} audio to {full_path_name}, period: {record_period}, interval {interval} seconds")
             # wait "interval" seconds before starting recording again
-            t = interval
-            while t > 0:
-                time.sleep(1)
-                t -= 1
-                if stop_recording_event.is_set():
-                    return
+            sleep(interval, stop_recording_event)
+
 
 
 def callback(indata, frames, time, status):
@@ -682,9 +718,12 @@ def list_all_threads():
 
 def signal_stop_all():
     global stop_program
+
     print("Signalling stop all processes...")
+    clear_input_buffer()
+    stop_recording_event.set()
     stop_program[0] = True
-    ##stop_all()
+    stop_all()
 
 
 def clear_input_buffer():
@@ -696,9 +735,7 @@ def stop_all():
     global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc, stop_intercom_event, stop_vu_event
 
     print("\n\nStopping all threads...\n")
-
     list_all_threads()
-
     print("\nClearing input buffer of keystrokes\n")
     clear_input_buffer()    # clear the input buffer so we don't get any unwanted characters
 
@@ -709,7 +746,7 @@ def stop_all():
             if t.is_alive():
                 stop_recording_event.set()
                 t.join
-                print("continuous stopped ***")  
+                print("recording_worker_thread stopped ***")  
 
     stop_fft_periodic_plot_event.set()
     if fft_periodic_plot_proc is not None:
@@ -762,6 +799,7 @@ def main():
         fft_periodic_plot_proc.start()
         print("started fft_periodic_plot_process")
 
+
     def trigger_oscope():
         oscope_proc = multiprocessing.Process(target=plot_oscope)
         oscope_proc.start()
@@ -778,13 +816,29 @@ def main():
         one_shot_fft_proc = multiprocessing.Process(target=plot_fft)
         one_shot_fft_proc.start()
         keyboard.write('\b')
-        input()
+        time.sleep(FFT_DURATION + 3)
+        input("Press any key to continue...")
         # fft one shot returns here when plot window is closed by user
         ##print("one_shot_fft_proc.is_alive():", one_shot_fft_proc.is_alive())
         ##if one_shot_fft_proc.is_alive():
         one_shot_fft_proc.terminate()
         one_shot_fft_proc.join()
         print("exit fft")
+
+
+    def trigger_spectrogram():
+        one_shot_spectrogram_proc = multiprocessing.Process(target=plot_spectrogram)
+        one_shot_spectrogram_proc.start()
+        keyboard.write('\b')
+        print("Plotting spectrogram...")
+        time.sleep(30)
+        input("Press any key to continue...")
+        # spectrogram one shot returns here when plot window is closed by user
+        ##print("one_shot_fft_proc.is_alive():", one_shot_fft_proc.is_alive())
+        ##if one_shot_fft_proc.is_alive():
+        one_shot_spectrogram_proc.terminate()
+        one_shot_spectrogram_proc.join()
+        print("exit spectrogram")
 
 
     # Function to switch the channel being listened to
@@ -819,6 +873,8 @@ def main():
             keyboard.on_press_key("f", lambda _: trigger_fft(), suppress=True)   
             # one shot process to view oscope
             keyboard.on_press_key("o", lambda _: trigger_oscope(), suppress=True) 
+            # usage: press s to plot spectrogram of last recording
+            keyboard.on_press_key("s", lambda _: trigger_spectrogram(), suppress=True)            
             # one shot process to see device list
             keyboard.on_press_key("d", lambda _: show_audio_device_list(), suppress=True) 
             # usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
@@ -831,7 +887,7 @@ def main():
             keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
             # usage: press m to select channel to monitor
             keyboard.on_press_key("m", lambda _: change_monitor_channel(), suppress=True)
-            
+
         # Start the audio stream
         audio_stream()
 
@@ -844,7 +900,7 @@ def main():
             
     except KeyboardInterrupt: # ctrl-c in windows
         print('\nRecording process stopped by user.')
-        stop_all()
+        signal_stop_all()
 
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
