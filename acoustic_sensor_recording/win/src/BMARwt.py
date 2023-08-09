@@ -482,17 +482,21 @@ def vu_meter(stop_vu_queue, asterisks):
         print("Stopping vu...")
 
 
-def stop_vu(vu_proc, stop_vu_event):
+def stop_vu():
+    global vu_proc, stop_vu_event, stop_vu_queue
     if vu_proc is not None:
         stop_vu_event.set()
+        stop_vu_queue.put(True)
+        vu_proc = None
         vu_proc.join()            # make sure its stopped, hate zombies
+        keyboard.write('\b')
+        print("\nvu stopped")
 
 
 def toggle_vu_meter():
     global vu_proc, monitor_channel, asterisks, stop_vu_queue
 
     keyboard.write('\b')
-
     if vu_proc is None:
         print("\nVU meter monitoring channel:", monitor_channel)
         manager = multiprocessing.Manager()
@@ -509,11 +513,7 @@ def toggle_vu_meter():
         vu_proc = multiprocessing.Process(target=vu_meter, args=(stop_vu_queue, asterisks))
         vu_proc.start()
     else:
-        stop_vu_queue.put(True)
-        vu_proc.join()
-        print("\nvu stopped")
-        vu_proc = None
-        keyboard.write('\b')
+        stop_vu()
 
 
 def intercom():
@@ -654,7 +654,6 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
             sleep(interval, stop_recording_event)
 
 
-
 def callback(indata, frames, time, status):
     global buffer, buffer_index
     ##print("callback", indata.shape, frames, time, status)
@@ -702,7 +701,9 @@ def audio_stream():
             pass
         
         stop_all()
+
         stream.stop()
+
         print("Stopped audio_stream...")
 
 
@@ -716,6 +717,11 @@ def list_all_threads():
         print(f"Thread name: {thread.name}, Thread ID: {thread.ident}, Alive: {thread.is_alive()}")
 
 
+def clear_input_buffer():
+    while msvcrt.kbhit():
+        msvcrt.getch()
+
+
 def signal_stop_all():
     global stop_program
 
@@ -726,19 +732,23 @@ def signal_stop_all():
     stop_all()
 
 
-def clear_input_buffer():
-    while msvcrt.kbhit():
-        msvcrt.getch()
-
-
 def stop_all():
     global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc, stop_intercom_event, stop_vu_event
 
+    print("Signalling stop all processes...")
     print("\n\nStopping all threads...\n")
-    list_all_threads()
-    print("\nClearing input buffer of keystrokes\n")
-    clear_input_buffer()    # clear the input buffer so we don't get any unwanted characters
 
+    stop_program[0] = True
+    stop_recording_event.set()
+    stop_fft_periodic_plot_event.set()
+
+    if fft_periodic_plot_proc is not None:
+        fft_periodic_plot_proc.join()
+
+    stop_intercom()
+    stop_vu()
+
+    list_all_threads()
     for t in threading.enumerate():
         print("thread name:", t)
 
@@ -747,13 +757,6 @@ def stop_all():
                 stop_recording_event.set()
                 t.join
                 print("recording_worker_thread stopped ***")  
-
-    stop_fft_periodic_plot_event.set()
-    if fft_periodic_plot_proc is not None:
-        fft_periodic_plot_proc.join()
-
-    stop_intercom()
-    keyboard.unhook_all()
     print("\nHopefully we have turned off all the lights...")
 
 
@@ -891,7 +894,7 @@ def main():
         # Start the audio stream
         audio_stream()
 
-        if KB_or_CP == "KB":
+        if KB_or_CP == 'KB':
             # Unhook all hooks
             keyboard.unhook_all()
             clear_input_buffer()
@@ -899,8 +902,8 @@ def main():
         print("\nHopefully we have turned off all the lights...")
             
     except KeyboardInterrupt: # ctrl-c in windows
-        print('\nRecording process stopped by user.')
-        signal_stop_all()
+        print('\nCtrl-C: Recording process stopped by user.')
+        stop_all()
 
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
