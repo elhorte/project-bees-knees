@@ -405,7 +405,7 @@ def plot_spectrogram(audio_path=spectrogram_audio_path, output_image_path=output
     plt.show()
 
 
-# continuous fft plot of audio in a separate process
+# continuous fft plot of audio in a separate background process
 def plot_and_save_fft():
     global monitor_channel, stop_fft_periodic_plot_event, fft_periodic_plot_proc
 
@@ -468,7 +468,7 @@ def vu_meter(stop_vu_queue, asterisks):
         buffer[:frames] = channel_data
 
         audio_level = np.max(np.abs(channel_data))
-        normalized_value = int((audio_level / 1.0) * 50)  # scale based on max value of 1.0, and multiply by 50 for the length of the asterisks bar
+        normalized_value = int((audio_level / 1.0) * 50)  
 
         asterisks.value = '*' * normalized_value
         ##print(f"Audio level: {audio_level}, Normalized value: {normalized_value}")
@@ -476,35 +476,32 @@ def vu_meter(stop_vu_queue, asterisks):
 
     with sd.InputStream(callback=callback_input, channels=SOUND_CHS, samplerate=PRIMARY_SAMPLE_RATE):
         while not stop_vu_queue.get():
-            ##sd.sleep(1)
-            ##print(asterisks.value.ljust(50, ' '), end='\r')
-            pass
+            sd.sleep(0.1)
+            ##pass
         print("Stopping vu...")
 
 
 def stop_vu():
     global vu_proc, stop_vu_event, stop_vu_queue
+
     if vu_proc is not None:
         stop_vu_event.set()
         stop_vu_queue.put(True)
-        vu_proc = None
         vu_proc.join()            # make sure its stopped, hate zombies
-        keyboard.write('\b')
+        vu_proc = None
+        clear_input_buffer()
         print("\nvu stopped")
 
 
 def toggle_vu_meter():
     global vu_proc, monitor_channel, asterisks, stop_vu_queue
 
-    keyboard.write('\b')
     if vu_proc is None:
         print("\nVU meter monitoring channel:", monitor_channel)
-        manager = multiprocessing.Manager()
+        vu_manager = multiprocessing.Manager()
         stop_vu_queue = multiprocessing.Queue()
-        asterisks = manager.Value(str, '*' * 50)
-
+        asterisks = vu_manager.Value(str, '*' * 50)
         print("fullscale:",asterisks.value.ljust(50, ' '))
-
         if MODE_EVENT:
             normalized_value = int(EVENT_THRESHOLD / 1000)
             asterisks.value = '*' * normalized_value
@@ -700,8 +697,6 @@ def audio_stream():
         while stream.active and not stop_program[0]:
             pass
         
-        stop_all()
-
         stream.stop()
 
         print("Stopped audio_stream...")
@@ -722,16 +717,6 @@ def clear_input_buffer():
         msvcrt.getch()
 
 
-def signal_stop_all():
-    global stop_program
-
-    print("Signalling stop all processes...")
-    clear_input_buffer()
-    stop_recording_event.set()
-    stop_program[0] = True
-    stop_all()
-
-
 def stop_all():
     global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc, stop_intercom_event, stop_vu_event
 
@@ -739,16 +724,17 @@ def stop_all():
     print("\n\nStopping all threads...\n")
 
     stop_program[0] = True
-    stop_recording_event.set()
-    stop_fft_periodic_plot_event.set()
 
+    stop_recording_event.set()
+
+    stop_fft_periodic_plot_event.set()
     if fft_periodic_plot_proc is not None:
         fft_periodic_plot_proc.join()
 
     stop_intercom()
     stop_vu()
+    clear_input_buffer()
 
-    list_all_threads()
     for t in threading.enumerate():
         print("thread name:", t)
 
@@ -757,6 +743,8 @@ def stop_all():
                 stop_recording_event.set()
                 t.join
                 print("recording_worker_thread stopped ***")  
+
+    list_all_threads()
     print("\nHopefully we have turned off all the lights...")
 
 
@@ -885,7 +873,7 @@ def main():
             # usage: press v to start cli vu meter, press v again to stop
             keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
             # usage: press q to stop all processes
-            keyboard.on_press_key("q", lambda _: signal_stop_all(), suppress=True)
+            keyboard.on_press_key("q", lambda _: stop_all(), suppress=True)
             # usage: press t to see all threads
             keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
             # usage: press m to select channel to monitor
@@ -893,6 +881,8 @@ def main():
 
         # Start the audio stream
         audio_stream()
+
+        stop_all()
 
         if KB_or_CP == 'KB':
             # Unhook all hooks
