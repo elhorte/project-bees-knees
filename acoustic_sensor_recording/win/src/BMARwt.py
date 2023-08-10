@@ -814,6 +814,7 @@ def main():
         oscope_proc.start()
         keyboard.write('\b')
         time.sleep(TRACE_DURATION + 3)
+        clear_input_buffer()
         input("Press any key to continue...")
         # oscope returns here when plot window is closed by user
         print("exit oscope")
@@ -826,6 +827,7 @@ def main():
         one_shot_fft_proc.start()
         keyboard.write('\b')
         time.sleep(FFT_DURATION + 3)
+        clear_input_buffer()        
         input("Press any key to continue...")
         # fft one shot returns here when plot window is closed by user
         ##print("one_shot_fft_proc.is_alive():", one_shot_fft_proc.is_alive())
@@ -841,6 +843,7 @@ def main():
         keyboard.write('\b')
         print("Plotting spectrogram...")
         time.sleep(30)
+        clear_input_buffer()
         input("Press any key to continue...")
         # spectrogram one shot returns here when plot window is closed by user
         ##print("one_shot_fft_proc.is_alive():", one_shot_fft_proc.is_alive())
