@@ -253,6 +253,17 @@ def show_audio_device_list():
     print(f"\nCurrent device in: {SOUND_IN}, device out: {SOUND_OUT}\n")
     show_audio_device_info_for_SOUND_IN_OUT()
 
+
+def find_file_of_type_with_offset(directory=SIGNAL_DIRECTORY, file_type=PRIMARY_FILE_FORMAT, offset=0):
+    print("signal dir:", SIGNAL_DIRECTORY, "file type:", PRIMARY_FILE_FORMAT)
+    matching_files = [file for file in os.listdir(directory) if file.endswith(f".{file_type}")]
+    
+    if offset < len(matching_files):
+        print("spectrogram found:", matching_files[offset])
+        return matching_files[offset]
+
+    return None
+
 # #############################################################
 # Audio conversion functions
 # #############################################################
@@ -378,6 +389,8 @@ def plot_fft():
 
 # one-shot spectrogram plot of audio in a separate process
 def plot_spectrogram(audio_path=spectrogram_audio_path, output_image_path=output_image_path, y_axis_type='log', y_decimal_places=2):
+    
+    print("find file:",find_file_of_type_with_offset())
     # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
     y, sr = librosa.load(audio_path, sr=None, duration=120)
     
@@ -592,12 +605,12 @@ record_start = None
 def recording_worker_thread(record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
     #
     # recording_period is the length of time to record in seconds
-    # interval is the time between recordings in seconds
-    # thread_id is a string to identify the thread
-    # file_format is the format to save the audio file as
-    # target_sample_rate is the sample rate to save the audio file as
-    # start_tod is the time of day to start recording, if None, record continuously
-    # end_tod is the time of day to stop recording, if None, record continuously
+    # interval is the time between recordings in seconds if > 0
+    # thread_id is a string to label the thread
+    # file_format is the format in which to save the audio file
+    # target_sample_rate is the sample rate in which to save the audio file
+    # start_tod is the time of day to start recording, if 'None', record continuously
+    # end_tod is the time of day to stop recording, if start_tod == None, ignore & record continuously
     #
     global buffer, buffer_size, buffer_index, stop_recording_event
 
@@ -695,7 +708,7 @@ def audio_stream():
             threading.Thread(target=recording_worker_thread, args=(SAVE_BEFORE_EVENT, SAVE_AFTER_EVENT, "Event_recording", PRIMARY_FILE_FORMAT, PRIMARY_SAMPLE_RATE, EVENT_START, EVENT_END)).start()
 
         while stream.active and not stop_program[0]:
-            pass
+            time.sleep(1)
         
         stream.stop()
 
