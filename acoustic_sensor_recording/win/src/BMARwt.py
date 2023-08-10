@@ -255,8 +255,8 @@ def show_audio_device_list():
 
 
 def find_file_of_type_with_offset(directory=SIGNAL_DIRECTORY, file_type=PRIMARY_FILE_FORMAT, offset=0):
-    print("signal dir:", SIGNAL_DIRECTORY, "file type:", PRIMARY_FILE_FORMAT)
-    matching_files = [file for file in os.listdir(directory) if file.endswith(f".{file_type}")]
+    ##print("signal dir:", SIGNAL_DIRECTORY, "file type:", PRIMARY_FILE_FORMAT)
+    matching_files = [file for file in os.listdir(directory) if file.endswith(f".{file_type.lower()}")]
     
     if offset < len(matching_files):
         print("spectrogram found:", matching_files[offset])
@@ -388,11 +388,16 @@ def plot_fft():
 
 
 # one-shot spectrogram plot of audio in a separate process
-def plot_spectrogram(audio_path=spectrogram_audio_path, output_image_path=output_image_path, y_axis_type='log', y_decimal_places=2):
+def plot_spectrogram(audio_path=spectrogram_audio_path, output_image_path=output_image_path, y_axis_type='lin', y_decimal_places=2):
     
-    print("find file:",find_file_of_type_with_offset())
+    if find_file_of_type_with_offset() == None:
+        print("No data available to see?")
+        return
+    else: 
+        audio_path = SIGNAL_DIRECTORY + '/' + find_file_of_type_with_offset() # quick hack to eval code
+
     # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
-    y, sr = librosa.load(audio_path, sr=None, duration=120)
+    y, sr = librosa.load(audio_path, sr=None, duration=PERIOD_RECORD)
     
     # Compute the spectrogram
     D = librosa.amplitude_to_db(abs(librosa.stft(y)), ref=np.max)
