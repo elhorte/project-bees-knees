@@ -564,28 +564,6 @@ def intercom():
         print("Stopping intercom...")
 
 
-def stop_intercom():
-    global intercom_proc, stop_intercom_event
-
-    if intercom_proc is not None:
-        stop_intercom_event.set()
-        intercom_proc.terminate()
-        intercom_proc.join()            # make sure its stopped, hate zombies
-
-
-def toggle_intercom():
-    global intercom_proc
-
-    if intercom_proc is None:
-        print("Starting intercom...")
-        print("listening to channel 0",  end='\r')
-        intercom_proc = multiprocessing.Process(target=intercom)
-        intercom_proc.start()
-    else:
-        stop_intercom()
-        print("\nIntercom stopped")
-        intercom_proc = None
-
 #
 # ############ intercom using threads #############
 #
@@ -616,22 +594,23 @@ def intercom_t():
         monitor_channel = channel
 
     # Set up hotkeys for switching channels
-    for i in range(SOUND_CHS):
-        keyboard.add_hotkey(str(i), lambda channel=i: switch_channel(channel))
+    ##for i in range(SOUND_CHS):
+    ##    keyboard.add_hotkey(str(i), lambda channel=i: switch_channel(channel))
 
     # Open an input stream and an output stream with the callback function
-    with sd.InputStream(callback=callback_input, channels=PRIMARY_SAMPLE_RATE, samplerate=PRIMARY_SAMPLE_RATE), \
-        sd.OutputStream(callback=callback_output, channels=PRIMARY_SAMPLE_RATE, samplerate=PRIMARY_SAMPLE_RATE):
+    with sd.InputStream(callback=callback_input, channels=SOUND_CHS, samplerate=PRIMARY_SAMPLE_RATE), \
+        sd.OutputStream(callback=callback_output, channels=SOUND_CHS, samplerate=PRIMARY_SAMPLE_RATE):
         # The streams are now open and the callback function will be called every time there is audio input and output
         # We'll just use a blocking wait here for simplicity
         while not stop_intercom_event.is_set():
             if change_ch_event.is_set():
                 channel = monitor_channel
-                print("Intercom changing to ch:", monitor_channel)
+                print("\nIntercom changing to ch:", monitor_channel + 1)
                 change_ch_event.clear()
             sd.sleep(1)
 
         print("Stopping intercom...")
+
 
 
 #
@@ -801,7 +780,6 @@ def stop_all():
     if fft_periodic_plot_proc is not None:
         fft_periodic_plot_proc.join()
 
-    stop_intercom()
     stop_vu()
     clear_input_buffer()
 
@@ -906,8 +884,8 @@ def main():
         global intercom_thread, stop_intercom_event
 
         if intercom_thread is None or not intercom_thread.is_alive():
-            print("Starting intercom, listening to channel 0")
-            intercom_thread = threading.Thread(target=intercom)
+            print("Starting intercom on channel:", monitor_channel + 1)
+            intercom_thread = threading.Thread(target=intercom_t)
             intercom_thread.start()
         else:
             stop_intercom_event.set()
@@ -916,6 +894,27 @@ def main():
             intercom_thread = None
             stop_intercom_event.clear()
 
+
+    def stop_intercom():
+        global intercom_proc, stop_intercom_event
+
+        if intercom_proc is not None:
+            stop_intercom_event.set()
+            intercom_proc.terminate()
+            intercom_proc.join()            # make sure its stopped, hate zombies
+
+
+    def toggle_intercom_m():
+        global intercom_proc
+
+        if intercom_proc is None:
+            print("Starting intercom on channel:", monitor_channel + 1)
+            intercom_proc = multiprocessing.Process(target=intercom)
+            intercom_proc.start()
+        else:
+            stop_intercom()
+            print("\nIntercom stopped")
+            intercom_proc = None
 
     # Function to switch the channel being listened to
     def change_monitor_channel():
@@ -934,6 +933,7 @@ def main():
                         monitor_channel = key_int - 1
                         change_ch_event.set()                         
                         print(f"Now monitoring: {monitor_channel+1}")
+                        return          # usage: press m then press 1, 2, 3, 4
                     else:
                         print(f"Sound device has only {SOUND_CHS} channels")
 
