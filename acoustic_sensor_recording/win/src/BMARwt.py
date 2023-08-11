@@ -64,6 +64,7 @@ detected_level = None
 
 # threads
 recording_worker_thread = None
+intercom_thread = None
 
 # procs
 vu_proc = None
@@ -259,9 +260,8 @@ def find_file_of_type_with_offset(directory=SIGNAL_DIRECTORY, file_type=PRIMARY_
     matching_files = [file for file in os.listdir(directory) if file.endswith(f".{file_type.lower()}")]
     
     if offset < len(matching_files):
-        print("spectrogram found:", matching_files[offset])
         return matching_files[offset]
-
+    # else:
     return None
 
 # #############################################################
@@ -395,7 +395,7 @@ def plot_spectrogram(audio_path=spectrogram_audio_path, output_image_path=output
         return
     else: 
         audio_path = SIGNAL_DIRECTORY + '/' + find_file_of_type_with_offset() # quick hack to eval code
-
+        print("Spectrogram found:", audio_path)
     # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
     y, sr = librosa.load(audio_path, sr=None, duration=PERIOD_RECORD)
     
@@ -529,7 +529,9 @@ def toggle_vu_meter():
         vu_proc.start()
     else:
         stop_vu()
-
+#
+# ############ intercom using multiprocessing #############
+#
 
 def intercom():
     global monitor_channel
@@ -581,6 +583,54 @@ def toggle_intercom():
         stop_intercom()
         print("\nIntercom stopped")
         intercom_proc = None
+
+#
+# ############ intercom using threads #############
+#
+
+def intercom_t():
+    global monitor_channel, stop_intercom_event
+
+    # Create a buffer to hold the audio data
+    buffer = np.zeros((PRIMARY_SAMPLE_RATE,))
+    channel = monitor_channel
+
+    # Callback function to handle audio input
+    def callback_input(indata, frames, time, status):
+        # Only process audio from the designated channel
+        channel_data = indata[:, channel]
+        buffer[:frames] = channel_data
+
+    # Callback function to handle audio output
+    def callback_output(outdata, frames, time, status):
+        # Play back the audio from the buffer
+        outdata[:, 0] = buffer[:frames]  # Play back on the first channel
+        outdata[:, 1] = buffer[:frames]  # Play back on the second channel
+
+    # Function to switch the channel being listened to
+    def switch_channel(channel):
+        global monitor_channel
+        print(f" switching to channel: {channel}", end='\r')
+        monitor_channel = channel
+
+    # Set up hotkeys for switching channels
+    for i in range(SOUND_CHS):
+        keyboard.add_hotkey(str(i), lambda channel=i: switch_channel(channel))
+
+    # Open an input stream and an output stream with the callback function
+    with sd.InputStream(callback=callback_input, channels=PRIMARY_SAMPLE_RATE, samplerate=PRIMARY_SAMPLE_RATE), \
+        sd.OutputStream(callback=callback_output, channels=PRIMARY_SAMPLE_RATE, samplerate=PRIMARY_SAMPLE_RATE):
+        # The streams are now open and the callback function will be called every time there is audio input and output
+        # We'll just use a blocking wait here for simplicity
+        while not stop_intercom_event.is_set():
+            sd.sleep(1)
+
+        print("Stopping intercom...")
+
+
+
+
+
 
 #
 # #############################################################
@@ -812,7 +862,6 @@ def main():
     def trigger_oscope():
         oscope_proc = multiprocessing.Process(target=plot_oscope)
         oscope_proc.start()
-        keyboard.write('\b')
         time.sleep(TRACE_DURATION + 3)
         clear_input_buffer()
         input("Press any key to continue...")
@@ -825,7 +874,6 @@ def main():
     def trigger_fft():
         one_shot_fft_proc = multiprocessing.Process(target=plot_fft)
         one_shot_fft_proc.start()
-        keyboard.write('\b')
         time.sleep(FFT_DURATION + 3)
         clear_input_buffer()        
         input("Press any key to continue...")
@@ -840,9 +888,8 @@ def main():
     def trigger_spectrogram():
         one_shot_spectrogram_proc = multiprocessing.Process(target=plot_spectrogram)
         one_shot_spectrogram_proc.start()
-        keyboard.write('\b')
         print("Plotting spectrogram...")
-        time.sleep(30)
+        time.sleep(5)
         clear_input_buffer()
         input("Press any key to continue...")
         # spectrogram one shot returns here when plot window is closed by user
@@ -851,6 +898,21 @@ def main():
         one_shot_spectrogram_proc.terminate()
         one_shot_spectrogram_proc.join()
         print("exit spectrogram")
+
+
+    def toggle_intercom_t():
+        global intercom_thread, stop_intercom_event
+
+        if intercom_thread is None or not intercom_thread.is_alive():
+            print("Starting intercom, listening to channel 0")
+            intercom_thread = threading.Thread(target=intercom)
+            intercom_thread.start()
+        else:
+            stop_intercom_event.set()
+            intercom_thread.join()
+            print("\nIntercom stopped")
+            intercom_thread = None
+            stop_intercom_event.clear()
 
 
     # Function to switch the channel being listened to
@@ -890,7 +952,7 @@ def main():
             # one shot process to see device list
             keyboard.on_press_key("d", lambda _: show_audio_device_list(), suppress=True) 
             # usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
-            keyboard.on_press_key("i", lambda _: toggle_intercom(), suppress=True)
+            keyboard.on_press_key("i", lambda _: toggle_intercom_t(), suppress=True)
             # usage: press v to start cli vu meter, press v again to stop
             keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
             # usage: press q to stop all processes
