@@ -82,9 +82,9 @@ stop_vu_event = threading.Event()
 stop_intercom_event = threading.Event()
 stop_fft_periodic_plot_event = threading.Event()
 
-trigger_oscope_event = threading.Event()
-trigger_fft_event = threading.Event()
-stop_worker_event = threading.Event()
+plot_oscope_done = threading.Event()
+plot_fft_done = threading.Event()
+plot_spectrogram_done = threading.Event()
 
 change_ch_event = threading.Event()
 
@@ -118,7 +118,7 @@ MODE_FFT_PERIODIC_RECORD = True     # record fft periodically
 KB_or_CP = 'KB'                    # use keyboard or control panel (PyQT5) to control program
 
 # audio hardware config:
-device_id = 0                               
+device_id = 1                               
 
 if device_id == 0:                  # windows mme, 2 ch only
     SOUND_IN = 1                           
@@ -170,7 +170,7 @@ SAVE_AFTER_EVENT = 30                           # seconds to save after the even
 EVENT_THRESHOLD = 20000                         # audio level threshold to be considered an event
 MONITOR_CH = 0                                  # channel to monitor for event (if > number of chs, all channels are monitored)
 TRACE_DURATION = 10                            # seconds of audio to show on oscope
-OSCOPE_GAIN_DB = 20                             # Gain in dB of audio level for oscope 
+OSCOPE_GAIN_DB = 1                             # Gain in dB of audio level for oscope 
 
 # instrumentation parms
 FFT_BINS = 900                                  # number of bins for fft
@@ -180,7 +180,7 @@ FFT_GAIN = 20                                   # gain in dB for fft
 FFT_INTERVAL = 30                               # minutes between ffts
 
 OSCOPE_DURATION = 10                            # seconds of audio to show on oscope
-OSCOPE_GAIN = 20                                # gain in dB for oscope
+OSCOPE_GAIN = 12                                # gain in dB for oscope
 
 FULL_SCALE = 2 ** 16                            # just for cli vu meter level reference
 BUFFER_SECONDS = 1000                           # time length of circular buffer 
@@ -258,14 +258,28 @@ def show_audio_device_list():
     show_audio_device_info_for_SOUND_IN_OUT()
 
 
-def find_file_of_type_with_offset(directory=SIGNAL_DIRECTORY, file_type=PRIMARY_FILE_FORMAT, offset=0):
+def find_file_of_type_with_offset_1(directory=SIGNAL_DIRECTORY, file_type=PRIMARY_FILE_FORMAT, offset=0):
     ##print("signal dir:", SIGNAL_DIRECTORY, "file type:", PRIMARY_FILE_FORMAT)
-    matching_files = [file for file in os.listdir(directory) if file.endswith(f".{file_type.lower()}")]
-    
+    ##matching_files = [file for file in os.listdir(directory) if os.path.isfile(directory) and file.endswith(f".{file_type.lower()}")]
+    matching_files = [os.path.join(directory, f) for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f)) and f.endswith(f".{file_type.lower()}")]
     if offset < len(matching_files):
         return matching_files[offset]
     # else:
     return None
+
+
+def find_file_of_type_with_offset(directory=SIGNAL_DIRECTORY, file_type=PRIMARY_FILE_FORMAT, offset=0):
+    # List all files of the specified type in the directory
+    files_of_type = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f)) and f.endswith(f".{file_type.lower()}")]
+    
+    # Sort files alphabetically
+    files_of_type.sort(reverse=True)
+    
+    if files_of_type:
+        return files_of_type[0]
+    else:
+        return None
+
 
 # #############################################################
 # Audio conversion functions
@@ -353,6 +367,7 @@ def plot_oscope():
         plt.ylim(-0.5, 0.5)
 
     plt.tight_layout()
+    plot_oscope_done.set()
     plt.show()
 
 
@@ -387,6 +402,7 @@ def plot_fft():
     plt.ylabel('Amplitude')
     plt.title('FFT Plot monitoring ch: ' + str(monitor_channel + 1) + ' of ' + str(SOUND_CHS) + ' channels')
     plt.grid(True)
+    plot_fft_done.set()
     plt.show()
 
 
@@ -411,7 +427,7 @@ def plot_spectrogram(y_axis_type='lin'):
         return
     else: 
         full_audio_path = SIGNAL_DIRECTORY + find_file_of_type_with_offset()    # quick hack to eval code
-        print("Spectrogram found:", full_audio_path)
+        print("Spectrogram source:", full_audio_path)
 
     # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
     y, sr = librosa.load(full_audio_path, sr=PRIMARY_SAMPLE_RATE, duration=PERIOD_RECORD, mono=False)
@@ -442,13 +458,15 @@ def plot_spectrogram(y_axis_type='lin'):
     # Extract filename from the audio path
     filename = os.path.basename(full_audio_path)
     root, _ = os.path.splitext(filename)
-    plotname = PLOT_DIRECTORY + root + '.png'
+    plotname = PLOT_DIRECTORY + root + '_spectorgram' + '.png'
 
     # Set title to include filename and channel
     plt.title(f'Spectrogram from {LOCATION_ID}, hive:{HIVE_ID}, Mic Loc:{MIC_LOCATION[monitor_channel]}\nfile:{filename}, Ch:{monitor_channel+1}')
     plt.colorbar(format='%+2.0f dB')
     plt.tight_layout()
-    print("Saving spectrogram to:", plotname)
+    output_filename = f"{timestamp}_fft_{PRIMARY_SAMPLE_RATE/1000:.0F}_{PRIMARY_BIT_DEPTH}_{monitor_channel}_{LOCATION_ID}_{HIVE_ID}.png"
+    full_path_name = os.path.join(PLOT_DIRECTORY, output_filename)
+    print("\nSaving spectrogram to:", plotname)
     plt.savefig(plotname, dpi=150)
     plt.show()
 
@@ -868,42 +886,32 @@ def main():
 
 
     def trigger_oscope():
+        global oscope_proc
+
         oscope_proc = multiprocessing.Process(target=plot_oscope)
         oscope_proc.start()
-        time.sleep(TRACE_DURATION + 3)
         clear_input_buffer()
-        input("Press any key to continue...")
-        # oscope returns here when plot window is closed by user
-        print("exit oscope")
-        oscope_proc.terminate()
         oscope_proc.join()
+        print("exit oscope")
 
 
     def trigger_fft():
+        global one_shot_fft_proc
+
         one_shot_fft_proc = multiprocessing.Process(target=plot_fft)
         one_shot_fft_proc.start()
-        time.sleep(FFT_DURATION + 3)
         clear_input_buffer()        
-        input("Press any key to continue...")
-        # fft one shot returns here when plot window is closed by user
-        ##print("one_shot_fft_proc.is_alive():", one_shot_fft_proc.is_alive())
-        ##if one_shot_fft_proc.is_alive():
-        one_shot_fft_proc.terminate()
         one_shot_fft_proc.join()
         print("exit fft")
 
 
     def trigger_spectrogram():
+        global one_shot_spectrogram_proc
+
         one_shot_spectrogram_proc = multiprocessing.Process(target=plot_spectrogram)
         one_shot_spectrogram_proc.start()
         print("Plotting spectrogram...")
-        time.sleep(5)
         clear_input_buffer()
-        input("Press any key to continue...")
-        # spectrogram one shot returns here when plot window is closed by user
-        ##print("one_shot_fft_proc.is_alive():", one_shot_fft_proc.is_alive())
-        ##if one_shot_fft_proc.is_alive():
-        one_shot_spectrogram_proc.terminate()
         one_shot_spectrogram_proc.join()
         print("exit spectrogram")
 
@@ -922,7 +930,7 @@ def main():
             intercom_thread = None
             stop_intercom_event.clear()
 
-
+    # mothballed, hanging around for reference
     def stop_intercom():
         global intercom_proc, stop_intercom_event
 
@@ -949,7 +957,6 @@ def main():
         global monitor_channel, change_ch_event
 
         ##keyboard.write('\b')  # backspace to erase the current keystroke on the cli
-        print("\npress 'esc' to exit monitor channel selection")
         print(f"\nChannel {monitor_channel+1} is active, {SOUND_CHS} are available: select a channel:") #, end='\r')
 
         while True:
