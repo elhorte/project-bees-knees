@@ -86,6 +86,8 @@ trigger_oscope_event = threading.Event()
 trigger_fft_event = threading.Event()
 stop_worker_event = threading.Event()
 
+change_ch_event = threading.Event()
+
 # queues
 stop_vu_queue = None
 
@@ -589,7 +591,7 @@ def toggle_intercom():
 #
 
 def intercom_t():
-    global monitor_channel, stop_intercom_event
+    global monitor_channel, stop_intercom_event, change_ch_event
 
     # Create a buffer to hold the audio data
     buffer = np.zeros((PRIMARY_SAMPLE_RATE,))
@@ -623,13 +625,13 @@ def intercom_t():
         # The streams are now open and the callback function will be called every time there is audio input and output
         # We'll just use a blocking wait here for simplicity
         while not stop_intercom_event.is_set():
+            if change_ch_event.is_set():
+                channel = monitor_channel
+                print("Intercom changing to ch:", monitor_channel)
+                change_ch_event.clear()
             sd.sleep(1)
 
         print("Stopping intercom...")
-
-
-
-
 
 
 #
@@ -917,12 +919,12 @@ def main():
 
     # Function to switch the channel being listened to
     def change_monitor_channel():
-        global monitor_channel
+        global monitor_channel, change_ch_event
 
         ##keyboard.write('\b')  # backspace to erase the current keystroke on the cli
         print("\npress 'esc' to exit monitor channel selection")
         print(f"\nChannel {monitor_channel+1} is active, {SOUND_CHS} are available: select a channel:") #, end='\r')
-        keyboard.write('\b')
+
         while True:
             while msvcrt.kbhit():
                 key = msvcrt.getch().decode('utf-8')
@@ -930,6 +932,7 @@ def main():
                     key_int = int(key)
                     if key_int >= 1 and key_int <= SOUND_CHS:
                         monitor_channel = key_int - 1
+                        change_ch_event.is_set()                         
                         print(f"Now monitoring: {monitor_channel+1}")
                     else:
                         print(f"Sound device has only {SOUND_CHS} channels")
