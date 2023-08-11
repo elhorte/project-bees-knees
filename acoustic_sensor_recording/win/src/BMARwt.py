@@ -133,8 +133,8 @@ elif device_id == 2:                # WASAPI: Behringer 2ch
     SOUND_OUT = 14                         
     SOUND_CHS = 2                
 elif device_id == 3:                # WASAPI: Behringer 4ch
-    SOUND_IN = 16                              
-    SOUND_OUT = 14                             
+    SOUND_IN = 19                              
+    SOUND_OUT = 17                             
     SOUND_CHS = 4                
 else:                               # default
     SOUND_IN = 1                              
@@ -200,8 +200,9 @@ else:
     quit(-1)
 
 ##SIGNAL_DIRECTORY = "."                        # for debugging
-SIGNAL_DIRECTORY = "D:/OneDrive/data/Zeev/recordings"
-PLOT_DIRECTORY = "D:/OneDrive/data/Zeev/plots"
+SIGNAL_DIRECTORY = "D:/OneDrive/data/Zeev/recordings/"
+PLOT_DIRECTORY = "D:/OneDrive/data/Zeev/plots/"
+MIC_LOCATION = ["lower w/queen--front", "upper--front", "upper--back", "lower w/queen--back", "upper--back"]
 
 # location and hive ID
 LOCATION_ID = "Zeev-Berkeley"
@@ -390,17 +391,35 @@ def plot_fft():
 
 
 # one-shot spectrogram plot of audio in a separate process
-def plot_spectrogram(audio_path=spectrogram_audio_path, output_image_path=output_image_path, y_axis_type='lin', y_decimal_places=2):
-    
+def plot_spectrogram(y_axis_type='lin'):
+    global monitor_channel
+
+    """
+    Generate a spectrogram from an audio file and display/save it as an image.
+    Parameters:
+    - audio_path: Path to the audio file (FLAC format).
+    - output_image_path: Path to save the spectrogram image.
+    - y_axis_type: Type of Y axis for the spectrogram. Can be 'log' or 'linear'.
+    - y_decimal_places: Number of decimal places for the Y axis (note: preset in statements below).
+    - channel: Channel to use for multi-channel audio files (default is 0 for left channel).
+
+    - in librosa.load() function, sr=None means no resampling, mono=True means all channels are averaged into mono
+    """
+
     if find_file_of_type_with_offset() == None:
         print("No data available to see?")
         return
     else: 
-        audio_path = SIGNAL_DIRECTORY + '/' + find_file_of_type_with_offset() # quick hack to eval code
-        print("Spectrogram found:", audio_path)
+        full_audio_path = SIGNAL_DIRECTORY + find_file_of_type_with_offset()    # quick hack to eval code
+        print("Spectrogram found:", full_audio_path)
+
     # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
-    y, sr = librosa.load(audio_path, sr=None, duration=PERIOD_RECORD)
-    
+    y, sr = librosa.load(full_audio_path, sr=PRIMARY_SAMPLE_RATE, duration=PERIOD_RECORD, mono=False)
+
+    # If multi-channel audio, select the specified channel
+    if len(y.shape) > 1:
+        y = y[monitor_channel]
+
     # Compute the spectrogram
     D = librosa.amplitude_to_db(abs(librosa.stft(y)), ref=np.max)
     
@@ -409,8 +428,10 @@ def plot_spectrogram(audio_path=spectrogram_audio_path, output_image_path=output
     
     if y_axis_type == 'log':
         librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='log')
+        y_decimal_places = 3
     elif y_axis_type == 'lin':
         librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='linear')
+        y_decimal_places = 0
     else:
         raise ValueError("y_axis_type must be 'log' or 'linear'")
     
@@ -418,10 +439,17 @@ def plot_spectrogram(audio_path=spectrogram_audio_path, output_image_path=output
     y_ticks = plt.gca().get_yticks()
     plt.gca().set_yticklabels(['{:.{}f} kHz'.format(tick/1000, y_decimal_places) for tick in y_ticks])
     
+    # Extract filename from the audio path
+    filename = os.path.basename(full_audio_path)
+    root, _ = os.path.splitext(filename)
+    plotname = PLOT_DIRECTORY + root + '.png'
+
+    # Set title to include filename and channel
+    plt.title(f'Spectrogram from {LOCATION_ID}, hive:{HIVE_ID}, Mic Loc:{MIC_LOCATION[monitor_channel]}\nfile:{filename}, Ch:{monitor_channel+1}')
     plt.colorbar(format='%+2.0f dB')
-    plt.title('Spectrogram')
     plt.tight_layout()
-    ##plt.savefig(output_image_path, dpi=300)
+    print("Saving spectrogram to:", plotname)
+    plt.savefig(plotname, dpi=150)
     plt.show()
 
 
