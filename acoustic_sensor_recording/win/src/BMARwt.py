@@ -932,7 +932,7 @@ def main():
                     key_int = int(key)
                     if key_int >= 1 and key_int <= SOUND_CHS:
                         monitor_channel = key_int - 1
-                        change_ch_event.is_set()                         
+                        change_ch_event.set()                         
                         print(f"Now monitoring: {monitor_channel+1}")
                     else:
                         print(f"Sound device has only {SOUND_CHS} channels")
