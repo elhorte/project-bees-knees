@@ -118,7 +118,7 @@ MODE_FFT_PERIODIC_RECORD = True     # record fft periodically
 KB_or_CP = 'KB'                    # use keyboard or control panel (PyQT5) to control program
 
 # audio hardware config:
-device_id = 1                               
+device_id = 0                               
 
 if device_id == 0:                  # windows mme, 2 ch only
     SOUND_IN = 1                           
@@ -346,7 +346,6 @@ def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
 
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
 def plot_oscope(): 
-    global monitor_channel
 
     # Convert gain from dB to linear scale
     gain = 10 ** (OSCOPE_GAIN_DB / 20)
@@ -367,25 +366,25 @@ def plot_oscope():
         plt.ylim(-0.5, 0.5)
 
     plt.tight_layout()
-    plot_oscope_done.set()
     plt.show()
 
 
 # single-shot fft plot of audio
-def plot_fft():
-    global monitor_channel
+def plot_fft(channel):
 
     N = PRIMARY_SAMPLE_RATE * FFT_DURATION  # Number of samples
     # Convert gain from dB to linear scale
     gain = 10 ** (FFT_GAIN / 20)
     # Record audio
-    print("Recording audio for fft one shot...")
-    myrecording = sd.rec(int(N), samplerate=PRIMARY_SAMPLE_RATE, channels=monitor_channel + 1)
+    print("Recording audio for fft one shot on channel:", channel+1)
+    all_channels_audio = sd.rec(int(N), samplerate=PRIMARY_SAMPLE_RATE, channels=SOUND_CHS)
     sd.wait()  # Wait until recording is finished
-    myrecording *= gain
+    single_channel_audio = all_channels_audio[:, channel]
+    single_channel_audio *= gain
     print("Recording fft finished.")
+
     # Perform FFT
-    yf = rfft(myrecording.flatten())
+    yf = rfft(single_channel_audio.flatten())
     xf = rfftfreq(N, 1 / PRIMARY_SAMPLE_RATE)
 
     # Define bucket width
@@ -400,16 +399,13 @@ def plot_fft():
     plt.plot(bucket_freqs, np.abs(buckets))
     plt.xlabel('Frequency (Hz)')
     plt.ylabel('Amplitude')
-    plt.title('FFT Plot monitoring ch: ' + str(monitor_channel + 1) + ' of ' + str(SOUND_CHS) + ' channels')
+    plt.title('FFT Plot monitoring ch: ' + str(channel + 1) + ' of ' + str(SOUND_CHS) + ' channels')
     plt.grid(True)
-    plot_fft_done.set()
     plt.show()
 
 
 # one-shot spectrogram plot of audio in a separate process
-def plot_spectrogram(y_axis_type='lin'):
-    global monitor_channel
-
+def plot_spectrogram(channel, y_axis_type):
     """
     Generate a spectrogram from an audio file and display/save it as an image.
     Parameters:
@@ -434,7 +430,7 @@ def plot_spectrogram(y_axis_type='lin'):
 
     # If multi-channel audio, select the specified channel
     if len(y.shape) > 1:
-        y = y[monitor_channel]
+        y = y[channel]
 
     # Compute the spectrogram
     D = librosa.amplitude_to_db(abs(librosa.stft(y)), ref=np.max)
@@ -458,22 +454,20 @@ def plot_spectrogram(y_axis_type='lin'):
     # Extract filename from the audio path
     filename = os.path.basename(full_audio_path)
     root, _ = os.path.splitext(filename)
-    plotname = PLOT_DIRECTORY + root + '_spectorgram' + '.png'
+    plotname = PLOT_DIRECTORY + root + '_spectrogram' + '.png'
 
     # Set title to include filename and channel
-    plt.title(f'Spectrogram from {LOCATION_ID}, hive:{HIVE_ID}, Mic Loc:{MIC_LOCATION[monitor_channel]}\nfile:{filename}, Ch:{monitor_channel+1}')
+    plt.title(f'Spectrogram from {LOCATION_ID}, hive:{HIVE_ID}, Mic Loc:{MIC_LOCATION[channel]}\nfile:{filename}, Ch:{channel+1}')
     plt.colorbar(format='%+2.0f dB')
     plt.tight_layout()
-    output_filename = f"{timestamp}_fft_{PRIMARY_SAMPLE_RATE/1000:.0F}_{PRIMARY_BIT_DEPTH}_{monitor_channel}_{LOCATION_ID}_{HIVE_ID}.png"
-    full_path_name = os.path.join(PLOT_DIRECTORY, output_filename)
     print("\nSaving spectrogram to:", plotname)
     plt.savefig(plotname, dpi=150)
     plt.show()
 
 
 # continuous fft plot of audio in a separate background process
-def plot_and_save_fft():
-    global monitor_channel, stop_fft_periodic_plot_event, fft_periodic_plot_proc
+def plot_and_save_fft(channel):
+    global stop_fft_periodic_plot_event, fft_periodic_plot_proc
 
     interval = FFT_INTERVAL * 60    # convert to seconds, time betwwen ffts
     N = PRIMARY_SAMPLE_RATE * FFT_DURATION  # Number of samples
@@ -486,7 +480,7 @@ def plot_and_save_fft():
         # Wait for the desired time interval before recording and plotting again
         sleep(interval, stop_fft_periodic_plot_event)
             
-        myrecording = sd.rec(int(N), samplerate=PRIMARY_SAMPLE_RATE, channels=monitor_channel + 1)
+        myrecording = sd.rec(int(N), samplerate=PRIMARY_SAMPLE_RATE, channels=channel + 1)
         sd.wait()  # Wait until recording is finished
         myrecording *= gain
         print("Recording auto fft finished.")
@@ -507,30 +501,28 @@ def plot_and_save_fft():
         plt.plot(bucket_freqs, np.abs(buckets))
         plt.xlabel('Frequency (Hz)')
         plt.ylabel('Amplitude')
-        plt.title('FFT Plot monitoring ch: ' + str(monitor_channel + 1) + ' of ' + str(SOUND_CHS) + ' channels')
+        plt.title('FFT Plot monitoring ch: ' + str(channel + 1) + ' of ' + str(SOUND_CHS) + ' channels')
 
         plt.grid(True)
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         # Save plot to disk with a unique filename based on current time
-        output_filename = f"{timestamp}_fft_{PRIMARY_SAMPLE_RATE/1000:.0F}_{PRIMARY_BIT_DEPTH}_{monitor_channel}_{LOCATION_ID}_{HIVE_ID}.png"
+        output_filename = f"{timestamp}_fft_{PRIMARY_SAMPLE_RATE/1000:.0F}_{PRIMARY_BIT_DEPTH}_{channel}_{LOCATION_ID}_{HIVE_ID}.png"
         full_path_name = os.path.join(PLOT_DIRECTORY, output_filename)
         plt.savefig(full_path_name)
 
     print("Exiting fft periodic")
 
-
+last_ch = 0
 # Print a string of asterisks, ending with only a carriage return to overwrite the line
 # value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
-def vu_meter(stop_vu_queue, asterisks):
-    global monitor_channel, device_ch
+def vu_meter(channel, stop_vu_queue, asterisks):
 
     buffer = np.zeros((PRIMARY_SAMPLE_RATE,))
 
     def callback_input(indata, frames, time, status):
-        global monitor_channel
         # Only process audio from the designated channel
-        channel_data = indata[:, monitor_channel]
+        channel_data = indata[:, channel]
         buffer[:frames] = channel_data
 
         audio_level = np.max(np.abs(channel_data))
@@ -563,7 +555,7 @@ def toggle_vu_meter():
     global vu_proc, monitor_channel, asterisks, stop_vu_queue
 
     if vu_proc is None:
-        print("\nVU meter monitoring channel:", monitor_channel)
+        print("\nVU meter monitoring channel:", monitor_channel+1)
         vu_manager = multiprocessing.Manager()
         stop_vu_queue = multiprocessing.Queue()
         asterisks = vu_manager.Value(str, '*' * 50)
@@ -573,10 +565,11 @@ def toggle_vu_meter():
             asterisks.value = '*' * normalized_value
             print("threshold:",asterisks.value.ljust(50, ' '))
 
-        vu_proc = multiprocessing.Process(target=vu_meter, args=(stop_vu_queue, asterisks))
+        vu_proc = multiprocessing.Process(target=vu_meter, args=(monitor_channel, stop_vu_queue, asterisks))
         vu_proc.start()
     else:
         stop_vu()
+
 #
 # ############ intercom using multiprocessing #############
 #
@@ -656,7 +649,6 @@ def intercom_t():
             sd.sleep(1)
 
         print("Stopping intercom...")
-
 
 
 #
@@ -879,7 +871,7 @@ def main():
 
     # Create and start the process, note: using mp because matplotlib wants in be in the mainprocess threqad
     if MODE_FFT_PERIODIC_RECORD:
-        fft_periodic_plot_proc = multiprocessing.Process(target=plot_and_save_fft) 
+        fft_periodic_plot_proc = multiprocessing.Process(target=plot_and_save_fft, args=(monitor_channel,)) 
         fft_periodic_plot_proc.daemon = True  
         fft_periodic_plot_proc.start()
         print("started fft_periodic_plot_process")
@@ -898,7 +890,7 @@ def main():
     def trigger_fft():
         global one_shot_fft_proc
 
-        one_shot_fft_proc = multiprocessing.Process(target=plot_fft)
+        one_shot_fft_proc = multiprocessing.Process(target=plot_fft, args=(monitor_channel,))
         one_shot_fft_proc.start()
         clear_input_buffer()        
         one_shot_fft_proc.join()
@@ -908,7 +900,7 @@ def main():
     def trigger_spectrogram():
         global one_shot_spectrogram_proc
 
-        one_shot_spectrogram_proc = multiprocessing.Process(target=plot_spectrogram)
+        one_shot_spectrogram_proc = multiprocessing.Process(target=plot_spectrogram, args=(monitor_channel, 'lin'))
         one_shot_spectrogram_proc.start()
         print("Plotting spectrogram...")
         clear_input_buffer()
@@ -955,8 +947,7 @@ def main():
     # Function to switch the channel being listened to
     def change_monitor_channel():
         global monitor_channel, change_ch_event
-
-        ##keyboard.write('\b')  # backspace to erase the current keystroke on the cli
+        # usage: press m then press 1, 2, 3, 4
         print(f"\nChannel {monitor_channel+1} is active, {SOUND_CHS} are available: select a channel:") #, end='\r')
 
         while True:
@@ -968,7 +959,7 @@ def main():
                         monitor_channel = key_int - 1
                         change_ch_event.set()                         
                         print(f"Now monitoring: {monitor_channel+1}")
-                        return          # usage: press m then press 1, 2, 3, 4
+                        return        
                     else:
                         print(f"Sound device has only {SOUND_CHS} channels")
 
