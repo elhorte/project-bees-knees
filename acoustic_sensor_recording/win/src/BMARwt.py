@@ -118,7 +118,7 @@ MODE_FFT_PERIODIC_RECORD = True     # record fft periodically
 KB_or_CP = 'KB'                    # use keyboard or control panel (PyQT5) to control program
 
 # audio hardware config:
-device_id = 3                               
+device_id = 1                               
 
 if device_id == 0:                  # windows mme, 2 ch only
     SOUND_IN = 1                           
@@ -170,7 +170,7 @@ SAVE_AFTER_EVENT = 30                           # seconds to save after the even
 EVENT_THRESHOLD = 20000                         # audio level threshold to be considered an event
 MONITOR_CH = 0                                  # channel to monitor for event (if > number of chs, all channels are monitored)
 TRACE_DURATION = 10                            # seconds of audio to show on oscope
-OSCOPE_GAIN_DB = 0                             # Gain in dB of audio level for oscope 
+OSCOPE_GAIN_DB = 12                             # Gain in dB of audio level for oscope 
 
 # instrumentation parms
 FFT_BINS = 900                                  # number of bins for fft
@@ -180,7 +180,7 @@ FFT_GAIN = 20                                   # gain in dB for fft
 FFT_INTERVAL = 30                               # minutes between ffts
 
 OSCOPE_DURATION = 10                            # seconds of audio to show on oscope
-OSCOPE_GAIN_DB = 0                                # gain in dB for oscope
+OSCOPE_GAIN_DB = 12                                # gain in dB for oscope
 
 FULL_SCALE = 2 ** 16                            # just for cli vu meter level reference
 BUFFER_SECONDS = 1000                           # time length of circular buffer 
@@ -347,16 +347,15 @@ def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
 def plot_oscope(): 
 
-    # Convert gain from dB to linear scale
-    gain = 10 ** (OSCOPE_GAIN_DB / 20)
-
     # Record audio
-    print("Recording audio for oscope traces for ch count:", SOUND_CHS)
+    print("Recording audio for o-scope traces for channel count of", SOUND_CHS)
     o_recording = sd.rec(int(PRIMARY_SAMPLE_RATE * TRACE_DURATION), samplerate=PRIMARY_SAMPLE_RATE, channels=SOUND_CHS, device=SOUND_IN)
     sd.wait()  # Wait until recording is finished
     print("Recording oscope finished.")
 
     if OSCOPE_GAIN_DB > 0:
+        gain = 10 ** (OSCOPE_GAIN_DB / 20)      
+        print("applying gain of:",gain) 
         o_recording *= gain
 
     plt.figure(figsize=(10, 3 * SOUND_CHS))
@@ -364,9 +363,8 @@ def plot_oscope():
     for i in range(SOUND_CHS):
         plt.subplot(SOUND_CHS, 1, i+1)
         plt.plot(o_recording[:, i])
-        plt.title(f"Channel {i+1}")
+        plt.title(f"Oscilloscope Traces w/{OSCOPE_GAIN_DB}dB Gain--Ch{i+1}")
         plt.ylim(-1.0, 1.0)
-
     plt.tight_layout()
     plt.show()
 
