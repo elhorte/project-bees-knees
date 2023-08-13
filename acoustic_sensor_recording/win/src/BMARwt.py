@@ -1017,3 +1017,6 @@ def main():
 if __name__ == "__main__":
     main()
 
+lot = "17 Microphone (UMC404HD 192k), Windows WASAPI (4 in, 0 out)"
+if 'UMC404HD' in lot:
+    print("matched")
