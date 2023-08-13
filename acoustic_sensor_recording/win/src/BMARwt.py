@@ -141,6 +141,11 @@ else:                               # default
     SOUND_OUT = 3                             
     SOUND_CHS = 2 
 
+BRAND_NAME = "UMC404HD"            # 'Behringer' or 'Scarlett'
+DEVICE_NAME = 'UAC'                 # 'UAC' or 'USB'
+CH_IN = "4 in"                           # number of channels on input device
+API_NAME = "WASAPI"                      # 'MME' or 'WASAPI'
+
 # audio parameters:
 PRIMARY_SAMPLE_RATE = 192000                    # Audio sample rate
 PRIMARY_BIT_DEPTH = 16                          # Audio bit depth
@@ -217,13 +222,39 @@ spectrogram_audio_path = os.path.join(SIGNAL_DIRECTORY, "test.flac")
 # misc utilities
 ##########################
 
+import sounddevice as sd
+from sounddevice import query_devices
+
+from sounddevice import query_devices
+
+def find_device_id_by_exact_match(brand_name, api_name, in_channels):
+    devices = query_devices()
+    for device in devices:
+        if (brand_name in device['name'] and api_name in device['api_name'] and device['max_input_channels'] == in_channels):
+            return device['deviceid']
+    return None
+
+print("searching for: ", BRAND_NAME, API_NAME, CH_IN, "...")
+
+device_in = find_device_id_by_exact_match(BRAND_NAME, API_NAME, 4) 
+
+if device_in is not None:
+    print("Device in found:", device_in)
+    SOUND_IN = device_in
+else:
+    print("Device not found")
+    SOUND_IN = 1    # default device
+
+print("Devices found:", sd.query_devices())
+
+input("Press Enter to continue...")
+
 # interruptable sleep
 def sleep(seconds, stop_sleep_event):
     for i in range(seconds):
         if stop_sleep_event.is_set():
             return
         time.sleep(1)
-
 
 # for debugging
 def play_audio(filename, device):
@@ -638,7 +669,8 @@ def intercom_t():
 
     # Open an input stream and an output stream with the callback function
     with sd.InputStream(callback=callback_input, channels=SOUND_CHS, samplerate=PRIMARY_SAMPLE_RATE), \
-        sd.OutputStream(callback=callback_output, channels=SOUND_CHS, samplerate=PRIMARY_SAMPLE_RATE):
+        sd.OutputStream(callback=callback_output, channels=2, samplerate=44100):
+        ##sd.OutputStream(callback=callback_output, channels=SOUND_CHS, samplerate=PRIMARY_SAMPLE_RATE):
         # The streams are now open and the callback function will be called every time there is audio input and output
         # We'll just use a blocking wait here for simplicity
         while not stop_intercom_event.is_set():
