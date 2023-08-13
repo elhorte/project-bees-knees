@@ -258,7 +258,7 @@ def set_input_device():
                     if (MODEL_NAME[j] in devices_str[i]):
                         print("Found device: ", devices_str[i])
                         time.sleep(3)      # in case a human is looking at the screen
-                        break
+                        return
             except:
                 # if input device model not found, use default device
                 if sound_in_samplerate < 192000:
