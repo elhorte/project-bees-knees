@@ -29,13 +29,15 @@ from scipy.signal import resample_poly
 from scipy.signal import decimate
 from scipy.signal import butter, filtfilt
 from pydub import AudioSegment
-import os
+
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 import keyboard
 import atexit
 import msvcrt
 import signal
 import sys
+import os
+import io
 import warnings
 import queue
 import librosa
@@ -120,31 +122,11 @@ KB_or_CP = 'KB'                    # use keyboard or control panel (PyQT5) to co
 # audio hardware config:
 device_id = 1                               
 
-if device_id == 0:                  # windows mme, 2 ch only
-    SOUND_IN = 1                           
-    SOUND_OUT = 3                          
-    SOUND_CHS = 2            
-elif device_id == 1:                # WASAPI: Scarlett 2ch
-    SOUND_IN = 17                                              
-    SOUND_OUT = 14                             
-    SOUND_CHS = 2   
-elif device_id == 2:                # WASAPI: Behringer 2ch
-    SOUND_IN = 16                              
-    SOUND_OUT = 14                         
-    SOUND_CHS = 2                
-elif device_id == 3:                # WASAPI: Behringer 4ch
-    SOUND_IN = 17                              
-    SOUND_OUT = 15                             
-    SOUND_CHS = 4                
-else:                               # default
-    SOUND_IN = 1                              
-    SOUND_OUT = 3                             
-    SOUND_CHS = 2 
+# windows mme defaults, 2 ch only
+SOUND_IN_DEFAULT = 0               
+SOUND_OUT_DEFAULT = 3
 
-BRAND_NAME = "UMC404HD"            # 'Behringer' or 'Scarlett'
-DEVICE_NAME = 'UAC'                 # 'UAC' or 'USB'
-CH_IN = "4 in"                           # number of channels on input device
-API_NAME = "WASAPI"                      # 'MME' or 'WASAPI'
+sound_in = None         
 
 # audio parameters:
 PRIMARY_SAMPLE_RATE = 192000                    # Audio sample rate
@@ -216,38 +198,55 @@ HIVE_ID = "Z1"
 output_image_path = "."
 spectrogram_audio_path = os.path.join(SIGNAL_DIRECTORY, "test.flac")
 
+# input device parameters:
+MAKE_NAME = "Behringer"                        # 'Behringer' or 'Zoom'
+MODEL_NAME = ["UMC404HD", "Scarlett", "Zoom", "Volt"]
+DEVICE_NAME = 'UAC'                             # 'UAC' or 'USB'
+IN_CHS = "4 in"                                 # string of in channel count 
+API_NAME = "WASAPI"                             # 'MME' or 'WASAPI'
+SOUND_CHS = 4
+
 # ==================================================================================================
 
 ##########################  
 # misc utilities
 ##########################
 
-import sounddevice as sd
 from sounddevice import query_devices
 
-from sounddevice import query_devices
+# Redirect stdout to a string buffer
+def set_input_device():
+    global MODEL_NAME, API_NAME, IN_CHS, SOUND_CHS, PRIMARY_SAMPLE_RATE, PRIMARY_BIT_DEPTH, sound_in
 
-def find_device_id_by_exact_match(brand_name, api_name, in_channels):
-    devices = query_devices()
-    for device in devices:
-        if (brand_name in device['name'] and api_name in device['api_name'] and device['max_input_channels'] == in_channels):
-            return device['deviceid']
-    return None
+    # Redirect stdout to a string buffer
+    original_stdout = sys.stdout
+    sys.stdout = buffer = io.StringIO()
+    # Call the function that prints to stdout
+    print(query_devices())
+    # Reset stdout to its original value
+    sys.stdout = original_stdout
+    # Get the string value from the buffer and split by lines to get the array
+    devices_str = buffer.getvalue().splitlines()
 
-print("searching for: ", BRAND_NAME, API_NAME, CH_IN, "...")
+# loop through known MODEL_NAME##
+    device_id = 0
+    for i in range(len(devices_str)):
+        if ("Microphone" in devices_str[i] and API_NAME in devices_str[i]):
+            print("Looking at device: ", devices_str[i])
+            for j in range(len(MODEL_NAME)):
+                if (MODEL_NAME[j] in devices_str[i]):
+                    device = query_devices(i)
+                    sound_channels = int(device['max_input_channels'])
+                    device_id = i
+                    print("Found device: ", devices_str[i])
+                    break
+    if device_id == 0:
+        print("Device not found, using default [0]\n", devices_str)
+        sound_in = 0    # default device
+        SOUND_CHS = 2   # default channels
+        PRIMARY_SAMPLE_RATE = 44100
+        PRIMARY_BIT_DEPTH = 16
 
-device_in = find_device_id_by_exact_match(BRAND_NAME, API_NAME, 4) 
-
-if device_in is not None:
-    print("Device in found:", device_in)
-    SOUND_IN = device_in
-else:
-    print("Device not found")
-    SOUND_IN = 1    # default device
-
-print("Devices found:", sd.query_devices())
-
-input("Press Enter to continue...")
 
 # interruptable sleep
 def sleep(seconds, stop_sleep_event):
@@ -265,10 +264,12 @@ def play_audio(filename, device):
 
 
 def show_audio_device_info_for_SOUND_IN_OUT():
-    device_info = sd.query_devices(SOUND_IN)  
+    global sound_in
+
+    device_info = sd.query_devices(sound_in)  
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Input Channels: {}'.format(device_info['max_input_channels']))
-    device_info = sd.query_devices(SOUND_OUT)  
+    device_info = sd.query_devices(SOUND_OUT_DEFAULT)  
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Output Channels: {}'.format(device_info['max_output_channels']))
     print()
@@ -285,7 +286,7 @@ def show_audio_device_info_for_defaults():
 def show_audio_device_list():
     print(sd.query_devices())
     show_audio_device_info_for_defaults()
-    print(f"\nCurrent device in: {SOUND_IN}, device out: {SOUND_OUT}\n")
+    print(f"\nCurrent device in: {sound_in}, device out: {SOUND_OUT_DEFAULT}\n")
     show_audio_device_info_for_SOUND_IN_OUT()
 
 
@@ -380,7 +381,7 @@ def plot_oscope():
 
     # Record audio
     print("Recording audio for o-scope traces for channel count of", SOUND_CHS)
-    o_recording = sd.rec(int(PRIMARY_SAMPLE_RATE * TRACE_DURATION), samplerate=PRIMARY_SAMPLE_RATE, channels=SOUND_CHS, device=SOUND_IN)
+    o_recording = sd.rec(int(PRIMARY_SAMPLE_RATE * TRACE_DURATION), samplerate=PRIMARY_SAMPLE_RATE, channels=SOUND_CHS, device=sound_in)
     sd.wait()  # Wait until recording is finished
     print("Recording oscope finished.")
 
@@ -408,7 +409,7 @@ def plot_fft(channel):
     gain = 10 ** (FFT_GAIN / 20)
     # Record audio
     print("Recording audio for fft one shot on channel:", channel+1)
-    all_channels_audio = sd.rec(int(N), samplerate=PRIMARY_SAMPLE_RATE, channels=SOUND_CHS, device=SOUND_IN)
+    all_channels_audio = sd.rec(int(N), samplerate=PRIMARY_SAMPLE_RATE, channels=SOUND_CHS, device=sound_in)
     sd.wait()  # Wait until recording is finished
     single_channel_audio = all_channels_audio[:, channel]
     single_channel_audio *= gain
@@ -544,7 +545,7 @@ def plot_and_save_fft(channel):
 
     print("Exiting fft periodic")
 
-last_ch = 0
+
 # Print a string of asterisks, ending with only a carriage return to overwrite the line
 # value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
 def vu_meter(channel, stop_vu_queue, asterisks):
@@ -625,7 +626,7 @@ def intercom():
         outdata[:, 1] = buffer[:frames]  # Play back on the second channel
 
     # Open an input stream and an output stream with the callback function
-    with sd.InputStream(callback=callback_input, device=SOUND_IN, channels=SOUND_CHS, samplerate=PRIMARY_SAMPLE_RATE), \
+    with sd.InputStream(callback=callback_input, device=sound_in, channels=SOUND_CHS, samplerate=PRIMARY_SAMPLE_RATE), \
         sd.OutputStream(callback=callback_output, device=3, channels=2, samplerate=44100):  
         # The streams are now open and the callback function will be called every time there is audio input and output
         # In Windows, output is set to the soundmapper output (device=3) which bypasses the ADC/DAC encoder device.
@@ -681,7 +682,6 @@ def intercom_t():
             sd.sleep(1)
 
         print("Stopping intercom...")
-
 
 #
 # #############################################################
@@ -795,7 +795,7 @@ def audio_stream():
     global stop_program
 
     print("Start audio_stream...")
-    stream = sd.InputStream(device=SOUND_IN, channels=SOUND_CHS, samplerate=PRIMARY_SAMPLE_RATE, dtype=_dtype, blocksize=blocksize, callback=callback)
+    stream = sd.InputStream(device=sound_in, channels=SOUND_CHS, samplerate=PRIMARY_SAMPLE_RATE, dtype=_dtype, blocksize=blocksize, callback=callback)
 
     with stream:
         # start the recording worker threads
@@ -872,17 +872,20 @@ def stop_all():
 
 
 def main():
-    global time_of_day_thread, fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel
+    global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel
 
     print("Acoustic Signal Capture\n")
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
     print(f"Sample Rate: {PRIMARY_SAMPLE_RATE}; File Format: {PRIMARY_FILE_FORMAT}; Channels: {SOUND_CHS}")
     
+    set_input_device()
+
     # Check on input device parms or if input device even exits
+    """
     try:
         print("These are the available devices: \n")
         show_audio_device_list()
-        device_info = sd.query_devices(SOUND_IN)  
+        device_info = sd.query_devices(sound_in)  
         device_ch = device_info['max_input_channels'] 
         if SOUND_CHS > device_ch:
             print(f"The device only has {device_ch} channel(s) but requires {SOUND_CHS} channels.")
@@ -892,6 +895,7 @@ def main():
     except Exception as e:
         print(f"An error occurred while attempting to access the input device: {e}")
         quit(-1)
+    """
 
     # Create the output directory if it doesn't exist
     try:
