@@ -356,7 +356,8 @@ def time_between():
 
 # Initialize the function 'time_diff()', which will return a value.
 time_diff = time_between()
-print("time diff from the outter script", time_diff())   # 0
+# wlh: why does this print on the cli when keyboard 's' iniates plot spectrogram?
+###print("time diff from the outter script", time_diff())   # 0
 
 # #############################################################
 # Audio conversion functions
