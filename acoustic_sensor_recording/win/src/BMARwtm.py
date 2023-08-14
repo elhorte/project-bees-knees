@@ -105,7 +105,7 @@ stop_program = [False]
 buffer_size = None
 buffer = None
 buffer_index = None
-
+file_offset = 0
 
 # #############################################################
 # #### Control Panel ##########################################
@@ -119,7 +119,6 @@ MODE_FFT_PERIODIC_RECORD = True     # record fft periodically
 
 KB_or_CP = 'KB'                    # use keyboard or control panel (PyQT5) to control program
 
-
 # audio parameters:
 PRIMARY_SAMPLERATE = 192000                    # Audio sample rate
 PRIMARY_BITDEPTH = 16                          # Audio bit depth
@@ -132,12 +131,12 @@ AUDIO_MONITOR_QUALITY = 0                       # for mp3 only: 0-9 sets vbr (0=
 AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
 
 # recording types controls:
-AUDIO_MONITOR_START = datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec
+AUDIO_MONITOR_START = None  ##datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec; None = continuous recording
 AUDIO_MONITOR_END = datetime.time(23, 0, 0)     # time of day to stop recording hr, min, sec
 AUDIO_MONITOR_RECORD = 1800                     # file size in seconds of continuous recording
 AUDIO_MONITOR_INTERVAL = 0                      # seconds between recordings
 
-PERIOD_START = datetime.time(4, 0, 0)
+PERIOD_START = None  ##datetime.time(4, 0, 0)   # 'None' = continuous recording
 PERIOD_END = datetime.time(20, 0, 0)
 PERIOD_RECORD = 300                             # seconds of recording
 PERIOD_INTERVAL = 0                             # seconds between start of period, must be > period, of course
@@ -187,9 +186,6 @@ MIC_LOCATION = ["lower w/queen--front", "upper--front", "upper--back", "lower w/
 LOCATION_ID = "Zeev-Berkeley"
 HIVE_ID = "Z1"
 
-# audio hardware config:
-##device_id = 1                               
-
 # windows mme defaults, 2 ch only
 SOUND_IN_DEFAULT = 0                        # default input device id              
 SOUND_OUT_ID_DEFAULT = 3                    # default output device id
@@ -208,8 +204,6 @@ DEVICE_NAME = 'UAC'                         # 'UAC' or 'USB'
 API_NAME = "WASAPI"                         # 'MME' or 'WASAPI' or 'ASIO' or 'DS'  
 
 testmode = False                            # True to run in test mode with lower than neeeded sample rate
-testmode_samplerate = None                  # don't know it yet
-
 
 # ==================================================================================================
 
@@ -328,19 +322,41 @@ def find_file_of_type_with_offset_1(directory=SIGNAL_DIRECTORY, file_type=PRIMAR
     # else:
     return None
 
-
-def find_file_of_type_with_offset(directory=SIGNAL_DIRECTORY, file_type=PRIMARY_FILE_FORMAT, offset=0):
+# return the most recent audio file in the directory minus offset (next most recent, etc.)
+def find_file_of_type_with_offset(offset, directory=SIGNAL_DIRECTORY, file_type=PRIMARY_FILE_FORMAT):
     # List all files of the specified type in the directory
     files_of_type = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f)) and f.endswith(f".{file_type.lower()}")]
-    
     # Sort files alphabetically
     files_of_type.sort(reverse=True)
-    
     if files_of_type:
-        return files_of_type[0]
+        return files_of_type[offset]
     else:
         return None
 
+
+def time_between():
+    # Using a list to store the last called time because lists are mutable and can be modified inside the nested function.
+    # This will act like a "nonlocal" variable.
+    last_called = [None]
+    
+    def helper():
+        current_time = time.time()
+        
+        # If the function has never been called before, set last_called to the current time and return 0.
+        if last_called[0] is None:
+            last_called[0] = current_time
+            return 0
+        # Calculate the difference and update the last_called time.
+        diff = current_time - last_called[0]
+        last_called[0] = current_time
+        # Cap the difference at 1800 seconds.
+        return min(diff, 1800)
+    # Return the helper function, NOT A VALUE.
+    return helper
+
+# Initialize the function 'time_diff()', which will return a value.
+time_diff = time_between()
+print("time diff from the outter script", time_diff())   # 0
 
 # #############################################################
 # Audio conversion functions
@@ -415,7 +431,7 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs):
 
     if OSCOPE_GAIN_DB > 0:
         gain = 10 ** (OSCOPE_GAIN_DB / 20)      
-        print("applying gain of:",gain) 
+        print(f"applying gain of: {gain:.1f}") 
         o_recording *= gain
 
     plt.figure(figsize=(10, 3 * sound_in_chs))
@@ -480,7 +496,7 @@ def trigger_fft():
     print("exit fft")
 
 # one-shot spectrogram plot of audio in a separate process
-def plot_spectrogram(channel, y_axis_type):
+def plot_spectrogram(channel, y_axis_type, file_offset):
     """
     Generate a spectrogram from an audio file and display/save it as an image.
     Parameters:
@@ -492,27 +508,24 @@ def plot_spectrogram(channel, y_axis_type):
 
     - in librosa.load() function, sr=None means no resampling, mono=True means all channels are averaged into mono
     """
-
-    if find_file_of_type_with_offset() == None:
+    next_spectrogram = find_file_of_type_with_offset(file_offset) 
+    
+    if next_spectrogram == None:
         print("No data available to see?")
         return
     else: 
-        full_audio_path = SIGNAL_DIRECTORY + find_file_of_type_with_offset()    # quick hack to eval code
+        full_audio_path = SIGNAL_DIRECTORY + next_spectrogram    # quick hack to eval code
         print("Spectrogram source:", full_audio_path)
 
     # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
     y, sr = librosa.load(full_audio_path, sr=sound_in_samplerate, duration=PERIOD_RECORD, mono=False)
-
     # If multi-channel audio, select the specified channel
-    if len(y.shape) > 1:
-        y = y[channel]
-
+    if len(y.shape) > 1: y = y[channel]
     # Compute the spectrogram
     D = librosa.amplitude_to_db(abs(librosa.stft(y)), ref=np.max)
-    
     # Plot the spectrogram
     plt.figure(figsize=(10, 4))
-    
+
     if y_axis_type == 'log':
         librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='log')
         y_decimal_places = 3
@@ -541,15 +554,20 @@ def plot_spectrogram(channel, y_axis_type):
 
 
 def trigger_spectrogram():
-    one_shot_spectrogram_proc = multiprocessing.Process(target=plot_spectrogram, args=(monitor_channel, 'lin'))
+    global file_offset, monitor_channel, time_diff
+
+    diff = time_diff()       # time since last file was read
+    if diff < (PERIOD_RECORD + PERIOD_INTERVAL):
+        file_offset +=1
+    else:
+        file_offset = 1 
+    one_shot_spectrogram_proc = multiprocessing.Process(target=plot_spectrogram, args=(monitor_channel, 'lin', file_offset-1))
     one_shot_spectrogram_proc.start()
     print("Plotting spectrogram...")
     clear_input_buffer()
     one_shot_spectrogram_proc.join()
     print("exit spectrogram")
     
-
-
 # called from a thread
 # Print a string of asterisks, ending with only a carriage return to overwrite the line
 # value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
@@ -656,10 +674,10 @@ def toggle_intercom_t():
         intercom_thread = threading.Thread(target=intercom_t)
         intercom_thread.start()
     else:
-        stop_intercom()
+        stop_intercom_t()
 
 
-def stop_intercom():
+def stop_intercom_t():
         global intercom_thread, stop_intercom_event
 
         stop_intercom_event.set()
@@ -819,7 +837,6 @@ def setup_audio_circular_buffer():
     blocksize = 8196
     buffer_wrap_event = threading.Event()
 
-
 # 
 # ### WORKER THREAD ########################################################
 #
@@ -908,7 +925,7 @@ def callback(indata, frames, time, status):
 
 
 def audio_stream():
-    global stop_program, sound_in_samplerate, testmode
+    global stop_program, sound_in_id, sound_in_chs, sound_in_samplerate, _dtype, testmode
 
     print("Start audio_stream...")
     stream = sd.InputStream(device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate, dtype=_dtype, blocksize=blocksize, callback=callback)
@@ -1008,24 +1025,24 @@ def main():
         if KB_or_CP == 'KB':
 
             # beehive keyboard triggered management utilities
-            # one shot process to see fft
-            keyboard.on_press_key("f", lambda _: trigger_fft(), suppress=True)   
-            # one shot process to view oscope
-            keyboard.on_press_key("o", lambda _: trigger_oscope(), suppress=True) 
-            # usage: press s to plot spectrogram of last recording
-            keyboard.on_press_key("s", lambda _: trigger_spectrogram(), suppress=True)            
             # one shot process to see device list
             keyboard.on_press_key("d", lambda _: show_audio_device_list(), suppress=True) 
+            # one shot process to see fft
+            keyboard.on_press_key("f", lambda _: trigger_fft(), suppress=True)
             # usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
             keyboard.on_press_key("i", lambda _: toggle_intercom_m(), suppress=True)
-            # usage: press v to start cli vu meter, press v again to stop
-            keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
-            # usage: press q to stop all processes
-            keyboard.on_press_key("q", lambda _: stop_all(), suppress=True)
-            # usage: press t to see all threads
-            keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
             # usage: press m to select channel to monitor
             keyboard.on_press_key("m", lambda _: change_monitor_channel(), suppress=True)
+            # one shot process to view oscope
+            keyboard.on_press_key("o", lambda _: trigger_oscope(), suppress=True) 
+            # usage: press q to stop all processes
+            keyboard.on_press_key("q", lambda _: stop_all(), suppress=True)
+            # usage: press s to plot spectrogram of last recording
+            keyboard.on_press_key("s", lambda _: trigger_spectrogram(), suppress=True)            
+            # usage: press t to see all threads
+            keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
+            # usage: press v to start cli vu meter, press v again to stop
+            keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
 
         # Start the audio stream
         audio_stream()
