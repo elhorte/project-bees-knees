@@ -178,8 +178,13 @@ else:
     quit(-1)
 
 ##SIGNAL_DIRECTORY = "."                        # for debugging
-SIGNAL_DIRECTORY = "D:/OneDrive/data/Zeev/recordings/"
-PLOT_DIRECTORY = "D:/OneDrive/data/Zeev/plots/"
+##SIGNAL_DIRECTORY = "D:/OneDrive/data/Zeev/recordings/"
+##PLOT_DIRECTORY = "D:/OneDrive/data/Zeev/plots/"
+
+PRIMARY_DIRECTORY = "G:/My Drive/en_beehive_data/Zeev/recordings/202308_primary/"
+MONITOR_DIRECTORY = "G:/My Drive/en_beehive_data/Zeev/recordings/202308_monitor/"
+PLOT_DIRECTORY = "G:/My Drive/en_beehive_data/Zeev/plots/202308/"
+
 MIC_LOCATION = ["lower w/queen--front", "upper--front", "upper--back", "lower w/queen--back", "upper--back"]
 
 # location and hive ID
@@ -314,7 +319,7 @@ def show_audio_device_list():
     show_audio_device_info_for_SOUND_IN_OUT()
 
 # fetch the most recent audio file in the directory
-def find_file_of_type_with_offset_1(directory=SIGNAL_DIRECTORY, file_type=PRIMARY_FILE_FORMAT, offset=0):
+def find_file_of_type_with_offset_1(directory=PRIMARY_DIRECTORY, file_type=PRIMARY_FILE_FORMAT, offset=0):
     matching_files = [os.path.join(directory, f) for f in os.listdir(directory) \
                       if os.path.isfile(os.path.join(directory, f)) and f.endswith(f".{file_type.lower()}")]
     if offset < len(matching_files):
@@ -323,7 +328,7 @@ def find_file_of_type_with_offset_1(directory=SIGNAL_DIRECTORY, file_type=PRIMAR
     return None
 
 # return the most recent audio file in the directory minus offset (next most recent, etc.)
-def find_file_of_type_with_offset(offset, directory=SIGNAL_DIRECTORY, file_type=PRIMARY_FILE_FORMAT):
+def find_file_of_type_with_offset(offset, directory=PRIMARY_DIRECTORY, file_type=PRIMARY_FILE_FORMAT):
     # List all files of the specified type in the directory
     files_of_type = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f)) and f.endswith(f".{file_type.lower()}")]
     # Sort files alphabetically
@@ -515,7 +520,7 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
         print("No data available to see?")
         return
     else: 
-        full_audio_path = SIGNAL_DIRECTORY + next_spectrogram    # quick hack to eval code
+        full_audio_path = PRIMARY_DIRECTORY + next_spectrogram    # quick hack to eval code
         print("Spectrogram source:", full_audio_path)
 
     # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
@@ -887,15 +892,17 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
 
             timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             output_filename = f"{timestamp}_{thread_id}_{record_period}_{interval}_{LOCATION_ID}_{HIVE_ID}.{file_format.lower()}"
-            full_path_name = os.path.join(SIGNAL_DIRECTORY, output_filename)
+
 
             if file_format.upper() == 'MP3':
                 if target_sample_rate == 44100 or target_sample_rate == 48000:
+                    full_path_name = os.path.join(MONITOR_DIRECTORY, output_filename)
                     pcm_to_mp3_write(audio_data, full_path_name)
                 else:
                     print("mp3 only supports 44.1k and 48k sample rates")
                     quit(-1)
             else:
+                full_path_name = os.path.join(PRIMARY_DIRECTORY, output_filename)
                 sf.write(full_path_name, audio_data, target_sample_rate, format=file_format.upper())
 
             if not stop_recording_event.is_set():
@@ -1009,7 +1016,7 @@ def main():
 
     # Create the output directory if it doesn't exist
     try:
-        os.makedirs(SIGNAL_DIRECTORY, exist_ok=True)
+        os.makedirs(PRIMARY_DIRECTORY, exist_ok=True)
         os.makedirs(PLOT_DIRECTORY, exist_ok=True)
     except Exception as e:
         print(f"An error occurred while trying to make or find output directory: {e}")
