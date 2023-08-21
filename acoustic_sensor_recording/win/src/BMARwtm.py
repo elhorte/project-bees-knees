@@ -75,6 +75,7 @@ oscope_proc = None
 intercom_proc = None
 fft_periodic_plot_proc = None
 one_shot_fft_proc = None  
+overflow_monitor_proc = None
 
 # event flags
 
@@ -317,6 +318,31 @@ def show_audio_device_list():
     show_audio_device_info_for_defaults()
     print(f"\nCurrent device in: {sound_in_id}, device out: {SOUND_OUT_ID_DEFAULT}\n")
     show_audio_device_info_for_SOUND_IN_OUT()
+
+
+def check_stream_status(stream_duration):
+    """
+    Check the status of a sounddevice input stream for overflows and underflows.
+
+    Parameters:
+    - stream_duration: Duration for which the stream should be open and checked (in seconds).
+    """
+    print(f"Checking input stream for overflow. Watching for {stream_duration} seconds")
+
+    # Define a callback function to process the audio stream
+    def callback(indata, frames, time, status):
+        if status and status.input_overflow:
+                print("Input overflow detected at:", datetime.datetime.now())
+
+    # Open an input stream
+    with sd.InputStream(callback=callback) as stream:
+        # Run the stream for the specified duration
+        timeout = time.time() + stream_duration
+        while time.time() < timeout:
+            time.sleep(0.1)  # Sleep for a short duration before checking again
+
+    print("Stream checking finished at", datetime.datetime.now())
+
 
 # fetch the most recent audio file in the directory
 def find_file_of_type_with_offset_1(directory=PRIMARY_DIRECTORY, file_type=PRIMARY_FILE_FORMAT, offset=0):
@@ -860,7 +886,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
     global buffer, buffer_size, buffer_index, stop_recording_event
 
     if start_tod is None:
-        print(f"{thread_id} is reconding continuously")
+        print(f"{thread_id} is recording continuously")
 
     samplerate = sound_in_samplerate
 
@@ -916,6 +942,8 @@ def callback(indata, frames, time, status):
     ##print("callback", indata.shape, frames, time, status)
     if status:
         print("Callback status:", status)
+        if status.input_overflow:
+            print("Sounddevice input overflow at:", datetime.datetime.now())
 
     data_len = len(indata)
 
@@ -990,7 +1018,7 @@ def stop_all():
         print("fft_periodic_plot_proc stopped ***")
 
     stop_vu()
-    stop_intercom()
+    stop_intercom_m()
     keyboard.write('\b') 
     clear_input_buffer()
     ##list_all_threads()
@@ -1033,6 +1061,9 @@ def main():
         if KB_or_CP == 'KB':
 
             # beehive keyboard triggered management utilities
+
+            # check audio pathway for over/underflows
+            keyboard.on_press_key("c", lambda _: check_stream_status(10), suppress=True) 
             # one shot process to see device list
             keyboard.on_press_key("d", lambda _: show_audio_device_list(), suppress=True) 
             # one shot process to see fft
