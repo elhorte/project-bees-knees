@@ -293,9 +293,7 @@ def clear_input_buffer():
         msvcrt.getch()
 
 
-def show_audio_device_info_for_SOUND_IN_OUT():
-    global sound_in_id
-
+def show_audio_device_info_for_SOUND_IN_OUT(sound_in_id):
     device_info = sd.query_devices(sound_in_id)  
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Input Channels: {}'.format(device_info['max_input_channels']))
@@ -317,7 +315,7 @@ def show_audio_device_list():
     print(sd.query_devices())
     show_audio_device_info_for_defaults()
     print(f"\nCurrent device in: {sound_in_id}, device out: {SOUND_OUT_ID_DEFAULT}\n")
-    show_audio_device_info_for_SOUND_IN_OUT()
+    show_audio_device_info_for_SOUND_IN_OUT(sound_in_id)
 
 
 def check_stream_status(stream_duration):
@@ -327,6 +325,7 @@ def check_stream_status(stream_duration):
     Parameters:
     - stream_duration: Duration for which the stream should be open and checked (in seconds).
     """
+    global sound_in_id
     print(f"Checking input stream for overflow. Watching for {stream_duration} seconds")
 
     # Define a callback function to process the audio stream
@@ -335,13 +334,14 @@ def check_stream_status(stream_duration):
                 print("Input overflow detected at:", datetime.datetime.now())
 
     # Open an input stream
-    with sd.InputStream(callback=callback) as stream:
+    with sd.InputStream(callback=callback, device=sound_in_id) as stream:
         # Run the stream for the specified duration
         timeout = time.time() + stream_duration
         while time.time() < timeout:
             time.sleep(0.1)  # Sleep for a short duration before checking again
 
     print("Stream checking finished at", datetime.datetime.now())
+    show_audio_device_info_for_SOUND_IN_OUT(sound_in_id)
 
 
 # fetch the most recent audio file in the directory
@@ -603,7 +603,7 @@ def trigger_spectrogram():
 # called from a thread
 # Print a string of asterisks, ending with only a carriage return to overwrite the line
 # value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
-def vu_meter(sound_in_samplerate, sound_in_chs, channel, stop_vu_queue, asterisks):
+def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_queue, asterisks):
 
     buffer = np.zeros((sound_in_samplerate,))
 
@@ -619,7 +619,7 @@ def vu_meter(sound_in_samplerate, sound_in_chs, channel, stop_vu_queue, asterisk
         ##print(f"Audio level: {audio_level}, Normalized value: {normalized_value}")
         print(asterisks.value.ljust(50, ' '), end='\r')
 
-    with sd.InputStream(callback=callback_input, channels=sound_in_chs, samplerate=sound_in_samplerate):
+    with sd.InputStream(callback=callback_input, device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate):
         while not stop_vu_queue.get():
             sd.sleep(0.1)
             ##pass
@@ -639,7 +639,7 @@ def toggle_vu_meter():
             normalized_value = int(EVENT_THRESHOLD / 1000)
             asterisks.value = '*' * normalized_value
             print("threshold:",asterisks.value.ljust(50, ' '))
-        vu_proc = multiprocessing.Process(target=vu_meter, args=(sound_in_samplerate, sound_in_chs, monitor_channel, stop_vu_queue, asterisks))
+        vu_proc = multiprocessing.Process(target=vu_meter, args=(sound_in_id, sound_in_samplerate, sound_in_chs, monitor_channel, stop_vu_queue, asterisks))
         vu_proc.start()
     else:
         stop_vu()
@@ -724,7 +724,7 @@ def stop_intercom_t():
 # ############ intercom using multiprocessing #############
 #
 
-def intercom_m(sound_in_samplerate, sound_in_id, sound_in_chs, channel):
+def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, channel):
 
     # Create a buffer to hold the audio data
     buffer = np.zeros((sound_in_samplerate,))
@@ -768,7 +768,7 @@ def toggle_intercom_m():
 
     if intercom_proc is None:
         print("Starting intercom on channel:", monitor_channel + 1)
-        intercom_proc = multiprocessing.Process(target=intercom_m, args=(sound_in_samplerate, sound_in_id, sound_in_chs, monitor_channel))
+        intercom_proc = multiprocessing.Process(target=intercom_m, args=(sound_in_id, sound_in_samplerate, sound_in_chs, monitor_channel))
         intercom_proc.start()
     else:
         stop_intercom_m()
@@ -798,9 +798,9 @@ def change_monitor_channel():
                         time.sleep(0.1)
                         toggle_vu_meter()
                     if intercom_proc is not None:
-                        toggle_intercom_m
+                        toggle_intercom_m()
                         time.sleep(0.1)
-                        toggle_intercom_m
+                        toggle_intercom_m()
                     return        
                 else:
                     print(f"Sound device has only {sound_in_chs} channels")
@@ -1029,7 +1029,7 @@ def stop_all():
     stop_intercom_m()
     keyboard.write('\b') 
     clear_input_buffer()
-    ##list_all_threads()
+    list_all_threads()
 
     print("\nHopefully we have turned off all the lights...")
 
