@@ -105,7 +105,7 @@ stop_program = [False]
 buffer_size = None
 buffer = None
 buffer_index = None
-
+file_offset = 0
 
 # #############################################################
 # #### Control Panel ##########################################
@@ -119,7 +119,6 @@ MODE_FFT_PERIODIC_RECORD = True     # record fft periodically
 
 KB_or_CP = 'KB'                    # use keyboard or control panel (PyQT5) to control program
 
-
 # audio parameters:
 PRIMARY_SAMPLERATE = 192000                    # Audio sample rate
 PRIMARY_BITDEPTH = 16                          # Audio bit depth
@@ -132,12 +131,12 @@ AUDIO_MONITOR_QUALITY = 0                       # for mp3 only: 0-9 sets vbr (0=
 AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
 
 # recording types controls:
-AUDIO_MONITOR_START = datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec
+AUDIO_MONITOR_START = None  ##datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec; None = continuous recording
 AUDIO_MONITOR_END = datetime.time(23, 0, 0)     # time of day to stop recording hr, min, sec
 AUDIO_MONITOR_RECORD = 1800                     # file size in seconds of continuous recording
 AUDIO_MONITOR_INTERVAL = 0                      # seconds between recordings
 
-PERIOD_START = datetime.time(4, 0, 0)
+PERIOD_START = None  ##datetime.time(4, 0, 0)   # 'None' = continuous recording
 PERIOD_END = datetime.time(20, 0, 0)
 PERIOD_RECORD = 300                             # seconds of recording
 PERIOD_INTERVAL = 0                             # seconds between start of period, must be > period, of course
@@ -187,9 +186,6 @@ MIC_LOCATION = ["lower w/queen--front", "upper--front", "upper--back", "lower w/
 LOCATION_ID = "Zeev-Berkeley"
 HIVE_ID = "Z1"
 
-# audio hardware config:
-##device_id = 1                               
-
 # windows mme defaults, 2 ch only
 SOUND_IN_DEFAULT = 0                        # default input device id              
 SOUND_OUT_ID_DEFAULT = 3                    # default output device id
@@ -208,8 +204,6 @@ DEVICE_NAME = 'UAC'                         # 'UAC' or 'USB'
 API_NAME = "WASAPI"                         # 'MME' or 'WASAPI' or 'ASIO' or 'DS'  
 
 testmode = False                            # True to run in test mode with lower than neeeded sample rate
-testmode_samplerate = None                  # don't know it yet
-
 
 # ==================================================================================================
 
@@ -258,7 +252,7 @@ def set_input_device():
                     if (MODEL_NAME[j] in devices_str[i]):
                         print("Found device: ", devices_str[i])
                         time.sleep(3)      # in case a human is looking at the screen
-                        break
+                        return
             except:
                 # if input device model not found, use default device
                 if sound_in_samplerate < 192000:
@@ -328,19 +322,42 @@ def find_file_of_type_with_offset_1(directory=SIGNAL_DIRECTORY, file_type=PRIMAR
     # else:
     return None
 
-
-def find_file_of_type_with_offset(directory=SIGNAL_DIRECTORY, file_type=PRIMARY_FILE_FORMAT, offset=0):
+# return the most recent audio file in the directory minus offset (next most recent, etc.)
+def find_file_of_type_with_offset(offset, directory=SIGNAL_DIRECTORY, file_type=PRIMARY_FILE_FORMAT):
     # List all files of the specified type in the directory
     files_of_type = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f)) and f.endswith(f".{file_type.lower()}")]
-    
     # Sort files alphabetically
     files_of_type.sort(reverse=True)
-    
     if files_of_type:
-        return files_of_type[0]
+        return files_of_type[offset]
     else:
         return None
 
+
+def time_between():
+    # Using a list to store the last called time because lists are mutable and can be modified inside the nested function.
+    # This will act like a "nonlocal" variable.
+    last_called = [None]
+    
+    def helper():
+        current_time = time.time()
+        
+        # If the function has never been called before, set last_called to the current time and return 0.
+        if last_called[0] is None:
+            last_called[0] = current_time
+            return 0
+        # Calculate the difference and update the last_called time.
+        diff = current_time - last_called[0]
+        last_called[0] = current_time
+        # Cap the difference at 1800 seconds.
+        return min(diff, 1800)
+    # Return the helper function, NOT A VALUE.
+    return helper
+
+# Initialize the function 'time_diff()', which will return a value.
+time_diff = time_between()
+# wlh: why does this print on the cli when keyboard 's' iniates plot spectrogram?
+###print("time diff from the outter script", time_diff())   # 0
 
 # #############################################################
 # Audio conversion functions
@@ -415,7 +432,7 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs):
 
     if OSCOPE_GAIN_DB > 0:
         gain = 10 ** (OSCOPE_GAIN_DB / 20)      
-        print("applying gain of:",gain) 
+        print(f"applying gain of: {gain:.1f}") 
         o_recording *= gain
 
     plt.figure(figsize=(10, 3 * sound_in_chs))
@@ -428,6 +445,14 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs):
     plt.tight_layout()
     plt.show()
 
+
+def trigger_oscope():
+    clear_input_buffer()
+    oscope_proc = multiprocessing.Process(target=plot_oscope, args=(sound_in_samplerate, sound_in_id, sound_in_chs))
+    oscope_proc.start()
+    clear_input_buffer()  
+    oscope_proc.join()
+    print("exit oscope")
 
 # single-shot fft plot of audio
 def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel):
@@ -464,8 +489,15 @@ def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel):
     plt.show()
 
 
+def trigger_fft():
+    one_shot_fft_proc = multiprocessing.Process(target=plot_fft, args=(sound_in_samplerate, sound_in_id, sound_in_chs, monitor_channel))
+    one_shot_fft_proc.start()
+    clear_input_buffer()        
+    one_shot_fft_proc.join()
+    print("exit fft")
+
 # one-shot spectrogram plot of audio in a separate process
-def plot_spectrogram(channel, y_axis_type):
+def plot_spectrogram(channel, y_axis_type, file_offset):
     """
     Generate a spectrogram from an audio file and display/save it as an image.
     Parameters:
@@ -477,27 +509,24 @@ def plot_spectrogram(channel, y_axis_type):
 
     - in librosa.load() function, sr=None means no resampling, mono=True means all channels are averaged into mono
     """
-
-    if find_file_of_type_with_offset() == None:
+    next_spectrogram = find_file_of_type_with_offset(file_offset) 
+    
+    if next_spectrogram == None:
         print("No data available to see?")
         return
     else: 
-        full_audio_path = SIGNAL_DIRECTORY + find_file_of_type_with_offset()    # quick hack to eval code
+        full_audio_path = SIGNAL_DIRECTORY + next_spectrogram    # quick hack to eval code
         print("Spectrogram source:", full_audio_path)
 
     # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
     y, sr = librosa.load(full_audio_path, sr=sound_in_samplerate, duration=PERIOD_RECORD, mono=False)
-
     # If multi-channel audio, select the specified channel
-    if len(y.shape) > 1:
-        y = y[channel]
-
+    if len(y.shape) > 1: y = y[channel]
     # Compute the spectrogram
     D = librosa.amplitude_to_db(abs(librosa.stft(y)), ref=np.max)
-    
     # Plot the spectrogram
     plt.figure(figsize=(10, 4))
-    
+
     if y_axis_type == 'log':
         librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='log')
         y_decimal_places = 3
@@ -525,7 +554,227 @@ def plot_spectrogram(channel, y_axis_type):
     plt.show()
 
 
+def trigger_spectrogram():
+    global file_offset, monitor_channel, time_diff
+
+    diff = time_diff()       # time since last file was read
+    if diff < (PERIOD_RECORD + PERIOD_INTERVAL):
+        file_offset +=1
+    else:
+        file_offset = 1 
+    one_shot_spectrogram_proc = multiprocessing.Process(target=plot_spectrogram, args=(monitor_channel, 'lin', file_offset-1))
+    one_shot_spectrogram_proc.start()
+    print("Plotting spectrogram...")
+    clear_input_buffer()
+    one_shot_spectrogram_proc.join()
+    print("exit spectrogram")
+    
+# called from a thread
+# Print a string of asterisks, ending with only a carriage return to overwrite the line
+# value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
+def vu_meter(sound_in_samplerate, sound_in_chs, channel, stop_vu_queue, asterisks):
+
+    buffer = np.zeros((sound_in_samplerate,))
+
+    def callback_input(indata, frames, time, status):
+        # Only process audio from the designated channel
+        channel_data = indata[:, channel]
+        buffer[:frames] = channel_data
+
+        audio_level = np.max(np.abs(channel_data))
+        normalized_value = int((audio_level / 1.0) * 50)  
+
+        asterisks.value = '*' * normalized_value
+        ##print(f"Audio level: {audio_level}, Normalized value: {normalized_value}")
+        print(asterisks.value.ljust(50, ' '), end='\r')
+
+    with sd.InputStream(callback=callback_input, channels=sound_in_chs, samplerate=sound_in_samplerate):
+        while not stop_vu_queue.get():
+            sd.sleep(0.1)
+            ##pass
+        print("Stopping vu...")
+
+
+def toggle_vu_meter():
+    global vu_proc, monitor_channel, asterisks, stop_vu_queue
+
+    if vu_proc is None:
+        print("\nVU meter monitoring channel:", monitor_channel+1)
+        vu_manager = multiprocessing.Manager()
+        stop_vu_queue = multiprocessing.Queue()
+        asterisks = vu_manager.Value(str, '*' * 50)
+        print("fullscale:",asterisks.value.ljust(50, ' '))
+        if MODE_EVENT:
+            normalized_value = int(EVENT_THRESHOLD / 1000)
+            asterisks.value = '*' * normalized_value
+            print("threshold:",asterisks.value.ljust(50, ' '))
+        vu_proc = multiprocessing.Process(target=vu_meter, args=(sound_in_samplerate, sound_in_chs, monitor_channel, stop_vu_queue, asterisks))
+        vu_proc.start()
+    else:
+        stop_vu()
+
+
+def stop_vu():
+    global vu_proc, stop_vu_event, stop_vu_queue
+
+    if vu_proc is not None:
+        stop_vu_event.set()
+        stop_vu_queue.put(True)
+        if vu_proc.is_alive():
+            vu_proc.join()            # make sure its stopped, hate zombies
+            print("\nvu stopped")
+        vu_proc = None
+        clear_input_buffer()
+
+#
+# ############ intercom using threads #############
+#
+
+def intercom_t():
+    global monitor_channel, stop_intercom_event, change_ch_event, sound_in_chs, sound_in_id
+
+    # Create a buffer to hold the audio data
+    buffer = np.zeros((sound_in_samplerate,))
+    channel = monitor_channel
+
+    # Callback function to handle audio input
+    def callback_input(indata, frames, time, status):
+        # Only process audio from the designated channel
+        channel_data = indata[:, channel]
+        buffer[:frames] = channel_data
+
+    # Callback function to handle audio output
+    def callback_output(outdata, frames, time, status):
+        # Play back the audio from the buffer
+        outdata[:, 0] = buffer[:frames]  # Play back on the first channel
+        outdata[:, 1] = buffer[:frames]  # Play back on the second channel
+
+#   sd.OutputStream(callback=callback_output, device=SOUND_OUT_ID_DEFAULT, channels=SOUND_OUT_CHS_DEFAULT, samplerate=SOUND_OUT_SR_DEFAULT):
+#   sd.OutputStream(callback=callback_output, device=14, channels=sound_in_chs, samplerate=sound_in_samplerate):
+    # Open an input stream and an output stream with the callback function
+    with sd.InputStream(callback=callback_input, device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate), \
+        sd.OutputStream(callback=callback_output, device=3, channels=2, samplerate=44100):
+        ##sd.OutputStream(callback=callback_output, channels=sound_in_chs, samplerate=sound_in_samplerate):
+        # The streams are now open and the callback function will be called every time there is audio input and output
+        # We'll just use a blocking wait here for simplicity
+        while not stop_intercom_event.is_set():
+            if change_ch_event.is_set():
+                channel = monitor_channel
+                print("\nIntercom changing to ch:", monitor_channel + 1)
+                change_ch_event.clear()
+            sd.sleep(1)
+
+        print("Stopping intercom...")
+
+
+def toggle_intercom_t():
+    global sound_in_samplerate, intercom_thread, stop_intercom_event, sound_in_chs, sound_in_id
+
+    if intercom_thread is None or not intercom_thread.is_alive():
+        print("Starting intercom on channel:", monitor_channel + 1)
+        intercom_thread = threading.Thread(target=intercom_t)
+        intercom_thread.start()
+    else:
+        stop_intercom_t()
+
+
+def stop_intercom_t():
+        global intercom_thread, stop_intercom_event
+
+        stop_intercom_event.set()
+        if intercom_thread is not None:
+            intercom_thread.join()
+            print("\nIntercom stopped")
+        intercom_thread = None
+        stop_intercom_event.clear()
+        clear_input_buffer()
+
+#
+# ############ intercom using multiprocessing #############
+#
+
+def intercom_m(sound_in_samplerate, sound_in_id, sound_in_chs, channel):
+
+    # Create a buffer to hold the audio data
+    buffer = np.zeros((sound_in_samplerate,))
+    channel = monitor_channel
+
+    # Callback function to handle audio input
+    def callback_input(indata, frames, time, status):
+        # Only process audio from the designated channel
+        channel_data = indata[:, channel]
+        buffer[:frames] = channel_data
+
+    # Callback function to handle audio output
+    def callback_output(outdata, frames, time, status):
+        # Play back the audio from the buffer
+        outdata[:, 0] = buffer[:frames]  # Play back on the first channel
+        outdata[:, 1] = buffer[:frames]  # Play back on the second channel
+
+    # Open an input stream and an output stream with the callback function
+    ##with sd.InputStream(callback=callback_input, device=SOUND_IN, channels=SOUND_CHS, samplerate=PRIMARY_SAMPLE_RATE), \
+    with sd.InputStream(callback=callback_input, device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate), \
+        sd.OutputStream(callback=callback_output, device=3, channels=2, samplerate=44100):  
+        # The streams are now open and the callback function will be called every time there is audio input and output
+        # In Windows, output is set to the soundmapper output (device=3) which bypasses the ADC/DAC encoder device.
+        while not stop_intercom_event.is_set():
+            sd.sleep(1)
+        print("Stopping intercom...")
+
+
+# mothballed, hanging around for reference
+def stop_intercom_m():
+    global intercom_proc, stop_intercom_event
+
+    if intercom_proc is not None:
+        stop_intercom_event.set()
+        intercom_proc.terminate()
+        intercom_proc.join()            # make sure its stopped, hate zombies
+
+
+def toggle_intercom_m():
+    global intercom_proc
+
+    if intercom_proc is None:
+        print("Starting intercom on channel:", monitor_channel + 1)
+        intercom_proc = multiprocessing.Process(target=intercom_m, args=(sound_in_samplerate, sound_in_id, sound_in_chs, monitor_channel))
+        intercom_proc.start()
+    else:
+        stop_intercom_m()
+        print("\nIntercom stopped")
+        intercom_proc = None
+
+#
+# Function to switch the channel being monitored
+#
+
+def change_monitor_channel():
+    global monitor_channel, change_ch_event
+    # usage: press m then press 1, 2, 3, 4
+    print(f"\nChannel {monitor_channel+1} is active, {sound_in_chs} are available: select a channel:") #, end='\r')
+
+    while True:
+        while msvcrt.kbhit():
+            key = msvcrt.getch().decode('utf-8')
+            if key.isdigit():
+                key_int = int(key)
+                if key_int >= 1 and key_int <= sound_in_chs:
+                    monitor_channel = key_int - 1
+                    change_ch_event.set()                         
+                    print(f"Now monitoring: {monitor_channel+1}")
+                    return        
+                else:
+                    print(f"Sound device has only {sound_in_chs} channels")
+
+            if key == '\x1b':       # escape
+                print("exiting monitor channel selection")
+                return
+        time.sleep(1)
+
+#
 # continuous fft plot of audio in a separate background process
+#
+
 def plot_and_save_fft(sound_in_samplerate, channel):
 
     interval = FFT_INTERVAL * 60    # convert to seconds, time betwwen ffts
@@ -572,70 +821,6 @@ def plot_and_save_fft(sound_in_samplerate, channel):
 
     print("Exiting fft periodic")
 
-
-# called from a thread
-# Print a string of asterisks, ending with only a carriage return to overwrite the line
-# value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
-def vu_meter(sound_in_samplerate, sound_in_chs, channel, stop_vu_queue, asterisks):
-
-    buffer = np.zeros((sound_in_samplerate,))
-
-    def callback_input(indata, frames, time, status):
-        # Only process audio from the designated channel
-        channel_data = indata[:, channel]
-        buffer[:frames] = channel_data
-
-        audio_level = np.max(np.abs(channel_data))
-        normalized_value = int((audio_level / 1.0) * 50)  
-
-        asterisks.value = '*' * normalized_value
-        ##print(f"Audio level: {audio_level}, Normalized value: {normalized_value}")
-        print(asterisks.value.ljust(50, ' '), end='\r')
-
-    with sd.InputStream(callback=callback_input, channels=sound_in_chs, samplerate=sound_in_samplerate):
-        while not stop_vu_queue.get():
-            sd.sleep(0.1)
-            ##pass
-        print("Stopping vu...")
-
-#
-# ############ intercom using threads #############
-#
-
-def intercom_t():
-    global monitor_channel, stop_intercom_event, change_ch_event, sound_in_chs, sound_in_id
-
-    # Create a buffer to hold the audio data
-    buffer = np.zeros((sound_in_samplerate,))
-    channel = monitor_channel
-
-    # Callback function to handle audio input
-    def callback_input(indata, frames, time, status):
-        # Only process audio from the designated channel
-        channel_data = indata[:, channel]
-        buffer[:frames] = channel_data
-
-    # Callback function to handle audio output
-    def callback_output(outdata, frames, time, status):
-        # Play back the audio from the buffer
-        outdata[:, 0] = buffer[:frames]  # Play back on the first channel
-        outdata[:, 1] = buffer[:frames]  # Play back on the second channel
-
-    # Open an input stream and an output stream with the callback function
-    with sd.InputStream(callback=callback_input, device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate), \
-        sd.OutputStream(callback=callback_output, device=SOUND_OUT_ID_DEFAULT, channels=SOUND_OUT_CHS_DEFAULT, samplerate=SOUND_OUT_SR_DEFAULT):
-        ##sd.OutputStream(callback=callback_output, channels=sound_in_chs, samplerate=sound_in_samplerate):
-        # The streams are now open and the callback function will be called every time there is audio input and output
-        # We'll just use a blocking wait here for simplicity
-        while not stop_intercom_event.is_set():
-            if change_ch_event.is_set():
-                channel = monitor_channel
-                print("\nIntercom changing to ch:", monitor_channel + 1)
-                change_ch_event.clear()
-            sd.sleep(1)
-
-        print("Stopping intercom...")
-
 #
 # #############################################################
 # audio stream & callback functions
@@ -652,14 +837,6 @@ def setup_audio_circular_buffer():
     buffer_wrap = False
     blocksize = 8196
     buffer_wrap_event = threading.Event()
-
-
-recording_start_index = None
-thread_id = "Continuous"
-period = 300
-interval = 0
-file_format = "FLAC"
-record_start = None
 
 # 
 # ### WORKER THREAD ########################################################
@@ -749,7 +926,7 @@ def callback(indata, frames, time, status):
 
 
 def audio_stream():
-    global stop_program, sound_in_samplerate, testmode
+    global stop_program, sound_in_id, sound_in_chs, sound_in_samplerate, _dtype, testmode
 
     print("Start audio_stream...")
     stream = sd.InputStream(device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate, dtype=_dtype, blocksize=blocksize, callback=callback)
@@ -776,6 +953,42 @@ def audio_stream():
         stream.stop()
 
         print("Stopped audio_stream...")
+
+
+def kill_worker_threads():
+    for t in threading.enumerate():
+        print("thread name:", t)
+
+        if "recording_worker_thread" in t.name:
+            if t.is_alive():
+                stop_recording_event.set()
+                t.join
+                print("recording_worker_thread stopped ***")  
+
+
+def stop_all():
+    global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc
+
+    if KB_or_CP == 'KB':
+        # Unhook all hooks
+        keyboard.unhook_all()
+        print("Unhooked all keyboard hooks")
+
+    stop_program[0] = True
+    stop_recording_event.set()
+
+    stop_fft_periodic_plot_event.set()
+    if fft_periodic_plot_proc is not None:
+        fft_periodic_plot_proc.join()
+        print("fft_periodic_plot_proc stopped ***")
+
+    stop_vu()
+    stop_intercom()
+    keyboard.write('\b') 
+    clear_input_buffer()
+    ##list_all_threads()
+
+    print("\nHopefully we have turned off all the lights...")
 
 
 ###########################
@@ -809,167 +1022,35 @@ def main():
         fft_periodic_plot_proc.start()
         print("started fft_periodic_plot_process")
 
-
-    def trigger_oscope():
-        clear_input_buffer()
-        oscope_proc = multiprocessing.Process(target=plot_oscope, args=(sound_in_samplerate, sound_in_id, sound_in_chs))
-        oscope_proc.start()
-        clear_input_buffer()  
-        oscope_proc.join()
-        print("exit oscope")
-
-
-    def trigger_fft():
-        one_shot_fft_proc = multiprocessing.Process(target=plot_fft, args=(sound_in_samplerate, sound_in_id, sound_in_chs, monitor_channel))
-        one_shot_fft_proc.start()
-        clear_input_buffer()        
-        one_shot_fft_proc.join()
-        print("exit fft")
-
-
-    def trigger_spectrogram():
-        one_shot_spectrogram_proc = multiprocessing.Process(target=plot_spectrogram, args=(monitor_channel, 'lin'))
-        one_shot_spectrogram_proc.start()
-        print("Plotting spectrogram...")
-        clear_input_buffer()
-        one_shot_spectrogram_proc.join()
-        print("exit spectrogram")
-
-
-    def toggle_vu_meter():
-        global vu_proc, monitor_channel, asterisks, stop_vu_queue
-
-        if vu_proc is None:
-            print("\nVU meter monitoring channel:", monitor_channel+1)
-            vu_manager = multiprocessing.Manager()
-            stop_vu_queue = multiprocessing.Queue()
-            asterisks = vu_manager.Value(str, '*' * 50)
-            print("fullscale:",asterisks.value.ljust(50, ' '))
-            if MODE_EVENT:
-                normalized_value = int(EVENT_THRESHOLD / 1000)
-                asterisks.value = '*' * normalized_value
-                print("threshold:",asterisks.value.ljust(50, ' '))
-            vu_proc = multiprocessing.Process(target=vu_meter, args=(sound_in_samplerate, monitor_channel, stop_vu_queue, asterisks))
-            vu_proc.start()
-        else:
-            stop_vu()
-
-
-    def stop_vu():
-        global vu_proc, stop_vu_event, stop_vu_queue
-
-        if vu_proc is not None:
-            stop_vu_event.set()
-            stop_vu_queue.put(True)
-            vu_proc.join()            # make sure its stopped, hate zombies
-            vu_proc = None
-            clear_input_buffer()
-            print("\nvu stopped")
-
-
-    def toggle_intercom_t():
-        global sound_in_samplerate, intercom_thread, stop_intercom_event, sound_in_chs, sound_in_id
-
-        if intercom_thread is None or not intercom_thread.is_alive():
-            print("Starting intercom on channel:", monitor_channel + 1)
-            intercom_thread = threading.Thread(target=intercom_t)
-            intercom_thread.start()
-        else:
-            stop_intercom()
-
-
-    def stop_intercom():
-            global intercom_thread, stop_intercom_event
-
-            stop_intercom_event.set()
-            intercom_thread.join()
-            print("\nIntercom stopped")
-            intercom_thread = None
-            stop_intercom_event.clear()
-            clear_input_buffer()
-
-
-    # Function to switch the channel being listened to
-    def change_monitor_channel():
-        global monitor_channel, change_ch_event
-        # usage: press m then press 1, 2, 3, 4
-        print(f"\nChannel {monitor_channel+1} is active, {sound_in_chs} are available: select a channel:") #, end='\r')
-
-        while True:
-            while msvcrt.kbhit():
-                key = msvcrt.getch().decode('utf-8')
-                if key.isdigit():
-                    key_int = int(key)
-                    if key_int >= 1 and key_int <= sound_in_chs:
-                        monitor_channel = key_int - 1
-                        change_ch_event.set()                         
-                        print(f"Now monitoring: {monitor_channel+1}")
-                        return        
-                    else:
-                        print(f"Sound device has only {sound_in_chs} channels")
-
-                if key == '\x1b':       # escape
-                    print("exiting monitor channel selection")
-                    return
-            time.sleep(1)
-
     try:
         if KB_or_CP == 'KB':
 
             # beehive keyboard triggered management utilities
-            # one shot process to see fft
-            keyboard.on_press_key("f", lambda _: trigger_fft(), suppress=True)   
-            # one shot process to view oscope
-            keyboard.on_press_key("o", lambda _: trigger_oscope(), suppress=True) 
-            # usage: press s to plot spectrogram of last recording
-            keyboard.on_press_key("s", lambda _: trigger_spectrogram(), suppress=True)            
             # one shot process to see device list
             keyboard.on_press_key("d", lambda _: show_audio_device_list(), suppress=True) 
+            # one shot process to see fft
+            keyboard.on_press_key("f", lambda _: trigger_fft(), suppress=True)
             # usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
-            keyboard.on_press_key("i", lambda _: toggle_intercom_t(), suppress=True)
-            # usage: press v to start cli vu meter, press v again to stop
-            keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
-            # usage: press q to stop all processes
-            keyboard.on_press_key("q", lambda _: stop_all(), suppress=True)
-            # usage: press t to see all threads
-            keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
+            keyboard.on_press_key("i", lambda _: toggle_intercom_m(), suppress=True)
             # usage: press m to select channel to monitor
             keyboard.on_press_key("m", lambda _: change_monitor_channel(), suppress=True)
+            # one shot process to view oscope
+            keyboard.on_press_key("o", lambda _: trigger_oscope(), suppress=True) 
+            # usage: press q to stop all processes
+            keyboard.on_press_key("q", lambda _: stop_all(), suppress=True)
+            # usage: press s to plot spectrogram of last recording
+            keyboard.on_press_key("s", lambda _: trigger_spectrogram(), suppress=True)            
+            # usage: press t to see all threads
+            keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
+            # usage: press v to start cli vu meter, press v again to stop
+            keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
 
         # Start the audio stream
         audio_stream()
-
-        if KB_or_CP == 'KB':
-            # Unhook all hooks
-            keyboard.unhook_all()
-            clear_input_buffer()
-
-        stop_program[0] = True
-
-        stop_recording_event.set()
-
-        stop_fft_periodic_plot_event.set()
-        if fft_periodic_plot_proc is not None:
-            fft_periodic_plot_proc.join()
-
-        stop_vu()
-        stop_intercom()
-
-        for t in threading.enumerate():
-            print("thread name:", t)
-
-            if "recording_worker_thread" in t.name:
-                if t.is_alive():
-                    stop_recording_event.set()
-                    t.join
-                    print("recording_worker_thread stopped ***")  
-
-        list_all_threads()
-        print("\nHopefully we have turned off all the lights...")
             
     except KeyboardInterrupt: # ctrl-c in windows
         print('\nCtrl-C: Recording process stopped by user.')
-        stop_all()
+        ##stop_all()
 
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
