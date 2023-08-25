@@ -793,14 +793,17 @@ def change_monitor_channel():
                     monitor_channel = key_int - 1
                     change_ch_event.set()                         
                     print(f"Now monitoring: {monitor_channel+1}")
-                    if vu_proc is not None:
-                        toggle_vu_meter()
-                        time.sleep(0.1)
-                        toggle_vu_meter()
+
                     if intercom_proc is not None:
                         toggle_intercom_m()
                         time.sleep(0.1)
                         toggle_intercom_m()
+                        
+                    if vu_proc is not None:
+                        toggle_vu_meter()
+                        time.sleep(0.1)
+                        toggle_vu_meter()
+
                     return        
                 else:
                     print(f"Sound device has only {sound_in_chs} channels")
