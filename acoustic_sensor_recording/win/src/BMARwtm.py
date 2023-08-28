@@ -178,6 +178,14 @@ else:
     print("The bit depth is not supported: ", PRIMARY_BITDEPTH)
     quit(-1)
 
+# #############################################################
+
+MIC_LOCATION = ["lower w/queen--front", "upper--front", "upper--back", "lower w/queen--back", "upper--back"]
+
+# location and hive ID
+LOCATION_ID = "Zeev-Berkeley"
+HIVE_ID = "Z1"
+
 ##SIGNAL_DIRECTORY = "."                        # for debugging
 ##SIGNAL_DIRECTORY = "D:/OneDrive/data/Zeev/recordings/"
 ##PLOT_DIRECTORY = "D:/OneDrive/data/Zeev/plots/"
@@ -185,17 +193,14 @@ else:
 current_date = datetime.datetime.now()
 current_year = current_date.strftime('%Y')
 current_month = current_date.strftime('%m')
-data_directory = "G:"
+data_drive = "G:"
+data_directory = "My Drive/en_beehive_data"
 
-PRIMARY_DIRECTORY = f"{data_directory}/My Drive/en_beehive_data/Zeev/recordings/{current_year}{current_month}_primary/"
-MONITOR_DIRECTORY = f"{data_directory}/My Drive/en_beehive_data/Zeev/recordings/{current_year}{current_month}_monitor/"
-PLOT_DIRECTORY = f"{data_directory}/My Drive/en_beehive_data/Zeev/plots/{current_year}{current_month}/"
+PRIMARY_DIRECTORY = f"{data_drive}/{data_directory}/{LOCATION_ID}/recordings/{current_year}{current_month}_primary/"
+MONITOR_DIRECTORY = f"{data_drive}/{data_directory}/{LOCATION_ID}/recordings/{current_year}{current_month}_monitor/"
+PLOT_DIRECTORY = f"{data_drive}/{data_directory}/{LOCATION_ID}/plots/{current_year}{current_month}/"
 
-MIC_LOCATION = ["lower w/queen--front", "upper--front", "upper--back", "lower w/queen--back", "upper--back"]
-
-# location and hive ID
-LOCATION_ID = "Zeev-Berkeley"
-HIVE_ID = "Z1"
+# #############################################################
 
 # windows mme defaults, 2 ch only
 SOUND_IN_DEFAULT = 0                        # default input device id              
@@ -275,10 +280,10 @@ def set_input_device():
 
 # interruptable sleep
 def sleep(seconds, stop_sleep_event):
-    for i in range(seconds):
+    for i in range(seconds*2):
         if stop_sleep_event.is_set():
             return
-        time.sleep(1)
+        time.sleep(0.5)
 
 # for debugging
 def play_audio(filename, device):
@@ -546,7 +551,8 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
     - in librosa.load() function, sr=None means no resampling, mono=True means all channels are averaged into mono
     """
     next_spectrogram = find_file_of_type_with_offset(file_offset) 
-    
+    ##print("preparing spectrogram of:", next_spectrogram)
+
     if next_spectrogram == None:
         print("No data available to see?")
         return
@@ -1061,6 +1067,7 @@ def main():
     # Create the output directory if it doesn't exist
     try:
         os.makedirs(PRIMARY_DIRECTORY, exist_ok=True)
+        os.makedirs(MONITOR_DIRECTORY, exist_ok=True)
         os.makedirs(PLOT_DIRECTORY, exist_ok=True)
     except Exception as e:
         print(f"An error occurred while trying to make or find output directory: {e}")
