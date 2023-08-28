@@ -78,7 +78,6 @@ one_shot_fft_proc = None
 overflow_monitor_proc = None
 
 # event flags
-
 stop_recording_event = threading.Event()
 stop_tod_event = threading.Event()
 stop_vu_event = threading.Event()
@@ -88,7 +87,6 @@ stop_fft_periodic_plot_event = threading.Event()
 plot_oscope_done = threading.Event()
 plot_fft_done = threading.Event()
 plot_spectrogram_done = threading.Event()
-
 change_ch_event = threading.Event()
 
 # queues
@@ -112,14 +110,6 @@ file_offset = 0
 # #### Control Panel ##########################################
 # #############################################################
 
-# mode controls
-MODE_AUDIO_MONITOR = True           # recording continuously to mp3 files
-MODE_PERIOD = True                 # period recording
-MODE_EVENT = False                  # event recording
-MODE_FFT_PERIODIC_RECORD = True     # record fft periodically
-
-KB_or_CP = 'KB'                    # use keyboard or control panel (PyQT5) to control program
-
 # audio parameters:
 PRIMARY_SAMPLERATE = 192000                    # Audio sample rate
 PRIMARY_BITDEPTH = 16                          # Audio bit depth
@@ -131,22 +121,6 @@ AUDIO_MONITOR_CHANNELS = 2                      # Number of channels
 AUDIO_MONITOR_QUALITY = 0                       # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
 
-# recording types controls:
-AUDIO_MONITOR_START = None  ##datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec; None = continuous recording
-AUDIO_MONITOR_END = datetime.time(23, 0, 0)     # time of day to stop recording hr, min, sec
-AUDIO_MONITOR_RECORD = 1800                     # file size in seconds of continuous recording
-AUDIO_MONITOR_INTERVAL = 0                      # seconds between recordings
-
-PERIOD_START = None  ##datetime.time(4, 0, 0)   # 'None' = continuous recording
-PERIOD_END = datetime.time(20, 0, 0)
-PERIOD_RECORD = 300                             # seconds of recording
-PERIOD_INTERVAL = 0                             # seconds between start of period, must be > period, of course
-
-EVENT_START = datetime.time(4, 0, 0)
-EVENT_END = datetime.time(22, 0, 0)
-SAVE_BEFORE_EVENT = 30                          # seconds to save before the event
-SAVE_AFTER_EVENT = 30                           # seconds to save after the event
-EVENT_THRESHOLD = 20000                         # audio level threshold to be considered an event
 MONITOR_CH = 0                                  # channel to monitor for event (if > number of chs, all channels are monitored)
 TRACE_DURATION = 10                            # seconds of audio to show on oscope
 OSCOPE_GAIN_DB = 12                             # Gain in dB of audio level for oscope 
@@ -178,27 +152,13 @@ else:
     print("The bit depth is not supported: ", PRIMARY_BITDEPTH)
     quit(-1)
 
-# #############################################################
-
-MIC_LOCATION = ["lower w/queen--front", "upper--front", "upper--back", "lower w/queen--back", "upper--back"]
-
-# location and hive ID
-LOCATION_ID = "Zeev-Berkeley"
-HIVE_ID = "Z1"
-
-##SIGNAL_DIRECTORY = "."                        # for debugging
-##SIGNAL_DIRECTORY = "D:/OneDrive/data/Zeev/recordings/"
-##PLOT_DIRECTORY = "D:/OneDrive/data/Zeev/plots/"
-
+# Date and time stuff for file naming
 current_date = datetime.datetime.now()
 current_year = current_date.strftime('%Y')
 current_month = current_date.strftime('%m')
-data_drive = "G:"
-data_directory = "My Drive/en_beehive_data"
+current_day = current_date.strftime('%d')
 
-PRIMARY_DIRECTORY = f"{data_drive}/{data_directory}/{LOCATION_ID}/recordings/{current_year}{current_month}_primary/"
-MONITOR_DIRECTORY = f"{data_drive}/{data_directory}/{LOCATION_ID}/recordings/{current_year}{current_month}_monitor/"
-PLOT_DIRECTORY = f"{data_drive}/{data_directory}/{LOCATION_ID}/plots/{current_year}{current_month}/"
+import BMARwtm_config as config
 
 # #############################################################
 
@@ -213,15 +173,13 @@ sound_in_id = None                          # id of input device
 sound_in_chs = None                         # number of input channels
 sound_in_samplerate = None                  # sample rate of input device
 
-# input device parameters:
-MAKE_NAME = "Behringer"                     # 'Behringer' or 'Zoom'
-MODEL_NAME = ["UMC404HD", "Scarlett", "Zoom", "Volt"]
-DEVICE_NAME = 'UAC'                         # 'UAC' or 'USB'
-API_NAME = "WASAPI"                         # 'MME' or 'WASAPI' or 'ASIO' or 'DS'  
+PRIMARY_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/recordings/{current_year}{current_month}_primary/"
+MONITOR_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/recordings/{current_year}{current_month}_monitor/"
+PLOT_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/plots/{current_year}{current_month}/"
 
 testmode = False                            # True to run in test mode with lower than neeeded sample rate
+KB_or_CP = 'KB'                             # use keyboard or control panel (PyQT5) to control program
 
-# ==================================================================================================
 
 ##########################  
 # setup utilities
@@ -257,15 +215,15 @@ def set_input_device():
 
     # loop through known MODEL_NAME
     for i in range(len(devices_str)):
-        if ("Microphone" in devices_str[i] and API_NAME in devices_str[i]):
+        if ("Microphone" in devices_str[i] and config.API_NAME in devices_str[i]):
             print("Looking at device: ", devices_str[i])
             device = sd.query_devices(i)
             sound_in_id = i
             sound_in_chs = device['max_input_channels']
             sound_in_samplerate = int(device['default_samplerate'])
             try:    # found an input device and of type WASAPI, do we know about it?
-                for j in range(len(MODEL_NAME)):
-                    if (MODEL_NAME[j] in devices_str[i]):
+                for j in range(len(config.MODEL_NAME)):
+                    if (config.MODEL_NAME[j] in devices_str[i]):
                         print("Found device: ", devices_str[i])
                         time.sleep(3)      # in case a human is looking at the screen
                         return
@@ -561,7 +519,7 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
         print("Spectrogram source:", full_audio_path)
 
     # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
-    y, sr = librosa.load(full_audio_path, sr=sound_in_samplerate, duration=PERIOD_RECORD, mono=False)
+    y, sr = librosa.load(full_audio_path, sr=sound_in_samplerate, duration=config.PERIOD_RECORD, mono=False)
     # If multi-channel audio, select the specified channel
     if len(y.shape) > 1: y = y[channel]
     # Compute the spectrogram
@@ -588,7 +546,7 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
     plotname = PLOT_DIRECTORY + root + '_spectrogram' + '.png'
 
     # Set title to include filename and channel
-    plt.title(f'Spectrogram from {LOCATION_ID}, hive:{HIVE_ID}, Mic Loc:{MIC_LOCATION[channel]}\nfile:{filename}, Ch:{channel+1}')
+    plt.title(f'Spectrogram from {config.LOCATION_ID}, hive:{config.HIVE_ID}, Mic Loc:{config.MIC_LOCATION[channel]}\nfile:{filename}, Ch:{channel+1}')
     plt.colorbar(format='%+2.0f dB')
     plt.tight_layout()
     print("\nSaving spectrogram to:", plotname)
@@ -600,7 +558,7 @@ def trigger_spectrogram():
     global file_offset, monitor_channel, time_diff
 
     diff = time_diff()       # time since last file was read
-    if diff < (PERIOD_RECORD + PERIOD_INTERVAL):
+    if diff < (config.PERIOD_RECORD + config.PERIOD_INTERVAL):
         file_offset +=1
     else:
         file_offset = 1 
@@ -646,8 +604,8 @@ def toggle_vu_meter():
         stop_vu_queue = multiprocessing.Queue()
         asterisks = vu_manager.Value(str, '*' * 50)
         print("fullscale:",asterisks.value.ljust(50, ' '))
-        if MODE_EVENT:
-            normalized_value = int(EVENT_THRESHOLD / 1000)
+        if config.MODE_EVENT:
+            normalized_value = int(config.EVENT_THRESHOLD / 1000)
             asterisks.value = '*' * normalized_value
             print("threshold:",asterisks.value.ljust(50, ' '))
         vu_proc = multiprocessing.Process(target=vu_meter, args=(sound_in_id, sound_in_samplerate, sound_in_chs, monitor_channel, stop_vu_queue, asterisks))
@@ -868,7 +826,7 @@ def plot_and_save_fft(sound_in_samplerate, channel):
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         # Save plot to disk with a unique filename based on current time
-        output_filename = f"{timestamp}_fft_{sound_in_samplerate/1000:.0F}_{PRIMARY_BITDEPTH}_{channel}_{LOCATION_ID}_{HIVE_ID}.png"
+        output_filename = f"{timestamp}_fft_{sound_in_samplerate/1000:.0F}_{PRIMARY_BITDEPTH}_{channel}_{config.LOCATION_ID}_{config.HIVE_ID}.png"
         full_path_name = os.path.join(PLOT_DIRECTORY, output_filename)
         plt.savefig(full_path_name)
 
@@ -939,7 +897,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
                 audio_data = downsample_audio(audio_data, sound_in_samplerate, target_sample_rate)
 
             timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            output_filename = f"{timestamp}_{thread_id}_{record_period}_{interval}_{LOCATION_ID}_{HIVE_ID}.{file_format.lower()}"
+            output_filename = f"{timestamp}_{thread_id}_{record_period}_{interval}_{config.LOCATION_ID}_{config.HIVE_ID}.{file_format.lower()}"
 
 
             if file_format.upper() == 'MP3':
@@ -992,17 +950,17 @@ def audio_stream():
         # start the recording worker threads
         # NOTE: these threads will run until the program is stopped, it will not stop when the stream is stopped
         # NOTE: replace <name>_START with None to disable time of day recording
-        if MODE_AUDIO_MONITOR:
+        if config.MODE_AUDIO_MONITOR:
             print("starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
-            threading.Thread(target=recording_worker_thread, args=(AUDIO_MONITOR_RECORD, AUDIO_MONITOR_INTERVAL, "Audio_monitor", AUDIO_MONITOR_FORMAT, AUDIO_MONITOR_SAMPLERATE, AUDIO_MONITOR_START, AUDIO_MONITOR_END)).start()
+            threading.Thread(target=recording_worker_thread, args=(config.AUDIO_MONITOR_RECORD, config.AUDIO_MONITOR_INTERVAL, "Audio_monitor", AUDIO_MONITOR_FORMAT, AUDIO_MONITOR_SAMPLERATE, config.AUDIO_MONITOR_START, config.AUDIO_MONITOR_END)).start()
 
-        if MODE_PERIOD and not testmode:
+        if config.MODE_PERIOD and not testmode:
             print("starting recording_worker_thread for saving period audio at primary sample rate and all channels...")
-            threading.Thread(target=recording_worker_thread, args=(PERIOD_RECORD, PERIOD_INTERVAL, "Period_recording", PRIMARY_FILE_FORMAT, sound_in_samplerate, PERIOD_START, PERIOD_END)).start()
+            threading.Thread(target=recording_worker_thread, args=(config.PERIOD_RECORD, config.PERIOD_INTERVAL, "Period_recording", PRIMARY_FILE_FORMAT, sound_in_samplerate, config.PERIOD_START, config.PERIOD_END)).start()
 
-        if MODE_EVENT and not testmode:  # *** UNDER CONSTRUCTION, NOT READY FOR PRIME TIME ***
+        if config.MODE_EVENT and not testmode:  # *** UNDER CONSTRUCTION, NOT READY FOR PRIME TIME ***
             print("starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...")
-            threading.Thread(target=recording_worker_thread, args=(SAVE_BEFORE_EVENT, SAVE_AFTER_EVENT, "Event_recording", PRIMARY_FILE_FORMAT, sound_in_samplerate, EVENT_START, EVENT_END)).start()
+            threading.Thread(target=recording_worker_thread, args=(config.SAVE_BEFORE_EVENT, config.SAVE_AFTER_EVENT, "Event_recording", PRIMARY_FILE_FORMAT, sound_in_samplerate, config.EVENT_START, config.EVENT_END)).start()
 
         while stream.active and not stop_program[0]:
             time.sleep(1)
@@ -1074,7 +1032,7 @@ def main():
         quit(-1)
 
     # Create and start the process, note: using mp because matplotlib wants in be in the mainprocess threqad
-    if MODE_FFT_PERIODIC_RECORD:
+    if config.MODE_FFT_PERIODIC_RECORD:
         fft_periodic_plot_proc = multiprocessing.Process(target=plot_and_save_fft, args=(sound_in_samplerate, monitor_channel,)) 
         fft_periodic_plot_proc.daemon = True  
         fft_periodic_plot_proc.start()
