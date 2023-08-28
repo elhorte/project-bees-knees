@@ -42,6 +42,7 @@ import warnings
 import queue
 import librosa
 import librosa.display
+import resampy
 ##import TestPyQT5
 
 lock = threading.Lock()
@@ -627,21 +628,23 @@ def stop_vu():
         clear_input_buffer()
 
 #
-# ############ intercom using threads #############
+# ############ intercom using multiprocessing #############
 #
 
-def intercom_t():
-    global monitor_channel, stop_intercom_event, change_ch_event, sound_in_chs, sound_in_id
+def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, channel):
 
     # Create a buffer to hold the audio data
-    buffer = np.zeros((sound_in_samplerate,))
+    buffer_size = sound_in_samplerate // 4  # For 48,000 samples per second
+    buffer = np.zeros((buffer_size,))
     channel = monitor_channel
 
     # Callback function to handle audio input
     def callback_input(indata, frames, time, status):
         # Only process audio from the designated channel
         channel_data = indata[:, channel]
-        buffer[:frames] = channel_data
+        # Downsample the audio using resampy
+        downsampled_data = resampy.resample(channel_data, sound_in_samplerate, 48000)
+        buffer[:len(downsampled_data)] = downsampled_data
 
     # Callback function to handle audio output
     def callback_output(outdata, frames, time, status):
@@ -649,50 +652,15 @@ def intercom_t():
         outdata[:, 0] = buffer[:frames]  # Play back on the first channel
         outdata[:, 1] = buffer[:frames]  # Play back on the second channel
 
-#   sd.OutputStream(callback=callback_output, device=SOUND_OUT_ID_DEFAULT, channels=SOUND_OUT_CHS_DEFAULT, samplerate=SOUND_OUT_SR_DEFAULT):
-#   sd.OutputStream(callback=callback_output, device=14, channels=sound_in_chs, samplerate=sound_in_samplerate):
     # Open an input stream and an output stream with the callback function
     with sd.InputStream(callback=callback_input, device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate), \
-        sd.OutputStream(callback=callback_output, device=3, channels=2, samplerate=44100):
-        ##sd.OutputStream(callback=callback_output, channels=sound_in_chs, samplerate=sound_in_samplerate):
+        sd.OutputStream(callback=callback_output, device=3, channels=2, samplerate=48000):  # Updated sample rate to 48,000
         # The streams are now open and the callback function will be called every time there is audio input and output
-        # We'll just use a blocking wait here for simplicity
         while not stop_intercom_event.is_set():
-            if change_ch_event.is_set():
-                channel = monitor_channel
-                print("\nIntercom changing to ch:", monitor_channel + 1)
-                change_ch_event.clear()
             sd.sleep(1)
-
         print("Stopping intercom...")
 
-
-def toggle_intercom_t():
-    global sound_in_samplerate, intercom_thread, stop_intercom_event, sound_in_chs, sound_in_id
-
-    if intercom_thread is None or not intercom_thread.is_alive():
-        print("Starting intercom on channel:", monitor_channel + 1)
-        intercom_thread = threading.Thread(target=intercom_t)
-        intercom_thread.start()
-    else:
-        stop_intercom_t()
-
-
-def stop_intercom_t():
-        global intercom_thread, stop_intercom_event
-
-        stop_intercom_event.set()
-        if intercom_thread is not None:
-            intercom_thread.join()
-            print("\nIntercom stopped")
-        intercom_thread = None
-        stop_intercom_event.clear()
-        clear_input_buffer()
-
-#
-# ############ intercom using multiprocessing #############
-#
-
+'''
 def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, channel):
 
     # Create a buffer to hold the audio data
@@ -720,7 +688,7 @@ def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, channel):
         while not stop_intercom_event.is_set():
             sd.sleep(1)
         print("Stopping intercom...")
-
+'''
 
 # mothballed, hanging around for reference
 def stop_intercom_m():
