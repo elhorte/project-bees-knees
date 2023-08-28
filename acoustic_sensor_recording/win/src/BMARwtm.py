@@ -182,9 +182,14 @@ else:
 ##SIGNAL_DIRECTORY = "D:/OneDrive/data/Zeev/recordings/"
 ##PLOT_DIRECTORY = "D:/OneDrive/data/Zeev/plots/"
 
-PRIMARY_DIRECTORY = "G:/My Drive/en_beehive_data/Zeev/recordings/202308_primary/"
-MONITOR_DIRECTORY = "G:/My Drive/en_beehive_data/Zeev/recordings/202308_monitor/"
-PLOT_DIRECTORY = "G:/My Drive/en_beehive_data/Zeev/plots/202308/"
+current_date = datetime.datetime.now()
+current_year = current_date.strftime('%Y')
+current_month = current_date.strftime('%m')
+data_directory = "G:"
+
+PRIMARY_DIRECTORY = f"{data_directory}/My Drive/en_beehive_data/Zeev/recordings/{current_year}{current_month}_primary/"
+MONITOR_DIRECTORY = f"{data_directory}/My Drive/en_beehive_data/Zeev/recordings/{current_year}{current_month}_monitor/"
+PLOT_DIRECTORY = f"{data_directory}/My Drive/en_beehive_data/Zeev/plots/{current_year}{current_month}/"
 
 MIC_LOCATION = ["lower w/queen--front", "upper--front", "upper--back", "lower w/queen--back", "upper--back"]
 
