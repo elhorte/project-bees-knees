@@ -114,18 +114,18 @@ file_offset = 0
 # #############################################################
 
 # audio parameters:
-PRIMARY_SAMPLERATE = 192000                    # Audio sample rate
-PRIMARY_BITDEPTH = 16                          # Audio bit depth
+PRIMARY_SAMPLERATE = 192000                     # Audio sample rate
+PRIMARY_BITDEPTH = 16                           # Audio bit depth
 PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
-AUDIO_MONITOR_SAMPLERATE = 48000               # For continuous audio
-AUDIO_MONITOR_BITDEPTH = 16                    # Audio bit depthv
+AUDIO_MONITOR_SAMPLERATE = 48000                # For continuous audio
+AUDIO_MONITOR_BITDEPTH = 16                     # Audio bit depthv
 AUDIO_MONITOR_CHANNELS = 2                      # Number of channels
 AUDIO_MONITOR_QUALITY = 0                       # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
 
 MONITOR_CH = 0                                  # channel to monitor for event (if > number of chs, all channels are monitored)
-TRACE_DURATION = 10                            # seconds of audio to show on oscope
+TRACE_DURATION = 10                             # seconds of audio to show on oscope
 OSCOPE_GAIN_DB = 12                             # Gain in dB of audio level for oscope 
 
 # instrumentation parms
@@ -136,7 +136,7 @@ FFT_GAIN = 20                                   # gain in dB for fft
 FFT_INTERVAL = 30                               # minutes between ffts
 
 OSCOPE_DURATION = 10                            # seconds of audio to show on oscope
-OSCOPE_GAIN_DB = 12                                # gain in dB for oscope
+OSCOPE_GAIN_DB = 12                             # gain in dB for oscope
 
 FULL_SCALE = 2 ** 16                            # just for cli vu meter level reference
 BUFFER_SECONDS = 1000                           # time length of circular buffer 
@@ -238,7 +238,7 @@ def set_input_device(model_name, api_name):
 
 
 # interruptable sleep
-def sleep(seconds, stop_sleep_event):
+def interruptable_sleep(seconds, stop_sleep_event):
     for i in range(seconds*2):
         if stop_sleep_event.is_set():
             return
@@ -764,7 +764,7 @@ def plot_and_save_fft(sound_in_samplerate, channel):
         # Record audio
         print(f"Recording audio for auto fft in {FFT_INTERVAL} minutes...")
         # Wait for the desired time interval before recording and plotting again
-        sleep(interval, stop_fft_periodic_plot_event)
+        interruptable_sleep(interval, stop_fft_periodic_plot_event)
             
         myrecording = sd.rec(int(N), samplerate=sound_in_samplerate, channels=channel + 1)
         sd.wait()  # Wait until recording is finished
@@ -846,7 +846,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
 
             period_start_index = buffer_index 
             # wait PERIOD seconds to accumulate audio
-            sleep(record_period, stop_recording_event)
+            interruptable_sleep(record_period, stop_recording_event)
 
             period_end_index = buffer_index 
             ##print(f"Recording length in worker thread: {period_end_index - period_start_index}, after {record_period} seconds")
@@ -881,7 +881,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
             if not stop_recording_event.is_set():
                 print(f"Saved {thread_id} audio to {full_path_name}, period: {record_period}, interval {interval} seconds")
             # wait "interval" seconds before starting recording again
-            sleep(interval, stop_recording_event)
+            interruptable_sleep(interval, stop_recording_event)
 
 
 def callback(indata, frames, time, status):
