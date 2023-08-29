@@ -45,6 +45,8 @@ import librosa.display
 import resampy
 ##import TestPyQT5
 
+import BMAR_config as config
+
 lock = threading.Lock()
 
 # Ignore this specific warning
@@ -159,10 +161,6 @@ current_year = current_date.strftime('%Y')
 current_month = current_date.strftime('%m')
 current_day = current_date.strftime('%d')
 
-import BMARwtm_config as config
-
-# #############################################################
-
 # windows mme defaults, 2 ch only
 SOUND_IN_DEFAULT = 0                        # default input device id              
 SOUND_OUT_ID_DEFAULT = 3                    # default output device id
@@ -173,6 +171,9 @@ SOUND_OUT_SR_DEFAULT = 44100                # default sample rate
 sound_in_id = None                          # id of input device
 sound_in_chs = None                         # number of input channels
 sound_in_samplerate = None                  # sample rate of input device
+sound_out_id = SOUND_OUT_ID_DEFAULT
+sound_out_chs = SOUND_OUT_CHS_DEFAULT                        
+sound_out_samplerate = SOUND_OUT_SR_DEFAULT    
 
 PRIMARY_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/recordings/{current_year}{current_month}_primary/"
 MONITOR_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/recordings/{current_year}{current_month}_monitor/"
@@ -180,7 +181,6 @@ PLOT_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_
 
 testmode = False                            # True to run in test mode with lower than neeeded sample rate
 KB_or_CP = 'KB'                             # use keyboard or control panel (PyQT5) to control program
-
 
 ##########################  
 # setup utilities
@@ -192,8 +192,8 @@ def get_api_name_for_device(device_id):
     return hostapi_info['name']
 
 # find the device id that matches the model name and hostapi name
-def set_input_device():
-    global MODEL_NAME, API_NAME, sound_in_id, sound_in_chs, testmode, sound_in_samplerate
+def set_input_device(model_name, api_name):
+    global sound_in_id, sound_in_chs, testmode, sound_in_samplerate
 
     # Purpose is to find connected audio device and set the sound_in_id
     # to the device that matches the MODEL_NAME and HOSTAPI_NAME
@@ -216,15 +216,15 @@ def set_input_device():
 
     # loop through known MODEL_NAME
     for i in range(len(devices_str)):
-        if ("Microphone" in devices_str[i] and config.API_NAME in devices_str[i]):
+        if ("Microphone" in devices_str[i] and api_name in devices_str[i]):
             print("Looking at device: ", devices_str[i])
             device = sd.query_devices(i)
             sound_in_id = i
             sound_in_chs = device['max_input_channels']
             sound_in_samplerate = int(device['default_samplerate'])
             try:    # found an input device and of type WASAPI, do we know about it?
-                for j in range(len(config.MODEL_NAME)):
-                    if (config.MODEL_NAME[j] in devices_str[i]):
+                for j in range(len(model_name)):
+                    if (model_name[j] in devices_str[i]):
                         print("Found device: ", devices_str[i])
                         time.sleep(3)      # in case a human is looking at the screen
                         return
@@ -262,11 +262,11 @@ def clear_input_buffer():
         msvcrt.getch()
 
 
-def show_audio_device_info_for_SOUND_IN_OUT(sound_in_id):
+def show_audio_device_info_for_SOUND_IN_OUT():
     device_info = sd.query_devices(sound_in_id)  
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Input Channels: {}'.format(device_info['max_input_channels']))
-    device_info = sd.query_devices(SOUND_OUT_ID_DEFAULT)  
+    device_info = sd.query_devices(sound_out_id)  
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Output Channels: {}'.format(device_info['max_output_channels']))
     print()
@@ -284,13 +284,12 @@ def show_audio_device_list():
     print(sd.query_devices())
     show_audio_device_info_for_defaults()
     print(f"\nCurrent device in: {sound_in_id}, device out: {SOUND_OUT_ID_DEFAULT}\n")
-    show_audio_device_info_for_SOUND_IN_OUT(sound_in_id)
+    show_audio_device_info_for_SOUND_IN_OUT()
 
 
 def check_stream_status(stream_duration):
     """
     Check the status of a sounddevice input stream for overflows and underflows.
-
     Parameters:
     - stream_duration: Duration for which the stream should be open and checked (in seconds).
     """
@@ -310,7 +309,7 @@ def check_stream_status(stream_duration):
             time.sleep(0.1)  # Sleep for a short duration before checking again
 
     print("Stream checking finished at", datetime.datetime.now())
-    show_audio_device_info_for_SOUND_IN_OUT(sound_in_id)
+    show_audio_device_info_for_SOUND_IN_OUT()
 
 
 # fetch the most recent audio file in the directory
@@ -631,10 +630,10 @@ def stop_vu():
 # ############ intercom using multiprocessing #############
 #
 
-def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, channel):
+def intercom_m_downsampled(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel):
 
     # Create a buffer to hold the audio data
-    buffer_size = sound_in_samplerate // 4  # For 48,000 samples per second
+    buffer_size = sound_in_samplerate // 4      # For 48,000 samples per second
     buffer = np.zeros((buffer_size,))
     channel = monitor_channel
 
@@ -643,24 +642,24 @@ def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, channel):
         # Only process audio from the designated channel
         channel_data = indata[:, channel]
         # Downsample the audio using resampy
-        downsampled_data = resampy.resample(channel_data, sound_in_samplerate, 48000)
+        downsampled_data = resampy.resample(channel_data, sound_in_samplerate, 44100)
         buffer[:len(downsampled_data)] = downsampled_data
 
     # Callback function to handle audio output
     def callback_output(outdata, frames, time, status):
         # Play back the audio from the buffer
-        outdata[:, 0] = buffer[:frames]  # Play back on the first channel
-        outdata[:, 1] = buffer[:frames]  # Play back on the second channel
+        outdata[:, 0] = buffer[:frames]         # Play back on the first channel
+        ##outdata[:, 1] = buffer[:frames]         # Play back on the second channel
 
     # Open an input stream and an output stream with the callback function
     with sd.InputStream(callback=callback_input, device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate), \
-        sd.OutputStream(callback=callback_output, device=3, channels=2, samplerate=48000):  # Updated sample rate to 48,000
+        sd.OutputStream(callback=callback_output, device=sound_out_id, channels=sound_out_chs, samplerate=sound_out_samplerate): 
         # The streams are now open and the callback function will be called every time there is audio input and output
         while not stop_intercom_event.is_set():
             sd.sleep(1)
         print("Stopping intercom...")
 
-'''
+
 def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, channel):
 
     # Create a buffer to hold the audio data
@@ -688,7 +687,7 @@ def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, channel):
         while not stop_intercom_event.is_set():
             sd.sleep(1)
         print("Stopping intercom...")
-'''
+
 
 # mothballed, hanging around for reference
 def stop_intercom_m():
@@ -701,11 +700,11 @@ def stop_intercom_m():
 
 
 def toggle_intercom_m():
-    global intercom_proc
+    global intercom_proc, sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel
 
     if intercom_proc is None:
         print("Starting intercom on channel:", monitor_channel + 1)
-        intercom_proc = multiprocessing.Process(target=intercom_m, args=(sound_in_id, sound_in_samplerate, sound_in_chs, monitor_channel))
+        intercom_proc = multiprocessing.Process(target=intercom_m_downsampled, args=(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel))
         intercom_proc.start()
     else:
         stop_intercom_m()
@@ -984,7 +983,7 @@ def main():
 
     print("Beehive Multichannel Acoustic-Signal Recorder\n")
 
-    set_input_device()
+    set_input_device(config.MODEL_NAME, config.API_NAME)
     setup_audio_circular_buffer()
 
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
