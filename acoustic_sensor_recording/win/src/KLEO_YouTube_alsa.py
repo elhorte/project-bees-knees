@@ -18,6 +18,8 @@ AUDIO_DIRECTORY= "."
 duration = 0
 start_time = 0
 duration = 0
+capture_duration = 60   # default unless changed by user
+YouTube_URL = "https://www.youtube.com/watch?v=wfuQLdrlrqg"
 
 
 def time_it(func):
@@ -72,12 +74,12 @@ def extract_audio(hls_url, output_option,file_name):
             'default'
         ]
     else:
+        ##print("Audio capture duration & sample rate:", capture_duration, audio_samplerate)
         command = [
             'ffmpeg',
             '-i', hls_url,
             '-acodec', 'pcm_s16le',
             '-ar', str(audio_samplerate),
-            '-live_start_index', '0',
             '-y', file_name
         ]
 
@@ -93,6 +95,7 @@ def extract_audio(hls_url, output_option,file_name):
             break
         time.sleep(1)
 
+
 def listen_for_exit_key():
     global exit_signal
 
@@ -103,27 +106,44 @@ def listen_for_exit_key():
             time.sleep(1)           # reduce load on CPU
             break
 
+
 def stop_all():
     global exit_signal
     exit_signal = True
+
+
+def get_capture_duration(default_value=capture_duration):
+    user_input = input(f"Enter the duration of the audio capture in seconds (default is {default_value}): ")
+    if not user_input.strip():
+        return default_value
+    return int(user_input)
+
+
+def get_url(default_value=YouTube_URL):
+    user_input = input(f"Enter the HLS source URL (default is {default_value}): ")
+    if not user_input.strip():
+        return default_value
+    return user_input
+
 
 if __name__ == "__main__":
 
     # usage: press q to stop all processes
     keyboard.on_press_key("q", lambda _: stop_all(), suppress=True)
 
-    video_url = input("Enter the YouTube video URL: ")
+    video_url = get_url()
     hls_url = get_hls_url(video_url)
 
     print("Choose an output option:")
     print("1: Output to ALSA")
     print("2: Save as WAV file")
     choice = input("Enter your choice (1/2): ")
-
+    
     if choice == "1":
         output_option = "alsa"
     elif choice == "2":
         output_option = "wav"
+        capture_duration = get_capture_duration()
     else:
         print("Invalid choice.")
         exit()
@@ -201,5 +221,16 @@ def get_audio_sample_rate_from_ffmpeg(hls_url):
     return None
 
 
-
+# alternative to get ffmpeg to use the mode:
+# Full Playlist Capture: Use the -y flag to overwrite output files and -bsf:a aac_adtstoasc to convert the AAC bitstream format.
+if 0:
+    command = [
+        'ffmpeg',
+        '-y',
+        '-i', hls_url,
+        '-acodec', 'pcm_s16le',
+        '-ar', '48000',
+        '-bsf:a', 'aac_adtstoasc',
+        'output_audio.wav'
+    ]
 
