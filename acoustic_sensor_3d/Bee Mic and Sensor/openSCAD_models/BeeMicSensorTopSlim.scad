@@ -1,14 +1,14 @@
 $fn=50;
 BOX_W = 38; // Box Width
 BOX_L = 86;// Box Length
-BOX_H = 6.5; // Box Height
+BOX_H = 8.0; // Box Height
 CORNER_RADIUS = 1.0; // Radius of corners
 WALL = 1.0;// Wall Thickness
 
 MIC_OUTSIDE_WIDTH=8.3;
-MIC_OUTSIDE_HEIGHT=9.0;
+MIC_OUTSIDE_HEIGHT=10.0;
 MIC_INSIDE_WIDTH=6.3;
-MIC_LENGTH=23;
+MIC_LENGTH=23.5;
 
 CON_OUTSIDE=5;
 CON_INSIDE=4;
@@ -16,9 +16,19 @@ CON_LENGTH=3;
 
 MIC_OFFSET_X = 0;
 MIC_OFFSET_Y = -26.0;
-MIC_OFFSET_Z = 0;
+MIC_OFFSET_Z = -1;
 
+VENT_OFFSET = -3.5;
+VENT_L = 18.0;
+VENT_R = -20.5;
 
+module vent(x, y, vent_offset) {
+    translate([x, y, BOX_H + vent_offset]) {
+        rotate([90, 0, 90]) {
+            #linear_extrude(2.5) square([6, 8], center=true);
+        }
+    }
+}
 
 difference() {
     union() {
@@ -34,32 +44,44 @@ difference() {
             hull()
             for (i = coordinates)
             translate(i) sphere(CORNER_RADIUS);
+            
         translate([MIC_OFFSET_X, MIC_OFFSET_Y, MIC_OFFSET_Z]){
-            // outside shape
+            // mic box
             translate([0,-18.0,BOX_H-3])
             rotate([90,0,0])
-            #linear_extrude(MIC_LENGTH) square([MIC_OUTSIDE_WIDTH,MIC_OUTSIDE_HEIGHT], center=true);
+            #linear_extrude(MIC_LENGTH)square([MIC_OUTSIDE_WIDTH,MIC_OUTSIDE_HEIGHT], center=true);
         }
     }
     translate([MIC_OFFSET_X, MIC_OFFSET_Y, MIC_OFFSET_Z]){
-        // inside mio channel
+        // inside mic channel
         translate([0,-13.8,BOX_H-0.2]) // inside
         rotate([90,0,0])
         linear_extrude(MIC_LENGTH+3.1) square([MIC_INSIDE_WIDTH,MIC_OUTSIDE_HEIGHT], center=true); 
         
-        // mic lid clearance
-        translate([0,-17.25,BOX_H+1.11])
+        // mic lid clearance at mic box opening
+        translate([0,-16,BOX_H+1.11])
         rotate([90,0,0])
         linear_extrude(2.0) square([9,2.2], center=true);   
         
-        // mic lid clearance
-        translate([0,-17.25,BOX_H+1.11])
-        rotate([90,0,0])
-        linear_extrude(2.0) square([9,2.2], center=true);
     }
-
-    translate([0,19.3,BOX_H-1])
+    // cable exit
+    translate([0,44.3,BOX_H-2.5])
     rotate([90,0,0])
-    //cylinder(h=CON_LENGTH+1,r=CON_INSIDE/2);
-    linear_extrude(2.0) square([6,3], center=true);
+    #linear_extrude(2.0) square([10,6], center=true);
+     
+    // gas sensor vents
+    vent(VENT_L, 29.0, VENT_OFFSET);
+    vent(VENT_L, 21.0, VENT_OFFSET);
+    vent(VENT_L, 13.0, VENT_OFFSET);
+    vent(VENT_L, 5.0, VENT_OFFSET);
+    vent(VENT_L, -3.0, VENT_OFFSET);
+    vent(VENT_L, -11.0, VENT_OFFSET);
+    
+    vent(VENT_R, 29.0, VENT_OFFSET);
+    vent(VENT_R, 21.0, VENT_OFFSET);
+    vent(VENT_R, 13.0, VENT_OFFSET);
+    vent(VENT_R, 5.0, VENT_OFFSET);
+    vent(VENT_R, -3.0, VENT_OFFSET);
+    vent(VENT_R, -11.0, VENT_OFFSET);    
+    
 }

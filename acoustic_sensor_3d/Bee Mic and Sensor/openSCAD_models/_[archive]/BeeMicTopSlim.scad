@@ -48,5 +48,5 @@ difference() {
   translate([0,19.3,BOX_H-1])
   rotate([90,0,0])
   //cylinder(h=CON_LENGTH+1,r=CON_INSIDE/2);
-  linear_extrude(2.0) square([6,3], center=true);
+  #linear_extrude(2.0) square([6,3], center=true);
 }

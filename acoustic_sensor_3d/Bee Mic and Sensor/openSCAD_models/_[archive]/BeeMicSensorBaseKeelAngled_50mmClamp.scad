@@ -10,18 +10,6 @@ KEEL_WIDTH=9.0;
 KEEL_HEIGHT=9.0;
 KEEL_LENGTH=100;
 
-VENT_OFFSET = 2.5;
-VENT_L = 16.5;
-VENT_R = -18.5;
-
-module vent(x, y, vent_offset) {
-    translate([x, y, BOX_H + vent_offset]) {
-        rotate([90, 0, 90]) {
-            #linear_extrude(2.5) square([6, 4], center=true);
-        }
-    }
-}
-    
 difference() {
     union() {
         linear_extrude( BOX_H )
@@ -93,38 +81,66 @@ difference() {
           
         // Inverted L-shaped C-clamp
         difference() {
-            translate([KEEL_WIDTH/2-3, KEEL_LENGTH-18, -0.5])
+            translate([KEEL_WIDTH/2-2, KEEL_LENGTH-18, -0.5])
             rotate([90, 0, 0])
             union() {
                 // Vertical arm of the C-clamp 2
                 // x, z, y
-                translate([2.0, 0, 21]) cube([1, 5, 8]);
+                translate([0, 0, 21]) cube([1, 5, 8]);
                 // Horizontal arm of the C-clamp
                 rotate([90, 0, 0])
-                translate([0, 21, -5]) cube([2, 8, 1]);
+                translate([-1.5, 21, -5]) cube([1.5, 8, 1]);
                   
                 // Vertical arm of the C-clamp 1
                 translate([-6, 0, 21]) cube([1, 5, 8]);
                 // Horizontal arm of the C-clamp
                 rotate([90, 0, 0])
-                translate([-5.0, 21,-5]) cube([2, 8, 1]);
+                translate([-5, 21,-5]) cube([1.5, 8, 1]);
             }
         }
     }
     
+    VENT_OFFSET = 2.5;
+    VENT_L = 16.5;
+    VENT_R = -18.5;
+    
+    // gas sensor vents near
+    translate([VENT_L,21.0,BOX_H+VENT_OFFSET])
+    rotate([90,0,90])
+    #linear_extrude(2.5) square([6,4], center=true);    
+
     // gas sensor vents
-    vent(VENT_L, 29.0, VENT_OFFSET);
-    vent(VENT_L, 21.0, VENT_OFFSET);
-    vent(VENT_L, 13.0, VENT_OFFSET);
-    vent(VENT_L, 5.0, VENT_OFFSET);
-    vent(VENT_L, -3.0, VENT_OFFSET);
-    vent(VENT_L, -11.0, VENT_OFFSET);
-    
-    vent(VENT_R, 29.0, VENT_OFFSET);
-    vent(VENT_R, 21.0, VENT_OFFSET);
-    vent(VENT_R, 13.0, VENT_OFFSET);
-    vent(VENT_R, 5.0, VENT_OFFSET);
-    vent(VENT_R, -3.0, VENT_OFFSET);
-    vent(VENT_R, -11.0, VENT_OFFSET);   
-    
+    translate([VENT_L,13.0,BOX_H+VENT_OFFSET])
+    rotate([90,0,90])
+    #linear_extrude(2.5) square([6,4], center=true);    
+
+    // gas sensor vents
+    translate([VENT_L,5.0,BOX_H+VENT_OFFSET])
+    rotate([90,0,90])
+    #linear_extrude(2.5) square([6,4], center=true);    
+
+    // gas sensor vents
+    translate([VENT_L,-3.0,BOX_H+VENT_OFFSET])
+    rotate([90,0,90])
+    #linear_extrude(2.5) square([6,4], center=true);    
+
+    // gas sensor vents
+    translate([VENT_R,21.0,BOX_H+VENT_OFFSET])
+    rotate([90,0,90])
+    #linear_extrude(2.5) square([6,4], center=true);    
+
+    // gas sensor vents far
+    translate([VENT_R,13.0,BOX_H+VENT_OFFSET])
+    rotate([90,0,90])
+    #linear_extrude(2.5) square([6,4], center=true);    
+
+    // gas sensor vents
+    translate([VENT_R,5.0,BOX_H+VENT_OFFSET])
+    rotate([90,0,90])
+    #linear_extrude(2.5) square([6,4], center=true);    
+
+    // gas sensor vents
+    translate([VENT_R,-3.0,BOX_H+VENT_OFFSET])
+    rotate([90,0,90])
+    #linear_extrude(2.5) square([6,4], center=true);   
 }
