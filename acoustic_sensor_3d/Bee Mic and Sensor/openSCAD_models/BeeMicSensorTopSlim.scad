@@ -6,17 +6,17 @@ CORNER_RADIUS = 1.0; // Radius of corners
 WALL = 1.0;// Wall Thickness
 
 MIC_OUTSIDE_WIDTH=8.3;
-MIC_OUTSIDE_HEIGHT=10.0;
+MIC_OUTSIDE_HEIGHT=11.0;
 MIC_INSIDE_WIDTH=6.3;
-MIC_LENGTH=23.5;
+MIC_LENGTH=24.5;
 
 CON_OUTSIDE=5;
 CON_INSIDE=4;
 CON_LENGTH=3;
 
 MIC_OFFSET_X = 0;
-MIC_OFFSET_Y = -26.0;
-MIC_OFFSET_Z = -1;
+MIC_OFFSET_Y = -25.0;
+MIC_OFFSET_Z = -0.5;
 
 VENT_OFFSET = -3.5;
 VENT_L = 18.0;
@@ -59,7 +59,7 @@ difference() {
         linear_extrude(MIC_LENGTH+3.1) square([MIC_INSIDE_WIDTH,MIC_OUTSIDE_HEIGHT], center=true); 
         
         // mic lid clearance at mic box opening
-        translate([0,-16,BOX_H+1.11])
+        translate([0,-17,BOX_H+1.60])
         rotate([90,0,0])
         linear_extrude(2.0) square([9,2.2], center=true);   
         

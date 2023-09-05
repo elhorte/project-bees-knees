@@ -45,9 +45,9 @@ difference() {
 
         // mic channel cover
         // x, y, z
-        translate([0,-44.0,WALL-1])
+        translate([0,-44.0,WALL-0.7])
         rotate([90,0,0])
-        #linear_extrude(22.2) square([6.1,1.0], center=true);
+        #linear_extrude(20.0) square([6.1,1.5], center=true);
 
         // mic mounting studs
         difference() {
@@ -57,8 +57,8 @@ difference() {
             union() {
                 // mounting stud for sensor
                 // x, z, y
-                translate([-4, -130, 0]) cylinder(h=5, d=1.8); 
-                translate([4, -130, 0]) cylinder(h=5, d=1.8); 
+                translate([-4.5, -133, 0]) cylinder(h=5, d=3); 
+                translate([4.5, -133, 0]) cylinder(h=5, d=3); 
             }
         }
  
