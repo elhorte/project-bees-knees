@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "dgSpecHash": "T6HlTot88UEDDGwhN2Vtts6mTVcDiSrHXoxfHEqO2AD7i8s4wnrYHK7cz3NV/IDQ1ga8AESSYaTEzyyZyOyXkQ==",
+  "success": true,
+  "projectFilePath": "/Users/yost/p/leo/project-bees-knees/acoustic_sensor_recording/mac/Bees/Bees/Bees.fsproj",
+  "expectedPackageFiles": [
+    "/Users/yost/.nuget/packages/fsharp.collections.parallelseq/1.2.0/fsharp.collections.parallelseq.1.2.0.nupkg.sha512",
+    "/Users/yost/.nuget/packages/fsharp.control.asyncseq/3.2.1/fsharp.control.asyncseq.3.2.1.nupkg.sha512",
+    "/Users/yost/.nuget/packages/fsharp.core/7.0.400/fsharp.core.7.0.400.nupkg.sha512",
+    "/Users/yost/.nuget/packages/microsoft.bcl.asyncinterfaces/5.0.0/microsoft.bcl.asyncinterfaces.5.0.0.nupkg.sha512",
+    "/Users/yost/.nuget/packages/naudio.core/2.1.0/naudio.core.2.1.0.nupkg.sha512",
+    "/Users/yost/.nuget/packages/naudio.lame/2.1.0/naudio.lame.2.1.0.nupkg.sha512",
+    "/Users/yost/.nuget/packages/org.k2fsa.portaudio.runtime.linux-x64/0.4.0/org.k2fsa.portaudio.runtime.linux-x64.0.4.0.nupkg.sha512",
+    "/Users/yost/.nuget/packages/org.k2fsa.portaudio.runtime.osx-x64/0.4.0/org.k2fsa.portaudio.runtime.osx-x64.0.4.0.nupkg.sha512",
+    "/Users/yost/.nuget/packages/org.k2fsa.portaudio.runtime.win-x64/0.4.0/org.k2fsa.portaudio.runtime.win-x64.0.4.0.nupkg.sha512",
+    "/Users/yost/.nuget/packages/portaudiosharp2/0.4.0/portaudiosharp2.0.4.0.nupkg.sha512"
+  ],
+  "logs": []
+}

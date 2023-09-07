@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <RestoreSuccess Condition=" '$(RestoreSuccess)' == '' ">True</RestoreSuccess>
+    <RestoreTool Condition=" '$(RestoreTool)' == '' ">NuGet</RestoreTool>
+    <ProjectAssetsFile Condition=" '$(ProjectAssetsFile)' == '' ">$(MSBuildThisFileDirectory)project.assets.json</ProjectAssetsFile>
+    <NuGetPackageRoot Condition=" '$(NuGetPackageRoot)' == '' ">/Users/yost/.nuget/packages/</NuGetPackageRoot>
+    <NuGetPackageFolders Condition=" '$(NuGetPackageFolders)' == '' ">/Users/yost/.nuget/packages/</NuGetPackageFolders>
+    <NuGetProjectStyle Condition=" '$(NuGetProjectStyle)' == '' ">PackageReference</NuGetProjectStyle>
+    <NuGetToolVersion Condition=" '$(NuGetToolVersion)' == '' ">6.6.0</NuGetToolVersion>
+  </PropertyGroup>
+  <ItemGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <SourceRoot Include="/Users/yost/.nuget/packages/" />
+  </ItemGroup>
+  <PropertyGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <PkgPortAudioSharp2 Condition=" '$(PkgPortAudioSharp2)' == '' ">/Users/yost/.nuget/packages/portaudiosharp2/0.4.0</PkgPortAudioSharp2>
+    <PkgNAudio_Lame Condition=" '$(PkgNAudio_Lame)' == '' ">/Users/yost/.nuget/packages/naudio.lame/2.1.0</PkgNAudio_Lame>
+    <PkgFSharp_Core Condition=" '$(PkgFSharp_Core)' == '' ">/Users/yost/.nuget/packages/fsharp.core/7.0.400</PkgFSharp_Core>
+    <PkgFSharp_Control_AsyncSeq Condition=" '$(PkgFSharp_Control_AsyncSeq)' == '' ">/Users/yost/.nuget/packages/fsharp.control.asyncseq/3.2.1</PkgFSharp_Control_AsyncSeq>
+    <PkgFSharp_Collections_ParallelSeq Condition=" '$(PkgFSharp_Collections_ParallelSeq)' == '' ">/Users/yost/.nuget/packages/fsharp.collections.parallelseq/1.2.0</PkgFSharp_Collections_ParallelSeq>
+  </PropertyGroup>
+</Project>

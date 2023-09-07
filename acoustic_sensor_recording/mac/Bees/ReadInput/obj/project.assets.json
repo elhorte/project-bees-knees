@@ -1,0 +1,272 @@
+{
+  "version": 3,
+  "targets": {
+    "net7.0": {
+      "FSharp.Core/7.0.400": {
+        "type": "package",
+        "compile": {
+          "lib/netstandard2.1/FSharp.Core.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.1/FSharp.Core.dll": {
+            "related": ".xml"
+          }
+        },
+        "resource": {
+          "lib/netstandard2.1/cs/FSharp.Core.resources.dll": {
+            "locale": "cs"
+          },
+          "lib/netstandard2.1/de/FSharp.Core.resources.dll": {
+            "locale": "de"
+          },
+          "lib/netstandard2.1/es/FSharp.Core.resources.dll": {
+            "locale": "es"
+          },
+          "lib/netstandard2.1/fr/FSharp.Core.resources.dll": {
+            "locale": "fr"
+          },
+          "lib/netstandard2.1/it/FSharp.Core.resources.dll": {
+            "locale": "it"
+          },
+          "lib/netstandard2.1/ja/FSharp.Core.resources.dll": {
+            "locale": "ja"
+          },
+          "lib/netstandard2.1/ko/FSharp.Core.resources.dll": {
+            "locale": "ko"
+          },
+          "lib/netstandard2.1/pl/FSharp.Core.resources.dll": {
+            "locale": "pl"
+          },
+          "lib/netstandard2.1/pt-BR/FSharp.Core.resources.dll": {
+            "locale": "pt-BR"
+          },
+          "lib/netstandard2.1/ru/FSharp.Core.resources.dll": {
+            "locale": "ru"
+          },
+          "lib/netstandard2.1/tr/FSharp.Core.resources.dll": {
+            "locale": "tr"
+          },
+          "lib/netstandard2.1/zh-Hans/FSharp.Core.resources.dll": {
+            "locale": "zh-Hans"
+          },
+          "lib/netstandard2.1/zh-Hant/FSharp.Core.resources.dll": {
+            "locale": "zh-Hant"
+          }
+        }
+      },
+      "org.k2fsa.portaudio.runtime.linux-x64/0.4.0": {
+        "type": "package",
+        "runtimeTargets": {
+          "runtimes/linux-x64/native/libportaudio.so": {
+            "assetType": "native",
+            "rid": "linux-x64"
+          }
+        }
+      },
+      "org.k2fsa.portaudio.runtime.osx-x64/0.4.0": {
+        "type": "package",
+        "runtimeTargets": {
+          "runtimes/osx-x64/native/libportaudio.dylib": {
+            "assetType": "native",
+            "rid": "osx-x64"
+          }
+        }
+      },
+      "org.k2fsa.portaudio.runtime.win-x64/0.4.0": {
+        "type": "package",
+        "runtimeTargets": {
+          "runtimes/win-x64/native/portaudio.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          }
+        }
+      },
+      "PortAudioSharp2/0.4.0": {
+        "type": "package",
+        "dependencies": {
+          "org.k2fsa.portaudio.runtime.linux-x64": "0.4.0",
+          "org.k2fsa.portaudio.runtime.osx-x64": "0.4.0",
+          "org.k2fsa.portaudio.runtime.win-x64": "0.4.0"
+        },
+        "compile": {
+          "lib/net7.0/PortAudioSharp.dll": {}
+        },
+        "runtime": {
+          "lib/net7.0/PortAudioSharp.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "FSharp.Core/7.0.400": {
+      "sha512": "kJQ7TBQqd1d2VoODSgwFSAaApaBN0Fuu8mZt2XExmd3UzUxLjUsMn5Y5XhpsUWdnxOL8amp7VFg7cwhPllR4Qw==",
+      "type": "package",
+      "path": "fsharp.core/7.0.400",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "fsharp.core.7.0.400.nupkg.sha512",
+        "fsharp.core.nuspec",
+        "lib/netstandard2.0/FSharp.Core.dll",
+        "lib/netstandard2.0/FSharp.Core.xml",
+        "lib/netstandard2.0/cs/FSharp.Core.resources.dll",
+        "lib/netstandard2.0/de/FSharp.Core.resources.dll",
+        "lib/netstandard2.0/es/FSharp.Core.resources.dll",
+        "lib/netstandard2.0/fr/FSharp.Core.resources.dll",
+        "lib/netstandard2.0/it/FSharp.Core.resources.dll",
+        "lib/netstandard2.0/ja/FSharp.Core.resources.dll",
+        "lib/netstandard2.0/ko/FSharp.Core.resources.dll",
+        "lib/netstandard2.0/pl/FSharp.Core.resources.dll",
+        "lib/netstandard2.0/pt-BR/FSharp.Core.resources.dll",
+        "lib/netstandard2.0/ru/FSharp.Core.resources.dll",
+        "lib/netstandard2.0/tr/FSharp.Core.resources.dll",
+        "lib/netstandard2.0/zh-Hans/FSharp.Core.resources.dll",
+        "lib/netstandard2.0/zh-Hant/FSharp.Core.resources.dll",
+        "lib/netstandard2.1/FSharp.Core.dll",
+        "lib/netstandard2.1/FSharp.Core.xml",
+        "lib/netstandard2.1/cs/FSharp.Core.resources.dll",
+        "lib/netstandard2.1/de/FSharp.Core.resources.dll",
+        "lib/netstandard2.1/es/FSharp.Core.resources.dll",
+        "lib/netstandard2.1/fr/FSharp.Core.resources.dll",
+        "lib/netstandard2.1/it/FSharp.Core.resources.dll",
+        "lib/netstandard2.1/ja/FSharp.Core.resources.dll",
+        "lib/netstandard2.1/ko/FSharp.Core.resources.dll",
+        "lib/netstandard2.1/pl/FSharp.Core.resources.dll",
+        "lib/netstandard2.1/pt-BR/FSharp.Core.resources.dll",
+        "lib/netstandard2.1/ru/FSharp.Core.resources.dll",
+        "lib/netstandard2.1/tr/FSharp.Core.resources.dll",
+        "lib/netstandard2.1/zh-Hans/FSharp.Core.resources.dll",
+        "lib/netstandard2.1/zh-Hant/FSharp.Core.resources.dll"
+      ]
+    },
+    "org.k2fsa.portaudio.runtime.linux-x64/0.4.0": {
+      "sha512": "Rb6i46JQH09YPWxRs9xKy3caIUFbU0LDiOoEYkM3GWxWUeToQ6ECKh3gCgW5JDqOjsdCrUpI09vWhu9LhiTWZg==",
+      "type": "package",
+      "path": "org.k2fsa.portaudio.runtime.linux-x64/0.4.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "org.k2fsa.portaudio.runtime.linux-x64.0.4.0.nupkg.sha512",
+        "org.k2fsa.portaudio.runtime.linux-x64.nuspec",
+        "runtimes/linux-x64/native/libportaudio.so"
+      ]
+    },
+    "org.k2fsa.portaudio.runtime.osx-x64/0.4.0": {
+      "sha512": "Pr3pmea204nv0tlmKeFwdhb9wTKh/4qSf59rA48dkDX/XCgMLCk1TpI6Q3QOcOLyWuMXG1+8QAcFd+zAjdb1CQ==",
+      "type": "package",
+      "path": "org.k2fsa.portaudio.runtime.osx-x64/0.4.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "org.k2fsa.portaudio.runtime.osx-x64.0.4.0.nupkg.sha512",
+        "org.k2fsa.portaudio.runtime.osx-x64.nuspec",
+        "runtimes/osx-x64/native/libportaudio.dylib"
+      ]
+    },
+    "org.k2fsa.portaudio.runtime.win-x64/0.4.0": {
+      "sha512": "kCG39ivNMh0DpDK1wJldWbzZ7dK1tUCREhVHmBMvGbFtk4Z+n/uY9R8sdxiM6jdQnRss4QorzCgtckeShK8uTw==",
+      "type": "package",
+      "path": "org.k2fsa.portaudio.runtime.win-x64/0.4.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "org.k2fsa.portaudio.runtime.win-x64.0.4.0.nupkg.sha512",
+        "org.k2fsa.portaudio.runtime.win-x64.nuspec",
+        "runtimes/win-x64/native/portaudio.dll"
+      ]
+    },
+    "PortAudioSharp2/0.4.0": {
+      "sha512": "6O4wzUSSE+w5DfsO/varj1IA9C9FwKmw+fCU8SZDyKPgVSve6b3MORMuCPqV5ibL9JeEU2cNlo2gB8Hek0F4OQ==",
+      "type": "package",
+      "path": "portaudiosharp2/0.4.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "lib/net6.0/PortAudioSharp.dll",
+        "lib/net7.0/PortAudioSharp.dll",
+        "lib/netcoreapp3.1/PortAudioSharp.dll",
+        "lib/netstandard2.0/PortAudioSharp.dll",
+        "portaudiosharp2.0.4.0.nupkg.sha512",
+        "portaudiosharp2.nuspec"
+      ]
+    }
+  },
+  "projectFileDependencyGroups": {
+    "net7.0": [
+      "FSharp.Core >= 7.0.400",
+      "PortAudioSharp2 >= 0.4.0"
+    ]
+  },
+  "packageFolders": {
+    "/Users/yost/.nuget/packages/": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "/Users/yost/p/leo/project-bees-knees/acoustic_sensor_recording/mac/Bees/ReadInput/ReadInput.fsproj",
+      "projectName": "ReadInput",
+      "projectPath": "/Users/yost/p/leo/project-bees-knees/acoustic_sensor_recording/mac/Bees/ReadInput/ReadInput.fsproj",
+      "packagesPath": "/Users/yost/.nuget/packages/",
+      "outputPath": "/Users/yost/p/leo/project-bees-knees/acoustic_sensor_recording/mac/Bees/ReadInput/obj/",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "/Users/yost/.nuget/NuGet/NuGet.Config"
+      ],
+      "originalTargetFrameworks": [
+        "net7.0"
+      ],
+      "sources": {
+        "/usr/local/share/dotnet/sdk/7.0.400/FSharp/library-packs": {},
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net7.0": {
+          "targetAlias": "net7.0",
+          "projectReferences": {}
+        }
+      }
+    },
+    "frameworks": {
+      "net7.0": {
+        "targetAlias": "net7.0",
+        "dependencies": {
+          "FSharp.Core": {
+            "include": "Runtime, Compile, Build, Native, Analyzers, BuildTransitive",
+            "target": "Package",
+            "version": "[7.0.400, )",
+            "generatePathProperty": true
+          },
+          "PortAudioSharp2": {
+            "target": "Package",
+            "version": "[0.4.0, )",
+            "generatePathProperty": true
+          }
+        },
+        "imports": [
+          "net461",
+          "net462",
+          "net47",
+          "net471",
+          "net472",
+          "net48",
+          "net481"
+        ],
+        "assetTargetFallback": true,
+        "warn": true,
+        "frameworkReferences": {
+          "Microsoft.NETCore.App": {
+            "privateAssets": "all"
+          }
+        },
+        "runtimeIdentifierGraphPath": "/usr/local/share/dotnet/sdk/7.0.400/RuntimeIdentifierGraph.json"
+      }
+    }
+  }
+}

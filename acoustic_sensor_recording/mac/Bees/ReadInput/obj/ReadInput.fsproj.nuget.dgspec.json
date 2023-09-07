@@ -1,0 +1,70 @@
+{
+  "format": 1,
+  "restore": {
+    "/Users/yost/p/leo/project-bees-knees/acoustic_sensor_recording/mac/Bees/ReadInput/ReadInput.fsproj": {}
+  },
+  "projects": {
+    "/Users/yost/p/leo/project-bees-knees/acoustic_sensor_recording/mac/Bees/ReadInput/ReadInput.fsproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/Users/yost/p/leo/project-bees-knees/acoustic_sensor_recording/mac/Bees/ReadInput/ReadInput.fsproj",
+        "projectName": "ReadInput",
+        "projectPath": "/Users/yost/p/leo/project-bees-knees/acoustic_sensor_recording/mac/Bees/ReadInput/ReadInput.fsproj",
+        "packagesPath": "/Users/yost/.nuget/packages/",
+        "outputPath": "/Users/yost/p/leo/project-bees-knees/acoustic_sensor_recording/mac/Bees/ReadInput/obj/",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/Users/yost/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net7.0"
+        ],
+        "sources": {
+          "/usr/local/share/dotnet/sdk/7.0.400/FSharp/library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net7.0": {
+            "targetAlias": "net7.0",
+            "projectReferences": {}
+          }
+        }
+      },
+      "frameworks": {
+        "net7.0": {
+          "targetAlias": "net7.0",
+          "dependencies": {
+            "FSharp.Core": {
+              "include": "Runtime, Compile, Build, Native, Analyzers, BuildTransitive",
+              "target": "Package",
+              "version": "[7.0.400, )",
+              "generatePathProperty": true
+            },
+            "PortAudioSharp2": {
+              "target": "Package",
+              "version": "[0.4.0, )",
+              "generatePathProperty": true
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/local/share/dotnet/sdk/7.0.400/RuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

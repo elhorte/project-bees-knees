@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "dgSpecHash": "PNnjDE1ROFhnm4BykmrqumjNHq8mnDdm9ir8kM5o/n2MZrIZYq2qd3IcFC+tWGofxS7GKGNy/8dQ9ERxeB7Qow==",
+  "success": true,
+  "projectFilePath": "/Users/yost/p/leo/project-bees-knees/acoustic_sensor_recording/mac/Bees/ReadInput/ReadInput.fsproj",
+  "expectedPackageFiles": [
+    "/Users/yost/.nuget/packages/fsharp.core/7.0.400/fsharp.core.7.0.400.nupkg.sha512",
+    "/Users/yost/.nuget/packages/org.k2fsa.portaudio.runtime.linux-x64/0.4.0/org.k2fsa.portaudio.runtime.linux-x64.0.4.0.nupkg.sha512",
+    "/Users/yost/.nuget/packages/org.k2fsa.portaudio.runtime.osx-x64/0.4.0/org.k2fsa.portaudio.runtime.osx-x64.0.4.0.nupkg.sha512",
+    "/Users/yost/.nuget/packages/org.k2fsa.portaudio.runtime.win-x64/0.4.0/org.k2fsa.portaudio.runtime.win-x64.0.4.0.nupkg.sha512",
+    "/Users/yost/.nuget/packages/portaudiosharp2/0.4.0/portaudiosharp2.0.4.0.nupkg.sha512"
+  ],
+  "logs": []
+}
