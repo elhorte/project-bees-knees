@@ -83,12 +83,17 @@ difference() {
             translate([0, KEEL_LENGTH, 0.0])
             //rotate([0, 0, 0])
             union() {
-                // mounting stud for sensor
+                // mounting stud for sensor and internal cable guide.
                 // x, z, y
                 translate([-10, -105, 0]) cylinder(h=7, d=1.8); 
                 translate([0, -75, 0]) cylinder(h=7, d=1.8); 
                 translate([10, -105, 0]) cylinder(h=7, d=1.8); 
-            }
+                
+                translate([-12, -65, 0]) cylinder(h=7, d=3);
+                translate([12, -65, 0]) cylinder(h=7, d=3);
+                
+                translate([-6, -59, 0]) cylinder(h=7, d=3);
+                translate([6, -59, 0]) cylinder(h=7, d=3);            }
         }
           
         // Inverted L-shaped C-clamp
@@ -97,7 +102,6 @@ difference() {
             rotate([90, 0, 0])
             union() {
                 // Vertical arm of the C-clamp 2
-                // x, z, y
                 translate([2.0, 0, 21]) cube([1, 5, 8]);
                 // Horizontal arm of the C-clamp
                 rotate([90, 0, 0])
@@ -126,5 +130,4 @@ difference() {
     vent(VENT_R, 5.0, VENT_OFFSET);
     vent(VENT_R, -3.0, VENT_OFFSET);
     vent(VENT_R, -11.0, VENT_OFFSET);   
-    
 }
