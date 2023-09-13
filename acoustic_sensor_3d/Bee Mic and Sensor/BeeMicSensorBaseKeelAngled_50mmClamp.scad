@@ -17,7 +17,7 @@ VENT_R = -18.5;
 module vent(x, y, vent_offset) {
     translate([x, y, BOX_H + vent_offset]) {
         rotate([90, 0, 90]) {
-            #linear_extrude(2.5) square([6, 4], center=true);
+            linear_extrude(2.5) square([6, 4], center=true);
         }
     }
 }
@@ -47,7 +47,7 @@ difference() {
         // x, y, z
         translate([0,-44.0,WALL-0.7])
         rotate([90,0,0])
-        #linear_extrude(20.0) square([6.1,1.5], center=true);
+        linear_extrude(20.0) square([6.1,1.5], center=true);
 
         // mic mounting studs
         difference() {
@@ -57,8 +57,8 @@ difference() {
             union() {
                 // mounting stud for sensor
                 // x, z, y
-                translate([-4.5, -133, 0]) cylinder(h=5, d=3); 
-                translate([4.5, -133, 0]) cylinder(h=5, d=3); 
+                translate([-4.5, -133, 0]) cylinder(h=7, d=3); 
+                translate([4.5, -133, 0]) cylinder(h=7, d=3); 
             }
         }
  
@@ -71,11 +71,11 @@ difference() {
             // back of keel slope
             translate([-5, -10, 1])
             rotate([-45, 0, 0])
-            #cube([10, 11, 8]); 
-            // front of keeo slope
+            cube([10, 11, 8]); 
+            // front of keel slope
             translate([-5, -5, 93])
             rotate([45, 0, 0])
-            #cube([10, 11, 8]);          
+            cube([10, 11, 8]);          
         }
         
         // sensor mounting studs
@@ -85,9 +85,9 @@ difference() {
             union() {
                 // mounting stud for sensor
                 // x, z, y
-                translate([0, -105, 0]) cylinder(h=5, d=1.8); 
-                translate([-10, -75, 0]) cylinder(h=5, d=1.8); 
-                translate([10, -75, 0]) cylinder(h=5, d=1.8); 
+                translate([-10, -105, 0]) cylinder(h=7, d=1.8); 
+                translate([0, -75, 0]) cylinder(h=7, d=1.8); 
+                translate([10, -105, 0]) cylinder(h=7, d=1.8); 
             }
         }
           

@@ -42,9 +42,8 @@ difference() {
       union() {
         // mounting stud for sensor
         // x, z, y
-        translate([-4.5, -62
-          , 0]) cylinder(h=6, d=3); 
-        translate([4.5, -62, 0]) cylinder(h=6, d=3); 
+        translate([-4.5, -57, 0]) cylinder(h=6, d=3); 
+        translate([4.5, -57, 0]) cylinder(h=6, d=3); 
       }
     }
  
@@ -57,11 +56,11 @@ difference() {
       // back of keel slope
       translate([-5, -10, 1])
       rotate([-45, 0, 0])
-      #cube([10, 11, 8]); 
+      cube([10, 11, 8]); 
       // front of keeo slope
       translate([-5, -5, 43])
       rotate([45, 0, 0])
-      #cube([10, 11, 8]);          
+      cube([10, 11, 8]);          
     }
       
       
