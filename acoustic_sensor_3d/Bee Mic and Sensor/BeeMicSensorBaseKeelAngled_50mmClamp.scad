@@ -83,7 +83,13 @@ difference() {
             translate([-5,-10,35])
             rotate([0,0,0])
             //y, z, x
-            #cube([10, 12, 50]);              
+            cube([10, 12, 50]);
+     
+            // ports
+            // y. z, x
+            translate([0, 10, 40]) 
+            rotate([90, 0, 0])
+            #cylinder(h=10, d=2.5);
         }
  
         
@@ -92,17 +98,19 @@ difference() {
             translate([0, KEEL_LENGTH, 0.0])
             //rotate([0, 0, 0])
             union() {
-                // mounting stud for sensor and internal cable guide.
+                // mounting stud for sensor
                 // x, z, y
                 translate([-10, -105, 0]) cylinder(h=7, d=1.8); 
                 translate([0, -75, 0]) cylinder(h=7, d=1.8); 
                 translate([10, -105, 0]) cylinder(h=7, d=1.8); 
                 
+                // internal cable guide
                 translate([-12, -65, 0]) cylinder(h=7, d=2.5);
                 translate([12, -65, 0]) cylinder(h=7, d=2.5);
                 
                 translate([-6, -59, 0]) cylinder(h=7, d=2.5);
-                translate([6, -59, 0]) cylinder(h=7, d=2.5);            }
+                translate([6, -59, 0]) cylinder(h=7, d=2.5);            
+           }
         }
           
         // Inverted L-shaped C-clamp
