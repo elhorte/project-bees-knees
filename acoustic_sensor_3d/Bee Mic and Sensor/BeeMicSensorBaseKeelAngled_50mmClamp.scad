@@ -57,8 +57,8 @@ difference() {
             union() {
                 // mounting stud for sensor
                 // x, z, y
-                translate([-4.5, -133, 0]) cylinder(h=7, d=3); 
-                translate([4.5, -133, 0]) cylinder(h=7, d=3); 
+                translate([-4.5, -133, 0]) cylinder(h=7, d=2.5); 
+                translate([4.5, -133, 0]) cylinder(h=7, d=2.5); 
             }
         }
  
@@ -68,15 +68,24 @@ difference() {
 
         difference() {
             linear_extrude(KEEL_LENGTH) square([KEEL_WIDTH, KEEL_HEIGHT], center=true); 
+            // front of keel slope
+            translate([-5, -5, 93])
+            rotate([45, 0, 0])
+            cube([10, 11, 8]);  
+            
             // back of keel slope
             translate([-5, -10, 1])
             rotate([-45, 0, 0])
             cube([10, 11, 8]); 
-            // front of keel slope
-            translate([-5, -5, 93])
-            rotate([45, 0, 0])
-            cube([10, 11, 8]);          
+            
+            //center cutout
+            // y, z, x
+            translate([-5,-10,35])
+            rotate([0,0,0])
+            //y, z, x
+            #cube([10, 12, 50]);              
         }
+ 
         
         // sensor mounting studs
         difference() {
@@ -89,11 +98,11 @@ difference() {
                 translate([0, -75, 0]) cylinder(h=7, d=1.8); 
                 translate([10, -105, 0]) cylinder(h=7, d=1.8); 
                 
-                translate([-12, -65, 0]) cylinder(h=7, d=3);
-                translate([12, -65, 0]) cylinder(h=7, d=3);
+                translate([-12, -65, 0]) cylinder(h=7, d=2.5);
+                translate([12, -65, 0]) cylinder(h=7, d=2.5);
                 
-                translate([-6, -59, 0]) cylinder(h=7, d=3);
-                translate([6, -59, 0]) cylinder(h=7, d=3);            }
+                translate([-6, -59, 0]) cylinder(h=7, d=2.5);
+                translate([6, -59, 0]) cylinder(h=7, d=2.5);            }
         }
           
         // Inverted L-shaped C-clamp
