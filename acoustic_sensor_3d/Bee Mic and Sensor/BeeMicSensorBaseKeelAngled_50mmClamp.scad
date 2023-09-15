@@ -87,9 +87,14 @@ difference() {
      
             // ports
             // y. z, x
-            translate([0, 10, 40]) 
+            translate([0, 6, 45]) 
             rotate([90, 0, 0])
-            #cylinder(h=10, d=2.5);
+            #cylinder(h=4.2, d=2.5);
+            
+            translate([0, 6, 75]) 
+            rotate([90, 0, 0])
+            #cylinder(h=4.2, d=2.5);
+           
         }
  
         

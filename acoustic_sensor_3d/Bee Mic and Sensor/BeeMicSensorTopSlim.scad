@@ -30,6 +30,23 @@ module vent(x, y, vent_offset) {
     }
 }
 
+module waterdrop() {
+    difference(){
+        // Main drop shape
+        # cylinder(r1=0, r2=0.1875, h=0.375, center=false);
+        
+        // To subtract from the base to make it rounded like a waterdrop
+        translate([0, 0, -0.05])
+        sphere(r=0.1875);
+    }
+}
+
+for(i=[0:2]){
+    translate([i*0.5, 0, 0]){
+        waterdrop();
+    }
+}
+
 difference() {
     union() {
         linear_extrude( BOX_H )
@@ -68,7 +85,8 @@ difference() {
     translate([0,44.3,BOX_H-2.5])
     rotate([90,0,0])
     #linear_extrude(2.0) square([10,6], center=true);
-     
+    
+    
     // gas sensor vents
     vent(VENT_L, 29.0, VENT_OFFSET);
     vent(VENT_L, 21.0, VENT_OFFSET);
