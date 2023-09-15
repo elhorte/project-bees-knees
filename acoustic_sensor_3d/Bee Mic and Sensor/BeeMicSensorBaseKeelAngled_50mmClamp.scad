@@ -80,12 +80,13 @@ difference() {
             
             //center cutout
             // y, z, x
-            translate([-5,-10,35])
+            translate([-3,-8, 35])
             rotate([0,0,0])
             //y, z, x
-            cube([10, 12, 50]);
+            cube([6, 12, 30]);
      
             // ports
+            /*
             // y. z, x
             translate([0, 6, 45]) 
             rotate([90, 0, 0])
@@ -94,7 +95,7 @@ difference() {
             translate([0, 6, 75]) 
             rotate([90, 0, 0])
             #cylinder(h=4.2, d=2.5);
-           
+            */
         }
  
         
@@ -137,19 +138,20 @@ difference() {
             }
         }
     }
-    
-    // gas sensor vents
-    vent(VENT_L, 29.0, VENT_OFFSET);
-    vent(VENT_L, 21.0, VENT_OFFSET);
-    vent(VENT_L, 13.0, VENT_OFFSET);
-    vent(VENT_L, 5.0, VENT_OFFSET);
-    vent(VENT_L, -3.0, VENT_OFFSET);
-    vent(VENT_L, -11.0, VENT_OFFSET);
-    
-    vent(VENT_R, 29.0, VENT_OFFSET);
-    vent(VENT_R, 21.0, VENT_OFFSET);
-    vent(VENT_R, 13.0, VENT_OFFSET);
-    vent(VENT_R, 5.0, VENT_OFFSET);
-    vent(VENT_R, -3.0, VENT_OFFSET);
-    vent(VENT_R, -11.0, VENT_OFFSET);   
+    /*union() {
+        // gas sensor vents
+        vent(VENT_L, 29.0, VENT_OFFSET);
+        vent(VENT_L, 21.0, VENT_OFFSET);
+        vent(VENT_L, 13.0, VENT_OFFSET);
+        vent(VENT_L, 5.0, VENT_OFFSET);
+        vent(VENT_L, -3.0, VENT_OFFSET);
+        vent(VENT_L, -11.0, VENT_OFFSET);
+        
+        vent(VENT_R, 29.0, VENT_OFFSET);
+        vent(VENT_R, 21.0, VENT_OFFSET);
+        vent(VENT_R, 13.0, VENT_OFFSET);
+        vent(VENT_R, 5.0, VENT_OFFSET);
+        vent(VENT_R, -3.0, VENT_OFFSET);
+        vent(VENT_R, -11.0, VENT_OFFSET);   
+    } */
 }

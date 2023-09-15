@@ -49,7 +49,7 @@ difference() {
             // mic box
             translate([0,-18.0,BOX_H-3])
             rotate([90,0,0])
-            #linear_extrude(MIC_LENGTH)square([MIC_OUTSIDE_WIDTH,MIC_OUTSIDE_HEIGHT], center=true);
+            linear_extrude(MIC_LENGTH)square([MIC_OUTSIDE_WIDTH,MIC_OUTSIDE_HEIGHT], center=true);
         }
     }
     translate([MIC_OFFSET_X, MIC_OFFSET_Y, MIC_OFFSET_Z]){
@@ -67,8 +67,9 @@ difference() {
     // cable exit
     translate([0,44.3,BOX_H-2.5])
     rotate([90,0,0])
-    #linear_extrude(2.0) square([10,6], center=true);
-     
+    linear_extrude(2.0) square([10,6], center=true);
+
+    /*
     // gas sensor vents
     vent(VENT_L, 29.0, VENT_OFFSET);
     vent(VENT_L, 21.0, VENT_OFFSET);
@@ -83,5 +84,5 @@ difference() {
     vent(VENT_R, 5.0, VENT_OFFSET);
     vent(VENT_R, -3.0, VENT_OFFSET);
     vent(VENT_R, -11.0, VENT_OFFSET);    
-    
+    */
 }
