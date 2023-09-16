@@ -78,12 +78,12 @@ difference() {
             rotate([-45, 0, 0])
             cube([10, 11, 8]); 
             
-            //center cutout
+            //center cutout - vent
             // y, z, x
-            translate([-3,-8, 35])
+            translate([-0.5,-8, 35])
             rotate([0,0,0])
             //y, z, x
-            cube([6, 12, 30]);
+            cube([1, 12, 30]);
      
             // ports
             /*
