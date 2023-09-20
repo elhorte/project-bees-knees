@@ -43,8 +43,8 @@ difference() {
             union() {
                 // x,y,z
                 //translate([0.0, KEEL_LENGTH-35.0, -4.6]) #cylinder(h=4, d=2.8); 
-                translate([0.0, KEEL_LENGTH-22.5, -4.6]) #cylinder(h=4, d=2.8); 
-                translate([0.0, KEEL_LENGTH-75.5, -4.6]) #cylinder(h=4, d=2.8);   
+                translate([0.0, KEEL_LENGTH-24.5, -4.6]) #cylinder(h=4, d=2.8); 
+                translate([0.0, KEEL_LENGTH-77.5, -4.6]) #cylinder(h=4, d=2.8);   
             }
         }
         // Inverted L-shaped C-clamp
@@ -53,16 +53,16 @@ difference() {
             rotate([90, 0, 0])
             union() {
                 // Vertical arm of the C-clamp 2
-                translate([2.0, 0, 21]) cube([1, 5, 8]);
+                translate([1.0, 0, 21]) cube([2, 5, 8]);
                 // Horizontal arm of the C-clamp
                 rotate([90, 0, 0])
-                translate([0, 21, -5]) cube([2, 8, 1]);
+                translate([0, 21, -5]) cube([2, 8, 2]);
                   
                 // Vertical arm of the C-clamp 1
-                translate([-6, 0, 21]) cube([1, 5, 8]);
+                translate([-6, 0, 21]) cube([2, 5, 8]);
                 // Horizontal arm of the C-clamp
                 rotate([90, 0, 0])
-                translate([-5.0, 21,-5]) cube([2, 8, 1]);
+                translate([-5.0, 21,-5]) cube([2, 8, 2]);
             }
         }
     }

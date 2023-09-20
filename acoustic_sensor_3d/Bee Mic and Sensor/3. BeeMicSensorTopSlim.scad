@@ -33,7 +33,7 @@ module sq_vent(x, y, vent_offset) {
 module vent(x, y, vent_offset) {
     translate([x, y, BOX_H + vent_offset]) {
         rotate([90, 0, 90]) {
-            #cylinder(h=3.0, d=2.0, center=true);
+            cylinder(h=3.0, d=2.0, center=true);
         }
     }
 }

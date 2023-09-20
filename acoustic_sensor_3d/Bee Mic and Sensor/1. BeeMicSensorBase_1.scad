@@ -76,7 +76,7 @@ difference() {
     linear_extrude(KEEL_LENGTH) square([KEEL_WIDTH+0.5, KEEL_HEIGHT], center=true); 
 */    
     // screw holes
-    translate([0.0, -15, -2]) cylinder(h=4, d=2.9); 
+    translate([0.0, -13, -2]) cylinder(h=4, d=2.9); 
     translate([0.0, 38, -2]) cylinder(h=4, d=2.9);    
     
     //translate([0.0, -37.5, -2]) cylinder(h=4, d=2.0);  
