@@ -40,9 +40,9 @@ difference() {
         translate([0, KEEL_LENGTH, 0.0])
         union() {
             // sensor mounts
-            translate([-10, -97, 0]) cylinder(h=7, d=1.8); 
-            translate([0, -67, 0]) cylinder(h=7, d=1.8); 
-            translate([10, -97, 0]) cylinder(h=7, d=1.8); 
+            translate([-10, -95, 0]) cylinder(h=7, d=1.8); 
+            translate([0, -65, 0]) cylinder(h=7, d=1.8); 
+            translate([10, -95, 0]) cylinder(h=7, d=1.8); 
             // cable runs
             translate([-12, -65, 0]) cylinder(h=7, d=2.5);
             translate([12, -65, 0]) cylinder(h=7, d=2.5);
@@ -77,7 +77,7 @@ difference() {
 */    
     // screw holes
     translate([0.0, -13, -2]) cylinder(h=4, d=2.9); 
-    translate([0.0, 38, -2]) cylinder(h=4, d=2.9);    
+    translate([0.0, 40, -2]) cylinder(h=4, d=2.9);    
     
     //translate([0.0, -37.5, -2]) cylinder(h=4, d=2.0);  
     

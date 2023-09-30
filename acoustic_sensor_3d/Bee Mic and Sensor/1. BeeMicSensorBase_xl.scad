@@ -1,9 +1,11 @@
 $fn=50;
 BOX_W = 38; // Box Width
-BOX_L = 92;// Box Length
-BOX_H = 0.8; // Box Height
+BOX_L = 100;// Box Length
+BOX_H = 1.0; // Box Height
 CORNER_RADIUS = 1.0; // Radius of corners
-WALL = 1.0;// Wall Thickness
+WALL = 0.8;// Wall Thickness
+
+SENSOR_MOUNT_OFFSET = -5;
 
 KEEL_WIDTH=9.0;
 KEEL_HEIGHT=10.0;
@@ -32,7 +34,7 @@ difference() {
         translate([BOX_W/2-WALL*1.8,BOX_L/-2+0.9,WALL]) cube([WALL,BOX_L-(WALL*2)+0.3,3]);
 
         // mic channel cover
-        translate([0,-42.6,WALL-1])
+        translate([0,-49.6,WALL-1])
         rotate([90,0,0])
         linear_extrude(23.0) square([6.1,2.0], center=true);
         
@@ -40,21 +42,21 @@ difference() {
         translate([0, KEEL_LENGTH, 0.0])
         union() {
             // sensor mounts
-            translate([-10, -97, 0]) cylinder(h=7, d=1.8); 
-            translate([0, -67, 0]) cylinder(h=7, d=1.8); 
-            translate([10, -97, 0]) cylinder(h=7, d=1.8); 
+            translate([-10, SENSOR_MOUNT_OFFSET-90, 0]) cylinder(h=7, d=1.8); 
+            translate([0, SENSOR_MOUNT_OFFSET-60, 0]) cylinder(h=7, d=1.8); 
+            translate([10, SENSOR_MOUNT_OFFSET-90, 0]) cylinder(h=7, d=1.8); 
             // cable runs
-            translate([-12, -65, 0]) cylinder(h=7, d=2.5);
-            translate([12, -65, 0]) cylinder(h=7, d=2.5);
-            translate([-6, -59, 0]) cylinder(h=7, d=2.5);
-            translate([6, -59, 0]) cylinder(h=7, d=2.5);            
+            translate([-11, -60, 0]) cylinder(h=7, d=2.5);
+            translate([11, -60, 0]) cylinder(h=7, d=2.5);
+            translate([-6, -52, 0]) cylinder(h=7, d=2.5);
+            translate([6, -52, 0]) cylinder(h=7, d=2.5);            
         } 
         
         // mic mounting studs
         translate([0, KEEL_LENGTH, 0.0])
         union() {
-            translate([-4.5, -133, 0]) cylinder(h=7, d=2.4); 
-            translate([4.5, -133, 0]) cylinder(h=7, d=2.4); 
+            translate([-4.5, -140, 0]) cylinder(h=7, d=2.3); 
+            translate([4.5, -140, 0]) cylinder(h=7, d=2.3); 
         }
     }
     //
@@ -63,12 +65,12 @@ difference() {
     // center cutout - vent in base of box
     translate([-1.0,-2.5,-4])
     rotate([90,0,90])
-    cube([25, 6, 2]);
+    cube([30, 6, 2]);
 
     // mic vents
-    translate([0.0, -50, -2]) cylinder(h=4, d=2.5); 
-    translate([0.0, -55, -2]) cylinder(h=4, d=2.5); 
-    translate([0.0, -60, -2]) cylinder(h=4, d=2.5);
+    translate([0.0, -57, -2]) cylinder(h=4, d=2.5); 
+    translate([0.0, -62, -2]) cylinder(h=4, d=2.5); 
+    translate([0.0, -67, -2]) cylinder(h=4, d=2.5);
 /*
     // keel
     translate([0,62.5,-5])
@@ -76,8 +78,8 @@ difference() {
     linear_extrude(KEEL_LENGTH) square([KEEL_WIDTH+0.5, KEEL_HEIGHT], center=true); 
 */    
     // screw holes
-    translate([0.0, -17, -2]) cylinder(h=4, d=2.9); 
-    translate([0.0, 38, -2]) cylinder(h=4, d=2.9);    
+    translate([0.0, -17.5, -2]) cylinder(h=4, d=2.9); 
+    translate([0.0, 43, -2]) cylinder(h=4, d=2.9);    
     
     //translate([0.0, -37.5, -2]) cylinder(h=4, d=2.0);  
     
