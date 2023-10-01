@@ -55,8 +55,8 @@ difference() {
         // mic mounting studs
         translate([0, KEEL_LENGTH, 0.0])
         union() {
-            translate([-4.5, -140, 0]) cylinder(h=7, d=2.3); 
-            translate([4.5, -140, 0]) cylinder(h=7, d=2.3); 
+            translate([-4.5, -140, 0]) cylinder(h=7, d=2.2); 
+            translate([4.5, -140, 0]) cylinder(h=7, d=2.2); 
         }
     }
     //
