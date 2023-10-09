@@ -36,15 +36,15 @@ difference() {
             translate([-1.0,-6, 39.0])
             rotate([0,0,0])
             //y, z, x
-            #cube([1.5, 12, 27]);
+            cube([1.5, 12, 27]);
             
             // screw holes
             rotate([90,0,0])
             union() {
                 // x,y,z
                 //translate([0.0, KEEL_LENGTH-35.0, -4.6]) #cylinder(h=4, d=2.8); 
-                translate([0.0, KEEL_LENGTH-17.0, -4.6]) cylinder(h=4, d=2.8); 
-                translate([0.0, KEEL_LENGTH-77.5, -4.6]) cylinder(h=4, d=2.8);   
+                translate([0.0, KEEL_LENGTH-17.0, -4.6]) cylinder(h=4, d=2.8); // 83
+                translate([0.0, KEEL_LENGTH-77.5, -4.6]) cylinder(h=4, d=2.8); // 22.5
             }
             // thru slots for straps
             rotate([90, 0, 0])
