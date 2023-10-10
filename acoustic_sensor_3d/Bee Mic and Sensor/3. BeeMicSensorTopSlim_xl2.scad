@@ -1,6 +1,6 @@
 $fn=50;
 BOX_W = 38; // Box Width
-BOX_L = 100;// Box Length
+BOX_L = 110;// Box Length
 BOX_H = 8.0; // Box Height
 CORNER_RADIUS = 0.8; // Radius of corners
 WALL = 0.8;// Wall Thickness all sides
@@ -15,7 +15,7 @@ CON_INSIDE=4;
 CON_LENGTH=3;
 
 MIC_OFFSET_X = 0;
-MIC_OFFSET_Y = -32.0;
+MIC_OFFSET_Y = -37.0;
 MIC_OFFSET_Z = -0.5;
 
 VENT_OFFSET = -4.5;
@@ -70,9 +70,9 @@ difference() {
         linear_extrude(2.0) square([9,2.2], center=true);   
     }
     // cable exit
-    translate([0,52.0,BOX_H-2.5])
+    translate([0,57.0,BOX_H-2.5])
     rotate([90,0,0])
-    linear_extrude(3.0) square([10,6], center=true);
+    #linear_extrude(3.0) square([10,6], center=true);
     /*
     // gas sensor vents
     vent(VENT_L, 29.0, VENT_OFFSET);
