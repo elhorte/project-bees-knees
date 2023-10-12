@@ -14,7 +14,7 @@ difference() {
         rotate([90,0,0])
         linear_extrude(KEEL_L) square([KEEL_W, KEEL_H], center=true); 
         // cable clamp
-        translate([1, 0, 4.5])
+        translate([1.5, 4, 4.5])
         rotate([90, 0, 0])
         union(){
             // Vertical arm of the C-clamp 2
@@ -43,7 +43,7 @@ difference() {
     translate([-5, -1, -10])
     rotate([45, 0, 0])
     //(x, z, y)
-    #cube([10, 11, 8]);  
+    cube([10, 11, 8]);  
  
     //center cutout - vent
     translate([-1.0, -42.0, -5.0])
