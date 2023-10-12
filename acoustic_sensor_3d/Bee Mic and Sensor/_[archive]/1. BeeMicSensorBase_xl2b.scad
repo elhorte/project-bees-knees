@@ -29,11 +29,11 @@ difference() {
             translate(i) sphere(CORNER_RADIUS);
     
         // lid rails
-        translate([BOX_W/-2+WALL,BOX_L/-2+0.9,WALL]) 
-        cube([WALL,BOX_L-(WALL*2)+0.3,3]);
+        translate([BOX_W/-2+WALL-0.5, BOX_L/-2+0.6, WALL]) 
+        cube([WALL, BOX_L-(WALL*2)+0.9, 3]);
         
-        translate([BOX_W/2-WALL*1.8,BOX_L/-2+0.9,WALL]) 
-        cube([WALL,BOX_L-(WALL*2)+0.3,3]);
+        translate([(BOX_W/2)-(WALL*1.8)+0.5, BOX_L/-2+0.6,WALL]) 
+        cube([WALL,BOX_L-(WALL*2)+0.9,3]);
 
         // mic channel cover
         translate([0,-52.8, 0])

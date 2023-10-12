@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "*.xc": "cpp",
+        "*.scad": "cpp"
+    }
+}
