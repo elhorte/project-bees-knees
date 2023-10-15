@@ -1,4 +1,4 @@
-$fn=50;
+$fn=75;
 
 BOX_W = 38;
 BOX_L = 105;
@@ -28,10 +28,10 @@ module mainBox() {
 
 // Lid Rails
 module lidRails() {
-    translate([BOX_W/-2+WALL-0.4, BOX_L/-2+0.6, WALL+1]) 
+    translate([BOX_W/-2+WALL-0.6, BOX_L/-2+0.6, WALL+1]) 
     cube([WALL, BOX_L-(WALL*2)+0.9, 3]);
         
-    translate([(BOX_W/2)-(WALL*1.8)+0.4, BOX_L/-2+0.6, WALL+1]) 
+    translate([(BOX_W/2)-(WALL*1.8)+0.6, BOX_L/-2+0.6, WALL+1]) 
     cube([WALL,BOX_L-(WALL*2)+0.9,3]);
 }
 
@@ -82,12 +82,16 @@ module cutouts() {
 }
 
 // Combine all modules
-difference() {
-    union() {
-        mainBox();
-        lidRails();
-        micChannelCover();
-        mountingStuds();
+rotate([180, 180, 0]) {
+    translate([0, -BOX_L/2, 0]) {
+        difference() {
+            union() {
+                mainBox();
+                lidRails();
+                micChannelCover();
+                mountingStuds();
+            }
+            cutouts();
+        }
     }
-    cutouts();
 }
