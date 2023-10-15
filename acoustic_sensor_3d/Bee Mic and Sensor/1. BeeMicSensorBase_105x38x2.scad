@@ -12,10 +12,6 @@ SENSOR_MOUNT_OFFSET = 10;
 MIC_MOUNT_OFFSET = 100;
 CABLE_GUIDE_OFFSET = 42;
 
-VENT_OFFSET = 2.5;
-VENT_L = 16.5;
-VENT_R = -18.5;
-
 module roundedRectangle(width, length, radius) {
     offset(r=radius) square([width, length], center=true);
 }
@@ -70,18 +66,18 @@ module cutouts() {
     // Center Vent
     translate([-1.0, 0,-1])
     rotate([90,0,90])
-    #cube([30, 4, 2]);
+    cube([30, 4, 2]);
 
     // Mic Vents
     for(pos = [-62, -67, -72])
-        translate([0.0, pos, -1]) #cylinder(h=4, d=2.5); 
+        translate([0.0, pos, -1]) cylinder(h=4, d=2.5); 
 
     // Screw Holes
     for(pos = [-5, 45])
-        translate([0.0, pos, -1]) #cylinder(h=4, d=2.9);
+        translate([0.0, pos, -1]) cylinder(h=4, d=2.9);
 }
 
-// Combine all modules
+// Combine modules
 rotate([180, 180, 0]) {
     translate([0, -BOX_L/2, 0]) {
         difference() {
