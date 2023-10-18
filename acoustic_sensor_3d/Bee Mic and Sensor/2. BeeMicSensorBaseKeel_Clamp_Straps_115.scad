@@ -2,7 +2,7 @@ $fn=50;
 
 KEEL_W=9.0;
 KEEL_H=9.0;
-KEEL_L=115;
+KEEL_L=75;
 
 module cable_clamp(y_position) {
     translate([1.5, y_position, 4.5]) {
@@ -36,18 +36,18 @@ module cutout_group(y_position) {
         cube([10, 11, 8]); 
 
         //center cutout - vent
-        translate([-1.0, -42.0, -5.0])
-        rotate([90,0,0])
+        //translate([-1.0, -42.0, -5.0])
+        //rotate([90,0,0])
         //y, z, x
-        cube([1.5, 10, 25]);
+        //cube([1.5, 10, 25]);
 
         // screw holes
         translate([0, -22, 0]) cylinder(h=5, d=2.8); 
-        translate([0.0, -72, 0]) cylinder(h=5, d=2.8);   
+        translate([0.0, -52, 0]) cylinder(h=5, d=2.8);   
 
         // thru slots for straps
         translate([-7.0, -42,-1]) cube([14, 18, 2]);       
-        translate([-7.0, -92,-1]) cube([14, 18, 2]);
+        //translate([-7.0, -92,-1]) cube([14, 18, 2]);
         
     }
 }
