@@ -43,8 +43,8 @@ module mountingStuds() {
     // Mic Mounting Studs
     translate([0, MIC_MOUNT_OFFSET, 0.0])
     union() {
-        translate([-4.5, -142.5, 0]) cylinder(h=7, d=2.3); 
-        translate([4.5, -142.5, 0]) cylinder(h=7, d=2.3); 
+        translate([-4.5, -142.5, 0]) cylinder(h=7, d=2.8); 
+        translate([4.5, -142.5, 0]) cylinder(h=7, d=2.8); 
     }
     
     // Sensor Mounting Studs and Cable Runs
