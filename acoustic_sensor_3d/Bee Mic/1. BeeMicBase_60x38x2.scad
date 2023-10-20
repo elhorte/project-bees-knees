@@ -64,11 +64,6 @@ module mountingStuds() {
 
 // Cutouts
 module cutouts() {
-    // Center Vent
-    //translate([-1.0, 0,-1])
-    //rotate([90,0,90])
-    //cube([30, 4, 2]);
-
     // Mic Vents
     for(pos = [MIC_HOLE_OFFSET-0, MIC_HOLE_OFFSET-5, MIC_HOLE_OFFSET-10])
         translate([0.0, pos, -1]) cylinder(h=4, d=2.5); 
@@ -80,7 +75,7 @@ module cutouts() {
 
 // Combine modules
 rotate([180, 180, 0]) {
-    translate([0, -BOX_L/2, 0]) {
+    translate([0, -BOX_L/2-1, 0]) {
         difference() {
             union() {
                 mainBox();
