@@ -44,8 +44,8 @@ module mountingStuds() {
     // Mic Mounting Studs
     translate([0, MIC_MOUNT_OFFSET, 0.0])
     union() {
-        translate([-4.5, 0, 0]) cylinder(h=7, d=2.8); 
-        translate([4.5, 0, 0]) cylinder(h=7, d=2.8); 
+        translate([-4.5, 0, 0]) cylinder(h=7, d=2.3); 
+        translate([4.5, 0, 0]) cylinder(h=7, d=2.3); 
     }
     
     // Sensor Mounting Studs and Cable Runs
@@ -71,10 +71,10 @@ module cutouts() {
 
     // Mic Vents
     for(pos = [MIC_HOLE_OFFSET-0, MIC_HOLE_OFFSET-5, MIC_HOLE_OFFSET-10])
-        translate([0.0, pos, -1]) #cylinder(h=4, d=2.5); 
+        translate([0.0, pos, -1]) cylinder(h=4, d=2.5); 
 
     // Screw Holes
-    for(pos = [-3, 27])
+    for(pos = [-15, 25])
         translate([0.0, pos, -1]) cylinder(h=4, d=2.9);
 }
 

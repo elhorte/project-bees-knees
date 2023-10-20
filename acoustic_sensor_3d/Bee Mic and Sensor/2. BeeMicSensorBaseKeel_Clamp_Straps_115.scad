@@ -43,7 +43,7 @@ module cutout_group(y_position) {
 
         // screw holes
         translate([0, -22, 0]) cylinder(h=5, d=2.8); 
-        translate([0.0, -52, 0]) cylinder(h=5, d=2.8);   
+        translate([0.0, -62, 0]) cylinder(h=5, d=2.8);   
 
         // thru slots for straps
         translate([-7.0, -42,-1]) cube([14, 18, 2]);       

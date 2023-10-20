@@ -63,7 +63,7 @@ module cutouts() {
     translate([-5, MIC_L+29.0, -14])
     rotate([45, 0, 0])
     //(x, z, y)
-    #cube([10, 11, 8]); 
+    cube([10, 11, 8]); 
     
     // Cable exit
     translate([0, -29.0, BOX_H-9.5])
