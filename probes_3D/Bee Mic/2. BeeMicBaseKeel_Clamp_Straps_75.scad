@@ -9,18 +9,20 @@ module cable_clamp(y_position) {
         rotate([90, 0, 0]) {
             union() {
                 // Vertical arm of the C-clamp 2
-                translate([2.0, 0, 0]) cube([2, 5, 8]);
+                translate([1.5, 0, 0]) cube([2, 5, 8]);
                 // Horizontal arm of the C-clamp
                 rotate([90, 0, 0])
                 translate([0, 0, -5]) cube([2, 8, 2]);
+                
                 // Vertical arm of the C-clamp 1
-                translate([-7, 0, 0]) cube([2, 5, 8]);
+                translate([-6.5, 0, 0]) cube([2, 5, 8]);
                 // Horizontal arm of the C-clamp
                 rotate([90, 0, 0])
                 translate([-5.0, 0,-5]) cube([2, 8, 2]);
+                
                 // clamp bed
                 rotate([90, 0, 0])
-                translate([-7.0, 0,-0]) cube([11, 8, 2]);
+                translate([-6.5, 0,-0]) cube([10, 8, 2]);
             }
         }
     }

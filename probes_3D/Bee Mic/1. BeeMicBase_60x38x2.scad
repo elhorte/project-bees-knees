@@ -25,11 +25,11 @@ module mainBox() {
 
 // Lid Rails
 module lidRails() {
-    translate([BOX_W/-2+WALL-0.6, BOX_L/-2+0.6, WALL+1]) 
-    cube([WALL, BOX_L-(WALL*2)+0.9, 3]);
+    translate([BOX_W/-2+WALL-0.2, BOX_L/-2+0.5, WALL+1]) 
+    cube([WALL, BOX_L-(WALL*2)+0.7, 3]);
         
-    translate([(BOX_W/2)-(WALL*1.8)+0.6, BOX_L/-2+0.6, WALL+1]) 
-    cube([WALL,BOX_L-(WALL*2)+0.9,3]);
+    translate([(BOX_W/2)-(WALL*2.0)+0.4, BOX_L/-2+0.5, WALL+1]) 
+    cube([WALL,BOX_L-(WALL*2)+0.7,3]);
 }
 
 // Mic Channel Cover

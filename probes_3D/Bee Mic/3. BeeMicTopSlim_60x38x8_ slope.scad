@@ -1,10 +1,10 @@
 $fn=75;
 
-BOX_W = 38;
-BOX_L = 60;
+BOX_W = 38.4;
+BOX_L = 60.4;
 BOX_H = 8.0;
 
-WALL = 0.8;
+WALL = 1.0;
 
 CORNER_RADIUS = 0.8;
 
