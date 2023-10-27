@@ -6,11 +6,12 @@
 import datetime
 
 # location and hive ID
-LOCATION_ID = "Leo-Lab"
-HIVE_ID = "T1"
+LOCATION_ID = "Zeev-Berkeley"
+HIVE_ID = "Z1"
+HIVE_CONFIG = "dual-mic, sensor"
 
 # mode controls
-MODE_AUDIO_MONITOR = True                       # recording continuously to mp3 files
+MODE_AUDIO_MONITOR = False                       # recording continuously to mp3 files
 MODE_PERIOD = True                              # period recording
 MODE_EVENT = False                              # event recording
 MODE_FFT_PERIODIC_RECORD = True                 # record fft periodically
@@ -33,8 +34,10 @@ SAVE_AFTER_EVENT = 30                           # seconds to save after the even
 EVENT_THRESHOLD = 20000                         # audio level threshold to be considered an event
 MIC_LOCATION = ["lower w/queen--front", "upper--front", "upper--back", "lower w/queen--back", "upper--back"]
 
-data_drive = "G:"
-data_directory = "My Drive/en_beehive_data"
+#data_drive = "G:"
+#data_directory = "My Drive/en_beehive_data"
+data_drive = "C:"
+data_directory = "temp"
 
 # input device parameters:
 MAKE_NAME = "Behringer"                         # 'Behringer' or 'Zoom'

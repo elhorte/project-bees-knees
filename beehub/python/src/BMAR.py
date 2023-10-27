@@ -163,9 +163,9 @@ current_day = current_date.strftime('%d')
 
 # windows mme defaults, 2 ch only
 SOUND_IN_DEFAULT = 0                        # default input device id              
-SOUND_OUT_ID_DEFAULT = 14                    # default output device id
+SOUND_OUT_ID_DEFAULT = 3                    # default output device id
 SOUND_OUT_CHS_DEFAULT = 2                   # default number of output channels
-SOUND_OUT_SR_DEFAULT = 192000                # default sample rate
+SOUND_OUT_SR_DEFAULT = 48000                # default sample rate
 
 # to be recovered from sounddevice.query_devices()
 sound_in_id = None                          # id of input device
@@ -173,7 +173,7 @@ sound_in_chs = None                         # number of input channels
 sound_in_samplerate = None                  # sample rate of input device
 sound_out_id = SOUND_OUT_ID_DEFAULT
 sound_out_chs = SOUND_OUT_CHS_DEFAULT                        
-sound_out_samplerate = 192000 ##SOUND_OUT_SR_DEFAULT    
+sound_out_samplerate = 48000  ##SOUND_OUT_SR_DEFAULT    
 
 PRIMARY_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/recordings/{current_year}{current_month}_primary/"
 MONITOR_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/recordings/{current_year}{current_month}_monitor/"
@@ -704,8 +704,8 @@ def toggle_intercom_m():
 
     if intercom_proc is None:
         print("Starting intercom on channel:", monitor_channel + 1)
-        ##intercom_proc = multiprocessing.Process(target=intercom_m_downsampled, args=(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel))
-        intercom_proc = multiprocessing.Process(target=intercom_m, args=(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel))
+        intercom_proc = multiprocessing.Process(target=intercom_m_downsampled, args=(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel))
+        ##intercom_proc = multiprocessing.Process(target=intercom_m, args=(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel))
         intercom_proc.start()
     else:
         stop_intercom_m()
@@ -910,6 +910,11 @@ def callback(indata, frames, time, status):
 
 def audio_stream():
     global stop_program, sound_in_id, sound_in_chs, sound_in_samplerate, _dtype, testmode
+
+    sound_in_id = 9
+    sound_in_chs = 4
+    sound_in_samplerate = 192000
+    _dtype = "int16"
 
     print("Start audio_stream...")
     stream = sd.InputStream(device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate, dtype=_dtype, blocksize=blocksize, callback=callback)
