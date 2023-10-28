@@ -49,6 +49,6 @@ HOSTAPI_INDEX = 3                               # 0 = Windows, 1 = ASIO, 2 = DS,
 
 # windows mme defaults, 2 ch only
 ##SOUND_IN_DEFAULT = 0                          # default input device id              
-SOUND_OUT_ID_DEFAULT = 5                        # default output device id
+SOUND_OUT_ID_DEFAULT = 3                        # default output device id
 SOUND_OUT_CHS_DEFAULT = 2                       # default number of output channels
 SOUND_OUT_SR_DEFAULT = 44100                    # default sample rate
