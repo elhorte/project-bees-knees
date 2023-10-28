@@ -32,7 +32,7 @@ and CbMessage(stream: Stream, streamQueue: StreamQueue, logger: Logger, bufSize:
   inherit IPoolItem()
 
   let cbMessagePoolPlaceHolder = CbMessagePool(bufSize, 0, 0, stream, streamQueue, logger)
-  let ti = StreamCallbackTimeInfo() // replace with actual time info
+  let ti = StreamCallbackTimeInfo() // Replace with actual time info.
   let sf = StreamCallbackFlags.PrimingOutput
   let buf = Buf (Array.zeroCreate<BufType> bufSize)
 
