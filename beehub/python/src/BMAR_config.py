@@ -7,7 +7,7 @@ import datetime
 
 # location and hive ID
 LOCATION_ID = "Zeev-Berkeley"
-HIVE_ID = "Z1"
+HIVE_ID = "Z1_4mic"
 HIVE_CONFIG = "dual-mic, sensor"
 
 # mode controls
@@ -34,10 +34,10 @@ SAVE_AFTER_EVENT = 30                           # seconds to save after the even
 EVENT_THRESHOLD = 20000                         # audio level threshold to be considered an event
 MIC_LOCATION = ["lower w/queen--front", "upper--front", "upper--back", "lower w/queen--back", "upper--back"]
 
-#data_drive = "G:"
-#data_directory = "My Drive/en_beehive_data"
-data_drive = "C:"
-data_directory = "temp"
+data_drive = "G:"
+data_directory = "My Drive/en_beehive_data"
+##data_drive = "C:"
+##data_directory = "temp"
 
 # input device parameters:
 MAKE_NAME = "Behringer"                         # 'Behringer' or 'Zoom'
@@ -45,4 +45,10 @@ MODEL_NAME = ["UMC404HD", "Scarlett", "Zoom", "Volt"]
 DEVICE_NAME = 'UAC'                             # 'UAC' or 'USB'
 API_NAME = "WASAPI"                             # 'MME' or 'WASAPI' or 'ASIO' or 'DS'  
 HOSTAPI_NAME = "Windows"                        # 'Windows' or 'ASIO' or 'DS' or 'WDM-KS'
-HOSTAPI_INDEX = 0                               # 0 for Windows, 1 for ASIO, 2 for DS, 3 for WDM-KS
+HOSTAPI_INDEX = 3                               # 0 = Windows, 1 = ASIO, 2 = DS, 3 = WASAPI, 4 = WDM-KS
+
+# windows mme defaults, 2 ch only
+##SOUND_IN_DEFAULT = 0                          # default input device id              
+SOUND_OUT_ID_DEFAULT = 5                        # default output device id
+SOUND_OUT_CHS_DEFAULT = 2                       # default number of output channels
+SOUND_OUT_SR_DEFAULT = 44100                    # default sample rate
