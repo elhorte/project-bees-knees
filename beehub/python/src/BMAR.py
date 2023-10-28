@@ -118,7 +118,7 @@ PRIMARY_SAMPLERATE = 192000                     # Audio sample rate
 PRIMARY_BITDEPTH = 16                           # Audio bit depth
 PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
-AUDIO_MONITOR_SAMPLERATE = 48000                # For continuous audio
+AUDIO_MONITOR_SAMPLERATE = 44100                # For continuous audio
 AUDIO_MONITOR_BITDEPTH = 16                     # Audio bit depthv
 AUDIO_MONITOR_CHANNELS = 2                      # Number of channels
 AUDIO_MONITOR_QUALITY = 0                       # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
@@ -161,21 +161,16 @@ current_year = current_date.strftime('%Y')
 current_month = current_date.strftime('%m')
 current_day = current_date.strftime('%d')
 
-# windows mme defaults, 2 ch only
-SOUND_IN_DEFAULT = 0                        # default input device id              
-SOUND_OUT_ID_DEFAULT = 3                    # default output device id
-SOUND_OUT_CHS_DEFAULT = 2                   # default number of output channels
-SOUND_OUT_SR_DEFAULT = 48000                # default sample rate
-
-# to be recovered from sounddevice.query_devices()
+# to be discovered from sounddevice.query_devices()
 sound_in_id = None                          # id of input device
 sound_in_chs = None                         # number of input channels
 sound_in_samplerate = None                  # sample rate of input device
-sound_out_id = SOUND_OUT_ID_DEFAULT
-sound_out_chs = SOUND_OUT_CHS_DEFAULT                        
-sound_out_samplerate = 48000  ##SOUND_OUT_SR_DEFAULT    
 
-PRIMARY_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/recordings/{current_year}{current_month}_primary/"
+sound_out_id = config.SOUND_OUT_ID_DEFAULT
+sound_out_chs = config.SOUND_OUT_CHS_DEFAULT                        
+sound_out_samplerate = config.SOUND_OUT_SR_DEFAULT    
+
+PRIMARY_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/{config.HIVE_ID}/recordings/{current_year}{current_month}_primary/"
 MONITOR_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/recordings/{current_year}{current_month}_monitor/"
 PLOT_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/plots/{current_year}{current_month}/"
 
@@ -704,8 +699,8 @@ def toggle_intercom_m():
 
     if intercom_proc is None:
         print("Starting intercom on channel:", monitor_channel + 1)
-        intercom_proc = multiprocessing.Process(target=intercom_m_downsampled, args=(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel))
-        ##intercom_proc = multiprocessing.Process(target=intercom_m, args=(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel))
+        ##intercom_proc = multiprocessing.Process(target=intercom_m_downsampled, args=(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel))
+        intercom_proc = multiprocessing.Process(target=intercom_m, args=(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel))
         intercom_proc.start()
     else:
         stop_intercom_m()
@@ -910,11 +905,6 @@ def callback(indata, frames, time, status):
 
 def audio_stream():
     global stop_program, sound_in_id, sound_in_chs, sound_in_samplerate, _dtype, testmode
-
-    sound_in_id = 9
-    sound_in_chs = 4
-    sound_in_samplerate = 192000
-    _dtype = "int16"
 
     print("Start audio_stream...")
     stream = sd.InputStream(device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate, dtype=_dtype, blocksize=blocksize, callback=callback)
