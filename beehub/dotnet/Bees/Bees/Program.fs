@@ -4,42 +4,13 @@ open System.Runtime.InteropServices
 open System.Threading
 open System.Threading.Tasks
 
-open Bees.AsyncConcurrentQueue
 open FSharp.Control
 open PortAudioSharp
-open Bees.Logger
 open Bees.PortAudioUtils
-open Bees.BufferPool
+open Bees.CbMessagePool
+open Bees.Logger
 
-/// Callback context
-[<Struct>]
-type CbContext = {
-  stream      : Stream
-  withEchoRef : bool ref
-  streamQueue : StreamQueue
-  bufferPool  : BufferPool
-  startTime   : DateTime
-  log         : Logger
-  seqNo       : int ref  }
-
-/// Callback args in a more usable form for managed code.
-and [<Struct>]
-    CbMessage = {
-  // the callback args
-  input       : IntPtr // for debugging
-  output      : IntPtr
-  frameCount  : uint32
-  timeInfo    : StreamCallbackTimeInfo
-  statusflags : StreamCallbackFlags
-  userDataPtr : IntPtr
-  // more from the callback
-  cbContext   : CbContext
-  withEcho    : bool
-  seqNo       : int
-  inputCopy   : Buf
-  timestamp   : DateTime }
-
-and StreamQueue = CbMessage AsyncConcurrentQueue
+// See Theory of Operation comment before main at the end of this file.
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // callback –> CbMessage –> StreamQueue handler
@@ -48,7 +19,7 @@ and StreamQueue = CbMessage AsyncConcurrentQueue
 ///   Creates a Stream.Callback that:
 ///   <list type="bullet">
 ///     <item><description> Allocates no memory because this is a system-level callback </description></item>
-///     <item><description> Makes a <c>CbMessage</c> struct from the callback arguments </description></item>
+///     <item><description> Ges a <c>CbMessage</c> from the pool and fills it in        </description></item>
 ///     <item><description> Posts the <c>CbMessage</c> to the <c>streamQueue</c>        </description></item>
 ///   </list>
 /// </summary>
@@ -57,42 +28,46 @@ and StreamQueue = CbMessage AsyncConcurrentQueue
 /// <returns> A Stream.Callback to be called by PortAudioSharp                 </returns>
 let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: StreamQueue)  : Stream.Callback =
   Stream.Callback(
-    fun input output frameCount timeInfo statusflags userDataPtr ->
+    fun input output frameCount timeInfo statusFlags userDataPtr ->
       let cbContext = cbContextRef[0]
       let withEcho  = Volatile.Read(cbContext.withEchoRef)
-      let seqNo     = Volatile.Read cbContext.seqNo
-      let inputCopy = cbContext.bufferPool.Take()
+      let seqNum    = Volatile.Read cbContext.seqNumRef
       let timeStamp = DateTime.Now
       if withEcho then
         let size = uint64 (frameCount * uint32 sizeof<float32>)
         Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
-      Volatile.Write(cbContext.seqNo, seqNo + 1)
-      do
-        let (Buf buf) = inputCopy
-        Marshal.Copy(input, buf, startIndex = 0, length = (int frameCount))
-      cbContext.log.add seqNo timeStamp "cb bufs=" cbContext.bufferPool.Size
-      { // the callback args
-        input       = input
-        output      = output
-        frameCount  = frameCount
-        timeInfo    = timeInfo
-        statusflags = statusflags
-        userDataPtr = userDataPtr
+      Volatile.Write(cbContext.seqNumRef, seqNum + 1)
+      match cbContext.cbMessagePool.Take() with
+      | None -> // Yikes, pool is empty
+        cbContext.logger.Add seqNum timeStamp "CbMessagePool is empty" null
+        StreamCallbackResult.Continue
+      | Some cbMessage ->
+        do
+          let (Buf buf) = cbMessage.InputSamplesCopy
+          Marshal.Copy(input, buf, startIndex = 0, length = (int frameCount))
+        if Volatile.Read(cbContext.withLoggingRef) then
+          cbContext.logger.Add seqNum timeStamp "cb bufs=" cbMessage.PoolStats
+        // the callback args
+        cbMessage.InputSamples <- input
+        cbMessage.Output       <- output
+        cbMessage.FrameCount   <- frameCount
+        cbMessage.TimeInfo     <- timeInfo
+        cbMessage.StatusFlags  <- statusFlags
+        cbMessage.UserDataPtr  <- userDataPtr
         // more from the callback
-        cbContext   = cbContext
-        withEcho    = withEcho 
-        seqNo       = seqNo
-        inputCopy   = inputCopy
-        timestamp   = timeStamp }
-      |> streamQueue.add
-      match cbContext.bufferPool.Size with
-      | 0 -> StreamCallbackResult.Complete
-      | _ -> StreamCallbackResult.Continue )
+        cbMessage.CbContext    <- cbContext
+        cbMessage.WithEcho     <- withEcho 
+        cbMessage.SeqNum       <- seqNum
+        cbMessage.Timestamp    <- timeStamp
+        cbMessage |> streamQueue.add
+        match cbContext.cbMessagePool.CountAvail with
+        | 0 -> StreamCallbackResult.Complete
+        | _ -> StreamCallbackResult.Continue )
 
 //–––––––––––––––––––––––––––––––––––––
 
 /// <summary>
-///   Continuously receives messages from a StreamQueue,
+///   Continuously receives messages from a StreamQueue;
 ///   processes each message with the provided function.
 /// </summary>
 /// <param name="workPerCallback"> A function to process each message.               </param>
@@ -100,17 +75,17 @@ let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: Strea
 let streamQueueHandler workPerCallback (streamQueue: StreamQueue) =
 //let mutable callbackMessage = Unchecked.defaultof<CbMessage>
   let doOne (m: CbMessage) =
-    let bufferPool = m.cbContext.bufferPool
-    bufferPool.BufUseBegin m.inputCopy
+    let cbMessagePool = m.CbContext.cbMessagePool
+    cbMessagePool.ItemUseBegin()
     workPerCallback m
-    bufferPool.BufUseEnd   m.inputCopy
+    cbMessagePool.ItemUseEnd   m
   streamQueue.iter doOne
 
 //–––––––––––––––––––––––––––––––––––––
 // StreamQueue
 
 /// <summary>
-///   Creates and starts a StreamQueue that is ready to process CbMessage structs posted by callbacks.
+///   Creates and starts a StreamQueue that will process CbMessages inserted by callbacks.
 /// </summary>
 /// <param name="workPerCallback">A function that processes a StreamQueueMessage</param>
 /// <returns>Returns a started StreamQueue</returns>
@@ -123,6 +98,13 @@ let makeAndStartStreamQueue workPerCallback  : StreamQueue =
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // PortAudioSharp.Stream
 
+/// <summary>Make the pool of CbMessages used by the stream callback</summary>
+let makeCbMessagePool stream streamQueue logger =
+  let bufSize    = 1024
+  let startCount = Environment.ProcessorCount * 4    // many more than number of cores
+  let minCount   = 4
+  CbMessagePool(bufSize, startCount, minCount, stream, streamQueue, logger)
+
 /// <summary>
 ///   Creates an audio stream, to be started by the caller.
 ///   The stream will echo input to output if desired.
@@ -131,10 +113,11 @@ let makeAndStartStreamQueue workPerCallback  : StreamQueue =
 /// <param name="outputParameters"> Parameters for output audio stream                        </param>
 /// <param name="sampleRate"      > Audio sample rate                                         </param>
 /// <param name="withEchoRef"     > A Boolean determining if input should be echoed to output </param>
+/// <param name="withLoggingRef"  > A Boolean determining if the callback should do logging   </param>
 /// <param name="streamQueue"     > StreamQueue object handling audio stream                  </param>
-/// <returns>A Stream object representing created audio stream</returns>
-let makeStream inputParameters outputParameters sampleRate withEchoRef (streamQueue: StreamQueue)  : CbContext =
-  let cbContextRef = ResizeArray<CbContext>(1)
+/// <returns>A CbContext struct to be passed to each callback</returns>
+let makeStream inputParameters outputParameters sampleRate withEchoRef withLoggingRef (streamQueue: StreamQueue)  : CbContext =
+  let cbContextRef = ResizeArray<CbContext>(1)  // indirection to solve the chicken or egg problem
   let callback = makeStreamCallback cbContextRef streamQueue
   let stream = new Stream(inParams        = Nullable<_>(inputParameters )        ,
                           outParams       = Nullable<_>(outputParameters)        ,
@@ -144,15 +127,17 @@ let makeStream inputParameters outputParameters sampleRate withEchoRef (streamQu
                           callback        = callback                             ,
                           userData        = Nullable()                           )
   let startTime = DateTime.Now
+  let logger = Logger(8000, startTime)
   let cbContext = {
-    stream      = stream
-    withEchoRef = withEchoRef
-    streamQueue = streamQueue
-    bufferPool  = BufferPool(32, 4) //? todo magic number to cover latency btw callback and agent
-    startTime   = startTime
-    log         = Logger(8000, startTime)
-    seqNo       = ref 1  } 
-  cbContextRef.Add(cbContext)
+    stream         = stream
+    streamQueue    = streamQueue
+    logger         = logger
+    cbMessagePool  = makeCbMessagePool stream streamQueue logger
+    withEchoRef    = withEchoRef
+    withLoggingRef = withLoggingRef
+    startTime      = startTime
+    seqNumRef      = ref 1  }
+  cbContextRef.Add(cbContext) // and here is where we provide the cbContext struct to be used by the callback
   cbContext
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -184,26 +169,25 @@ let prepareArgumentsForStreamCreation() =
   printfn $"outputParameters=%A{outputParameters}"
   sampleRate, inputParameters, outputParameters
 
-/// This is the work we will do on each callback.
-/// It is called by the agent, which
-/// - got the data from a queue of PortAudio callback data
-/// - transformed the data to a form more convenient for us
-/// - and then called us.
+// for debug
+let printCallback (m: CbMessage) =
+  let microseconds = floatToMicrosecondsFractionOnly m.TimeInfo.currentTime
+  let percentCPU   = m.CbContext.stream.CpuLoad * 100.0
+  let sDebug = sprintf "%3d: %A %s" m.SeqNum m.Timestamp m.PoolStats
+  let sWork  = sprintf $"work: %6d{microseconds} frameCount=%A{m.FrameCount} cpuLoad=%5.1f{percentCPU}%%"
+  Console.WriteLine($"{sDebug}   ––   {sWork}")
+
+/// This is the work to do immediately after each callback.
 /// There are no real-time restrictions on this work,
 /// since it is not called during the low-level PortAudio callback.
 let workPerCallback (m: CbMessage) =
-  Volatile.Write(m.cbContext.withEchoRef, false)
-  let microseconds = floatToMicrosecondsFractionOnly m.timeInfo.currentTime
-  let percentCPU   = m.cbContext.stream.CpuLoad * 100.0
-  let sDebug = sprintf "%3d: %A  %A %A" m.seqNo m.timestamp "a  bufs=" m.cbContext.bufferPool.Size
-  let s = sprintf($"work: %6d{microseconds} frameCount=%A{m.frameCount} cpuLoad=%5.1f{percentCPU}%%")
-  Console.WriteLine($"{sDebug}   ––   {s}")
-
+//printCallback m
+  ()
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run (stream: Stream) = task {
   printfn "Starting..."    ; stream.Start()
-  printfn "Reading..."     ; do! Task.Delay 2
+  printfn "Reading..."     ; do! Task.Delay 500
   printfn "Stopping..."    ; stream.Stop()
   printfn "Stopped"
   printfn "Terminating..." ; PortAudio.Terminate()
@@ -212,18 +196,34 @@ let run (stream: Stream) = task {
 //–––––––––––––––––––––––––––––––––––––
 // Main
 
+/// Main does the following:
+/// - Initialize PortAudio.
+/// - Create everything the callback will need.
+///   - sampleRate, inputParameters, outputParameters
+///   - a StreamQueue, which
+///     - accepts a CbMessage from each callback
+///     - calls the given handler asap for each CbMessage queued
+///   - a CbContext struct, which is passed to each callback
+/// - runs the streamQueue
+/// The audio callback is designed to do as little as possible at interrupt time:
+/// - grabs a CbMessage from a preallocated ItemPool
+/// - copies the input data buf into the CbMessage
+/// - inserts the CbMessage into in the StreamQueue for later processing
+
 [<EntryPoint>]
 let main _ =
-  let mutable withEchoRef = ref true
+//Bees.CbMessageItemPool.CbMessagePool.test()
+  let mutable withEchoRef    = ref false
+  let mutable withLoggingRef = ref true
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   let streamQueue = makeAndStartStreamQueue workPerCallback
-  let cbContext   = makeStream inputParameters outputParameters sampleRate withEchoRef streamQueue
+  let cbContext   = makeStream inputParameters outputParameters sampleRate withEchoRef withLoggingRef streamQueue
   task {
     try
       do! run cbContext.stream
     with
     | :? PortAudioException as e -> exitWithTrouble 2 e "Running PortAudio Stream" }
   |> Task.WaitAll
-  printfn "\nLog:\n%s" (cbContext.log.ToString())
+  printfn "%s" (cbContext.logger.ToString())
   0

@@ -31,7 +31,7 @@ type StreamCallbackData = {
   output      : IntPtr
   frameCount  : uint32
   timeInfo    : StreamCallbackTimeInfo
-  statusflags : StreamCallbackFlags
+  statusFlags : StreamCallbackFlags
   userDataPtr : IntPtr
   streamRef   : ResizeArray<Stream> }
 
@@ -40,13 +40,13 @@ type StreamCallbackData = {
 // - passes it to the given function
 let makeStreamCallback streamRef f =
   Stream.Callback(
-    fun input output frameCount timeInfo statusflags userDataPtr ->
+    fun input output frameCount timeInfo statusFlags userDataPtr ->
       let callbackData =
         { input       = input
           output      = output
           frameCount  = frameCount
           timeInfo    = timeInfo
-          statusflags = statusflags
+          statusFlags = statusFlags
           userDataPtr = userDataPtr
           streamRef   = streamRef   }
       f callbackData )
@@ -85,7 +85,7 @@ type StreamAgentMessage = {
   output      : float32 array
   frameCount  : uint32
   timeInfo    : StreamCallbackTimeInfo
-  statusflags : StreamCallbackFlags
+  statusFlags : StreamCallbackFlags
   userDataPtr : IntPtr
   stream      : Stream }
 
@@ -103,7 +103,7 @@ let makeAgentMessage (callbackArgs: StreamCallbackData)  : StreamAgentMessage =
     output      = outputCopy
     frameCount  = c.frameCount
     timeInfo    = c.timeInfo
-    statusflags = c.statusflags
+    statusFlags = c.statusFlags
     userDataPtr = c.userDataPtr
     stream      = stream        }
 
