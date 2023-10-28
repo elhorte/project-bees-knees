@@ -2,17 +2,20 @@
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net7.0</TargetFramework>
+        <TargetFramework>net8.0</TargetFramework>
+        <LangVersion>latest</LangVersion>
     </PropertyGroup>
 
     <ItemGroup>
         <Compile Include="Parallel.fs" />
+        <Compile Include="CpuStopwatch.fs" />
         <Compile Include="Logger.fs" />
-        <Compile Include="BufferPool.fs" />
         <Compile Include="AsyncConcurrentQueue.fs" />
         <Compile Include="PortAudioUtils.fs" />
         <Compile Include="StreamGeneric.fs" />
         <Compile Include="Mp3.fs" />
+        <Compile Include="ItemPool.fs" />
+        <Compile Include="CbMessagePool.fs" />
         <Compile Include="Program.fs"/>
     </ItemGroup>
 

@@ -3,36 +3,40 @@ module Bees.Logger
 open System
 open System.Text
 
-type LogEntry(seqNo: int, timestamp: DateTime, message: string, data: obj) =
+type LogEntry(seqNum: int, timestamp: DateTime, message: string, data: obj) =
   new() = LogEntry(0, DateTime.MinValue, "", null)
-  member val SeqNo     : int      = seqNo       with get, set
+  member val seqNum    : int      = seqNum      with get, set
   member val Timestamp : DateTime = timestamp   with get, set
   member val Message   : string   = message     with get, set
   member val Data      : obj      = data        with get, set
 
-/// A logger with a start time and a preallocated number of entries, which are modified in place
-/// so there is no allocation
+/// An in-memory logger accepting a fixed number of entries.
+/// Has a start time and a preallocated number of entries,
+/// which are modified in place.
+/// 
 type Logger (capacity: int, startTime: DateTime) =
   let entryBuf = Array.init<LogEntry> capacity (fun _ -> LogEntry())
   let mutable count = 0
-  let mutable entries = ArraySegment<LogEntry>(entryBuf, 0, 1)
+  let mutable entries = ArraySegment<LogEntry>(entryBuf, 0, 0)
 
   member this.Entries  with get() = entries
 
-  member this.add seqNo (timestamp: DateTime) (message: string) (data: obj) =
+  member this.Add seqNum (timestamp: DateTime) (message: string) (data: obj) =
     if count < capacity then
       let entry = entryBuf[count]
-      entry.SeqNo     <- seqNo
+      entry.seqNum    <- seqNum
       entry.Timestamp <- timestamp
       entry.Message   <- message
       entry.Data      <- data
       count <- count + 1
       entries <- ArraySegment<LogEntry>(entryBuf, 0, count)
 
-  member this.entryToString elapsedPrev (entry: LogEntry) = 
+  member this.Clear() = count <- 0
+    
+  member this.EntryToString elapsedPrev (entry: LogEntry) = 
     let elapsed = entry.Timestamp - startTime
     String.Format("{0:D3}: {1}  {2}  {3} {4}\n",
-                  entry.SeqNo                                     ,
+                  entry.seqNum                                    ,
                   elapsed                .ToString("ss'.'ffffff") ,
                   (elapsed - elapsedPrev).ToString(  "'.'ffffff") ,
                   entry.Message                                   ,
@@ -42,9 +46,12 @@ type Logger (capacity: int, startTime: DateTime) =
     let sb = StringBuilder()
     let print elapsedPrev (entry: LogEntry) =
       let elapsed = entry.Timestamp - startTime
-      sb.Append (this.entryToString elapsedPrev entry) |> ignore
+      sb.Append (this.EntryToString elapsedPrev entry) |> ignore
       elapsed
-    entries
-    |> Seq.fold print TimeSpan.Zero |> ignore
+    if entries.Count > 0 then
+      printfn "\nLog:"
+      entries
+      |> Seq.fold print TimeSpan.Zero |> ignore
+    printfn ""
     sb.AppendFormat("Log entries: {0}\n", count) |> ignore
     sb.ToString()
