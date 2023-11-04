@@ -163,7 +163,7 @@ current_day = current_date.strftime('%d')
 
 # to be discovered from sounddevice.query_devices()
 sound_in_id = None                          # id of input device
-sound_in_chs = None                         # number of input channels
+sound_in_chs = config.SOUND_IN_CHS          # number of input channels
 sound_in_samplerate = None                  # sample rate of input device
 
 sound_out_id = config.SOUND_OUT_ID_DEFAULT
@@ -211,11 +211,11 @@ def set_input_device(model_name, api_name):
 
     # loop through known MODEL_NAME
     for i in range(len(devices_str)):
-        if ("Microphone" in devices_str[i] and api_name in devices_str[i]):
+        if (str(sound_in_chs)+" in" in devices_str[i] and api_name in devices_str[i]):
             print("Looking at device: ", devices_str[i])
             device = sd.query_devices(i)
             sound_in_id = i
-            sound_in_chs = device['max_input_channels']
+            ##sound_in_chs = device['max_input_channels']
             sound_in_samplerate = int(device['default_samplerate'])
             try:    # found an input device and of type WASAPI, do we know about it?
                 for j in range(len(model_name)):
@@ -230,6 +230,12 @@ def set_input_device(model_name, api_name):
                     print("Caution: running in testmode with lower than needed sample rate")
                     testmode = True
                 print(f"Known devices not found, using default {i}\n", sd.query_devices(i))
+                
+    # wlh - force sound in device parms
+    ##sound_in_id = 16
+    ##sound_in_chs = 4
+    ##sound_in_samplerate = 192000
+
 
 
 # interruptable sleep
