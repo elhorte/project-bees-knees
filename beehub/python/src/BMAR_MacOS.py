@@ -33,16 +33,10 @@ from pydub import AudioSegment
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 import keyboard
 import atexit
+##import msvcrt
 import signal
 import sys
 import os
-is_windows = os.name == 'nt'
-msvcrt = None
-if is_windows:
-    try:
-        import msvcrt
-    except ImportError:
-        pass
 import io
 import warnings
 import queue
@@ -51,7 +45,7 @@ import librosa.display
 import resampy
 ##import TestPyQT5
 
-import BMAR_config_Mac as config
+import BMAR_config as config
 
 lock = threading.Lock()
 
@@ -120,7 +114,7 @@ file_offset = 0
 # #############################################################
 
 # audio parameters:
-PRIMARY_SAMPLERATE = 48000                      # Audio sample rate
+PRIMARY_SAMPLERATE = 192000                     # Audio sample rate
 PRIMARY_BITDEPTH = 16                           # Audio bit depth
 PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
@@ -168,20 +162,20 @@ current_month = current_date.strftime('%m')
 current_day = current_date.strftime('%d')
 
 # to be discovered from sounddevice.query_devices()
-sound_in_id = 3                             # id of input device
-sound_in_chs = 1                            # number of input channels
-sound_in_samplerate = 48000                 # sample rate of input device
+sound_in_id = None                          # id of input device
+sound_in_chs = None                         # number of input channels
+sound_in_samplerate = None                  # sample rate of input device
 
 sound_out_id = config.SOUND_OUT_ID_DEFAULT
 sound_out_chs = config.SOUND_OUT_CHS_DEFAULT                        
 sound_out_samplerate = config.SOUND_OUT_SR_DEFAULT    
 
-PRIMARY_DIRECTORY = "primary" # f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/{config.HIVE_ID}/recordings/{current_year}{current_month}_primary/"
-MONITOR_DIRECTORY = "monitor" # f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/recordings/{current_year}{current_month}_monitor/"
-PLOT_DIRECTORY    = "plot"    # f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/plots/{current_year}{current_month}/"
+PRIMARY_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/{config.HIVE_ID}/recordings/{current_year}{current_month}_primary/"
+MONITOR_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/recordings/{current_year}{current_month}_monitor/"
+PLOT_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/plots/{current_year}{current_month}/"
 
 testmode = False                            # True to run in test mode with lower than neeeded sample rate
-KB_or_CP = 'nosuchthing'                    # use keyboard or control panel (PyQT5) to control program
+KB_or_CP = 'KB'                             # use keyboard or control panel (PyQT5) to control program
 
 ##########################  
 # setup utilities
@@ -217,11 +211,11 @@ def set_input_device(model_name, api_name):
 
     # loop through known MODEL_NAME
     for i in range(len(devices_str)):
-        if (str(sound_in_chs)+" in" in devices_str[i] and api_name in devices_str[i]):
+        if ("Microphone" in devices_str[i] and api_name in devices_str[i]):
             print("Looking at device: ", devices_str[i])
             device = sd.query_devices(i)
             sound_in_id = i
-            ##sound_in_chs = device['max_input_channels']
+            sound_in_chs = device['max_input_channels']
             sound_in_samplerate = int(device['default_samplerate'])
             try:    # found an input device and of type WASAPI, do we know about it?
                 for j in range(len(model_name)):
@@ -236,12 +230,6 @@ def set_input_device(model_name, api_name):
                     print("Caution: running in testmode with lower than needed sample rate")
                     testmode = True
                 print(f"Known devices not found, using default {i}\n", sd.query_devices(i))
-                
-    # wlh - force sound in device parms
-    ##sound_in_id = 16
-    ##sound_in_chs = 4
-    ##sound_in_samplerate = 192000
-
 
 
 # interruptable sleep
@@ -991,7 +979,7 @@ def main():
 
     print("Beehive Multichannel Acoustic-Signal Recorder\n")
 
-    # set_input_device(config.MODEL_NAME, config.API_NAME)
+    set_input_device(config.MODEL_NAME, config.API_NAME)
     setup_audio_circular_buffer()
 
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
@@ -1039,17 +1027,17 @@ def main():
             # usage: press v to start cli vu meter, press v again to stop
             keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
 
+        # Start the audio stream
+        audio_stream()
+            
     except KeyboardInterrupt: # ctrl-c in windows
         print('\nCtrl-C: Recording process stopped by user.')
         ##stop_all()
 
-    # except Exception as e:
-    #     print(f"An error occurred while attempting to execute this script: {e}")
-    #     quit(-1)
+    except Exception as e:
+        print(f"An error occurred while attempting to execute this script: {e}")
+        quit(-1) 
 
-
-    # Start the audio stream
-    audio_stream()
 
 if __name__ == "__main__":
     main()

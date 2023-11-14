@@ -40,15 +40,16 @@ data_directory = "My Drive/en_beehive_data"
 ##data_directory = "temp"
 
 # input device parameters:
-MAKE_NAME = "Behringer"                         # 'Behringer' or 'Zoom'
-MODEL_NAME = ["UMC404HD", "Scarlett", "Zoom", "Volt"]
+MAKE_NAME = "Focusrite"                         # 'Behringer' or 'Zoom or Scarlett'
+MODEL_NAME = ["UMC404HD", "Analogue 1 + 2", "Zoom", "Volt"]
 DEVICE_NAME = 'UAC'                             # 'UAC' or 'USB'
 API_NAME = "WASAPI"                             # 'MME' or 'WASAPI' or 'ASIO' or 'DS'  
 HOSTAPI_NAME = "Windows"                        # 'Windows' or 'ASIO' or 'DS' or 'WDM-KS'
 HOSTAPI_INDEX = 3                               # 0 = Windows, 1 = ASIO, 2 = DS, 3 = WASAPI, 4 = WDM-KS
+SOUND_IN_CHS = 4
 
 # windows mme defaults, 2 ch only
 ##SOUND_IN_DEFAULT = 0                          # default input device id              
-SOUND_OUT_ID_DEFAULT = 3                        # default output device id
+SOUND_OUT_ID_DEFAULT = 14                        # default output device id
 SOUND_OUT_CHS_DEFAULT = 2                       # default number of output channels
 SOUND_OUT_SR_DEFAULT = 44100                    # default sample rate
