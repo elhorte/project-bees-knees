@@ -9,6 +9,7 @@ open PortAudioSharp
 open Bees.PortAudioUtils
 open Bees.CbMessagePool
 open Bees.Logger
+open Bees.Keyboard
 
 // See Theory of Operation comment before main at the end of this file.
 
@@ -185,9 +186,11 @@ let workPerCallback (m: CbMessage) =
   ()
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
-let run (stream: Stream) = task {
+let run stream cancellationTokenSource = task {
+  let stream = (stream: Stream)
   printfn "Starting..."    ; stream.Start()
-  printfn "Reading..."     ; do! Task.Delay 500
+  printfn "Reading..."
+  do! keyboardKeyInput cancellationTokenSource
   printfn "Stopping..."    ; stream.Stop()
   printfn "Stopped"
   printfn "Terminating..." ; PortAudio.Terminate()
@@ -214,14 +217,15 @@ let run (stream: Stream) = task {
 let main _ =
 //Bees.CbMessageItemPool.CbMessagePool.test()
   let mutable withEchoRef    = ref false
-  let mutable withLoggingRef = ref true
+  let mutable withLoggingRef = ref false
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   let streamQueue = makeAndStartStreamQueue workPerCallback
   let cbContext   = makeStream inputParameters outputParameters sampleRate withEchoRef withLoggingRef streamQueue
   task {
     try
-      do! run cbContext.stream
+      use cts = new CancellationTokenSource()
+      do! run cbContext.stream cts
     with
     | :? PortAudioException as e -> exitWithTrouble 2 e "Running PortAudio Stream" }
   |> Task.WaitAll

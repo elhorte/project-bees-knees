@@ -41,7 +41,7 @@ type ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, cre
     let n = max minCount startCount
     do
       if n > 0 then  for i in 1..n do  addNewItem() // Stock the pool.
-      countInUse = 0  // Zero out the changes to countInUse in poolAdd.
+      countInUse <- 0  // Zero out the changes to countInUse in poolAdd.
     assert (countAvail = startCount)
 
   
