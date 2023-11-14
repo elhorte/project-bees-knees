@@ -1,8 +1,11 @@
 ﻿namespace ConsoleReadAsync
 
 open System
+open System.Drawing
 open System.Threading
 open System.Threading.Tasks
+
+open ConsoleReadAsync.ConcurrentFlag
 
 // https://github.com/tonerdo/readline/issues/67
 
@@ -19,31 +22,32 @@ open System.Threading.Tasks
 // could be cleared when a new readAsync call comes in after a cancellation.
 // As of now there is no way to do that in the ReadLine library API.
 
-type ReadMode =
+type Mode =
   | Line = 0
   | Key  = 1
 
+
 type ConsoleReadAsync() =
 
+  let mutable mode         = Mode.Line
   let mutable prompt       = None
   let mutable input        = ""
   let mutable key          = ConsoleKeyInfo()
-  let mutable mode         = ReadMode.Line
-  let         allowClient  = new SemaphoreSlim(0, 1)
-  let         allowDaemon  = new SemaphoreSlim(0, 1)
+  let         allowClient  = new ConcurrentFlag()
+  let         allowDaemon  = new ConcurrentFlag()
   let         ctsForDaemon = new CancellationTokenSource()
 
   let rec daemon() =
     try  allowDaemon.Wait()
     with ex -> printfn "%A" ex
     match mode with
-      | ReadMode.Line ->  input <- match prompt with
-                                   | Some prompt -> System.ReadLine.Read prompt   // from the ReadLine NuGet package
-                                   | None        -> Console.ReadLine()
-      | ReadMode.Key  ->  key   <-                  Console.ReadKey()
+      | Mode.Line ->  input <- match prompt with
+                               | Some prompt -> System.ReadLine.Read prompt   // from the ReadLine NuGet package
+                               | None        -> Console.ReadLine()
+      | Mode.Key  ->  key   <-                  Console.ReadKey()
       | _ -> failwith "unreachable"
     if not ctsForDaemon.IsCancellationRequested then
-      allowClient.Release 1 |> ignore
+      allowClient.MakeReady()
       daemon()
 
   do
@@ -51,28 +55,19 @@ type ConsoleReadAsync() =
     Task.Run daemon |> ignore
 
 
-  let semaphoreWaitAsync semaphore cancellationToken = task {
-    try
-      let ss = (semaphore: SemaphoreSlim)
-      let ct = (cancellationToken : CancellationToken)
-      do! ss.WaitAsync(ct)
-      return true
-    with _ ->
-      return false }
-
   // for F# members
 
   let tryReadLineAsync promptOpt (cancellationToken: CancellationToken)  : Task<string option> =
-    mode   <- ReadMode.Line
+    mode   <- Mode.Line
     prompt <- promptOpt
-    if allowDaemon.CurrentCount = 0 then
-      allowDaemon.Release 1 |> ignore
+    if allowDaemon.Ready then
+      allowDaemon.MakeReady()
       // The daemon will output the prompt if there is one.
     else
       // Try again knowing that ReadLine.Read was already in progress.
       prompt |> Option.iter (printf "%s")
     task {
-      let! ok = semaphoreWaitAsync allowClient cancellationToken
+      let! ok = allowClient.WaitAsync cancellationToken
       if ok then return Some input else return None }
   
   let readLineFAsync prompt  : Task<string> =
@@ -84,11 +79,11 @@ type ConsoleReadAsync() =
         | None   -> failwith "should happen only on cancellation, which is impossible here"  }
 
   let tryReadKeyAsync (cancellationToken: CancellationToken)  : Task<ConsoleKeyInfo option> =
-    mode <- ReadMode.Key
-    if allowDaemon.CurrentCount = 0 then
-      allowDaemon.Release 1 |> ignore
+    mode <- Mode.Key
+    if allowDaemon.Ready then
+      allowDaemon.MakeReady()
     task {
-      let! ok = semaphoreWaitAsync allowClient cancellationToken
+      let! ok = allowClient.WaitAsync cancellationToken
       if ok then return Some key else return None }
 
   let readKeyFAsync prompt  : Task<ConsoleKeyInfo> =
@@ -106,8 +101,12 @@ type ConsoleReadAsync() =
     task {
       let! result = tryReadLineAsync promptOption cancellationToken
       return Option.defaultValue null result  }
+  
+  // For F# and C# callers
 
-  // For F# callers – returns string option, None means canceled
+  member this.Mode with get() = mode
+
+  // For F# callers – When returning string option, None means canceled.
 
   member this.readLineAsync(prompt: string, cancellationToken: CancellationToken)  : Task<string option> = tryReadLineAsync (Some prompt) cancellationToken
   member this.readLineAsync(prompt: string                                      )  : Task<string       > = readLineFAsync   (Some prompt)        
@@ -117,7 +116,7 @@ type ConsoleReadAsync() =
   member this.readKeyAsync                  (cancellationToken: CancellationToken)  : Task<ConsoleKeyInfo option> = tryReadKeyAsync cancellationToken
   member this.readKeyAsync                  (                                    )  : Task<ConsoleKeyInfo       > = readKeyFAsync()
 
-  // For C# callers – returns string?, null means canceled
+  // For C# callers – When returning string?, null means canceled.
 
   member this.ReadAsync(prompt: string, cancellationToken: CancellationToken)  : Task<string       > = TryReadAsync  (prompt, cancellationToken  )
   member this.ReadAsync(prompt: string                                      )  : Task<string       > = this.ReadAsync(prompt, CancellationToken())
