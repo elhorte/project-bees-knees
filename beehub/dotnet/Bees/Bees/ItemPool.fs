@@ -42,6 +42,8 @@ type ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, cre
     do
       if n > 0 then  for i in 1..n do  addNewItem() // Stock the pool.
       countInUse <- 0  // Zero out the changes to countInUse in poolAdd.
+    if countAvail <> startCount then
+      printfn "uh oh"
     assert (countAvail = startCount)
 
   

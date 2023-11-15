@@ -18,16 +18,16 @@ let performKey keyInfo consoleRead cancellationTokenSource =
   task {
     match key with
     | "q"  ->  cts.Cancel()
-               do! stop_all()                // usage: press q to stop all processes
-    | "c"  ->  do! check_stream_status 10    // check audio pathway for over/underflows
-    | "d"  ->  do! show_audio_device_list()  // one shot process to see device list
-    | "f"  ->  do! trigger_fft()             // one shot process to see fft
-    | "i"  ->  do! toggle_intercom_m cr cts     // usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
-    | "m"  ->  do! change_monitor_channel()  // usage: press m to select channel to monitor
-    | "o"  ->  do! trigger_oscope()          // one shot process to view oscope
-    | "s"  ->  do! trigger_spectrogram()     // usage: press s to plot spectrogram of last recording
-    | "t"  ->  do! list_all_threads()        // usage: press t to see all threads
-    | "v"  ->  do! toggle_vu_meter()         // usage: press v to start cli vu meter, press v again to stop
+               do! stopAll              ()     // usage: press q to stop all processes
+    | "c"  ->  do! checkStreamStatus    10     // check audio pathway for over/underflows
+    | "d"  ->  do! showAudioDeviceList  ()     // one shot process to see device list
+    | "f"  ->  do! triggerFft           ()     // one shot process to see fft
+    | "i"  ->  do! toggleIntercomM      cr cts // usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
+    | "m"  ->  do! changeMonitorChannel ()     // usage: press m to select channel to monitor
+    | "o"  ->  do! triggerOscope        ()     // one shot process to view oscope
+    | "s"  ->  do! triggerSpectrogram   ()     // usage: press s to plot spectrogram of last recording
+    | "t"  ->  do! listAllThreads       ()     // usage: press t to see all threads
+    | "v"  ->  do! toggleVuMeter        ()     // usage: press v to start cli vu meter, press v again to stop
     | "\r" ->  printfn ""
     | c    ->  printfn $"Unknown command: {c}" }
   |> Task.WaitAll
