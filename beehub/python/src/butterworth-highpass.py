@@ -32,13 +32,12 @@ def plot_frequency_spectrum(data, fs, title="Frequency Spectrum"):
     f, Pxx = welch(data, fs, nperseg=1024)
     plt.figure()  # Create a new figure
     plt.semilogy(f, Pxx)
-    plt.ylim([1e-8, 1e2])
+    plt.ylim([1e-4, 1e2])
     plt.xlabel('Frequency [Hz]')
     plt.ylabel('PSD [V²/Hz]')
     plt.title(title)
     plt.grid(True)
-    plt.show()  # Show the plot
-    plt.pause(1)  # Pause for a moment to ensure the plot is rendered
+
 
 def process_audio(input_file, output_file, cutoff_frequency, _dtype):
     # Read the input file
@@ -53,17 +52,20 @@ def process_audio(input_file, output_file, cutoff_frequency, _dtype):
     # Plot filtered frequency spectrum
     plot_frequency_spectrum(filtered_data, fs, "Filtered Audio")
 
+    plt.show()  # Show the plot
+
     # Save the processed audio as WAV
     sf.write(output_file, filtered_data, fs)
 
 
 def main():
+    
     work_dir = '/Users/elhorte/dev/GitHub/en/project-bees-knees/beehub/python/src/'
     os.chdir(work_dir)
 
     cutoff_frequency = 20000  # 20 kHz
 
-    input_file = 'input.flac'
+    input_file = 'input.wav'
     output_file = 'output.wav'
     file_path = work_dir + input_file
 
@@ -81,7 +83,7 @@ def main():
         print("Failed to retrieve audio file information.")
     
     if info.subtype == 'PCM_16': _dtype = 'int16'
-
+    
     process_audio(input_file, output_file, cutoff_frequency, _dtype)
 
 if __name__ == "__main__":
