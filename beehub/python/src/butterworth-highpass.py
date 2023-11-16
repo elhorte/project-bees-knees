@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# Code definition: 
-
 
 import numpy as np
 import soundfile as sf
 from scipy.signal import butter, filtfilt, welch
 import matplotlib.pyplot as plt
 import os
-
 
 
 def get_audio_file_info(file_path):
@@ -19,7 +16,6 @@ def get_audio_file_info(file_path):
     except RuntimeError as e:
         print(f"Error reading file: {e}")
         return None
-
 
 def high_pass_filter(data, cutoff, fs, order=9):
     nyquist = 0.5 * fs
@@ -37,7 +33,6 @@ def plot_frequency_spectrum(data, fs, title="Frequency Spectrum"):
     plt.ylabel('PSD [V²/Hz]')
     plt.title(title)
     plt.grid(True)
-
 
 def process_audio(input_file, output_file, cutoff_frequency, _dtype):
     # Read the input file
