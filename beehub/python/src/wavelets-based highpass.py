@@ -16,32 +16,41 @@ def get_audio_file_info(file_path):
     except RuntimeError as e:
         print(f"Error reading file: {e}")
         return None
-'''
-def plot_frequency_spectrum(data, fs, title="Frequency Spectrum"):
-    f, Pxx = welch(data, fs, nperseg=1024)
-    plt.figure()  # Create a new figure
-    plt.semilogy(f, Pxx)
-    plt.ylim([1e-4, 1e2])
-    plt.xlabel('Frequency [Hz]')
-    plt.ylabel('PSD [V²/Hz]')
-    plt.title(title)
-    plt.grid(True)
-'''
+    
+overlay = 1
+if overlay:
+    def plot_frequency_spectrum(data, fs, label):
+        f, Pxx = welch(data, fs, nperseg=1024)
+        plt.semilogy(f, Pxx, label=label)
 
-def plot_frequency_spectrum(data, fs, label):
-    f, Pxx = welch(data, fs, nperseg=1024)
-    plt.semilogy(f, Pxx, label=label)
+    def plot_spectrum_overlay(data, filtered_data, fs):
+        # Plot original and filtered frequency spectrum
+        plt.figure()  # Create a new figure
+        plot_frequency_spectrum(data, fs, "Original Audio")
+        plot_frequency_spectrum(filtered_data, fs, "Filtered Audio")
+        plt.xlabel('Frequency [Hz]')
+        plt.ylabel('PSD [V²/Hz]')
+        plt.title('Frequency Spectrum Comparison')
+        plt.legend()
+        plt.grid(True)
+else:
+    def plot_frequency_spectrum(data, fs, title="Frequency Spectrum"):
+        f, Pxx = welch(data, fs, nperseg=1024)
+        plt.figure()  # Create a new figure
+        plt.semilogy(f, Pxx)
+        plt.ylim([1e-4, 1e2])
+        plt.xlabel('Frequency [Hz]')
+        plt.ylabel('PSD [V²/Hz]')
+        plt.title(title)
+        plt.grid(True)
 
-def plot_spectrum_overlay(data, filtered_data, fs):
-    # Plot original and filtered frequency spectrum
-    plt.figure()  # Create a new figure
-    plot_frequency_spectrum(data, fs, "Original Audio")
-    plot_frequency_spectrum(filtered_data, fs, "Filtered Audio")
-    plt.xlabel('Frequency [Hz]')
-    plt.ylabel('PSD [V²/Hz]')
-    plt.title('Frequency Spectrum Comparison')
-    plt.legend()
-    plt.grid(True)
+
+def high_pass_filter_butterworth(data, cutoff, fs, order=5):
+    nyquist = 0.5 * fs
+    normal_cutoff = cutoff / nyquist
+    b, a = butter(order, normal_cutoff, btype='high', analog=False)
+    filtered_data = filtfilt(b, a, data)
+    return filtered_data
 
 
 def high_pass_filter_wavelet(data, cutoff, fs, wavelet='db8'):
@@ -62,18 +71,23 @@ def high_pass_filter_wavelet(data, cutoff, fs, wavelet='db8'):
     filtered_data = pywt.waverec(coeffs, wavelet)[:len(data)]
     return filtered_data
 
-def process_audio(input_file, output_file, cutoff_frequency, _dtype):
+
+def process_audio(input_file, output_file, cutoff_frequency, _dtype, _ftype):
     # Read the FLAC file
     data, fs = sf.read(input_file, dtype=_dtype)
 
-    # Plot original frequency spectrum
-    ##plot_frequency_spectrum(data, fs, "Original Audio")
+    if _ftype == 'wavelet':
+        # Apply high-pass filter using wavelet
+        filtered_data = high_pass_filter_wavelet(data, cutoff_frequency, fs)
+    else:
+        # Apply high-pass filter using wavelet
+        filtered_data = high_pass_filter_butterworth(data, cutoff_frequency, fs)
 
-    # Apply high-pass filter using wavelet
-    filtered_data = high_pass_filter_wavelet(data, cutoff_frequency, fs)
+    # Plot original frequency spectrum
+    plot_frequency_spectrum(data, fs, "Original Audio")
 
     # Plot filtered frequency spectrum
-    ##plot_frequency_spectrum(filtered_data, fs, "Filtered Audio")
+    plot_frequency_spectrum(filtered_data, fs, "Filtered Audio")
 
     plot_spectrum_overlay(data, filtered_data, fs)
 
@@ -108,8 +122,9 @@ def main():
         print("Failed to retrieve audio file information.")
     
     if info.subtype == 'PCM_16': _dtype = 'int16'
-    
-    process_audio(input_file, output_file, cutoff_frequency, _dtype)
+
+    _ftype = 'butterworth'
+    process_audio(input_file, output_file, cutoff_frequency, _dtype, _ftype)
 
 if __name__ == "__main__":
     main()
