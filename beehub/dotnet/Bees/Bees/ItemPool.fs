@@ -2,7 +2,6 @@ module Bees.ItemPool
 
 
 open System.Collections.Concurrent
-open CpuStopwatch
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // A pool of items that can be taken from the pool without risk of a GC.
@@ -14,59 +13,76 @@ type IPoolItem() =
 
 type ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, creator: unit -> 'Item) =
 
-  let pool = ConcurrentBag<'Item>()
-  // debugging:
+  let pool          = ConcurrentBag<'Item>()
+  let returnedItems = ConcurrentBag<'Item>()
+  
+  // modified only at interrupt time
   let mutable countAvail = 0
   let mutable countInUse = 0
-
-  let changeCount n = countAvail <- countAvail + n
-  let changeInUse n = countInUse <- countInUse + n
-
-  let poolAdd item =
-    pool.Add item
-    changeCount +1
-    changeInUse -1
-    assert (countAvail = pool.Count)
-
   let mutable seqNum = -1  // ok to be overwritten when item is used
 
-  let addNewItem() =
-    let item = creator()
-    item.SeqNum <- seqNum ; seqNum <- seqNum - 1
-    poolAdd item
-
-  do
-    assert pool.IsEmpty
-    assert (countAvail = 0)
-    let n = max minCount startCount
-    do
-      if n > 0 then  for i in 1..n do  addNewItem() // Stock the pool.
-      countInUse <- 0  // Zero out the changes to countInUse in poolAdd.
-    if countAvail <> startCount then
-      printfn "uh oh"
-    assert (countAvail = startCount)
-
   
+  // Functions called only at interrupt time
+
+  let changeAvail n = countAvail <- countAvail + n
+  let changeInUse n = countInUse <- countInUse + n
+  
+  let addReturnedItems() =
+    assert (countAvail = pool.Count)
+    let r = returnedItems.Count
+    changeAvail +r
+    changeInUse -r
+    let rec moveEm() =
+      let ok, item = returnedItems.TryTake()
+      if ok then
+        pool.Add item
+        moveEm()
+    moveEm()
+    assert (returnedItems.Count = 0)
+    assert (countAvail = pool.Count)
+ 
   let take() =
+    addReturnedItems()
     let ok, obj = pool.TryTake()
     if ok then
-      changeCount -1
+      changeAvail -1
       changeInUse +1
       assert (countAvail = pool.Count)
       Some obj
     else
       None
 
-  // Ensure the pool has at least lowWaterMark Bufs.
-  let addItemsIfNeeded() = while countAvail < minCount do  addNewItem()
+  
+  // Functions called at non-interrupt time
 
-  let giveBack item =
+  let poolAdd item = returnedItems.Add item
+
+  let addNewItem() =
+    let item = creator()
+    item.SeqNum <- seqNum ; seqNum <- seqNum - 1
     poolAdd item
 
+  let addNewItems n = for i in 1..n do  addNewItem() // Add to the pool.
 
+  let addItemsIfNeeded() = addNewItems (minCount - countAvail)
+
+        
+  do
+    if startCount <> 0 then  // see CbMessage constructor
+      assert (countAvail = 0)
+      assert pool.IsEmpty
+      let n = max minCount startCount
+      addNewItems n  // Stock the pool.
+      countInUse <- 0  // Zero out the changes to countInUse in poolAdd.
+      assert (countAvail = pool.Count)
+
+
+  // Always called at interrupt time
   member this.Take()           = take()
+  
+  // Never called at interrupt time
   member this.ItemUseBegin()   = addItemsIfNeeded()
-  member this.ItemUseEnd item  = poolAdd item //; printfn "released"
+  member this.ItemUseEnd item  = poolAdd item
   member this.CountAvail       = countAvail
   member this.CountInUse       = countInUse
 

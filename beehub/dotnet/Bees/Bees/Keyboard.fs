@@ -9,28 +9,46 @@ open CancelAfterDelay
 open ConsoleReadAsync
 open Bees.Commands
 
+printfn "Press Control-C or Control-Break to exit."
+
 /// beehive keyboard triggered management utilities
 let performKey keyInfo consoleRead cancellationTokenSource =
   let keyInfo = (keyInfo: ConsoleKeyInfo)
   let cr = (consoleRead: ConsoleReadAsync)
-  let key = keyInfo.KeyChar.ToString()
+  let keyChar = keyInfo.KeyChar
   let cts = (cancellationTokenSource: CancellationTokenSource)
   task {
-    match key with
-    | "q"  ->  cts.Cancel()
-               do! stopAll              ()     // usage: press q to stop all processes
-    | "c"  ->  do! checkStreamStatus    10     // check audio pathway for over/underflows
-    | "d"  ->  do! showAudioDeviceList  ()     // one shot process to see device list
-    | "f"  ->  do! triggerFft           ()     // one shot process to see fft
-    | "i"  ->  do! toggleIntercomM      cr cts // usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
-    | "m"  ->  do! changeMonitorChannel ()     // usage: press m to select channel to monitor
-    | "o"  ->  do! triggerOscope        ()     // one shot process to view oscope
-    | "s"  ->  do! triggerSpectrogram   ()     // usage: press s to plot spectrogram of last recording
-    | "t"  ->  do! listAllThreads       ()     // usage: press t to see all threads
-    | "v"  ->  do! toggleVuMeter        ()     // usage: press v to start cli vu meter, press v again to stop
-    | "\r" ->  printfn ""
+    match keyChar with
+    | 'q'  ->  cts.Cancel()
+               do! stopAll              true   // usage: press q to stop all processes
+    | 'c'  ->  do! checkStreamStatus    10     // check audio pathway for over/underflows
+    | 'd'  ->  do! showAudioDeviceList  ()     // one shot process to see device list
+    | 'f'  ->  do! triggerFft           ()     // one shot process to see fft
+    | 'i'  ->  do! toggleIntercomM      cr cts // usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
+    | 'm'  ->  do! changeMonitorChannel ()     // usage: press m to select channel to monitor
+    | 'o'  ->  do! triggerOscope        ()     // one shot process to view oscope
+    | 's'  ->  do! triggerSpectrogram   ()     // usage: press s to plot spectrogram of last recording
+    | 't'  ->  do! listAllThreads       ()     // usage: press t to see all threads
+    | 'v'  ->  do! toggleVuMeter        ()     // usage: press v to start cli vu meter, press v again to stop
+    | '\r' ->  printfn ""
     | c    ->  printfn $"Unknown command: {c}" }
   |> Task.WaitAll
+
+
+let keyboardInputInit() =
+  printfn "Initializing keyboard input."
+  let ctrlCEventHandler sender (args: ConsoleCancelEventArgs) =
+//  printfn "\nConsoleCancelEventHandler called."
+//  printfn $"  Key pressed: {args.SpecialKey}"
+
+    stopAll false |> Task.WaitAll
+
+//  printfn $"  Cancel property: {args.Cancel}"
+    // Prevent the process from terminating when we return.
+    args.Cancel <- true
+
+  Console.CancelKeyPress.AddHandler(ConsoleCancelEventHandler ctrlCEventHandler)
+  
 
 let keyboardKeyInput cancellationTokenSource = task {
   let cts = (cancellationTokenSource: CancellationTokenSource)

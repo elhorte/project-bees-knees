@@ -222,6 +222,7 @@ let main _ =
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   let streamQueue = makeAndStartStreamQueue workPerCallback
   let cbContext   = makeStream inputParameters outputParameters sampleRate withEchoRef withLoggingRef streamQueue
+  keyboardInputInit()
   task {
     try
       use cts = new CancellationTokenSource()

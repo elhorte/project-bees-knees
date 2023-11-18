@@ -7,8 +7,9 @@ let print name = printfn $" -> {name}"
 
 
 // usage: press q to stop all processes
-let stopAll() = task {
-  print "stopAll" }
+let stopAll how = task {
+  if how then  print "stopAll and quit"
+         else  printfn "^C -> stopAll without quitting" }
 
 
 // usage: press c to check audio pathway for over/underflows
