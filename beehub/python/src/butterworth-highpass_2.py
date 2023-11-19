@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# Code definition: 
 
-
+import os
+import platform
 import numpy as np
 import soundfile as sf
 from scipy.signal import butter, filtfilt, welch
 import matplotlib.pyplot as plt
-import os
 
+
+def get_working_dir():
+    os_name = platform.system()
+    if os_name == 'Windows':    # python compensates for the backslash (Gate's fault)
+        return r'E:/git/en/project-bees-knees/beehub/python/src/'
+    elif os_name == 'Darwin':
+        return r'/Users/elhorte/dev/GitHub/en/project-bees-knees/beehub/python/src/'
+    elif os_name == 'Linux':
+        return r'/home/elhorte/dev/GitHub/en/project-bees-knees/beehub/python/src/'
+    else:
+        return '.' # Default to current directory
 
 def get_audio_file_info(file_path):
     try:
@@ -20,7 +30,7 @@ def get_audio_file_info(file_path):
         return None
 
 
-def high_pass_filter(data, cutoff, fs, order=5):
+def high_pass_filter(data, cutoff, fs, order):
     nyquist = 0.5 * fs
     normal_cutoff = cutoff / nyquist
     b, a = butter(order, normal_cutoff, btype='high', analog=False)
@@ -31,12 +41,12 @@ def plot_frequency_spectrum(data, fs, label):
     f, Pxx = welch(data, fs, nperseg=1024)
     plt.semilogy(f, Pxx, label=label)
 
-def process_audio_and_plot(input_file, output_file, cutoff_frequency, _dtype):
+def process_audio_and_plot(input_file, output_file, cutoff_frequency, _dtype, order):
     # Read the FLAC file
     data, fs = sf.read(input_file, dtype=_dtype)
 
     # Apply high-pass filter
-    filtered_data = high_pass_filter(data, cutoff_frequency, fs)
+    filtered_data = high_pass_filter(data, cutoff_frequency, fs, order)
 
     # Plot original and filtered frequency spectrum
     plt.figure()  # Create a new figure
@@ -44,7 +54,7 @@ def process_audio_and_plot(input_file, output_file, cutoff_frequency, _dtype):
     plot_frequency_spectrum(filtered_data, fs, "Filtered Audio")
     plt.xlabel('Frequency [Hz]')
     plt.ylabel('PSD [V²/Hz]')
-    plt.title('Frequency Spectrum Comparison')
+    plt.title(f'Freq Spectrum Comparison - {order}th-order Butterworth - {cutoff_frequency/1000} kHz cutoff')
     plt.legend()
     plt.grid(True)
     plt.show()  # Show the plot
@@ -53,10 +63,8 @@ def process_audio_and_plot(input_file, output_file, cutoff_frequency, _dtype):
     sf.write(output_file, filtered_data, fs)
 
 def main():
-    work_dir = '/Users/elhorte/dev/GitHub/en/project-bees-knees/beehub/python/src/'
+    work_dir = get_working_dir()
     os.chdir(work_dir)
-
-    cutoff_frequency = 20000  # 20 kHz
 
     input_file = 'input.wav'
     output_file = 'output.wav'
@@ -76,8 +84,10 @@ def main():
         print("Failed to retrieve audio file information.")
     
     if info.subtype == 'PCM_16': _dtype = 'int16'
-    
-    process_audio_and_plot(input_file, output_file, cutoff_frequency, _dtype)
+
+    cutoff_frequency = 20000  # 20 kHz
+
+    process_audio_and_plot(input_file, output_file, cutoff_frequency, _dtype, 10)
 
 if __name__ == "__main__":
     main()
