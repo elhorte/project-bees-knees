@@ -33,16 +33,31 @@ from pydub import AudioSegment
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 import keyboard
 import atexit
+
+try:
+    # windows
+    import msvcrt
+
+    def getkey():
+        return msvcrt.getch().decode('utf-8')
+except ImportError:
+    # mac, linux
+    import termios
+    import tty
+
+    def getkey():
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
+
 import signal
 import sys
 import os
-is_windows = os.name == 'nt'
-msvcrt = None
-if is_windows:
-    try:
-        import msvcrt
-    except ImportError:
-        pass
 import io
 import warnings
 import queue
@@ -181,7 +196,7 @@ MONITOR_DIRECTORY = "monitor" # f"{config.data_drive}/{config.data_directory}/{c
 PLOT_DIRECTORY    = "plot"    # f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/plots/{current_year}{current_month}/"
 
 testmode = False                            # True to run in test mode with lower than neeeded sample rate
-KB_or_CP = 'nosuchthing'                    # use keyboard or control panel (PyQT5) to control program
+KB_or_CP = 'KB'                             # use keyboard or control panel (PyQT5) to control program
 
 ##########################  
 # setup utilities
@@ -1014,42 +1029,50 @@ def main():
         print("started fft_periodic_plot_process")
 
     try:
+
+        # Start the audio stream
+        audio_stream()
+
         if KB_or_CP == 'KB':
 
-            # beehive keyboard triggered management utilities
+            doKeyboard()
 
-            # check audio pathway for over/underflows
-            keyboard.on_press_key("c", lambda _: check_stream_status(10), suppress=True) 
-            # one shot process to see device list
-            keyboard.on_press_key("d", lambda _: show_audio_device_list(), suppress=True) 
-            # one shot process to see fft
-            keyboard.on_press_key("f", lambda _: trigger_fft(), suppress=True)
-            # usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
-            keyboard.on_press_key("i", lambda _: toggle_intercom_m(), suppress=True)
-            # usage: press m to select channel to monitor
-            keyboard.on_press_key("m", lambda _: change_monitor_channel(), suppress=True)
-            # one shot process to view oscope
-            keyboard.on_press_key("o", lambda _: trigger_oscope(), suppress=True) 
-            # usage: press q to stop all processes
-            keyboard.on_press_key("q", lambda _: stop_all(), suppress=True)
-            # usage: press s to plot spectrogram of last recording
-            keyboard.on_press_key("s", lambda _: trigger_spectrogram(), suppress=True)            
-            # usage: press t to see all threads
-            keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
-            # usage: press v to start cli vu meter, press v again to stop
-            keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
-
-    except KeyboardInterrupt: # ctrl-c in windows
+    except KeyboardInterrupt:  # ctrl-c in windows
         print('\nCtrl-C: Recording process stopped by user.')
         ##stop_all()
 
-    # except Exception as e:
-    #     print(f"An error occurred while attempting to execute this script: {e}")
-    #     quit(-1)
+    except Exception as e:
+        print(f"An error occurred while attempting to execute this script: {e}")
+        quit(-1)
 
 
-    # Start the audio stream
-    audio_stream()
+def doKeyboard():
+    while True:
+        # beehive keyboard triggered management utilities
+
+        key = getkey()
+
+        if key == "c":
+            check_stream_status(10)   # check audio pathway for over/underflows
+        elif key == "d":
+            show_audio_device_list()  # one shot process to see device list
+        elif key == "f":
+            trigger_fft()             # one shot process to see fft
+        elif key == "i":
+            toggle_intercom_m()       # usage: press i then 0, 1, 2, or 3 to listen to that channel, i again to stop
+        elif key == "m":
+            change_monitor_channel()  # usage: press m to select channel to monitor
+        elif key == "o":
+            trigger_oscope()          # one shot process to view oscope
+        elif key == "q":
+            stop_all(); break         # usage: press q to stop all processes
+        elif key == "s":
+            trigger_spectrogram()     # usage: press s to plot spectrogram of last recording
+        elif key == "t":
+            list_all_threads()        # usage: press t to see all threads
+        elif key == "v":
+            toggle_vu_meter()         # usage: press v to start cli vu meter, press v again to stop
+
 
 if __name__ == "__main__":
     main()
