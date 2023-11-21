@@ -1,4 +1,4 @@
-module Bees.AsyncConcurrentQueue
+module BeesLib.AsyncConcurrentQueue
 
 open System.Collections.Concurrent
 open FSharp.Control

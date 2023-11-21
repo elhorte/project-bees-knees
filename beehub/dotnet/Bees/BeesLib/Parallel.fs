@@ -1,4 +1,4 @@
-module Bees.Parallel
+module BeesLib.Parallel
 
 open System
 

@@ -1,4 +1,4 @@
-module Bees.Logger
+module BeesLib.Logger
 
 open System
 open System.Text

@@ -1,4 +1,4 @@
-module Bees.Commands
+module BeesLib.Commands
 
 open System.Threading
 open ConsoleReadAsync
@@ -28,6 +28,7 @@ let triggerFft() = task {
 
 
 // usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
+#nowarn "3511" // This state machine is not statically compilable. A 'let rec' occured in the resumable code.
 let toggleIntercomM consoleRead cts = task {
   let cr = (consoleRead: ConsoleReadAsync)
   let cts = (cts: CancellationTokenSource)
@@ -41,7 +42,7 @@ let toggleIntercomM consoleRead cts = task {
       | "0"
       | "1"
       | "2"
-      | "3" as s -> printfn " channel %s" s ; do! loop()
+      | "3" as s -> printfn " channel %s" s         ; do! loop()
       |  s       -> printfn " channel %s unknown" s ; do! loop()
     | None -> () }
   do! loop() }

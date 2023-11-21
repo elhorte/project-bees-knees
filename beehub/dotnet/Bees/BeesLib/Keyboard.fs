@@ -1,4 +1,4 @@
-module Bees.Keyboard
+module BeesLib.Keyboard
 
 open System
 open System.Threading
@@ -7,7 +7,7 @@ open Microsoft.FSharp.Data.UnitSystems.SI.UnitNames
 
 open CancelAfterDelay
 open ConsoleReadAsync
-open Bees.Commands
+open BeesLib.Commands
 
 printfn "Press Control-C or Control-Break to exit."
 
