@@ -1029,13 +1029,8 @@ def main():
         print("started fft_periodic_plot_process")
 
     try:
-
         # Start the audio stream
         audio_stream()
-
-        if KB_or_CP == 'KB':
-
-            doKeyboard()
 
     except KeyboardInterrupt:  # ctrl-c in windows
         print('\nCtrl-C: Recording process stopped by user.')
@@ -1045,33 +1040,48 @@ def main():
         print(f"An error occurred while attempting to execute this script: {e}")
         quit(-1)
 
+    if KB_or_CP == 'KB':
+
+        doKeyboard()
+
 
 def doKeyboard():
-    while True:
-        # beehive keyboard triggered management utilities
+    try:
+        while True:
+            # beehive keyboard triggered management utilities
 
-        key = getkey()
+            key = getkey()
 
-        if key == "c":
-            check_stream_status(10)   # check audio pathway for over/underflows
-        elif key == "d":
-            show_audio_device_list()  # one shot process to see device list
-        elif key == "f":
-            trigger_fft()             # one shot process to see fft
-        elif key == "i":
-            toggle_intercom_m()       # usage: press i then 0, 1, 2, or 3 to listen to that channel, i again to stop
-        elif key == "m":
-            change_monitor_channel()  # usage: press m to select channel to monitor
-        elif key == "o":
-            trigger_oscope()          # one shot process to view oscope
-        elif key == "q":
-            stop_all(); break         # usage: press q to stop all processes
-        elif key == "s":
-            trigger_spectrogram()     # usage: press s to plot spectrogram of last recording
-        elif key == "t":
-            list_all_threads()        # usage: press t to see all threads
-        elif key == "v":
-            toggle_vu_meter()         # usage: press v to start cli vu meter, press v again to stop
+            if key == "c":
+                check_stream_status(10)   # check audio pathway for over/underflows
+            elif key == "d":
+                show_audio_device_list()  # one shot process to see device list
+            elif key == "f":
+                trigger_fft()             # one shot process to see fft
+            elif key == "i":
+                toggle_intercom_m()       # usage: press i then 0, 1, 2, or 3 to listen to that channel, i again to stop
+            elif key == "m":
+                change_monitor_channel()  # usage: press m to select channel to monitor
+            elif key == "o":
+                trigger_oscope()          # one shot process to view oscope
+            elif key == "q":
+                stop_all(); break         # usage: press q to stop all processes
+            elif key == "s":
+                trigger_spectrogram()     # usage: press s to plot spectrogram of last recording
+            elif key == "t":
+                list_all_threads()        # usage: press t to see all threads
+            elif key == "v":
+                toggle_vu_meter()         # usage: press v to start cli vu meter, press v again to stop
+            else:
+                print("Unknown key " + key)
+
+    except KeyboardInterrupt:  # ctrl-c in windows
+        print('\nCtrl-C: Recording process stopped by user.')
+        ##stop_all()
+
+    except Exception as e:
+        print(f"An error occurred while attempting to execute this script: {e}")
+        quit(-1)
 
 
 if __name__ == "__main__":

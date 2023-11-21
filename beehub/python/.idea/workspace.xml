@@ -4,16 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4599c99b-129d-4426-bf58-b616570a75be" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/src/KeyTest.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../dotnet/Bees/.idea/.idea.Bees/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/../dotnet/Bees/.idea/.idea.Bees/.idea/vcs.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../dotnet/Bees/Bees/Bees.fsproj" beforeDir="false" afterPath="$PROJECT_DIR$/../dotnet/Bees/Bees/Bees.fsproj" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/python.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/python.iml" afterDir="false" />
+    <list default="true" id="4599c99b-129d-4426-bf58-b616570a75be" name="Changes" comment="WIP">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.run/BMAR.run.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.run/BMAR.run.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/BMAR.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/BMAR.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -50,14 +42,14 @@
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PythonContentEntriesConfigurable&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
 }</component>
   <component name="RunManager" selected="Python.BMAR">
     <list>
-      <item itemvalue="Python.KeyTest" />
       <item itemvalue="Python.BMAR" />
+      <item itemvalue="Python.KeyTest" />
     </list>
   </component>
   <component name="SharedIndexes">
@@ -85,7 +77,35 @@
       <workItem from="1700380046086" duration="348000" />
       <workItem from="1700381514787" duration="86000" />
       <workItem from="1700381621945" duration="150000" />
+      <workItem from="1700381789797" duration="2902000" />
+      <workItem from="1700443667111" duration="20000" />
+      <workItem from="1700443695463" duration="744000" />
     </task>
+    <task id="LOCAL-00001" summary="WIP">
+      <option name="closed" value="true" />
+      <created>1700435275887</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1700435275887</updated>
+    </task>
+    <task id="LOCAL-00002" summary="WIP">
+      <option name="closed" value="true" />
+      <created>1700437670769</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1700437670769</updated>
+    </task>
+    <task id="LOCAL-00003" summary="WIP">
+      <option name="closed" value="true" />
+      <created>1700438584732</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1700438584732</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -101,6 +121,10 @@
         </entry>
       </map>
     </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="WIP" />
+    <option name="LAST_COMMIT_MESSAGE" value="WIP" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
