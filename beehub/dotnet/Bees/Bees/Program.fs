@@ -3,6 +3,7 @@ open System
 open System.Threading
 open System.Threading.Tasks
 
+open BeesLib.CbMessageWorkList
 open FSharp.Control
 open PortAudioSharp
 open BeesLib.PortAudioUtils
@@ -49,13 +50,6 @@ let printCallback (m: CbMessage) =
   let sWork  = sprintf $"work: %6d{microseconds} frameCount=%A{m.FrameCount} cpuLoad=%5.1f{percentCPU}%%"
   Console.WriteLine($"{sDebug}   ––   {sWork}")
 
-/// This is the work to do immediately after each callback.
-/// There are no real-time restrictions on this work,
-/// since it is not called during the low-level PortAudio callback.
-let workPerCallback (m: CbMessage) =
-//printCallback m
-  ()
-
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run stream cancellationTokenSource = task {
   let stream = (stream: Stream)
@@ -88,9 +82,10 @@ let run stream cancellationTokenSource = task {
 let main _ =
   let mutable withEchoRef    = ref false
   let mutable withLoggingRef = ref false
+  let cbMessageWorkList = CbMessageWorkList()
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
-  let streamQueue = makeAndStartStreamQueue workPerCallback
+  let streamQueue = makeAndStartStreamQueue cbMessageWorkList.HandleCbMessage
   let cbContext   = makeStream inputParameters outputParameters sampleRate withEchoRef withLoggingRef streamQueue
   keyboardInputInit()
   task {

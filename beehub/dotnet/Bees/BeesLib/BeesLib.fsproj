@@ -18,6 +18,8 @@
         <Compile Include="CbMessagePool.fs" />
         <Compile Include="Commands.fs" />
         <Compile Include="Keyboard.fs" />
+        <Compile Include="CbMessageWorkList.fs" />
+        <Compile Include="Recording.fs" />
         <Compile Include="Stream.fs" />
     </ItemGroup>
 

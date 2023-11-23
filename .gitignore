@@ -1,5 +1,6 @@
 _archive/
 *.pyc
+venv*/
 acoustic_sensor_3d/Bee Mic and Sensor/BeeMicSensorBaseKeelAngled_50mmClamp.stl
 /beehub/python/src/plot/
 /beehub/python/src/primary/

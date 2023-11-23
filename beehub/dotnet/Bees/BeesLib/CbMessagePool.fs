@@ -25,7 +25,7 @@ type CbContext = {
   withEchoRef    : bool ref
   withLoggingRef : bool ref
   startTime      : DateTime
-  seqNumRef      : int ref  }
+  seqNumRef      : int ref }
 
 /// The callback sends this message to the managed-code handler.
 and CbMessage(stream: Stream, streamQueue: StreamQueue, logger: Logger, bufSize: int) =
