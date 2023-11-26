@@ -2,11 +2,19 @@
 open BeesLib.CbMessagePool
 open BeesLib.CbMessageWorkList
 
+let cbMessage = createDummyCbMessage()
 
-let handle (m: CbMessage) = ()
+let handler (_: CbMessage) (workItem: WorkId) unregisterMe =
+  match workItem with WorkId id ->  printfn "handling WorkId %d" id
+  unregisterMe()
 
 let workList = CbMessageWorkList()
+printfn "%d" workList.Count
 
-let item = workList.RegisterWorkToDo handle
+workList.HandleCbMessage cbMessage
 
-workList.UnregisterWorkToDo item
+workList.RegisterWorkItem handler
+printfn "%d" workList.Count
+
+workList.HandleCbMessage cbMessage
+printfn "%d" workList.Count

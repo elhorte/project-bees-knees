@@ -22,22 +22,22 @@ type Recording = {
   fileSampleRate    : int               
   beginDateTime     : DateTime option   
   endDateTime       : DateTime option   
-  inputSampleRate   : int               
+  inputSampleRate   : int
   cancellationToken : CancellationToken }
 
-let handleFrame (cbMessage: CbMessage) (params: Recording) =
-  ()
-  // if params.cancellationToken.IsCancellationRequested then
-  //   workList.UnregisterWorkToDo params
-  // else
-  //   let now = DateTime.Now
-  //   match params.beginDateTime, params.endDateTime with
-  //   | (Some b, Some e) when not (b <= now & now <= e) -> ()
-  //   | _ ->
-  //   printfn ""  
-  //   printfn $"{params.label} recording started at: {now} for {params.duration}, with gap {params.gap}"
-
-//
+ 
+let startRecording (cbMessageWorkList: CbMessageWorkList) paramRec =
+  let p = paramRec
+  let handleFrame (cbMessage: CbMessage) (workId: WorkId) unregisterMe =
+    if p.cancellationToken.IsCancellationRequested then
+      unregisterMe()
+    else
+      let now = DateTime.Now
+      match p.beginDateTime, p.endDateTime with
+      | (Some b, Some e) when not (b <= now && now <= e) -> ()
+      | _ ->
+      printfn ""  
+      printfn $"{p.label} recording started at: {now} for {p.duration}, with gap {p.gap}"
 //    period_start_index = buffer_index 
 //    # wait PERIOD seconds to accumulate audio
 //    interruptable_sleep(record_period, stop_recording_event)
@@ -77,21 +77,9 @@ let handleFrame (cbMessage: CbMessage) (params: Recording) =
 //    # wait "interval" seconds before starting recording again
 //    interruptable_sleep(interval, stop_recording_event)
 
- 
-let startRecording
-    ( duration          : TimeSpan          )
-    ( gap               : TimeSpan option   )
-    ( label             : string            )
-    ( audioFormat       : AudioFormat       )
-    ( fileSampleRate    : int               )
-    ( beginDateTime     : DateTime option   )
-    ( endDateTime       : DateTime option   )
-    ( inputSampleRate   : int               )
-    ( cancellationToken : CancellationToken ) =
-
-  match beginDateTime with
-  | None   -> printfn $"{label} is recording continuously"
+  match p.beginDateTime with
+  | None   -> printfn $"{p.label} is recording continuously"
   | Some b -> printfn $"Recording started at: {b}"
 
-  // let workToDo cbMessage = handleFrame cbMessage duration gap label audioFormat fileSampleRate beginDateTime endDateTime inputSampleRate cancellationToken
-  // registerWorkToDo workToDo
+  cbMessageWorkList.RegisterWorkItem handleFrame
+

@@ -4,29 +4,33 @@ open System.Collections.Generic
 open BeesLib.CbMessagePool
 
 
-type WorkToDo = CbMessage -> unit
+type Unregistrar = unit -> unit 
 type WorkId   = WorkId of int
-type WorkItem = WorkId * WorkToDo
+type WorkFunc = CbMessage -> WorkId -> Unregistrar -> unit
+and  WorkItem = WorkItem of (WorkId * WorkFunc)
 
 type CbMessageWorkList() =
   
-  let list = List<WorkItem>([||])
-  let mutable idNext = 1
+  let list = ResizeArray<WorkItem>()
+  let mutable idLatest = 0
 
+  let nextWorkId() =
+    idLatest <- idLatest + 1
+    WorkId idLatest
 
-  /// This is the work to do immediately after each callback.
-  /// There are no real-time restrictions on this work,
-  /// since it is not called during the low-level PortAudio callback.
+  let unregisterWorkItem workItem = list.Remove workItem |> ignore
+
+  /// Do the registered work post-callback, at non-interrupt time.
   member this.HandleCbMessage (m: CbMessage)  : unit =
-    let workList = list.ToArray() // so a workItem can remove itself
-    for (_, workToDo) in workList do
-      workToDo m
+    let workList = list.ToArray()
+    for workItem in workList do
+      let unregisterMe() = unregisterWorkItem workItem  
+      match workItem with WorkItem (workId, f) -> f m workId unregisterMe
 
-  member this.RegisterWorkToDo(workToDo: WorkToDo)  : WorkItem =
-    let workId   = WorkId idNext in idNext <- idNext + 1
-    let workItem = workId, workToDo
+  /// Register a function to be called after every callback
+  member this.RegisterWorkItem(workFunc: WorkFunc) =
+    let workItem = WorkItem (nextWorkId(), workFunc)
     list.Add workItem
-    workItem
 
-  member this.UnregisterWorkToDo(workItem: WorkItem)  : unit =
-    list.Remove workItem |> ignore
+  // The number of registered WorkItems.
+  member this.Count = list.Count
