@@ -953,7 +953,7 @@ def stop_all():
 
     if KB_or_CP == 'KB':
         # Unhook all hooks
-        keyboard.unhook_all()
+        ##keyboard.unhook_all()
         print("Unhooked all keyboard hooks")
 
     stop_program[0] = True
@@ -966,7 +966,7 @@ def stop_all():
 
     stop_vu()
     stop_intercom_m()
-    keyboard.write('\b') 
+    ##keyboard.write('\b') 
     clear_input_buffer()
     list_all_threads()
 
