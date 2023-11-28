@@ -30,6 +30,7 @@ from scipy.signal import decimate
 from scipy.signal import butter, filtfilt
 from pydub import AudioSegment
 from pynput import keyboard
+##import keyboard
 
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 
@@ -715,44 +716,32 @@ def toggle_intercom_m():
 # Function to switch the channel being monitored
 #
 
-def change_monitor_channel():
+def change_monitor_channel(key_char):
     global monitor_channel, change_ch_event
-    # usage: press m then press 1, 2, 3, 4
-    print(f"\nChannel {monitor_channel+1} is active, {sound_in_chs} are available: select a channel:") #, end='\r')
+    ##print(f"\nChannel {monitor_channel + 1} is active, {sound_in_chs} are available: select a channel:")
 
-    while True:
-        while msvcrt.kbhit():       # wlh - fix this
-            key = msvcrt.getch().decode('utf-8')
-            if key.isdigit():
-                key_int = int(key)
-                if key_int >= 1 and key_int <= sound_in_chs:
-                    monitor_channel = key_int - 1
-                    change_ch_event.set()                         
-                    print(f"Now monitoring: {monitor_channel+1}")
-
-                    if intercom_proc is not None:
-                        toggle_intercom_m()
-                        time.sleep(0.1)
-                        toggle_intercom_m()
-                        
-                    if vu_proc is not None:
-                        toggle_vu_meter()
-                        time.sleep(0.1)
-                        toggle_vu_meter()
-
-                    return        
-                else:
-                    print(f"Sound device has only {sound_in_chs} channels")
-
-            if key == '\x1b':       # escape
-                print("exiting monitor channel selection")
-                return
-        time.sleep(1)
-
+    key_int = int(key_char)
+    if 1 <= key_int <= sound_in_chs:
+        monitor_channel = key_int - 1
+        change_ch_event.set()
+        print(f"Now monitoring: {monitor_channel + 1}")
+        # if intercom active, turn off and back on
+        if intercom_proc is not None:
+            toggle_intercom_m()
+            time.sleep(0.1)
+            toggle_intercom_m()
+        # if vu meter active, turn off and back on
+        if vu_proc is not None:
+            toggle_vu_meter()
+            time.sleep(0.1)
+            toggle_vu_meter()
+        return
+    else:
+        print(f"Sound device has only {sound_in_chs} channels")
+        return
 #
 # continuous fft plot of audio in a separate background process
 #
-
 def plot_and_save_fft(sound_in_samplerate, channel):
 
     interval = FFT_INTERVAL * 60    # convert to seconds, time betwwen ffts
@@ -984,8 +973,8 @@ def on_press(key):
                 trigger_fft()
             elif key.char == 'i':
                 toggle_intercom_m()
-            elif key.char == 'm':
-                change_monitor_channel()
+            elif key.char >= '1' and key.char <='9':
+                change_monitor_channel(key.char)
             elif key.char == 'o':
                 trigger_oscope()
             elif key.char == 's':
