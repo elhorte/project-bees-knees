@@ -72,7 +72,7 @@ and StreamQueue = CbMessage AsyncConcurrentQueue
 and CbMessagePool(bufSize: int, startCount: int, minCount: int, stream: Stream, streamQueue: StreamQueue, logger: Logger) =
   inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(stream, streamQueue, logger, bufSize))
 
-let createDummyCbMessage() : CbMessage =
+let dummyCbMessage() : CbMessage =
   System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject typeof<CbMessage>
   |> unbox<CbMessage>
     

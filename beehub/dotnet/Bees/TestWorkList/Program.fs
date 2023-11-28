@@ -2,19 +2,29 @@
 open BeesLib.CbMessagePool
 open BeesLib.CbMessageWorkList
 
-let cbMessage = createDummyCbMessage()
-
-let handler (_: CbMessage) (workItem: WorkId) unregisterMe =
-  match workItem with WorkId id ->  printfn "handling WorkId %d" id
-  unregisterMe()
 
 let workList = CbMessageWorkList()
-printfn "%d" workList.Count
 
-workList.HandleCbMessage cbMessage
+let handleCbMessage() =
+  dummyCbMessage() |> workList.HandleCbMessage
 
-workList.RegisterWorkItem handler
-printfn "%d" workList.Count
+let workFunc (_: CbMessage) (workId: WorkId) unregisterMe =
+  match workId with WorkId id ->  printfn "WorkItem %d runs and unregisters itself." id
+  unregisterMe()
 
-workList.HandleCbMessage cbMessage
-printfn "%d" workList.Count
+let printHowManyRegisteredHandlers() = printfn "%d" workList.Count
+
+
+printHowManyRegisteredHandlers() // 0
+
+handleCbMessage() // workFunc is not called bc it is not registered yet
+printHowManyRegisteredHandlers() // 0
+
+workList.RegisterWorkItem workFunc
+printHowManyRegisteredHandlers() // 1
+
+handleCbMessage() // workFunc is called and unregisters itself
+printHowManyRegisteredHandlers() // 0
+
+handleCbMessage() // workFunc is not called bc it is no longer registered
+printHowManyRegisteredHandlers() // 0
