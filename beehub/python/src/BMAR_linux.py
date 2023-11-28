@@ -721,7 +721,7 @@ def change_monitor_channel():
     print(f"\nChannel {monitor_channel+1} is active, {sound_in_chs} are available: select a channel:") #, end='\r')
 
     while True:
-        while msvcrt.kbhit():
+        while msvcrt.kbhit():       # wlh - fix this
             key = msvcrt.getch().decode('utf-8')
             if key.isdigit():
                 key_int = int(key)

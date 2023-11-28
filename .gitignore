@@ -1,4 +1,5 @@
 _archive/
 *.pyc
 acoustic_sensor_3d/Bee Mic and Sensor/BeeMicSensorBaseKeelAngled_50mmClamp.stl
+*Period_recording*
 .venv
