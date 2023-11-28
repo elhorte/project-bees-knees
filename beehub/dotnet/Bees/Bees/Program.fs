@@ -28,7 +28,7 @@ let prepareArgumentsForStreamCreation() =
     sampleFormat              = SampleFormat.Float32              ,
     suggestedLatency          = inputInfo.defaultHighInputLatency ,
     hostApiSpecificStreamInfo = IntPtr.Zero                       )
-  printfn $"%s{deviceInfoToString inputInfo}"
+  printfn $"%s{inputInfo.ToString()}"
   printfn $"inputParameters=%A{inputParameters}"
   let defaultOutput = PortAudio .DefaultOutputDevice      in printfn $"Default output device = %d{defaultOutput}"
   let outputInfo    = PortAudio .GetDeviceInfo defaultOutput
@@ -38,7 +38,7 @@ let prepareArgumentsForStreamCreation() =
     sampleFormat              = SampleFormat.Float32                ,
     suggestedLatency          = outputInfo.defaultHighOutputLatency ,
     hostApiSpecificStreamInfo = IntPtr.Zero                         )
-  printfn $"%s{deviceInfoToString outputInfo}"
+  printfn $"%s{outputInfo.ToString()}"
   printfn $"outputParameters=%A{outputParameters}"
   sampleRate, inputParameters, outputParameters
 
