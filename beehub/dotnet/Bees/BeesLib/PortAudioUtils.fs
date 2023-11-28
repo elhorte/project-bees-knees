@@ -16,8 +16,7 @@ let initPortAudio() =
   try
     PortAudio.LoadNativeLibrary()
     PortAudio.Initialize()
-  with
-  | :? PortAudioException as e -> exitWithTrouble 2 e "Initializing PortAudio"
+  with :? PortAudioException as e -> exitWithTrouble 2 e "Initializing PortAudio"
 
 
 let floatToMicrosecondsFractionOnly (time: float) : int =
