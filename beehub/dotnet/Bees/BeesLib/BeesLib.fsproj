@@ -6,6 +6,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <Compile Include="Util.fs" />
         <Compile Include="Parallel.fs" />
         <Compile Include="CancelAfterDelay.fs" />
         <Compile Include="CpuStopwatch.fs" />
