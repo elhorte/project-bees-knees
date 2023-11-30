@@ -3,7 +3,8 @@ module BeesLib.AsyncConcurrentQueue
 open System.Collections.Concurrent
 open FSharp.Control
 
-/// A thread-safe queue with nonlocking, nonallocating Put() and TakeAsync() methods
+/// A thread-safe queue with nonblocking, nonallocating Put() method.
+/// TakeAsync() need not be nonblocking, nonallocating.
 type AsyncConcurrentQueue<'T> () =
 
   let queue = ConcurrentQueue<'T>()

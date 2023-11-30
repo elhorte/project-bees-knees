@@ -30,8 +30,8 @@ let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: Strea
   Stream.Callback(
     fun input output frameCount timeInfo statusFlags userDataPtr ->
       let cbContext = cbContextRef[0]
-      let withEcho  = Volatile.Read(cbContext.withEchoRef)
-      let seqNum    = Volatile.Read cbContext.seqNumRef
+      let withEcho  = Volatile.Read &cbContext.withEchoRef.contents
+      let seqNum    = Volatile.Read &cbContext.seqNumRef.contents
       let timeStamp = DateTime.Now
       if withEcho then
         let size = uint64 (frameCount * uint32 sizeof<float32>)
@@ -45,7 +45,7 @@ let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: Strea
         do
           let (Buf buf) = cbMessage.InputSamplesCopy
           Marshal.Copy(input, buf, startIndex = 0, length = (int frameCount))
-        if Volatile.Read(cbContext.withLoggingRef) then
+        if Volatile.Read &cbContext.withLoggingRef.contents then
           cbContext.logger.Add seqNum timeStamp "cb bufs=" cbMessage.PoolStats
         // the callback args
         cbMessage.InputSamples <- input

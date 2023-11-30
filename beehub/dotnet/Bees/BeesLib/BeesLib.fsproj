@@ -12,7 +12,6 @@
         <Compile Include="Logger.fs" />
         <Compile Include="AsyncConcurrentQueue.fs" />
         <Compile Include="PortAudioUtils.fs" />
-        <Compile Include="StreamGeneric.fs" />
         <Compile Include="Mp3.fs" />
         <Compile Include="ItemPool.fs" />
         <Compile Include="CbMessagePool.fs" />
