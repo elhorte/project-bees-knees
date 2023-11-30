@@ -15,50 +15,42 @@ type AudioFormat =
   | OGG
 
 type Recording = {
-  duration          : TimeSpan          
-  gap               : TimeSpan option   
+  recordPeriod      : TimeSpan          
+  interval          : TimeSpan option   
   label             : string            
   audioFormat       : AudioFormat       
-  fileSampleRate    : int               
+  targetSampleRate  : int               
   beginDateTime     : DateTime option   
   endDateTime       : DateTime option   
   inputSampleRate   : int
   cancellationToken : CancellationToken }
 
+// let inputSampleRate = 17
+// let downsampleAudio audioData inputSampleRate fileSampleRate  :Buf =
+//   new Buf(audioData.Length)
  
-let startRecording (cbMessageWorkList: CbMessageWorkList) paramRec =
-  let p = paramRec
+let startRecording (cbMessageWorkList: CbMessageWorkList) recordingParams =
+  let r = recordingParams
   let handleFrame (cbMessage: CbMessage) (workId: WorkId) unregisterMe =
-    if p.cancellationToken.IsCancellationRequested then
+    if r.cancellationToken.IsCancellationRequested then
       unregisterMe()
     else
       let now = DateTime.Now
-      match p.beginDateTime, p.endDateTime with
+      match r.beginDateTime, r.endDateTime with
       | (Some b, Some e) when not (b <= now && now <= e) -> ()
       | _ ->
       printfn ""  
-      printfn $"{p.label} recording started at: {now} for {p.duration}, with gap {p.gap}"
-//    period_start_index = buffer_index 
-//    # wait PERIOD seconds to accumulate audio
-//    interruptable_sleep(record_period, stop_recording_event)
-//
-//    period_end_index = buffer_index 
-//    ##print(f"Recording length in worker thread: {period_end_index - period_start_index}, after {record_period} seconds")
-//    save_start_index = period_start_index % buffer_size
-//    save_end_index = period_end_index % buffer_size
-//
-//    # saving from a circular buffer so segments aren't necessarily contiguous
-//    if save_end_index > save_start_index:   # indexing is contiguous
-//        audio_data = buffer[save_start_index:save_end_index]
-//    else:                                   # ain't contiguous so concatenate to make it contiguous
-//        audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
-//
-//    if target_sample_rate < inputSampleRate:
-//        # resample to lower sample rate
-//        audio_data = downsample_audio(audio_data, inputSampleRate, target_sample_rate)
-//
-//    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-//    output_filename = f"{timestamp}_{label}_{record_period}_{interval}_{config.LOCATION_ID}_{config.HIVE_ID}.{file_format.lower()}"
+      printfn $"{r.label} recording started at: {now} for {r.recordPeriod}, with gap {r.interval}"
+
+//     let audioData =
+//       if r.targetSampleRate < r.inputSampleRate then
+//         downsampleAudio cbMessage.InputSamplesCopy inputSampleRate r.targetSampleRate
+//       else
+//         cbMessage.InputSamplesCopy
+//     let timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+//     let outputFilename = $"%s{timestamp}_%s{r.label}_%A{r.recordPeriod}_%A{r.interval}_{config.LOCATION_ID}_{config.HIVE_ID}.{file_format.lower()}"
+//     ()
+
 //
 //
 //    if file_format.upper() == 'MP3':
@@ -77,8 +69,8 @@ let startRecording (cbMessageWorkList: CbMessageWorkList) paramRec =
 //    # wait "interval" seconds before starting recording again
 //    interruptable_sleep(interval, stop_recording_event)
 
-  match p.beginDateTime with
-  | None   -> printfn $"{p.label} is recording continuously"
+  match r.beginDateTime with
+  | None   -> printfn $"{r.label} is recording continuously"
   | Some b -> printfn $"Recording started at: {b}"
 
   cbMessageWorkList.RegisterWorkItem handleFrame
