@@ -1,4 +1,4 @@
-module Bees.StreamGeneric
+module BeesLib.StreamGeneric
 
 open PortAudioSharp
 

@@ -33,7 +33,28 @@ from pydub import AudioSegment
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 import keyboard
 import atexit
-import msvcrt
+
+try:
+    # windows
+    import msvcrt
+
+    def getkey():
+        return msvcrt.getch().decode('utf-8')
+except ImportError:
+    # mac, linux
+    import termios
+    import tty
+
+    def getkey():
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
+
 import signal
 import sys
 import os
@@ -45,7 +66,7 @@ import librosa.display
 import resampy
 ##import TestPyQT5
 
-import BMAR_config as config
+import BMAR_config_Mac as config
 
 lock = threading.Lock()
 
@@ -114,7 +135,7 @@ file_offset = 0
 # #############################################################
 
 # audio parameters:
-PRIMARY_SAMPLERATE = 192000                     # Audio sample rate
+PRIMARY_SAMPLERATE = 48000                      # Audio sample rate
 PRIMARY_BITDEPTH = 16                           # Audio bit depth
 PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
@@ -162,17 +183,17 @@ current_month = current_date.strftime('%m')
 current_day = current_date.strftime('%d')
 
 # to be discovered from sounddevice.query_devices()
-sound_in_id = None                          # id of input device
-sound_in_chs = config.SOUND_IN_CHS          # number of input channels
-sound_in_samplerate = None                  # sample rate of input device
+sound_in_id = 3                             # id of input device
+sound_in_chs = 1                            # number of input channels
+sound_in_samplerate = 48000                 # sample rate of input device
 
 sound_out_id = config.SOUND_OUT_ID_DEFAULT
 sound_out_chs = config.SOUND_OUT_CHS_DEFAULT                        
 sound_out_samplerate = config.SOUND_OUT_SR_DEFAULT    
 
-PRIMARY_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/{config.HIVE_ID}/recordings/{current_year}{current_month}_primary/"
-MONITOR_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/recordings/{current_year}{current_month}_monitor/"
-PLOT_DIRECTORY = f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/plots/{current_year}{current_month}/"
+PRIMARY_DIRECTORY = "primary" # f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/{config.HIVE_ID}/recordings/{current_year}{current_month}_primary/"
+MONITOR_DIRECTORY = "monitor" # f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/recordings/{current_year}{current_month}_monitor/"
+PLOT_DIRECTORY    = "plot"    # f"{config.data_drive}/{config.data_directory}/{config.LOCATION_ID}/plots/{current_year}{current_month}/"
 
 testmode = False                            # True to run in test mode with lower than neeeded sample rate
 KB_or_CP = 'KB'                             # use keyboard or control panel (PyQT5) to control program
@@ -985,7 +1006,7 @@ def main():
 
     print("Beehive Multichannel Acoustic-Signal Recorder\n")
 
-    set_input_device(config.MODEL_NAME, config.API_NAME)
+    # set_input_device(config.MODEL_NAME, config.API_NAME)
     setup_audio_circular_buffer()
 
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
@@ -1008,41 +1029,59 @@ def main():
         print("started fft_periodic_plot_process")
 
     try:
-        if KB_or_CP == 'KB':
-
-            # beehive keyboard triggered management utilities
-
-            # check audio pathway for over/underflows
-            keyboard.on_press_key("c", lambda _: check_stream_status(10), suppress=True) 
-            # one shot process to see device list
-            keyboard.on_press_key("d", lambda _: show_audio_device_list(), suppress=True) 
-            # one shot process to see fft
-            keyboard.on_press_key("f", lambda _: trigger_fft(), suppress=True)
-            # usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
-            keyboard.on_press_key("i", lambda _: toggle_intercom_m(), suppress=True)
-            # usage: press m to select channel to monitor
-            keyboard.on_press_key("m", lambda _: change_monitor_channel(), suppress=True)
-            # one shot process to view oscope
-            keyboard.on_press_key("o", lambda _: trigger_oscope(), suppress=True) 
-            # usage: press q to stop all processes
-            keyboard.on_press_key("q", lambda _: stop_all(), suppress=True)
-            # usage: press s to plot spectrogram of last recording
-            keyboard.on_press_key("s", lambda _: trigger_spectrogram(), suppress=True)            
-            # usage: press t to see all threads
-            keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
-            # usage: press v to start cli vu meter, press v again to stop
-            keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
-
         # Start the audio stream
         audio_stream()
-            
-    except KeyboardInterrupt: # ctrl-c in windows
+
+    except KeyboardInterrupt:  # ctrl-c in windows
         print('\nCtrl-C: Recording process stopped by user.')
         ##stop_all()
 
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
-        quit(-1) 
+        quit(-1)
+
+    if KB_or_CP == 'KB':
+
+        doKeyboard()
+
+
+def doKeyboard():
+    try:
+        while True:
+            # beehive keyboard triggered management utilities
+
+            key = getkey()
+
+            if key == "c":
+                check_stream_status(10)   # check audio pathway for over/underflows
+            elif key == "d":
+                show_audio_device_list()  # one shot process to see device list
+            elif key == "f":
+                trigger_fft()             # one shot process to see fft
+            elif key == "i":
+                toggle_intercom_m()       # usage: press i then 0, 1, 2, or 3 to listen to that channel, i again to stop
+            elif key == "m":
+                change_monitor_channel()  # usage: press m to select channel to monitor
+            elif key == "o":
+                trigger_oscope()          # one shot process to view oscope
+            elif key == "q":
+                stop_all(); break         # usage: press q to stop all processes
+            elif key == "s":
+                trigger_spectrogram()     # usage: press s to plot spectrogram of last recording
+            elif key == "t":
+                list_all_threads()        # usage: press t to see all threads
+            elif key == "v":
+                toggle_vu_meter()         # usage: press v to start cli vu meter, press v again to stop
+            else:
+                print("Unknown key " + key)
+
+    except KeyboardInterrupt:  # ctrl-c in windows
+        print('\nCtrl-C: Recording process stopped by user.')
+        ##stop_all()
+
+    except Exception as e:
+        print(f"An error occurred while attempting to execute this script: {e}")
+        quit(-1)
 
 
 if __name__ == "__main__":

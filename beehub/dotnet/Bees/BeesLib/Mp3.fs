@@ -1,4 +1,4 @@
-module Bees.Mp3
+module BeesLib.Mp3
 
 open NAudio.Lame
 open NAudio.Wave

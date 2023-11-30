@@ -1,7 +1,8 @@
-module Bees.Parallel
+module BeesLib.Parallel
 
 open System
 
+// Rough sketch, in case needed
 
 type IFParallelRunner<'T,'R> = 
     abstract member Submit: Func<Async<'T>> -> unit
