@@ -14,7 +14,7 @@ type IPoolItem() =
 
 type ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, creator: unit -> 'Item) =
 
-  let pool = ConcurrentBag<'Item>() // TryTake() at interrupt time
+  let pool = ConcurrentQueue<'Item>() // TryTake() at interrupt time
  
   
   // At interrupt time or at other times
@@ -29,7 +29,7 @@ type ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, cre
   // Always used at interrupt time
 
   let takeFromPool() =
-    let ok, obj = pool.TryTake()
+    let ok, obj = pool.TryDequeue()
     if ok then
       changeAvail -1
       changeInUse +1
@@ -44,7 +44,7 @@ type ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, cre
   let mutable seqNumNext = 0  // ok to be overwritten when item is used
 
   let addToPool (item: 'Item) =
-    pool.Add item // can cause allocation and thus GC
+    pool.Enqueue item // can cause allocation and thus GC
     changeAvail +1
     changeInUse -1
     assert (Volatile.Read &countAvail.contents = pool.Count)

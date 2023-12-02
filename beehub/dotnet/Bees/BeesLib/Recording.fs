@@ -34,19 +34,14 @@ type State =
 | AfterEndTOD
 | Active of RecordingOnOff
 
-type TimeOfDay(hours:int, minutes:int, seconds:int) =
-  member this.Hours   = if hours   < 24 then hours   else failwith "Hours must be less than 24"
-  member this.Minutes = if minutes < 60 then minutes else failwith "Minutes must be less than 60"
-  member this.Seconds = if seconds < 60 then seconds else failwith "Seconds must be less than 60"
-
 type Recording = {
-  recordingPeriod   : TimeSpan            // record_period for each file
-  interval          : TimeSpan option   
-  label             : string              // thread_id
-  filenameExtension : string              // file_format       
-  targetSampleRate  : int                 // target_sample_rate               
-  beginTimeOfDay    : TimeOfDay option    // start_tod
-  endTimeOfDay      : TimeOfDay option    // end_tod
+  recordingPeriod   : TimeSpan        // record_period for each file
+  interval          : TimeSpan option 
+  label             : string          // thread_id
+  filenameExtension : string          // file_format       
+  targetSampleRate  : int             // target_sample_rate               
+  beginTimeOfDay    : TimeSpan option // start_tod
+  endTimeOfDay      : TimeSpan option // end_tod
   inputSampleRate   : int
   mutable state     : State
   cancellationToken : CancellationToken }
