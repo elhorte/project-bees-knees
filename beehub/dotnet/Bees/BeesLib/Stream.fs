@@ -99,11 +99,11 @@ let makeAndStartStreamQueue workPerCallback  : StreamQueue =
 // PortAudioSharp.Stream
 
 /// <summary>Make the pool of CbMessages used by the stream callback</summary>
-let makeCbMessagePool stream streamQueue logger =
+let makeCbMessagePool config stream streamQueue logger =
   let bufSize    = 1024
   let startCount = Environment.ProcessorCount * 4    // many more than number of cores
   let minCount   = 4
-  CbMessagePool(bufSize, startCount, minCount, stream, streamQueue, logger)
+  CbMessagePool(bufSize, startCount, minCount, config, stream, streamQueue, logger)
 
 /// <summary>
 ///   Creates an audio stream, to be started by the caller.
@@ -116,7 +116,7 @@ let makeCbMessagePool stream streamQueue logger =
 /// <param name="withLoggingRef"  > A Boolean determining if the callback should do logging   </param>
 /// <param name="streamQueue"     > StreamQueue object handling audio stream                  </param>
 /// <returns>A CbContext struct to be passed to each callback</returns>
-let makeStream inputParameters outputParameters sampleRate withEchoRef withLoggingRef (streamQueue: StreamQueue)  : CbContext =
+let makeStream config inputParameters outputParameters sampleRate withEchoRef withLoggingRef (streamQueue: StreamQueue)  : CbContext =
   let cbContextRef = ResizeArray<CbContext>(1)  // indirection to solve the chicken or egg problem
   let callback = makeStreamCallback cbContextRef streamQueue
   let stream = new Stream(inParams        = Nullable<_>(inputParameters )        ,
@@ -129,10 +129,11 @@ let makeStream inputParameters outputParameters sampleRate withEchoRef withLoggi
   let startTime = DateTime.Now
   let logger = Logger(8000, startTime)
   let cbContext = {
+    config         = config
     stream         = stream
     streamQueue    = streamQueue
     logger         = logger
-    cbMessagePool  = makeCbMessagePool stream streamQueue logger
+    cbMessagePool  = makeCbMessagePool config stream streamQueue logger
     withEchoRef    = withEchoRef
     withLoggingRef = withLoggingRef
     startTime      = startTime

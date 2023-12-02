@@ -10,6 +10,16 @@ open BeesLib.ItemPool
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// Config
+
+type Config = {
+  LocationId : int
+  HiveId     : int
+  PrimaryDir : string
+  MonitorDir : string
+  PlotDir    : string }
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // CbMessage pool
 
 type BufType = float32
@@ -18,6 +28,7 @@ type Buf     = Buf of BufType array
 /// The callback is given this.
 [<Struct>]
 type CbContext = {
+  config         : Config
   stream         : Stream
   streamQueue    : StreamQueue
   logger         : Logger
@@ -28,10 +39,10 @@ type CbContext = {
   seqNumRef      : int ref }
 
 /// The callback sends this message to the managed-code handler.
-and CbMessage(stream: Stream, streamQueue: StreamQueue, logger: Logger, bufSize: int) =
+and CbMessage(config: Config, stream: Stream, streamQueue: StreamQueue, logger: Logger, bufSize: int) =
   inherit IPoolItem()
 
-  let cbMessagePoolPlaceHolder = CbMessagePool(bufSize, 0, 0, stream, streamQueue, logger)
+  let cbMessagePoolPlaceHolder = CbMessagePool(bufSize, 0, 0, config, stream, streamQueue, logger)
   let ti = StreamCallbackTimeInfo() // Replace with actual time info.
   let sf = StreamCallbackFlags.PrimingOutput
   let buf = Buf (Array.zeroCreate<BufType> bufSize)
@@ -39,6 +50,7 @@ and CbMessage(stream: Stream, streamQueue: StreamQueue, logger: Logger, bufSize:
   // Most initializer values here are placeholders that will be overwritten by the callback.
 
   let cbCtxTemp: CbContext = {
+    config         = config
     stream         = stream
     streamQueue    = streamQueue
     logger         = logger
@@ -69,8 +81,8 @@ and CbMessage(stream: Stream, streamQueue: StreamQueue, logger: Logger, bufSize:
 
 and StreamQueue = CbMessage AsyncConcurrentQueue
 
-and CbMessagePool(bufSize: int, startCount: int, minCount: int, stream: Stream, streamQueue: StreamQueue, logger: Logger) =
-  inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(stream, streamQueue, logger, bufSize))
+and CbMessagePool(bufSize: int, startCount: int, minCount: int, config: Config, stream: Stream, streamQueue: StreamQueue, logger: Logger) =
+  inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(config, stream, streamQueue, logger, bufSize))
 
 let dummyCbMessage() : CbMessage =
   System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject typeof<CbMessage>

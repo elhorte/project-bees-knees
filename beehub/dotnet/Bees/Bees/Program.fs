@@ -62,6 +62,16 @@ let run stream cancellationTokenSource = task {
   printfn "Terminated" }
 
 //–––––––––––––––––––––––––––––––––––––
+// Config
+
+let config = {
+  LocationId = 1
+  HiveId     = 1
+  PrimaryDir = "primary"
+  MonitorDir = "monitor"
+  PlotDir    = "plot" }
+
+//–––––––––––––––––––––––––––––––––––––
 // Main
 
 /// Main does the following:
@@ -86,7 +96,7 @@ let main _ =
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   let streamQueue = makeAndStartStreamQueue cbMessageWorkList.HandleCbMessage
-  let cbContext   = makeStream inputParameters outputParameters sampleRate withEchoRef withLoggingRef streamQueue
+  let cbContext   = makeStream config inputParameters outputParameters sampleRate withEchoRef withLoggingRef streamQueue
   keyboardInputInit()
   task {
     try
