@@ -23,25 +23,31 @@ open BeesLib.CbMessageWorkList
 //   | AAC
 //   | OGG
 
+type TodRange = {
+  Begin: TimeSpan
+  End: TimeSpan }
+
+type ActivePeriod =
+| Continuous
+| Range of TodRange
+
 type RecordingOnOff =
-| Recording of DateTime
-| Waiting   of DateTime
+| RecordingUntil of DateTime
+| WaitingUntil   of DateTime
 
 type State =
-| Init
-| Continuous
-| BeforeStartTOD
-| AfterEndTOD
-| Active of RecordingOnOff
+| AlwaysOn of RecordingOnOff
+| RightTod of RecordingOnOff
+| BeforeTodBegin
+| AfterTodEnd
 
 type Recording = {
-  recordingPeriod   : TimeSpan        // record_period for each file
-  interval          : TimeSpan option 
-  label             : string          // thread_id
-  filenameExtension : string          // file_format       
-  targetSampleRate  : int             // target_sample_rate               
-  beginTimeOfDay    : TimeSpan option // start_tod
-  endTimeOfDay      : TimeSpan option // end_tod
+  recordingPeriod   : TimeSpan     // 0 <= x <= 24h
+  interval          : TimeSpan     // x >= 0
+  label             : string       // thread_id
+  filenameExtension : string       // file_format       
+  targetSampleRate  : int          // target_sample_rate               
+  activePeriod      : ActivePeriod // start_tod  both = 0 means continuous recording
   inputSampleRate   : int
   mutable state     : State
   cancellationToken : CancellationToken }
@@ -56,20 +62,50 @@ let pcmToMp3Write data name =
   ()
 let osPathJoin dir name = $"{dir}/{name}"
 
-let nextState r now =
+let updateOnOff onOff =
+  onOff // todo
+
+let beginRightTod r now =
+  
+let todIsAfterEnd r state tod =
+  match r.activePeriod with
+  | Range todRange ->
+    match state with
+    | AlwaysOn onOff -> failwith "Can't happen"
+    | BeforeBegin
+    | RightTod
+    | AfterEnd    when tod > todRange.End   -> AfterTodEnd 
+    | BeforeBegin
+    | RightTod
+    | AfterEnd    when tod < todRange.Begin -> BeforeBegin
+    | BeforeBegin
+    | AfterEnd    when tod < todRange.Begin -> BeforeBegin
+    | RightTod onOff ->  RightTod onOff 
+  | Continuous -> 
+
+let updateState r now =
+  let tod = now - DateTime.Today
   match r.state with
-  | Continuous        -> Continuous
-  | AfterEndTOD -> AfterEndTOD 
+  | Continuous onOff -> Continuous (updateOnOff onOff)
+  | x ->
+  match x with
+  | AfterTodEnd
+  | BeforeTodBegin when todIsAfterEnd r tod    -> AfterTodEnd
+  | Init
+  | AfterTodEnd
+  | BeforeTodBegin when tod < r.TodBegin -> BeforeTodBegin
+  | AfterTodEnd
+  | BeforeTodBegin                       -> beginRightTod r now
   | _ ->
-  match r.beginTimeOfDay, r.endTimeOfDay with
-  | Some b, Some e  when now < b ->  BeforeStartTOD
-  | Some b, Some e  when e < now ->  AfterEndTOD
+  match r.TodBegin, r.TodEnd with
+  | Some b, Some e  when now < b ->  BeforeTodBegin
+  | Some b, Some e  when e < now ->  AfterTodEnd
   | _ ->
   match r.state with
   | Continuous
-  | BeforeStartTOD
-  | AfterEndTOD -> r.state
-  | Recording start ->
+  | BeforeTodBegin
+  | AfterTodEnd -> r.state
+  | RecordingUntil start ->
     if now < start + r.recordingPeriod then Recording start
     else Waiting start
   | Waiting start ->
@@ -78,16 +114,16 @@ let nextState r now =
     
 let startRecording (config: Config) (cbMessageWorkList: CbMessageWorkList) recordingParams =
   let r = recordingParams
-  if r.beginTimeOfDay.IsNone then
+  if r.TodBegin.IsNone then
     r.state <- Continuous
     printfn $"{r.label} is recording continuously"
   else
     r.state <- Init
-    r.state <- nextState r DateTime.Now
+    r.state <- updateState r DateTime.Now
   let handleFrame (cbMessage: CbMessage) (workId: WorkId) unregisterMe =
     if r.cancellationToken.IsCancellationRequested then unregisterMe() else
     let now = DateTime.Now
-    let state = nextState r now
+    let state = updateState r now
     
     printfn ""  
     printfn $"{r.label} recording started at: {now} for {r.recordingPeriod}, with gap {r.interval}"
@@ -117,7 +153,7 @@ let startRecording (config: Config) (cbMessageWorkList: CbMessageWorkList) recor
     interruptable_sleep(interval, stop_recording_event)
     ()
 
-  match r.beginTimeOfDay with
+  match r.TodBegin with
   | None   -> printfn $"{r.label} is recording continuously"
   | Some b -> printfn $"Recording started at: {b}"
 
