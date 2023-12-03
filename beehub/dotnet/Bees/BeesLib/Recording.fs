@@ -16,30 +16,19 @@ open BeesLib.CbMessageWorkList
 //   start_tod           the time of day to start recording, if 'None', record continuously
 //   end_tod             the time of day to stop  recording, if start_tod == None, ignore & record continuously
 
-// type AudioFormat =
-//   | WAV
-//   | MP3
-//   | FLAC
-//   | AAC
-//   | OGG
-
-type TodRange = {
-  Begin: TimeSpan
-  End: TimeSpan }
+// type TodRange = {
+//   Begin: TimeSpan
+//   End: TimeSpan }
 
 type ActivePeriod =
 | Continuous
-| Range of TodRange
-
-type RecordingOnOff =
-| RecordingUntil of DateTime
-| WaitingUntil   of DateTime
+// | Range of TodRange
 
 type State =
-| AlwaysOn of RecordingOnOff
-| RightTod of RecordingOnOff
-| BeforeTodBegin
-| AfterTodEnd
+| Waiting
+| Recording
+| RecordingUntil of DateTime
+| WaitingUntil   of DateTime
 
 type Recording = {
   recordingPeriod   : TimeSpan     // 0 <= x <= 24h
@@ -62,100 +51,69 @@ let pcmToMp3Write data name =
   ()
 let osPathJoin dir name = $"{dir}/{name}"
 
-let updateOnOff onOff =
-  onOff // todo
-
-let beginRightTod r now =
-  
-let todIsAfterEnd r state tod =
-  match r.activePeriod with
-  | Range todRange ->
-    match state with
-    | AlwaysOn onOff -> failwith "Can't happen"
-    | BeforeBegin
-    | RightTod
-    | AfterEnd    when tod > todRange.End   -> AfterTodEnd 
-    | BeforeBegin
-    | RightTod
-    | AfterEnd    when tod < todRange.Begin -> BeforeBegin
-    | BeforeBegin
-    | AfterEnd    when tod < todRange.Begin -> BeforeBegin
-    | RightTod onOff ->  RightTod onOff 
-  | Continuous -> 
+let initState r =
+  let now = DateTime.Now
+  r.state <-
+    match r.activePeriod with
+    | Continuous     ->  printfn $"{r.label} is now recording continuously"
+                         RecordingUntil (now + r.recordingPeriod)
+//  | Range todRange ->  
 
 let updateState r now =
-  let tod = now - DateTime.Today
-  match r.state with
-  | Continuous onOff -> Continuous (updateOnOff onOff)
-  | x ->
-  match x with
-  | AfterTodEnd
-  | BeforeTodBegin when todIsAfterEnd r tod    -> AfterTodEnd
-  | Init
-  | AfterTodEnd
-  | BeforeTodBegin when tod < r.TodBegin -> BeforeTodBegin
-  | AfterTodEnd
-  | BeforeTodBegin                       -> beginRightTod r now
-  | _ ->
-  match r.TodBegin, r.TodEnd with
-  | Some b, Some e  when now < b ->  BeforeTodBegin
-  | Some b, Some e  when e < now ->  AfterTodEnd
-  | _ ->
-  match r.state with
-  | Continuous
-  | BeforeTodBegin
-  | AfterTodEnd -> r.state
-  | RecordingUntil start ->
-    if now < start + r.recordingPeriod then Recording start
-    else Waiting start
-  | Waiting start ->
-    if start + r.recordingPeriod + r.interval < now then Recording start
-    else Waiting start
-    
+  r.state <-
+    let recordingUntil dt =
+      if now < dt then
+        RecordingUntil dt
+      else
+        if r.interval = TimeSpan.Zero then  RecordingUntil (dt + r.recordingPeriod)
+                                      else  WaitingUntil   (dt + r.interval)
+    let waitingUntil dt =
+      if now < dt then  WaitingUntil    dt
+                  else  RecordingUntil (dt + r.recordingPeriod)
+    match r.activePeriod with
+    | Continuous ->
+      match r.state with
+      | Waiting           ->  Waiting
+      | Recording         ->  Recording
+      | RecordingUntil dt ->  recordingUntil dt
+      | WaitingUntil   dt ->  waitingUntil   dt
+  
 let startRecording (config: Config) (cbMessageWorkList: CbMessageWorkList) recordingParams =
   let r = recordingParams
-  if r.TodBegin.IsNone then
-    r.state <- Continuous
-    printfn $"{r.label} is recording continuously"
-  else
-    r.state <- Init
-    r.state <- updateState r DateTime.Now
   let handleFrame (cbMessage: CbMessage) (workId: WorkId) unregisterMe =
     if r.cancellationToken.IsCancellationRequested then unregisterMe() else
     let now = DateTime.Now
-    let state = updateState r now
-    
-    printfn ""  
-    printfn $"{r.label} recording started at: {now} for {r.recordingPeriod}, with gap {r.interval}"
-
-    let audioData =
-      if r.targetSampleRate < r.inputSampleRate then
-        downsampleAudio cbMessage.InputSamplesCopy inputSampleRate r.targetSampleRate
-      else
-        cbMessage.InputSamplesCopy
-    let timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
-    let name = $"%s{timestamp}_%s{r.label}_%A{r.recordingPeriod}_%A{r.interval}_{config.LocationId}_{config.HiveId}"
-    let outputFilename = $"%s{name}.{r.filenameExtension.ToLower()}"
-    let mutable fullPathName = ""
-    if r.filenameExtension.ToUpper() = "MP3" then
-      if r.targetSampleRate = 44100 or r.targetSampleRate = 48000 then
-        fullPathName <- osPathJoin config.MonitorDir outputFilename
-        pcmToMp3Write audioData fullPathName
-      else
-        printfn "mp3 only supports 44.1k and 48k sample rates"
-        System.Environment.Exit -1
-    else
-      let fullPathName = osPathJoin config.PrimaryDir outputFilename
-      sf.write(fullPathName, audioData, r.targetSampleRate, format=r.filenameExtension.ToUpper())
-
-    printfn $"Saved %s{r.label} audio to %s{fullPathName}, period: %A{r.recordingPeriod}, interval %A{r.interval} seconds"
-    // wait "interval" seconds before starting recording again
-    interruptable_sleep(interval, stop_recording_event)
-    ()
-
-  match r.TodBegin with
-  | None   -> printfn $"{r.label} is recording continuously"
-  | Some b -> printfn $"Recording started at: {b}"
-
+    let writeFile() =
+      let audioData =
+        if r.targetSampleRate < r.inputSampleRate then
+          downsampleAudio cbMessage.InputSamplesCopy inputSampleRate r.targetSampleRate
+        else
+          cbMessage.InputSamplesCopy
+      let timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+      let name = $"%s{timestamp}_%s{r.label}_%A{r.recordingPeriod}_%A{r.interval}_{config.LocationId}_{config.HiveId}"
+      let outputFilename = $"%s{name}.{r.filenameExtension.ToLower()}"
+      let mutable fullPathName = ""
+      printfn ""  
+      printfn $"{r.label} recording started at: {now} for {r.recordingPeriod}, with gap {r.interval}"
+      match r.filenameExtension.ToUpper() with
+      | "MP3" ->
+        match r.targetSampleRate with
+        | 44100 | 48000 ->
+          fullPathName <- osPathJoin config.MonitorDir outputFilename
+          pcmToMp3Write audioData fullPathName
+        | _ ->
+          printfn "mp3 only supports 44.1k and 48k sample rates"
+          System.Environment.Exit -1
+      | _ ->
+        fullPathName <- osPathJoin config.PrimaryDir outputFilename
+        sf.write(fullPathName, audioData, r.targetSampleRate, format=r.filenameExtension.ToUpper())
+      printfn $"Saved %s{r.label} audio to %s{fullPathName}, period: %A{r.recordingPeriod}, interval %A{r.interval} seconds"
+    updateState r now
+    match r.state with
+    | Recording         -> writeFile()
+    | RecordingUntil dt -> writeFile()
+    | Waiting           -> ()
+    | WaitingUntil   dt -> ()
+  initState r
   cbMessageWorkList.RegisterWorkItem handleFrame
 

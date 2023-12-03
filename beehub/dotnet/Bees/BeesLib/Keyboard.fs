@@ -11,6 +11,18 @@ open BeesLib.Commands
 
 printfn "Press Control-C or Control-Break to exit."
 
+let help = """
+  c check audio pathway for over/underflows
+  d one shot process to see device list
+  f one shot process to see fft
+  i press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
+  m select channel to monitor
+  o one shot process to view oscope
+  q stop all processes and quit
+  s plot spectrogram of last recording
+  t see all threads
+  v start cli vu meter, press v again to stop"""
+
 /// beehive keyboard triggered management utilities
 let performKey keyInfo consoleRead cancellationTokenSource =
   let keyInfo = (keyInfo: ConsoleKeyInfo)
@@ -20,21 +32,21 @@ let performKey keyInfo consoleRead cancellationTokenSource =
   task {
     match keyChar with
     | 'q'  ->  cts.Cancel()
-               do! stopAll              true   // usage: press q to stop all processes
+               do! stopAll              true   // stop all processes and quit
     | 'c'  ->  do! checkStreamStatus    10     // check audio pathway for over/underflows
     | 'd'  ->  do! showAudioDeviceList  ()     // one shot process to see device list
     | 'f'  ->  do! triggerFft           ()     // one shot process to see fft
-    | 'i'  ->  do! toggleIntercomM      cr cts // usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
-    | 'm'  ->  do! changeMonitorChannel ()     // usage: press m to select channel to monitor
+    | 'i'  ->  do! toggleIntercomM      cr cts // press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
+    | 'm'  ->  do! changeMonitorChannel ()     // select channel to monitor
     | 'o'  ->  do! triggerOscope        ()     // one shot process to view oscope
-    | 's'  ->  do! triggerSpectrogram   ()     // usage: press s to plot spectrogram of last recording
-    | 't'  ->  do! listAllThreads       ()     // usage: press t to see all threads
-    | 'v'  ->  do! toggleVuMeter        ()     // usage: press v to start cli vu meter, press v again to stop
+    | 's'  ->  do! triggerSpectrogram   ()     // plot spectrogram of last recording
+    | 't'  ->  do! listAllThreads       ()     // see all threads
+    | 'v'  ->  do! toggleVuMeter        ()     // start cli vu meter, press v again to stop
     | '\r' ->  printfn ""
+    | '?'  ->  printfn $"%s{help}"
     | c    ->  printfn $"Unknown command: {c}" }
   |> Task.WaitAll
-
-
+  
 let keyboardInputInit() =
   printfn "Initializing keyboard input."
   let ctrlCEventHandler sender (args: ConsoleCancelEventArgs) =
