@@ -20,17 +20,12 @@ type TodRange = {
   Begin: TimeSpan
   End  : TimeSpan }
 
-type RangePos =
-  | Before
-  | During
-  | After
-
 type ActivityType =
   | Continuous
   | Range of TodRange
 
 type State =
-  | Init
+  | ReadyToRecord
   | RecordingUntil of DateTime
   | WaitingUntil   of DateTime
 
@@ -56,62 +51,61 @@ let pcmToMp3Write data name =
 let osPathJoin dir name = $"{dir}/{name}"
 
 
-let recordingUntil r dt now =
-  r.state <-
-    if now < dt then  RecordingUntil dt
-                else  if r.interval = TimeSpan.Zero then  RecordingUntil (dt + r.recordingPeriod)
-                                                    else  WaitingUntil   (dt + r.interval)
-let waitingUntil r dt now =
-  
-  r.state <-
-    if now < dt then  WaitingUntil    dt
-                else  RecordingUntil (dt + r.recordingPeriod)
+type RangePosition =
+  | During
+  | Before of DateTime // of next During today
+  | After  of DateTime // of next During tomorrow
 
 let rangePosition todRange now =
-  let today = DateTime.Today
-  if   now < today + todRange.Begin then  Before
-  elif now < today + todRange.End   then  During
-                                    else  After
+  let today    = DateTime.Today
+  let tomorrow = DateTime.Today + (TimeSpan.FromDays 1)
+  let todayBegin    = today    + todRange.Begin
+  let tomorrowBegin = tomorrow + todRange.Begin
+  let todayEnd      = today    + todRange.End
+  if   now <  todayBegin then  Before todayBegin
+  elif now >= todayEnd   then  After  tomorrowBegin
+                         else  During
 
-let setState r now =
-  match r.activityType with
-  | Continuous     ->  match r.state with
-                       | RecordingUntil dt ->  recordingUntil r dt now
-                       | WaitingUntil   dt ->  waitingUntil   r dt now
-  | Range todRange ->  match r.state, rangePosition todRange now with
-                       | RecordingUntil dt, During ->  recordingUntil r dt now
-                       | WaitingUntil   dt, Before ->  waitingUntil   r dt now
-                       | WaitingUntil   dt, After  ->  waitingUntil   r dt now
-
-  // match r.activityType with
-  // | Continuous     -> match r.state with
-  //                     | Init              ->  printfn $"{r.label} is now recording continuously"
-  //                                             r.state <- RecordingUntil (now + r.recordingPeriod)
-  //                     | RecordingUntil dt ->  recordingUntil dt
-  //                     | WaitingUntil   dt ->  waitingUntil   dt
-  // | Range todRange -> match r.state, rangePosition todRange now with
-  //                     | Init, During         ->  printfn $"{r.label} is now recording until end of the daily range"
-  //                                                r.state <- RecordingUntil (now + r.recordingPeriod)
-  //                     | Init, Before         ->  printfn $"{r.label} recording will start at beginning of the daily range"
-  //                     | Init, After          ->  printfn $"{r.label} recording will start tomorrow at beginning of the daily range"
-  //                     | RecordingUntil dt, _ ->  recordingUntil dt
-  //                     | WaitingUntil   dt, _ ->  waitingUntil   dt
+let stateNow r now =
+  let recordingUntil recEnd =
+    let xxxx todRange dt =
+      WRONG
+      let dt2 =
+        match rangePosition todRange recEnd with
+        | During    ->  recEnd
+        | Before dt ->  dt
+        | After  dt ->  dt
+      let dt = max recEnd dt2
+      WaitingUntil   dt
+    if   now < recEnd               then  RecordingUntil  recEnd
+    elif r.interval = TimeSpan.Zero then  RecordingUntil (recEnd + r.recordingPeriod)
+                                    else  xxxx           (recEnd + r.interval)
+  let waitingUntil dt =
+    if now < dt then  WaitingUntil    dt
+                else  RecordingUntil (dt + r.recordingPeriod)
+  r.state <-
+    match r.activityType with
+    | Continuous     ->  match r.state with
+                         | ReadyToRecord                 ->  RecordingUntil (now + r.recordingPeriod)
+                         | RecordingUntil dt             ->  recordingUntil dt
+                         | WaitingUntil   dt             ->  waitingUntil   dt
+    | Range todRange ->  match r.state, rangePosition todRange now with
+                         | RecordingUntil dt, _          ->  recordingUntil dt
+                         | WaitingUntil   dt, Before dt2 ->  waitingUntil   dt
+                         | WaitingUntil   dt, After  dt2 ->  waitingUntil   dt
 
 let initState r now =
-  match r.activityType with
-  | Continuous     ->  printfn $"{r.label} is now recording continuously"
-                       r.state <- RecordingUntil (now + r.recordingPeriod)
-  | Range todRange ->  match rangePosition todRange now with
-                       | During ->  printfn $"{r.label} is now recording until end of the daily range"
-                                    r.state <- RecordingUntil (now + r.recordingPeriod)
-                       | Before ->  printfn $"{r.label} recording will start at beginning of the daily range"
-                       | After  ->  printfn $"{r.label} recording will start tomorrow at beginning of the daily range"
-  | RecordingUntil dt, _ ->
-      match r.activityType, rangePosition todRange now with
-                      | Init, During         ->  printfn $"{r.label} is now recording until end of the daily range"
-                                                 r.state <- RecordingUntil (now + r.recordingPeriod)
-                      | Init, Before         ->  printfn $"{r.label} recording will start at beginning of the daily range"
-                      | Init, After          ->  printfn $"{r.label} recording will start tomorrow at beginning of the daily range"
+  r.state <-
+    match r.activityType with
+    | Continuous     ->  printfn $"{r.label} will recording continuously"
+                         ReadyToRecord
+    | Range todRange ->  match rangePosition todRange now with
+                         | During    ->  printfn $"{r.label} will record until end of the daily range"
+                                         ReadyToRecord
+                         | Before dt ->  printfn $"{r.label} will start recording at beginning of the daily range"
+                                         WaitingUntil dt
+                         | After  dt ->  printfn $"{r.label} will start recording tomorrow at beginning of the daily range"
+                                         WaitingUntil dt
 
 /// Start recording.
 let startRecording (config: Config) (cbMessageWorkList: CbMessageWorkList) recordingParams =
@@ -144,12 +138,11 @@ let startRecording (config: Config) (cbMessageWorkList: CbMessageWorkList) recor
         fullPathName <- osPathJoin config.PrimaryDir outputFilename
         sf.write(fullPathName, audioData, r.targetSampleRate, format=r.filenameExtension.ToUpper())
       printfn $"Saved %s{r.label} audio to %s{fullPathName}, period: %A{r.recordingPeriod}, interval %A{r.interval} seconds"
-    setState r now
+    stateNow r now
     match r.state with
-    | Init             -> failwith "can’t happen"
+    | ReadyToRecord    -> ()
     | RecordingUntil _ -> writeFile()
     | WaitingUntil   _ -> ()
-  r.state <- Init
-  setState r DateTime.Now
+  initState r DateTime.Now
   cbMessageWorkList.RegisterWorkItem handleFrame
 
