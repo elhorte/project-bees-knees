@@ -16,13 +16,18 @@ open BeesLib.CbMessageWorkList
 //   start_tod           the time of day to start recording, if 'None', record continuously
 //   end_tod             the time of day to stop  recording, if start_tod == None, ignore & record continuously
 
-// type TodRange = {
-//   Begin: TimeSpan
-//   End: TimeSpan }
+type TodRange = {
+  Begin: TimeSpan
+  End: TimeSpan }
+
+type RangePos =
+| Before
+| During
+| After
 
 type ActivePeriod =
 | Continuous
-// | Range of TodRange
+| Range of TodRange
 
 type State =
 | Waiting
@@ -36,7 +41,7 @@ type Recording = {
   label             : string       // thread_id
   filenameExtension : string       // file_format       
   targetSampleRate  : int          // target_sample_rate               
-  activePeriod      : ActivePeriod // start_tod  both = 0 means continuous recording
+  activePeriod      : ActivePeriod // continuous recording or range of time
   inputSampleRate   : int
   mutable state     : State
   cancellationToken : CancellationToken }
@@ -51,32 +56,47 @@ let pcmToMp3Write data name =
   ()
 let osPathJoin dir name = $"{dir}/{name}"
 
+let inRange todRange now =
+  if   now < todRange.Begin then Before
+  elif now < todRange.End   then During
+                            else After
+
+let isBefore todRange now = inRange todRange now = Before
+let isDuring todRange now = inRange todRange now = During
+let isAfter  todRange now = inRange todRange now = After
+
 let initState r =
   let now = DateTime.Now
   r.state <-
     match r.activePeriod with
     | Continuous     ->  printfn $"{r.label} is now recording continuously"
                          RecordingUntil (now + r.recordingPeriod)
-//  | Range todRange ->  
+    | Range todRange when isDuring todRange now ->
+      printfn $"{r.label} is now recording until end of daily range"
+      let thisSegment = now + r.recordingPeriod
+      let endOfRange  = now.Date + todRange.End
+      RecordingUntil (min thisSegment endOfRange)
+    | Range todRange when isBefore todRange now -> WaitingUntil (now.Date + todRange.Begin)
+    | Range todRange -> WaitingUntil (now.Date + todRange.Begin)
+  
 
-let updateState r now =
-  r.state <-
-    let recordingUntil dt =
-      if now < dt then
-        RecordingUntil dt
-      else
-        if r.interval = TimeSpan.Zero then  RecordingUntil (dt + r.recordingPeriod)
-                                      else  WaitingUntil   (dt + r.interval)
-    let waitingUntil dt =
-      if now < dt then  WaitingUntil    dt
-                  else  RecordingUntil (dt + r.recordingPeriod)
-    match r.activePeriod with
-    | Continuous ->
-      match r.state with
-      | Waiting           ->  Waiting
-      | Recording         ->  Recording
-      | RecordingUntil dt ->  recordingUntil dt
-      | WaitingUntil   dt ->  waitingUntil   dt
+let determineState r now =
+  let recordingUntil dt =
+    if now < dt then
+      RecordingUntil dt
+    else
+      if r.interval = TimeSpan.Zero then  RecordingUntil (dt + r.recordingPeriod)
+                                    else  WaitingUntil   (dt + r.interval)
+  let waitingUntil dt =
+    if now < dt then  WaitingUntil    dt
+                else  RecordingUntil (dt + r.recordingPeriod)
+  match r.activePeriod with
+  | Continuous ->
+    match r.state with
+    | Waiting           ->  Waiting
+    | Recording         ->  Recording
+    | RecordingUntil dt ->  recordingUntil dt
+    | WaitingUntil   dt ->  waitingUntil   dt
   
 let startRecording (config: Config) (cbMessageWorkList: CbMessageWorkList) recordingParams =
   let r = recordingParams
@@ -108,7 +128,7 @@ let startRecording (config: Config) (cbMessageWorkList: CbMessageWorkList) recor
         fullPathName <- osPathJoin config.PrimaryDir outputFilename
         sf.write(fullPathName, audioData, r.targetSampleRate, format=r.filenameExtension.ToUpper())
       printfn $"Saved %s{r.label} audio to %s{fullPathName}, period: %A{r.recordingPeriod}, interval %A{r.interval} seconds"
-    updateState r now
+    determineState r now
     match r.state with
     | Recording         -> writeFile()
     | RecordingUntil dt -> writeFile()
