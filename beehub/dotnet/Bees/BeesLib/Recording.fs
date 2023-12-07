@@ -1,8 +1,10 @@
 module BeesLib.Recording
 
 open System
+open System.Collections.Generic
 open System.Threading
 
+open System.Threading.Tasks
 open BeesLib.CbMessagePool
 open BeesLib.CbMessageWorkList
 
@@ -67,51 +69,49 @@ let rangePosition todRange now =
   elif now >= todayEnd   then  After  tomorrowBegin
                          else  During
 
-let setState r now =
-  let recordingUntil count =
-    let xxxx todRange count =
-      WRONG
-      let dt2 =
-        match rangePosition todRange recEnd with
-        | During    ->  recEnd
-        | Before dt ->  dt
-        | After  dt ->  dt
-      let dt = max recEnd dt2
-      WaitingUntil   dt
-    if   count > 0                  then  RecordingUntil  count
-    elif r.interval = TimeSpan.Zero then  RecordingUntil (recEnd + r.recordingPeriod) // start again
-                                    else  xxxx           (recEnd + r.interval)
-  let waitingUntil dt =
-    let recordingFileSize (duration: TimeSpan) = duration.Seconds * r.targetSampleRate * r.targetChannels 
-    if now < dt then  WaitingUntil    dt
-                else  RecordingUntil  (recordingFileSize r.recordingPeriod)
-  r.state <-
-    match r.activityType with
-    | Continuous     ->  match r.state with
-                         | RecordingUntil count          ->  recordingUntil count
-                         | WaitingUntil   dt             ->  waitingUntil   dt
-    | Range todRange ->  match r.state, rangePosition todRange now with
-                         | RecordingUntil count, _          ->  recordingUntil count
-                         | WaitingUntil   dt   , Before dt2
-                         | WaitingUntil   dt   , After  dt2 ->  waitingUntil   dt
+// let setState r now =
+//   let recordingUntil count =
+//     let xxxx todRange count =
+//       WRONG
+//       let dt2 =
+//         match rangePosition todRange recEnd with
+//         | During    ->  recEnd
+//         | Before dt ->  dt
+//         | After  dt ->  dt
+//       let dt = max recEnd dt2
+//       WaitingUntil   dt
+//     if   count > 0                  then  RecordingUntil  count
+//     elif r.interval = TimeSpan.Zero then  RecordingUntil (recEnd + r.recordingPeriod) // start again
+//                                     else  xxxx           (recEnd + r.interval)
+//   let waitingUntil dt =
+//     let recordingFileSize (duration: TimeSpan) = duration.Seconds * r.targetSampleRate * r.targetChannels 
+//     if now < dt then  WaitingUntil    dt
+//                 else  RecordingUntil  (recordingFileSize r.recordingPeriod)
+//   r.state <-
+//     match r.activityType with
+//     | Continuous     ->  match r.state with
+//                          | RecordingUntil count          ->  recordingUntil count
+//                          | WaitingUntil   dt             ->  waitingUntil   dt
+//     | Range todRange ->  match r.state, rangePosition todRange now with
+//                          | RecordingUntil count, _          ->  recordingUntil count
+//                          | WaitingUntil   dt   , Before dt2
+//                          | WaitingUntil   dt   , After  dt2 ->  waitingUntil   dt
+//
+// let initState r now =
+//   r.state <-
+//     match r.activityType with
+//     | Continuous     ->  printfn $"{r.label} will recording continuously"
+//                          RecordingUntil (now + r.recordingPeriod)
+//     | Range todRange ->  match rangePosition todRange now with
+//                          | During    ->  printfn $"{r.label} will record until end of the daily range"
+//                                          RecordingUntil (now + r.recordingPeriod)
+//                          | Before dt ->  printfn $"{r.label} will start recording at beginning of the daily range"
+//                                          WaitingUntil dt
+//                          | After  dt ->  printfn $"{r.label} will start recording tomorrow at beginning of the daily range"
+//                                          WaitingUntil dt
 
-let initState r now =
-  r.state <-
-    match r.activityType with
-    | Continuous     ->  printfn $"{r.label} will recording continuously"
-                         RecordingUntil (now + r.recordingPeriod)
-    | Range todRange ->  match rangePosition todRange now with
-                         | During    ->  printfn $"{r.label} will record until end of the daily range"
-                                         RecordingUntil (now + r.recordingPeriod)
-                         | Before dt ->  printfn $"{r.label} will start recording at beginning of the daily range"
-                                         WaitingUntil dt
-                         | After  dt ->  printfn $"{r.label} will start recording tomorrow at beginning of the daily range"
-                                         WaitingUntil dt
 
-  
-/// Start recording.
-let startRecording (config: Config) (cbMessageWorkList: CbMessageWorkList) recordingParams =
-  let r = recordingParams
+let doRecording r (queue: Queue<CbMessage option>) =
   let makeFilename config r =
     let timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
     let name = $"%s{timestamp}_%s{r.label}_%A{r.recordingPeriod}_%A{r.interval}_{config.LocationId}_{config.HiveId}"
@@ -119,33 +119,59 @@ let startRecording (config: Config) (cbMessageWorkList: CbMessageWorkList) recor
   let downSampleIfNeeded r buf =
     if r.targetSampleRate < r.inputSampleRate then  downsampleAudio buf inputSampleRate r.targetSampleRate
                                               else  buf
+  // let record() = seq {
+  //   while true do
+  //     match queue.Dequeue() with
+  //     | Some cbMessage -> //
+  //                         yield! record()
+  //     | None -> ()
+  //     
+  // //   let now = DateTime.Now
+  //   // let writeFile() =
+  //   //   let audioData = downSampleIfNeeded r cbMessage.InputSamplesCopy
+  //   //   let outputFilename = makeFilename config r
+  //   //   printfn $"\n{r.label} recording started at: {now} for {r.recordingPeriod}, with gap {r.interval}"
+  //   //   let mutable fullPathName = ""
+  //   //   let fileExt = r.filenameExtension.ToLower()
+  //   //   match fileExt with
+  //   //   | "mp3" ->
+  //   //     match r.targetSampleRate with
+  //   //     | 44100 | 48000 ->
+  //   //       fullPathName <- osPathJoin config.MonitorDir outputFilename
+  //   //       pcmToMp3Write audioData fullPathName
+  //   //     | _ ->
+  //   //       printfn "mp3 only supports 44.1k and 48k sample rates"
+  //   //       System.Environment.Exit -1
+  //   //   | _ ->
+  //   //     fullPathName <- osPathJoin config.PrimaryDir outputFilename
+  //   //     sf.write(fullPathName, audioData, r.targetSampleRate, format=fileExt)
+  //   //   printfn $"Saved %s{r.label} audio to %s{fullPathName}, period: %A{r.recordingPeriod}, interval %A{r.interval} seconds"
+  //   yield ()
+  // }
+  // match r.activityType with
+  // | Continuous     ->  printfn $"{r.label} will recording continuously"
+  //                      yield! record()
+  // | Range todRange ->  match rangePosition todRange now with
+  //                      | During    ->  printfn $"{r.label} will record until end of the daily range"
+  //                                      RecordingUntil (now + r.recordingPeriod)
+  //                      | Before dt ->  printfn $"{r.label} will start recording at beginning of the daily range"
+  //                                      WaitingUntil dt
+  //                      | After  dt ->  printfn $"{r.label} will start recording tomorrow at beginning of the daily range"
+  //                                      WaitingUntil dt
+  // }     
+  ()
+
+  
+/// Start recording.
+let startRecording (config: Config) (cbMessageWorkList: CbMessageWorkList) recordingParams =
+  let r = recordingParams
+  let queue = Queue<CbMessage option>()
   let handleFrame (cbMessage: CbMessage) (workId: WorkId) unregisterMe =
-    if r.cancellationToken.IsCancellationRequested then unregisterMe() else
-    let now = DateTime.Now
-    let writeFile() =
-      let audioData = downSampleIfNeeded r cbMessage.InputSamplesCopy
-      let outputFilename = makeFilename config r
-      printfn $"\n{r.label} recording started at: {now} for {r.recordingPeriod}, with gap {r.interval}"
-      let mutable fullPathName = ""
-      let fileExt = r.filenameExtension.ToLower()
-      match fileExt with
-      | "mp3" ->
-        match r.targetSampleRate with
-        | 44100 | 48000 ->
-          fullPathName <- osPathJoin config.MonitorDir outputFilename
-          pcmToMp3Write audioData fullPathName
-        | _ ->
-          printfn "mp3 only supports 44.1k and 48k sample rates"
-          System.Environment.Exit -1
-      | _ ->
-        fullPathName <- osPathJoin config.PrimaryDir outputFilename
-        sf.write(fullPathName, audioData, r.targetSampleRate, format=fileExt)
-      printfn $"Saved %s{r.label} audio to %s{fullPathName}, period: %A{r.recordingPeriod}, interval %A{r.interval} seconds"
-    setState r now
-    match r.state with
-    | ReadyToRecord    -> ()
-    | RecordingUntil _ -> writeFile()
-    | WaitingUntil   _ -> ()
-  initState r DateTime.Now
+    if r.cancellationToken.IsCancellationRequested then
+      unregisterMe()
+      queue.Enqueue None
+    else
+      queue.Enqueue (Some cbMessage)
   cbMessageWorkList.RegisterWorkItem handleFrame
+  Task.Run(fun () -> doRecording r queue)
 

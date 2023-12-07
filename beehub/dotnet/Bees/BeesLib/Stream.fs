@@ -43,8 +43,9 @@ let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: Strea
         StreamCallbackResult.Continue
       | Some cbMessage ->
         do
-          let (Buf buf) = cbMessage.InputSamplesCopy
-          Marshal.Copy(input, buf, startIndex = 0, length = (int frameCount))
+          let (BufRef bufRef) = cbMessage.InputSamplesCopyRef
+          let inputCopy = Volatile.Read &bufRef.contents
+          Marshal.Copy(input, inputCopy, startIndex = 0, length = (int frameCount))
         if Volatile.Read &cbContext.withLoggingRef.contents then
           cbContext.logger.Add seqNum timeStamp "cb bufs=" cbMessage.PoolStats
         // the callback args
@@ -61,7 +62,7 @@ let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: Strea
         cbMessage.Timestamp    <- timeStamp
         cbMessage |> streamQueue.add
         match cbContext.cbMessagePool.CountAvail with
-        | 0 -> StreamCallbackResult.Complete
+        | 0 -> StreamCallbackResult.Complete // todo should continue?
         | _ -> StreamCallbackResult.Continue )
 
 //–––––––––––––––––––––––––––––––––––––
