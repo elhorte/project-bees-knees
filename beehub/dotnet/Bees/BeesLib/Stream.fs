@@ -104,7 +104,8 @@ let makeCbMessagePool config stream streamQueue logger =
   let bufSize    = 1024
   let startCount = Environment.ProcessorCount * 4    // many more than number of cores
   let minCount   = 4
-  CbMessagePool(bufSize, startCount, minCount, config, stream, streamQueue, logger)
+  let bufRefMaker() = BufRef (ref (Array.zeroCreate<BufType> bufSize))
+  CbMessagePool(bufSize, startCount, minCount, config, stream, streamQueue, logger, bufRefMaker)
 
 /// <summary>
 ///   Creates an audio stream, to be started by the caller.

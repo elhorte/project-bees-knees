@@ -19,8 +19,8 @@ open BeesLib.CbMessageWorkList
 //   end_tod             the time of day to stop  recording, if start_tod == None, ignore & record continuously
 
 type TodRange = {
-  Begin: TimeSpan
-  End  : TimeSpan }
+  Begin : TimeSpan
+  End   : TimeSpan }
 
 type ActivityType =
   | Continuous

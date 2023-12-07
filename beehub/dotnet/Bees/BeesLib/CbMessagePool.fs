@@ -22,10 +22,11 @@ type Config = {
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // CbMessage pool
 
-type BufType  = float32
-type BufArray = BufType array
-type Buf      = Buf    of BufArray
-type BufRef   = BufRef of BufArray ref
+type BufType     = float32
+type BufArray    = BufType array
+type Buf         = Buf    of BufArray
+type BufRef      = BufRef of BufArray ref
+type BufRefMaker = unit -> BufRef
 
 /// The callback is given this.
 [<Struct>]
@@ -41,18 +42,13 @@ type CbContext = {
   seqNumRef      : int ref }
 
 /// The callback sends this message to the managed-code handler.
-and CbMessage(config: Config, stream: Stream, streamQueue: StreamQueue, logger: Logger, bufSize: int, buf: Buf option) =
+and CbMessage(config: Config, stream: Stream, streamQueue: StreamQueue, logger: Logger, bufSize: int, bufRefMaker: BufRefMaker) =
   inherit IPoolItem()
 
-  let cbMessagePoolPlaceHolder = CbMessagePool(bufSize, 0, 0, config, stream, streamQueue, logger)
+  let cbMessagePoolPlaceHolder = CbMessagePool(bufSize, 0, 0, config, stream, streamQueue, logger, bufRefMaker)
   let ti = StreamCallbackTimeInfo() // Replace with actual time info.
   let sf = StreamCallbackFlags.PrimingOutput
-  let bufRef =
-    match buf with
-    | Some (Buf bufArray) -> BufRef (ref bufArray)
-    | None ->
-      let inputSamplesCopy = Array.zeroCreate<BufType> bufSize 
-      BufRef (ref inputSamplesCopy)
+  let bufRef = bufRefMaker()
 
   // Most initializer values here are placeholders that will be overwritten by the callback.
 
@@ -78,7 +74,7 @@ and CbMessage(config: Config, stream: Stream, streamQueue: StreamQueue, logger: 
   member   val public CbContext           : CbContext              = cbCtxTemp          with get, set
   member   val public WithEcho            : bool                   = false              with get, set
   override val        SeqNum              : int                    = 0                  with get, set
-  member   val public InputSamplesCopyRef : BufRef                 = bufRef             with get
+  member   val public InputSamplesCopyRef : BufRef                 = bufRef             with get, set
   member   val public Timestamp           : DateTime               = DateTime.MinValue  with get, set
   
   member   m.PoolStats with get() =
@@ -88,8 +84,9 @@ and CbMessage(config: Config, stream: Stream, streamQueue: StreamQueue, logger: 
 
 and StreamQueue = CbMessage AsyncConcurrentQueue
 
-and CbMessagePool(bufSize: int, startCount: int, minCount: int, config: Config, stream: Stream, streamQueue: StreamQueue, logger: Logger) =
-  inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(config, stream, streamQueue, logger, bufSize, None))
+and CbMessagePool(bufSize: int, startCount: int, minCount: int, config: Config, stream: Stream, streamQueue: StreamQueue,
+                  logger: Logger, bufRefMaker: BufRefMaker) =
+  inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(config, stream, streamQueue, logger, bufSize, bufRefMaker))
 
 let dummyCbMessage() : CbMessage =
   System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject typeof<CbMessage>
