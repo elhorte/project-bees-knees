@@ -73,9 +73,12 @@ and CbMessage(config: Config, stream: Stream, streamQueue: StreamQueue, logger: 
   // more from the callback
   member   val public CbContext           : CbContext              = cbCtxTemp          with get, set
   member   val public WithEcho            : bool                   = false              with get, set
-  override val        SeqNum              : int                    = 0                  with get, set
   member   val public InputSamplesCopyRef : BufRef                 = bufRef             with get, set
   member   val public Timestamp           : DateTime               = DateTime.MinValue  with get, set
+  // IPoolItem interface
+  override val        SeqNum              : int                    = 0                  with get, set
+  override val        UseCount            : int                    = 0                  with get, set
+  override val        Locker              : obj                    = Object()           with get
   
   member   m.PoolStats with get() =
     sprintf "pool=%A:%A" m.CbContext.cbMessagePool.CountAvail m.CbContext.cbMessagePool.CountInUse

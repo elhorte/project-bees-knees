@@ -9,7 +9,9 @@ open System.Threading
 
 [<AbstractClass>]
 type IPoolItem() =
-  abstract SeqNum : int with get, set
+  abstract SeqNum   : int with get, set
+  abstract UseCount : int with get, set
+  abstract Locker   : obj with get
 
 
 type ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, creator: unit -> 'Item) =
@@ -49,6 +51,14 @@ type ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, cre
     changeInUse -1
     assert (Volatile.Read &countAvail.contents = pool.Count)
 
+  let changeItemUseCount (item: 'Item) n = lock item.Locker (fun () -> item.UseCount <- item.UseCount + n)
+
+  let holdTilRelease (item: 'Item) = changeItemUseCount item +1
+
+  let releaseToPool (item: 'Item) =
+    if item.UseCount > 0 then  changeItemUseCount item -1
+    if item.UseCount = 0 then  addToPool item
+
   let addNewItem() =
     let item = creator()
     seqNumNext  <- seqNumNext + 1
@@ -82,5 +92,7 @@ type ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, cre
 
   member this.ItemUseBegin()           = addMoreItemsIfNeeded()
   member this.ItemUseEnd (item: 'Item) = addToPool item
+  member this.Hold       (item: 'Item) = holdTilRelease item
+  member this.Release    (item: 'Item) = releaseToPool  item
   member this.CountAvail               = Volatile.Read &countAvail.contents
   member this.CountInUse               = Volatile.Read &countInUse.contents
