@@ -7,9 +7,6 @@ let startCount = 4
 type TestItem() =
   inherit IPoolItem()
   let mutable num = 0
-  override this.SeqNum
-    with get() = num
-    and set(value) = num <- value
   override this.ToString() = sprintf "TestItem %d ha" this.SeqNum
 
 let test (pool: ItemPool<TestItem>) =

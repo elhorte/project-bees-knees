@@ -163,7 +163,7 @@ let doRecording r (queue: Queue<CbMessage option>) =
 
   
 /// Start recording.
-let startRecording (config: Config) (cbMessageWorkList: CbMessageWorkList) recordingParams =
+let startRecordingAsync (config: Config) (cbMessageWorkList: CbMessageWorkList) recordingParams = task {
   let r = recordingParams
   let queue = Queue<CbMessage option>()
   let handleFrame (cbMessage: CbMessage) (workId: WorkId) unregisterMe =
@@ -172,6 +172,5 @@ let startRecording (config: Config) (cbMessageWorkList: CbMessageWorkList) recor
       queue.Enqueue None
     else
       queue.Enqueue (Some cbMessage)
-  cbMessageWorkList.RegisterWorkItem handleFrame
-  Task.Run(fun () -> doRecording r queue)
-
+  cbMessageWorkList.Subscribe handleFrame
+  doRecording r queue }

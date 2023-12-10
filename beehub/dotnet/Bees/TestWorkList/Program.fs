@@ -22,7 +22,7 @@ printHowManyRegisteredHandlers 0
 handleCbMessage() // workFunc is not called bc it is not registered yet
 printHowManyRegisteredHandlers 0
 
-workList.RegisterWorkItem workFunc
+workList.Subscribe workFunc
 printHowManyRegisteredHandlers 1
 
 handleCbMessage() // workFunc is called and unregisters itself

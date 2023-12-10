@@ -16,9 +16,10 @@
         <Compile Include="Mp3.fs" />
         <Compile Include="ItemPool.fs" />
         <Compile Include="CbMessagePool.fs" />
+        <Compile Include="CbMessageWorkList.fs" />
         <Compile Include="Commands.fs" />
         <Compile Include="Keyboard.fs" />
-        <Compile Include="CbMessageWorkList.fs" />
+        <Compile Include="InputBuffer.fs" />
         <Compile Include="Recording.fs" />
         <Compile Include="Stream.fs" />
     </ItemGroup>
