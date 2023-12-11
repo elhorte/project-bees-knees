@@ -18,9 +18,9 @@ type IPoolItem() =
   // member this.Release() = this.Pool.Release this
 
 
-and ItemPool<'T when 'T :> IPoolItem>(startCount: int, minCount: int, creator: unit -> IPoolItem) =
+and ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, creator: unit ->'Item) =
 
-  let pool = ConcurrentQueue<IPoolItem>() // TryTake() at interrupt time
+  let pool = ConcurrentQueue<'Item>() // TryTake() at interrupt time
  
   
   // At interrupt time or at other times
@@ -35,31 +35,28 @@ and ItemPool<'T when 'T :> IPoolItem>(startCount: int, minCount: int, creator: u
   // Always used at interrupt time
 
   let takeFromPool() =
-    let ok, obj = pool.TryDequeue()
-    if ok then
-      changeAvail -1
-      changeInUse +1
-      assert (Volatile.Read &countAvail.contents = pool.Count)
-      Some obj
-    else
-      None
-
+    match pool.TryDequeue() with
+    | true, obj ->  changeAvail -1
+                    changeInUse +1
+                    assert (Volatile.Read &countAvail.contents = pool.Count)
+                    Some obj
+    | false, _  ->  None
   
   // Never used at interrupt time
 
   let mutable seqNumNext = 0  // ok to be overwritten when item is used
 
-  let addToPool (item: IPoolItem) =
+  let addToPool (item: 'Item) =
     pool.Enqueue item // can cause allocation and thus GC
     changeAvail +1
     changeInUse -1
     assert (Volatile.Read &countAvail.contents = pool.Count)
 
-  let changeItemUseCount (item: IPoolItem) n = lock item.Locker (fun () -> item.UseCount <- item.UseCount + n)
+  let changeItemUseCount (item: 'Item) n = lock item.Locker (fun () -> item.UseCount <- item.UseCount + n)
 
-  let holdTilRelease (item: IPoolItem) = changeItemUseCount item +1
+  let holdTilRelease (item: 'Item) = changeItemUseCount item +1
 
-  let releaseToPool (item: IPoolItem) =
+  let releaseToPool (item: 'Item) =
     if item.UseCount > 0 then  changeItemUseCount item -1
     if item.UseCount = 0 then  addToPool item
 
@@ -95,8 +92,8 @@ and ItemPool<'T when 'T :> IPoolItem>(startCount: int, minCount: int, creator: u
   // Never used at interrupt time
 
   member this.ItemUseBegin()           = addMoreItemsIfNeeded()
-  member this.ItemUseEnd (item: IPoolItem) = addToPool item
-  member this.Hold       (item: IPoolItem) = holdTilRelease item
-  member this.Release    (item: IPoolItem) = releaseToPool  item
+  member this.ItemUseEnd (item: 'Item) = addToPool item
+  member this.Hold       (item: 'Item) = holdTilRelease item
+  member this.Release    (item: 'Item) = releaseToPool  item
   member this.CountAvail               = Volatile.Read &countAvail.contents
   member this.CountInUse               = Volatile.Read &countInUse.contents

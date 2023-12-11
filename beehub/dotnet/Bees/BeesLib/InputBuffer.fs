@@ -11,7 +11,6 @@ type InputBuffer(timeSpan: TimeSpan, source: CbMessageWorkList) =
   let mutable earliest = DateTime.Now
   
   let callback (cbMessage: CbMessage) (workId: WorkId) (unsubscribeMe: Unsubscriber) =
-    cbMessage.
     ()
     
   do
