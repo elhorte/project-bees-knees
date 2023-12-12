@@ -64,12 +64,15 @@ let run stream cancellationTokenSource = task {
 //–––––––––––––––––––––––––––––––––––––
 // Config
 
-let config = {
-  LocationId = 1
-  HiveId     = 1
-  PrimaryDir = "primary"
-  MonitorDir = "monitor"
-  PlotDir    = "plot" }
+let config: Config = {
+  LocationId     = 1
+  HiveId         = 1
+  PrimaryDir     = "primary"
+  MonitorDir     = "monitor"
+  PlotDir        = "plot"
+  bufferDuration = TimeSpan.FromMinutes 16
+  nChannels      = 1
+  inSampleRate   = 4800  }
 
 //–––––––––––––––––––––––––––––––––––––
 // Main
@@ -95,6 +98,8 @@ let main _ =
   let cbMessageWorkList = CbMessageWorkList()
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
+  config.nChannels    = inputParameters.channelCount
+  config.inSampleRate = int sampleRate
   let streamQueue = makeAndStartStreamQueue cbMessageWorkList.HandleCbMessage
   let cbContext   = makeStream config inputParameters outputParameters sampleRate withEchoRef withLoggingRef streamQueue
   keyboardInputInit()

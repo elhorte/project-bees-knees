@@ -86,7 +86,7 @@ and ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, crea
 
   // Always used at interrupt time
 
-  member this.Take()          = takeFromPool()
+  member this.Take() = takeFromPool()
 
     
   // Never used at interrupt time

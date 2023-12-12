@@ -6,11 +6,17 @@ open BeesLib.CbMessageWorkList
 
 type Worker = Buf -> int -> int
 
-type InputBuffer(timeSpan: TimeSpan, source: CbMessageWorkList) =
+type InputBuffer(config: Config, timeSpan: TimeSpan, source: CbMessageWorkList) =
   
+  let mutable bufBegin = DateTime.Now
   let mutable earliest = DateTime.Now
+  let size = config.bufferDuration
+  let nSamples = config.bufferDuration.Seconds * config.inSampleRate * config.nChannels 
+  let buf = Buf (Array.init nSamples (fun _ -> float32 0.0f))
+  let index = 0
   
   let callback (cbMessage: CbMessage) (workId: WorkId) (unsubscribeMe: Unsubscriber) =
+    Buffer.MemoryCopy(fromAddr, toAddr, size, size)
     ()
     
   do

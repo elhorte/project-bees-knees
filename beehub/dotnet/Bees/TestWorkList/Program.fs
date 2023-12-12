@@ -7,7 +7,7 @@ open BeesLib.Util
 let workList = CbMessageWorkList()
 
 let handleCbMessage() =
-  dummyCbMessage() |> workList.HandleCbMessage
+  dummyInstance<CbMessage>() |> workList.HandleCbMessage
 
 let workFunc (_: CbMessage) (workId: WorkId) unregisterMe =
   match workId with WorkId id ->  printfn "WorkItem %d runs and unregisters itself." id
