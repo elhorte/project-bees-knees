@@ -60,7 +60,7 @@ let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: Strea
         cbMessage.WithEcho     <- withEcho 
         cbMessage.SeqNum       <- seqNum
         cbMessage.Timestamp    <- timeStamp
-        cbMessage |> streamQueue.add
+        cbMessage |> streamQueue.Enqueue
         match cbContext.cbMessagePool.CountAvail with
         | 0 -> StreamCallbackResult.Complete // todo should continue?
         | _ -> StreamCallbackResult.Continue )

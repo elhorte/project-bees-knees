@@ -3,8 +3,7 @@ module BeesLib.AsyncConcurrentQueue
 open System.Collections.Concurrent
 open FSharp.Control
 
-/// A thread-safe queue with nonblocking, nonallocating Put() method.
-/// TakeAsync() need not be nonblocking, nonallocating.
+/// ConcurrentQueue with DequeueAsync() method.
 type AsyncConcurrentQueue<'T> () =
 
   let queue = ConcurrentQueue<'T>()
@@ -14,24 +13,24 @@ type AsyncConcurrentQueue<'T> () =
   /// Adds an object to the end of the ConcurrentQueue.
   /// No allocation or locking is done.
   /// </summary>
-  member this.add(item: 'T) =
+  member this.Enqueue(item: 'T) =
     queue.Enqueue(item)
     signal.Release() |> ignore
 
-  member this.get() = async {
-    let! _ = Async.AwaitTask(signal.WaitAsync())
+  member this.DequeueAsync() = async {
+    do! Async.AwaitTask(signal.WaitAsync())
     let success, item = queue.TryDequeue()
     if success then return item
-    else return failwith "Couldn't dequeue item from queue." }
+    else return failwith "Couldn't take item from queue." }
 
-  member this.getAsyncSeq() = 
-    AsyncSeq.initInfiniteAsync (fun _ -> this.get())
+  member this.GetAsyncSeq() = 
+    AsyncSeq.initInfiniteAsync (fun _ -> this.DequeueAsync())
 
   /// <summary>
   /// Calls f on each item as it becomes available from the queue
   /// </summary>
   member this.iter f =
-    this.getAsyncSeq()
+    this.GetAsyncSeq()
     |> AsyncSeq.iter f
     |> Async.Start
 
