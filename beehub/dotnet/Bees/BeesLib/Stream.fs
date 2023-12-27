@@ -26,28 +26,28 @@ open BeesLib.Logger
 /// <param name="cbContextRef"> A reference to the associated <c>CbContext</c> </param>
 /// <param name="streamQueue" > The <c>StreamQueue</c> to post to              </param>
 /// <returns> A Stream.Callback to be called by PortAudioSharp                 </returns>
-let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: StreamQueue)  : Stream.Callback =
-  Stream.Callback(
+let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: StreamQueue)  : PortAudioSharp.Stream.Callback =
+  PortAudioSharp.Stream.Callback(
     fun input output frameCount timeInfo statusFlags userDataPtr ->
       let cbContext = cbContextRef[0]
-      let withEcho  = Volatile.Read &cbContext.withEchoRef.contents
-      let seqNum    = Volatile.Read &cbContext.seqNumRef.contents
+      let withEcho  = Volatile.Read &cbContext.WithEchoRef.contents
+      let seqNum    = Volatile.Read &cbContext.SeqNumRef.contents
       let timeStamp = DateTime.Now
       if withEcho then
         let size = uint64 (frameCount * uint32 sizeof<float32>)
         Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
-      Volatile.Write(cbContext.seqNumRef, seqNum + 1)
-      match cbContext.cbMessagePool.Take() with
+      Volatile.Write(cbContext.SeqNumRef, seqNum + 1)
+      match cbContext.CbMessagePool.Take() with
       | None -> // Yikes, pool is empty
-        cbContext.logger.Add seqNum timeStamp "CbMessagePool is empty" null
+        cbContext.Logger.Add seqNum timeStamp "CbMessagePool is empty" null
         StreamCallbackResult.Continue
       | Some cbMessage ->
         do
           let (BufRef bufRef) = cbMessage.InputSamplesCopyRef
           let inputCopy = Volatile.Read &bufRef.contents
           Marshal.Copy(input, inputCopy, startIndex = 0, length = (int frameCount))
-        if Volatile.Read &cbContext.withLoggingRef.contents then
-          cbContext.logger.Add seqNum timeStamp "cb bufs=" cbMessage.PoolStats
+        if Volatile.Read &cbContext.WithLoggingRef.contents then
+          cbContext.Logger.Add seqNum timeStamp "cb bufs=" cbMessage.PoolStats
         // the callback args
         cbMessage.InputSamples <- input
         cbMessage.Output       <- output
@@ -61,7 +61,7 @@ let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: Strea
         cbMessage.SeqNum       <- seqNum
         cbMessage.Timestamp    <- timeStamp
         cbMessage |> streamQueue.Enqueue
-        match cbContext.cbMessagePool.CountAvail with
+        match cbContext.CbMessagePool.CountAvail with
         | 0 -> StreamCallbackResult.Complete // todo should continue?
         | _ -> StreamCallbackResult.Continue )
 
@@ -76,7 +76,7 @@ let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: Strea
 let streamQueueHandler workPerCallback (streamQueue: StreamQueue) =
 //let mutable callbackMessage = Unchecked.defaultof<CbMessage>
   let doOne (m: CbMessage) =
-    let cbMessagePool = m.CbContext.cbMessagePool
+    let cbMessagePool = m.CbContext.CbMessagePool
     cbMessagePool.ItemUseBegin()
     workPerCallback m
     cbMessagePool.ItemUseEnd   m
@@ -121,25 +121,25 @@ let makeCbMessagePool config stream streamQueue logger =
 let makeStream config inputParameters outputParameters sampleRate withEchoRef withLoggingRef (streamQueue: StreamQueue)  : CbContext =
   let cbContextRef = ResizeArray<CbContext>(1)  // indirection to solve the chicken or egg problem
   let callback = makeStreamCallback cbContextRef streamQueue
-  let stream = new Stream(inParams        = Nullable<_>(inputParameters )        ,
-                          outParams       = Nullable<_>(outputParameters)        ,
-                          sampleRate      = sampleRate                           ,
-                          framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
-                          streamFlags     = StreamFlags.ClipOff                  ,
-                          callback        = callback                             ,
-                          userData        = Nullable()                           )
+  let stream = new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
+                                         outParams       = Nullable<_>(outputParameters)        ,
+                                         sampleRate      = sampleRate                           ,
+                                         framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
+                                         streamFlags     = StreamFlags.ClipOff                  ,
+                                         callback        = callback                             ,
+                                         userData        = Nullable()                           )
   let startTime = DateTime.Now
   let logger = Logger(8000, startTime)
   let cbContext = {
-    config         = config
-    stream         = stream
-    streamQueue    = streamQueue
-    logger         = logger
-    cbMessagePool  = makeCbMessagePool config stream streamQueue logger
-    withEchoRef    = withEchoRef
-    withLoggingRef = withLoggingRef
-    startTime      = startTime
-    seqNumRef      = ref 1  }
+    Config         = config
+    Stream         = stream
+    CbMessagePool  = makeCbMessagePool config stream streamQueue logger
+    StreamQueue    = streamQueue
+    Logger         = logger
+    WithEchoRef    = withEchoRef
+    WithLoggingRef = withLoggingRef
+    StartTime      = startTime
+    SeqNumRef      = ref 1  }
   cbContextRef.Add(cbContext) // and here is where we provide the cbContext struct to be used by the callback
   cbContext
 

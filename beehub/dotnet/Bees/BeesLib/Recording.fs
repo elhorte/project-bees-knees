@@ -163,7 +163,7 @@ let doRecording r (queue: Queue<CbMessage option>) =
 
   
 /// Start recording.
-let startRecordingAsync (config: Config) (cbMessageWorkList: CbMessageWorkList) recordingParams = task {
+let startRecordingAsync (config: BeesConfig) (cbMessageWorkList: CbMessageWorkList) recordingParams = task {
   let r = recordingParams
   let queue = Queue<CbMessage option>()
   let handleFrame (cbMessage: CbMessage) (workId: WorkId) unregisterMe =

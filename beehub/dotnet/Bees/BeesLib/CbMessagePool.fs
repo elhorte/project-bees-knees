@@ -19,7 +19,7 @@ type BufRefMaker = unit -> BufRef
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // Config
 
-type Config = {
+type BeesConfig = {
   LocationId     : int
   HiveId         : int
   PrimaryDir     : string
@@ -32,21 +32,21 @@ type Config = {
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // CbMessage pool
 
-/// The callback is given this.
+// Every callback gets the same copy of this for context.
 [<Struct>]
 type CbContext = {
-  config         : Config
-  stream         : Stream
-  streamQueue    : StreamQueue
-  logger         : Logger
-  cbMessagePool  : CbMessagePool
-  withEchoRef    : bool ref
-  withLoggingRef : bool ref
-  startTime      : DateTime
-  seqNumRef      : int ref }
+  Config         : BeesConfig
+  Stream         : PortAudioSharp.Stream
+  CbMessagePool  : CbMessagePool // The callback grabs a CbMessage from here.
+  StreamQueue    : StreamQueue   // The callback fills in the CbMessage and enqueues it here.
+  Logger         : Logger
+  WithEchoRef    : bool ref
+  WithLoggingRef : bool ref
+  StartTime      : DateTime
+  SeqNumRef      : int ref }
 
-/// The callback sends this message to the managed-code handler.
-and CbMessage(config: Config, stream: Stream, streamQueue: StreamQueue, logger: Logger, bufSize: int, bufRefMaker: BufRefMaker) =
+/// This is the message that the callback sends to the managed-code handler.
+and CbMessage(config: BeesConfig, stream: PortAudioSharp.Stream, streamQueue: StreamQueue, logger: Logger, bufSize: int, bufRefMaker: BufRefMaker) =
   inherit IPoolItem()
 
   let cbMessagePoolPlaceHolder = CbMessagePool(bufSize, 0, 0, config, stream, streamQueue, logger, bufRefMaker)
@@ -57,15 +57,15 @@ and CbMessage(config: Config, stream: Stream, streamQueue: StreamQueue, logger: 
   // Most initializer values here are placeholders that will be overwritten by the callback.
 
   let cbCtxTemp: CbContext = {
-    config         = config
-    stream         = stream
-    streamQueue    = streamQueue
-    logger         = logger
-    cbMessagePool  = cbMessagePoolPlaceHolder
-    withEchoRef    = ref false
-    withLoggingRef = ref false
-    startTime      = DateTime.Now
-    seqNumRef      = ref 0  }
+    Config         = config
+    Stream         = stream
+    CbMessagePool  = cbMessagePoolPlaceHolder
+    StreamQueue    = streamQueue
+    Logger         = logger
+    WithEchoRef    = ref false
+    WithLoggingRef = ref false
+    StartTime      = DateTime.Now
+    SeqNumRef      = ref 0  }
 
   // the callback args
   member   val public InputSamples        : IntPtr                 = IntPtr.Zero        with get, set
@@ -81,20 +81,20 @@ and CbMessage(config: Config, stream: Stream, streamQueue: StreamQueue, logger: 
   member   val public Timestamp           : DateTime               = DateTime.MinValue  with get, set
   
   member   m.PoolStats with get() =
-    sprintf "pool=%A:%A" m.CbContext.cbMessagePool.CountAvail m.CbContext.cbMessagePool.CountInUse
+    sprintf "pool=%A:%A" m.CbContext.CbMessagePool.CountAvail m.CbContext.CbMessagePool.CountInUse
   
   override m.ToString() = sprintf "%A %A" m.SeqNum m.TimeInfo
 
 and StreamQueue = CbMessage AsyncConcurrentQueue
 
-and CbMessagePool(bufSize     : int         ,
-                  startCount  : int         ,
-                  minCount    : int         ,
-                  config      : Config      ,
-                  stream      : Stream      ,
-                  streamQueue : StreamQueue ,
-                  logger      : Logger      ,
-                  bufRefMaker : BufRefMaker ) =
+and CbMessagePool(bufSize     : int                   ,
+                  startCount  : int                   ,
+                  minCount    : int                   ,
+                  config      : BeesConfig                ,
+                  stream      : PortAudioSharp.Stream ,
+                  streamQueue : StreamQueue           ,
+                  logger      : Logger                ,
+                  bufRefMaker : BufRefMaker           ) =
   inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(config, stream, streamQueue, logger, bufSize, bufRefMaker))
     
 

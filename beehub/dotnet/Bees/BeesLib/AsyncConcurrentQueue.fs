@@ -3,7 +3,7 @@ module BeesLib.AsyncConcurrentQueue
 open System.Collections.Concurrent
 open FSharp.Control
 
-/// ConcurrentQueue with DequeueAsync() method.
+/// Like ConcurrentQueue but with DequeueAsync() method.
 type AsyncConcurrentQueue<'T> () =
 
   let queue = ConcurrentQueue<'T>()

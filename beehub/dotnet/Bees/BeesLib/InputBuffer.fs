@@ -24,7 +24,7 @@ type Request =
   | Count of Count
   | Print of Print
 
-type InputBuffer(config: Config, timeSpan: TimeSpan, source: CbMessageWorkList) =
+type InputBuffer(config: BeesConfig, timeSpan: TimeSpan, source: CbMessageWorkList) =
 
   let queue = AsyncConcurrentQueue<Request>()
   let mutable count = 0

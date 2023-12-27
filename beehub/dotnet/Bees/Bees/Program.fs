@@ -45,14 +45,14 @@ let prepareArgumentsForStreamCreation() =
 // for debug
 let printCallback (m: CbMessage) =
   let microseconds = floatToMicrosecondsFractionOnly m.TimeInfo.currentTime
-  let percentCPU   = m.CbContext.stream.CpuLoad * 100.0
+  let percentCPU   = m.CbContext.Stream.CpuLoad * 100.0
   let sDebug = sprintf "%3d: %A %s" m.SeqNum m.Timestamp m.PoolStats
   let sWork  = sprintf $"work: %6d{microseconds} frameCount=%A{m.FrameCount} cpuLoad=%5.1f{percentCPU}%%"
   Console.WriteLine($"{sDebug}   ––   {sWork}")
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run stream cancellationTokenSource = task {
-  let stream = (stream: Stream)
+  let stream = (stream: PortAudioSharp.Stream)
   printfn "Starting..."    ; stream.Start()
   printfn "Reading..."
   do! keyboardKeyInput cancellationTokenSource
@@ -64,7 +64,7 @@ let run stream cancellationTokenSource = task {
 //–––––––––––––––––––––––––––––––––––––
 // Config
 
-let config: Config = {
+let config: BeesConfig = {
   LocationId     = 1
   HiveId         = 1
   PrimaryDir     = "primary"
@@ -106,9 +106,9 @@ let main _ =
   task {
     try
       use cts = new CancellationTokenSource()
-      do! run cbContext.stream cts
+      do! run cbContext.Stream cts
     with
     | :? PortAudioException as e -> exitWithTrouble 2 e "Running PortAudio Stream" }
   |> Task.WaitAll
-  printfn "%s" (cbContext.logger.ToString())
+  printfn "%s" (cbContext.Logger.ToString())
   0
