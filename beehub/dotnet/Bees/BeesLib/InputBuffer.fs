@@ -10,42 +10,58 @@ open BeesLib.CbMessageWorkList
 type Worker = Buf -> int -> int
 
 
-type Count = {
-    Data: int
-    CompletionSource: TaskCompletionSource<int>
-}
+type TakeFunctions =
+  | TakeWrite of (BufRef -> int -> unit)
+  | TakeDone  of (int -> unit)
 
-type Print = {
-    Data: string
-    CompletionSource: TaskCompletionSource<unit>
-}
+type InputCallback = {
+    FromRef          : BufRef
+    FrameCount       : uint32
+    CompletionSource : TaskCompletionSource<unit> }
+
+type InputTake = {
+    Data: TakeFunctions
+    CompletionSource: TaskCompletionSource<unit> }
 
 type Request =
-  | Count of Count
-  | Print of Print
-
+  | Callback of InputCallback
+  | Take     of InputTake
+  
 type InputBuffer(config: BeesConfig, timeSpan: TimeSpan, source: CbMessageWorkList) =
 
   let queue = AsyncConcurrentQueue<Request>()
-  let mutable count = 0
   
   let mutable bufBegin = DateTime.Now
   let mutable earliest = DateTime.Now
   let mutable index    = 0
   let duration = config.bufferDuration
   let nSamples = config.bufferDuration.Seconds * config.inSampleRate * config.nChannels
-  let size = nSamples * sizeof<float32>
+  let nBytes = frameCountToByteCount nSamples
   let buffer = Array.init nSamples (fun _ -> float32 0.0f)
+
+  let advanceIndex count =
+    let indexNew = index + int count
+    let excess = indexNew - nBytes
+    index <- if excess < 0 then  index + int count else  0
+  
+  let callback inputCallback =
+    let from = match inputCallback.FromRef with BufRef arrRef -> !arrRef
+    let size = frameCountToByteCount inputCallback.FrameCount 
+    System.Buffer.BlockCopy(from, 0, buffer, index, size)
+    advanceIndex inputCallback.FrameCount
+    inputCallback.CompletionSource.SetResult()
+  
+  let take inputTake =
+    let from = match inputTake.FromRef with BufRef arrRef -> !arrRef
+    let size = frameCountToByteCount inputTake.FrameCount 
+    System.Buffer.BlockCopy(from, 0, buffer, index, size)
+    advanceIndex inputTake.FrameCount
+    inputTake.CompletionSource.SetResult()
 
   let doRequest request =
     match request with
-    | Count c ->
-      count <- count + c.Data
-      let result = count
-      c.CompletionSource.SetResult(result)
-    | Print p ->
-      printfn "print %s" p.Data
-      p.CompletionSource.SetResult()
+    | Callback x ->  callback x
+    | Take x     ->  take x
   
   // Method to process queue items
   let rec processQueue() = async {
@@ -53,17 +69,6 @@ type InputBuffer(config: BeesConfig, timeSpan: TimeSpan, source: CbMessageWorkLi
     doRequest request
     return! processQueue()
   }
-
-  let advanceIndex count =
-    let indexNew = index + int count
-    let excess = indexNew - size
-    index <- if excess < 0 then  index + int count else  0
-
-  let callback (cbMessage: CbMessage) (workId: WorkId) (unsubscribeMe: Unsubscriber) =
-    let from = match cbMessage.InputSamplesCopyRef with BufRef arrRef -> !arrRef
-    let size = int cbMessage.FrameCount * sizeof<float32>
-    System.Buffer.BlockCopy(from, 0, buffer, index, size)
-    advanceIndex cbMessage.FrameCount
     
   do
     source.Subscribe(callback)
@@ -95,11 +100,14 @@ type InputBuffer(config: BeesConfig, timeSpan: TimeSpan, source: CbMessageWorkLi
   member this.Keep(duration: TimeSpan)  : DateTime = keep duration
 
   // Method to submit a job
-  member this.PostCount(data: int) =
-    let completionSource = TaskCompletionSource<int>()
-    let request = Count { Data = data; CompletionSource = completionSource }
+  member this.Callback(cbMessage: CbMessage, workId: WorkId, unsubscribeMe: Unsubscriber) =
+    let inputCallback = {
+      FromRef          = cbMessage.InputSamplesCopyRef
+      FrameCount       = cbMessage.FrameCount
+      CompletionSource = TaskCompletionSource<unit>() }
+    let request = Callback inputCallback
     queue.Enqueue(request)
-    completionSource.Task
+    TaskCompletionSource<unit>().Task
 
   // Method to submit a job
   member this.PostPrint(data: string) =

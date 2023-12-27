@@ -16,6 +16,9 @@ type Buf         = Buf    of BufArray
 type BufRef      = BufRef of BufArray ref
 type BufRefMaker = unit -> BufRef
 
+
+let frameCountToByteCount frameCount =  int frameCount * sizeof<BufType>
+
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // Config
 
@@ -25,6 +28,7 @@ type BeesConfig = {
   PrimaryDir     : string
   MonitorDir     : string
   PlotDir        : string
+  callbackDuration : TimeSpan
   bufferDuration : TimeSpan
   nChannels      : int
   inSampleRate   : int  }

@@ -65,14 +65,15 @@ let run stream cancellationTokenSource = task {
 // Config
 
 let config: BeesConfig = {
-  LocationId     = 1
-  HiveId         = 1
-  PrimaryDir     = "primary"
-  MonitorDir     = "monitor"
-  PlotDir        = "plot"
-  bufferDuration = TimeSpan.FromMinutes 16
-  nChannels      = 1
-  inSampleRate   = 4800  }
+  LocationId       = 1
+  HiveId           = 1
+  PrimaryDir       = "primary"
+  MonitorDir       = "monitor"
+  PlotDir          = "plot"
+  callbackDuration = TimeSpan.FromMilliseconds 16
+  bufferDuration   = TimeSpan.FromMinutes 16
+  nChannels        = 1
+  inSampleRate     = 4800  }
 
 //–––––––––––––––––––––––––––––––––––––
 // Main
