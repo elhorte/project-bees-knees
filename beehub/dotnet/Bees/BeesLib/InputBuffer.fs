@@ -15,8 +15,7 @@ type TakeFunctions =
   | TakeDone  of (int -> unit)
 
 type InputCallback = {
-    FromRef          : BufRef
-    FrameCount       : uint32
+    CbMessage        : CbMessage
     CompletionSource : TaskCompletionSource<unit> }
 
 type InputTake = {
@@ -45,7 +44,7 @@ type InputBuffer(config: BeesConfig, timeSpan: TimeSpan, source: CbMessageWorkLi
     index <- if excess < 0 then  index + int count else  0
   
   let callback inputCallback =
-    let from = match inputCallback.FromRef with BufRef arrRef -> !arrRef
+    let from = match inputCallback.CbMessage.InputSamplesCopyRef with BufRef bufArrayRef -> !bufArrayRef
     let size = frameCountToByteCount inputCallback.FrameCount 
     System.Buffer.BlockCopy(from, 0, buffer, index, size)
     advanceIndex inputCallback.FrameCount
@@ -64,15 +63,15 @@ type InputBuffer(config: BeesConfig, timeSpan: TimeSpan, source: CbMessageWorkLi
     | Take x     ->  take x
   
   // Method to process queue items
-  let rec processQueue() = async {
+  let rec processQueue() = task {
     let! request = queue.DequeueAsync()
     doRequest request
-    return! processQueue()
+    processQueue()
   }
     
   do
     source.Subscribe(callback)
-    do Async.StartImmediate(processQueue())
+    Task.Run<unit> (fun () -> task { do! processQueue() }) |> ignore
 
   let get (dateTime: DateTime) (duration: TimeSpan) (worker: Worker) =
     let now = DateTime.Now
@@ -102,12 +101,10 @@ type InputBuffer(config: BeesConfig, timeSpan: TimeSpan, source: CbMessageWorkLi
   // Method to submit a job
   member this.Callback(cbMessage: CbMessage, workId: WorkId, unsubscribeMe: Unsubscriber) =
     let inputCallback = {
-      FromRef          = cbMessage.InputSamplesCopyRef
-      FrameCount       = cbMessage.FrameCount
+      CbMessage        = cbMessage
       CompletionSource = TaskCompletionSource<unit>() }
     let request = Callback inputCallback
     queue.Enqueue(request)
-    TaskCompletionSource<unit>().Task
 
   // Method to submit a job
   member this.PostPrint(data: string) =
