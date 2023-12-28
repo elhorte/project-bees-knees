@@ -97,8 +97,8 @@ and CbMessagePool(bufSize     : int                   ,
                   stream      : PortAudioSharp.Stream ,
                   streamQueue : StreamQueue           ,
                   logger      : Logger                ,
-                  bufRefMaker : BufRefMaker           ) =
-  inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(config, stream, streamQueue, logger, bufSize, bufRefMaker))
+                  itemCreator : BufRefMaker           ) =
+  inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(config, stream, streamQueue, logger, bufSize, itemCreator))
     
 
   // static member test() =

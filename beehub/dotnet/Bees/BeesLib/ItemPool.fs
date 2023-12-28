@@ -18,10 +18,10 @@ type IPoolItem() =
   // member this.Release() = this.Pool.Release this
 
 
-and ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, creator: unit ->'Item) =
+and ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, itemCreator: unit -> 'Item) =
 
   let pool = ConcurrentQueue<'Item>() // TryTake() at interrupt time
- 
+
   
   // At interrupt time or at other times
   
@@ -62,7 +62,7 @@ and ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, crea
 
   let addNewItem() =
     seqNumNext  <- seqNumNext + 1
-    let item = creator seqNumNext
+    let item = itemCreator seqNumNext
     assert (item.SeqNum = seqNumNext)
     addToPool item
 
