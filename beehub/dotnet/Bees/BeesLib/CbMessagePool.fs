@@ -36,7 +36,7 @@ type BeesConfig = {
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // CbMessage pool
 
-// Every callback gets the same copy of this for context.
+// The callback uses this for context.
 [<Struct>]
 type CbContext = {
   Config         : BeesConfig
@@ -60,7 +60,7 @@ and CbMessage(config: BeesConfig, stream: PortAudioSharp.Stream, streamQueue: St
 
   // Most initializer values here are placeholders that will be overwritten by the callback.
 
-  let cbCtxTemp: CbContext = {
+  let cbCtxDummy: CbContext = {
     Config         = config
     Stream         = stream
     CbMessagePool  = cbMessagePoolPlaceHolder
@@ -79,22 +79,21 @@ and CbMessage(config: BeesConfig, stream: PortAudioSharp.Stream, streamQueue: St
   member   val public StatusFlags         : StreamCallbackFlags    = sf                 with get, set
   member   val public UserDataPtr         : IntPtr                 = IntPtr.Zero        with get, set
   // more from the callback
-  member   val public CbContext           : CbContext              = cbCtxTemp          with get, set
+  member   val public CbContext           : CbContext              = cbCtxDummy         with get, set
   member   val public WithEcho            : bool                   = false              with get, set
   member   val public InputSamplesCopyRef : BufRef                 = bufRef             with get, set
   member   val public Timestamp           : DateTime               = DateTime.MinValue  with get, set
   
-  member   m.PoolStats with get() =
-    sprintf "pool=%A:%A" m.CbContext.CbMessagePool.CountAvail m.CbContext.CbMessagePool.CountInUse
+  member   m.PoolStats with get() = sprintf "pool=%A:%A" m.CbContext.CbMessagePool.CountAvail m.CbContext.CbMessagePool.CountInUse
   
   override m.ToString() = sprintf "%A %A" m.SeqNum m.TimeInfo
 
-and StreamQueue = CbMessage AsyncConcurrentQueue
+and StreamQueue = AsyncConcurrentQueue<CbMessage>
 
 and CbMessagePool(bufSize     : int                   ,
                   startCount  : int                   ,
                   minCount    : int                   ,
-                  config      : BeesConfig                ,
+                  config      : BeesConfig            ,
                   stream      : PortAudioSharp.Stream ,
                   streamQueue : StreamQueue           ,
                   logger      : Logger                ,
