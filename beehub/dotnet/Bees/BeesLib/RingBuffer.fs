@@ -1,4 +1,4 @@
-module BeesLib.InputBuffer
+module BeesLib.RingBuffer
 
 open System
 open System.Collections.Concurrent
@@ -14,65 +14,74 @@ type TakeFunctions =
   | TakeWrite of (BufRef -> int -> unit)
   | TakeDone  of (int -> unit)
 
-type InputCallback = {
-    CbMessage        : CbMessage
-    CompletionSource : TaskCompletionSource<unit> }
+type CallbackJob = {
+  CbMessage        : CbMessage
+  CompletionSource : TaskCompletionSource<unit> }
 
-type InputTake = {
-    Data: TakeFunctions
-    CompletionSource: TaskCompletionSource<unit> }
+type TakeJob = {
+  Data: TakeFunctions
+  CompletionSource: TaskCompletionSource<unit> }
 
-type Request =
-  | Callback of InputCallback
-  | Take     of InputTake
+type Job =
+  | Callback of CallbackJob
+  | Take     of TakeJob
   
-type InputBuffer(config: BeesConfig, timeSpan: TimeSpan, source: CbMessageWorkList) =
+type RingBuffer( config            : BeesConfig        ,
+                 timeSpan          : TimeSpan          ,
+                 cbMessageWorkList : CbMessageWorkList ) =
 
-  let queue = AsyncConcurrentQueue<Request>()
+  let jobQueue = AsyncConcurrentQueue<Job>()
   
   let mutable bufBegin = DateTime.Now
   let mutable earliest = DateTime.Now
   let mutable index    = 0
-  let duration = config.bufferDuration
-  let nSamples = config.bufferDuration.Seconds * config.inSampleRate * config.nChannels
+  let duration = config.ringBufferDuration
+  let nSamples = config.ringBufferDuration.Seconds * config.inSampleRate * config.nChannels
   let nBytes = frameCountToByteCount nSamples
   let buffer = Array.init nSamples (fun _ -> float32 0.0f)
 
   let advanceIndex count =
-    let indexNew = index + int count
+    let indexNew = index + count
     let excess = indexNew - nBytes
     index <- if excess < 0 then  index + int count else  0
   
-  let callback inputCallback =
-    let from = match inputCallback.CbMessage.InputSamplesCopyRef with BufRef bufArrayRef -> !bufArrayRef
-    let size = frameCountToByteCount inputCallback.FrameCount 
+  let handleCallback inputCallback =
+    let cbMessage = inputCallback.CbMessage
+    let (BufRef bufArrayRef) = cbMessage.InputSamplesCopyRef
+    let from = !bufArrayRef
+    let size = int cbMessage.FrameCount 
     System.Buffer.BlockCopy(from, 0, buffer, index, size)
-    advanceIndex inputCallback.FrameCount
+    advanceIndex size
     inputCallback.CompletionSource.SetResult()
   
-  let take inputTake =
-    let from = match inputTake.FromRef with BufRef arrRef -> !arrRef
-    let size = frameCountToByteCount inputTake.FrameCount 
-    System.Buffer.BlockCopy(from, 0, buffer, index, size)
-    advanceIndex inputTake.FrameCount
-    inputTake.CompletionSource.SetResult()
-
-  let doRequest request =
-    match request with
-    | Callback x ->  callback x
-    | Take x     ->  take x
+  let handleTake inputTake =
+    ()
+    // let from = match inputTake.FromRef with BufRef arrRef -> !arrRef
+    // let size = frameCountToByteCount inputTake.FrameCount 
+    // System.Buffer.BlockCopy(from, 0, buffer, index, size)
+    // advanceIndex inputTake.FrameCount
+    // inputTake.CompletionSource.SetResult()
   
-  // Method to process queue items
+  // Method to process jobQueue items
   let rec processQueue() = task {
-    let! request = queue.DequeueAsync()
-    doRequest request
-    processQueue()
-  }
-    
+    let! job = jobQueue.DequeueAsync()
+    match job with
+    | Callback x ->  handleCallback x
+    | Take     x ->  handleTake     x
+    return! processQueue() }
+
+  // Submit a job
+  let doCallback cbMessage _ _ =
+    let callbackJob = {
+      CbMessage        = cbMessage
+      CompletionSource = TaskCompletionSource<unit>() }
+    jobQueue.Enqueue(Callback callbackJob)
+
   do
-    source.Subscribe(callback)
+    cbMessageWorkList.Subscribe(doCallback)
     Task.Run<unit> (fun () -> task { do! processQueue() }) |> ignore
 
+  
   let get (dateTime: DateTime) (duration: TimeSpan) (worker: Worker) =
     let now = DateTime.Now
     let beginDt =
@@ -100,15 +109,4 @@ type InputBuffer(config: BeesConfig, timeSpan: TimeSpan, source: CbMessageWorkLi
 
   // Method to submit a job
   member this.Callback(cbMessage: CbMessage, workId: WorkId, unsubscribeMe: Unsubscriber) =
-    let inputCallback = {
-      CbMessage        = cbMessage
-      CompletionSource = TaskCompletionSource<unit>() }
-    let request = Callback inputCallback
-    queue.Enqueue(request)
-
-  // Method to submit a job
-  member this.PostPrint(data: string) =
-    let completionSource = TaskCompletionSource<unit>()
-    let request = Print { Data = data; CompletionSource = completionSource }
-    queue.Enqueue(request)
-    completionSource.Task
+    doCallback cbMessage workId unsubscribeMe

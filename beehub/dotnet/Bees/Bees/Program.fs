@@ -52,11 +52,11 @@ let printCallback (m: CbMessage) =
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run stream cancellationTokenSource = task {
-  let stream = (stream: PortAudioSharp.Stream)
-  printfn "Starting..."    ; stream.Start()
+  let paStream = (stream: PortAudioSharp.Stream)
+  printfn "Starting..."    ; paStream.Start()
   printfn "Reading..."
   do! keyboardKeyInput cancellationTokenSource
-  printfn "Stopping..."    ; stream.Stop()
+  printfn "Stopping..."    ; paStream.Stop()
   printfn "Stopped"
   printfn "Terminating..." ; PortAudio.Terminate()
   printfn "Terminated" }
@@ -65,15 +65,15 @@ let run stream cancellationTokenSource = task {
 // Config
 
 let config: BeesConfig = {
-  LocationId       = 1
-  HiveId           = 1
-  PrimaryDir       = "primary"
-  MonitorDir       = "monitor"
-  PlotDir          = "plot"
-  callbackDuration = TimeSpan.FromMilliseconds 16
-  bufferDuration   = TimeSpan.FromMinutes 16
-  nChannels        = 1
-  inSampleRate     = 4800  }
+  LocationId         = 1
+  HiveId             = 1
+  PrimaryDir         = "primary"
+  MonitorDir         = "monitor"
+  PlotDir            = "plot"
+  callbackDuration   = TimeSpan.FromMilliseconds 16
+  ringBufferDuration = TimeSpan.FromMinutes 16
+  nChannels          = 1
+  inSampleRate       = 4800  }
 
 //–––––––––––––––––––––––––––––––––––––
 // Main
@@ -82,15 +82,15 @@ let config: BeesConfig = {
 /// - Initialize PortAudio.
 /// - Create everything the callback will need.
 ///   - sampleRate, inputParameters, outputParameters
-///   - a StreamQueue, which
+///   - a CbMessageQueue, which
 ///     - accepts a CbMessage from each callback
 ///     - calls the given handler asap for each CbMessage queued
 ///   - a CbContext struct, which is passed to each callback
-/// - runs the streamQueue
+/// - runs the cbMessageQueue
 /// The audio callback is designed to do as little as possible at interrupt time:
 /// - grabs a CbMessage from a preallocated ItemPool
 /// - copies the input data buf into the CbMessage
-/// - inserts the CbMessage into in the StreamQueue for later processing
+/// - inserts the CbMessage into in the CbMessageQueue for later processing
 
 [<EntryPoint>]
 let main _ =
@@ -101,8 +101,8 @@ let main _ =
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   config.nChannels    = inputParameters.channelCount
   config.inSampleRate = int sampleRate
-  let streamQueue = makeAndStartStreamQueue cbMessageWorkList.HandleCbMessage
-  let cbContext   = makeStream config inputParameters outputParameters sampleRate withEchoRef withLoggingRef streamQueue
+  let cbMessageQueue = makeAndStartCbMessageQueue cbMessageWorkList.HandleCbMessage
+  let cbContext      = makeStream config inputParameters outputParameters sampleRate withEchoRef withLoggingRef cbMessageQueue
   keyboardInputInit()
   task {
     try

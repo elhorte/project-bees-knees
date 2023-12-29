@@ -19,7 +19,7 @@ type CbMessageWorkList() =
 
   let unsubscribe workItem = subscriptions.Remove workItem |> ignore
 
-  
+
   /// Run each subscribed post-callback workItem, not at interrupt time.
   member this.HandleCbMessage(m: CbMessage)  : unit =
     let workList = subscriptions.ToArray()

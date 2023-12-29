@@ -13,20 +13,20 @@ open BeesLib.Logger
 // See Theory of Operation comment before main at the end of this file.
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// callback –> CbMessage –> StreamQueue handler
+// callback –> CbMessage –> CbMessageQueue handler
 
 /// <summary>
 ///   Creates a Stream.Callback that:
 ///   <list type="bullet">
 ///     <item><description> Allocates no memory because this is a system-level callback </description></item>
 ///     <item><description> Ges a <c>CbMessage</c> from the pool and fills it in        </description></item>
-///     <item><description> Posts the <c>CbMessage</c> to the <c>streamQueue</c>        </description></item>
+///     <item><description> Posts the <c>CbMessage</c> to the <c>cbMessageQueue</c>     </description></item>
 ///   </list>
 /// </summary>
 /// <param name="cbContextRef"> A reference to the associated <c>CbContext</c> </param>
-/// <param name="streamQueue" > The <c>StreamQueue</c> to post to              </param>
+/// <param name="cbMessageQueue" > The <c>CbMessageQueue</c> to post to           </param>
 /// <returns> A Stream.Callback to be called by PortAudioSharp                 </returns>
-let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: StreamQueue)  : PortAudioSharp.Stream.Callback =
+let makeStreamCallback (cbContextRef: CbContext ResizeArray) (cbMessageQueue: CbMessageQueue)  : PortAudioSharp.Stream.Callback =
   PortAudioSharp.Stream.Callback(
     fun input output frameCount timeInfo statusFlags userDataPtr ->
       let cbContext = cbContextRef[0]
@@ -60,7 +60,7 @@ let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: Strea
         cbMessage.WithEcho     <- withEcho 
         cbMessage.SeqNum       <- seqNum
         cbMessage.Timestamp    <- timeStamp
-        cbMessage |> streamQueue.Enqueue
+        cbMessage |> cbMessageQueue.Enqueue
         match cbContext.CbMessagePool.CountAvail with
         | 0 -> StreamCallbackResult.Complete // todo should continue?
         | _ -> StreamCallbackResult.Continue )
@@ -68,59 +68,59 @@ let makeStreamCallback (cbContextRef: CbContext ResizeArray) (streamQueue: Strea
 //–––––––––––––––––––––––––––––––––––––
 
 /// <summary>
-///   Continuously receives messages from a StreamQueue;
+///   Continuously receives messages from a CbMessageQueue;
 ///   processes each message with the provided function.
 /// </summary>
-/// <param name="workPerCallback"> A function to process each message.               </param>
-/// <param name="streamQueue"    > A StreamQueue from which to receive the messages. </param>
-let streamQueueHandler workPerCallback (streamQueue: StreamQueue) =
+/// <param name="workPerCallback"> A function to process each message.                     </param>
+/// <param name="cbMessageQueue"    > A CbMessageQueue from which to receive the messages. </param>
+let cbMessageQueueHandler workPerCallback (cbMessageQueue: CbMessageQueue) =
 //let mutable callbackMessage = Unchecked.defaultof<CbMessage>
   let doOne (m: CbMessage) =
     let cbMessagePool = m.CbContext.CbMessagePool
     cbMessagePool.ItemUseBegin()
     workPerCallback m
     cbMessagePool.ItemUseEnd   m
-  streamQueue.iter doOne
+  cbMessageQueue.iter doOne
 
 //–––––––––––––––––––––––––––––––––––––
-// StreamQueue
+// CbMessageQueue
 
 /// <summary>
-///   Creates and starts a StreamQueue that will process CbMessages inserted by callbacks.
+///   Creates and starts a CbMessageQueue that will process CbMessages inserted by callbacks.
 /// </summary>
-/// <param name="workPerCallback">A function that processes a StreamQueueMessage</param>
-/// <returns>Returns a started StreamQueue</returns>
-let makeAndStartStreamQueue workPerCallback  : StreamQueue =
-  let streamQueue = StreamQueue()
-  let handler() = streamQueueHandler workPerCallback streamQueue
+/// <param name="workPerCallback">A function that processes a CbMessageQueueMessage</param>
+/// <returns>Returns a started CbMessageQueue</returns>
+let makeAndStartCbMessageQueue workPerCallback  : CbMessageQueue =
+  let cbMessageQueue = CbMessageQueue()
+  let handler() = cbMessageQueueHandler workPerCallback cbMessageQueue
   Task.Run handler |> ignore
-  streamQueue
+  cbMessageQueue
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // PortAudioSharp.Stream
 
 /// <summary>Make the pool of CbMessages used by the stream callback</summary>
-let makeCbMessagePool config stream streamQueue logger =
+let makeCbMessagePool config stream cbMessageQueue logger =
   let bufSize    = 1024
   let startCount = Environment.ProcessorCount * 4    // many more than number of cores
   let minCount   = 4
   let bufRefMaker() = BufRef (ref (Array.zeroCreate<BufType> bufSize))
-  CbMessagePool(bufSize, startCount, minCount, config, stream, streamQueue, logger, bufRefMaker)
+  CbMessagePool(bufSize, startCount, minCount, config, stream, cbMessageQueue, logger, bufRefMaker)
 
 /// <summary>
 ///   Creates an audio stream, to be started by the caller.
 ///   The stream will echo input to output if desired.
 /// </summary>
-/// <param name="inputParameters" > Parameters for input audio stream                         </param>
-/// <param name="outputParameters"> Parameters for output audio stream                        </param>
-/// <param name="sampleRate"      > Audio sample rate                                         </param>
-/// <param name="withEchoRef"     > A Boolean determining if input should be echoed to output </param>
-/// <param name="withLoggingRef"  > A Boolean determining if the callback should do logging   </param>
-/// <param name="streamQueue"     > StreamQueue object handling audio stream                  </param>
+/// <param name="inputParameters" > Parameters for input audio stream                               </param>
+/// <param name="outputParameters"> Parameters for output audio stream                              </param>
+/// <param name="sampleRate"      > Audio sample rate                                               </param>
+/// <param name="withEchoRef"     > A Boolean determining if input should be echoed to output       </param>
+/// <param name="withLoggingRef"  > A Boolean determining if the callback should do logging         </param>
+/// <param name="cbMessageQueue"     > CbMessageQueue object handling audio stream                  </param>
 /// <returns>A CbContext struct to be passed to each callback</returns>
-let makeStream config inputParameters outputParameters sampleRate withEchoRef withLoggingRef (streamQueue: StreamQueue)  : CbContext =
+let makeStream config inputParameters outputParameters sampleRate withEchoRef withLoggingRef (cbMessageQueue: CbMessageQueue)  : CbContext =
   let cbContextRef = ResizeArray<CbContext>(1)  // indirection to solve the chicken or egg problem
-  let callback = makeStreamCallback cbContextRef streamQueue
+  let callback = makeStreamCallback cbContextRef cbMessageQueue
   let stream = new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                          outParams       = Nullable<_>(outputParameters)        ,
                                          sampleRate      = sampleRate                           ,
@@ -133,8 +133,8 @@ let makeStream config inputParameters outputParameters sampleRate withEchoRef wi
   let cbContext = {
     Config         = config
     Stream         = stream
-    CbMessagePool  = makeCbMessagePool config stream streamQueue logger
-    StreamQueue    = streamQueue
+    CbMessagePool  = makeCbMessagePool config stream cbMessageQueue logger
+    CbMessageQueue = cbMessageQueue
     Logger         = logger
     WithEchoRef    = withEchoRef
     WithLoggingRef = withLoggingRef

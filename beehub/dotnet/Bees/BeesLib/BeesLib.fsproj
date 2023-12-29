@@ -17,7 +17,7 @@
         <Compile Include="ItemPool.fs" />
         <Compile Include="CbMessagePool.fs" />
         <Compile Include="CbMessageWorkList.fs" />
-        <Compile Include="InputBuffer.fs" />
+        <Compile Include="RingBuffer.fs" />
         <Compile Include="Recording.fs" />
         <Compile Include="Stream.fs" />
         <Compile Include="Commands.fs" />

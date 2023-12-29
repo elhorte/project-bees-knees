@@ -29,7 +29,7 @@ type BeesConfig = {
   MonitorDir     : string
   PlotDir        : string
   callbackDuration : TimeSpan
-  bufferDuration : TimeSpan
+  ringBufferDuration : TimeSpan
   nChannels      : int
   inSampleRate   : int  }
 
@@ -42,7 +42,7 @@ type CbContext = {
   Config         : BeesConfig
   Stream         : PortAudioSharp.Stream
   CbMessagePool  : CbMessagePool // The callback grabs a CbMessage from here.
-  StreamQueue    : StreamQueue   // The callback fills in the CbMessage and enqueues it here.
+  CbMessageQueue : CbMessageQueue   // The callback fills in the CbMessage and enqueues it here.
   Logger         : Logger
   WithEchoRef    : bool ref
   WithLoggingRef : bool ref
@@ -50,10 +50,10 @@ type CbContext = {
   SeqNumRef      : int ref }
 
 /// This is the message that the callback sends to the managed-code handler.
-and CbMessage(config: BeesConfig, stream: PortAudioSharp.Stream, streamQueue: StreamQueue, logger: Logger, bufSize: int, bufRefMaker: BufRefMaker) =
+and CbMessage(config: BeesConfig, stream: PortAudioSharp.Stream, cbMessageQueue: CbMessageQueue, logger: Logger, bufSize: int, bufRefMaker: BufRefMaker) =
   inherit IPoolItem()
 
-  let cbMessagePoolPlaceHolder = CbMessagePool(bufSize, 0, 0, config, stream, streamQueue, logger, bufRefMaker)
+  let cbMessagePoolPlaceHolder = CbMessagePool(bufSize, 0, 0, config, stream, cbMessageQueue, logger, bufRefMaker)
   let ti = StreamCallbackTimeInfo() // Replace with actual time info.
   let sf = StreamCallbackFlags.PrimingOutput
   let bufRef = bufRefMaker()
@@ -64,7 +64,7 @@ and CbMessage(config: BeesConfig, stream: PortAudioSharp.Stream, streamQueue: St
     Config         = config
     Stream         = stream
     CbMessagePool  = cbMessagePoolPlaceHolder
-    StreamQueue    = streamQueue
+    CbMessageQueue = cbMessageQueue
     Logger         = logger
     WithEchoRef    = ref false
     WithLoggingRef = ref false
@@ -74,7 +74,7 @@ and CbMessage(config: BeesConfig, stream: PortAudioSharp.Stream, streamQueue: St
   // the callback args
   member   val public InputSamples        : IntPtr                 = IntPtr.Zero        with get, set
   member   val public Output              : IntPtr                 = IntPtr.Zero        with get, set
-  member   val public FrameCount          : uint32                 = uint32 0           with get, set
+  member   val public FrameCount          : uint32                 = 0u                 with get, set
   member   val public TimeInfo            : StreamCallbackTimeInfo = ti                 with get, set
   member   val public StatusFlags         : StreamCallbackFlags    = sf                 with get, set
   member   val public UserDataPtr         : IntPtr                 = IntPtr.Zero        with get, set
@@ -88,17 +88,17 @@ and CbMessage(config: BeesConfig, stream: PortAudioSharp.Stream, streamQueue: St
   
   override m.ToString() = sprintf "%A %A" m.SeqNum m.TimeInfo
 
-and StreamQueue = AsyncConcurrentQueue<CbMessage>
+and CbMessageQueue = AsyncConcurrentQueue<CbMessage>
 
-and CbMessagePool(bufSize     : int                   ,
-                  startCount  : int                   ,
-                  minCount    : int                   ,
-                  config      : BeesConfig            ,
-                  stream      : PortAudioSharp.Stream ,
-                  streamQueue : StreamQueue           ,
-                  logger      : Logger                ,
-                  itemCreator : BufRefMaker           ) =
-  inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(config, stream, streamQueue, logger, bufSize, itemCreator))
+and CbMessagePool( bufSize        : int                   ,
+                   startCount     : int                   ,
+                   minCount       : int                   ,
+                   config         : BeesConfig            ,
+                   stream         : PortAudioSharp.Stream ,
+                   cbMessageQueue : CbMessageQueue        ,
+                   logger         : Logger                ,
+                   bufRefMaker    : BufRefMaker           ) =
+  inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(config, stream, cbMessageQueue, logger, bufSize, bufRefMaker))
     
 
   // static member test() =
@@ -107,5 +107,5 @@ and CbMessagePool(bufSize     : int                   ,
   //   let stream     = null 
   //   let startTime  = DateTime.Now
   //   let logger     = Logger(8000, startTime)
-  //   let pool = CbMessagePool(1, startCount, minCount, stream, StreamQueue(), logger)
+  //   let pool = CbMessagePool(1, startCount, minCount, stream, CbMessageQueue(), logger)
   //   pool.Test()
