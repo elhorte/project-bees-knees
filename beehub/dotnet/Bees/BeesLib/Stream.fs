@@ -12,6 +12,7 @@ open BeesLib.Logger
 
 // See Theory of Operation comment before main at the end of this file.
 
+
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // callback –> CbMessage –> CbMessageQueue handler
 
@@ -26,7 +27,8 @@ open BeesLib.Logger
 /// <param name="cbContextRef"> A reference to the associated <c>CbContext</c> </param>
 /// <param name="cbMessageQueue" > The <c>CbMessageQueue</c> to post to           </param>
 /// <returns> A Stream.Callback to be called by PortAudioSharp                 </returns>
-let makeStreamCallback (cbContextRef: CbContext ResizeArray) (cbMessageQueue: CbMessageQueue)  : PortAudioSharp.Stream.Callback =
+let makeStreamCallback (cbContextRef: ResizeArray<CbContext>) (cbMessageQueue: CbMessageQueue)  : PortAudioSharp.Stream.Callback =
+  let ringBuffer = RingBuffer(beesConfig, cbMessageQueue)
   PortAudioSharp.Stream.Callback(
     fun input output frameCount timeInfo statusFlags userDataPtr ->
       let cbContext = cbContextRef[0]
@@ -118,22 +120,22 @@ let makeCbMessagePool config stream cbMessageQueue logger =
 /// <param name="withLoggingRef"  > A Boolean determining if the callback should do logging         </param>
 /// <param name="cbMessageQueue"     > CbMessageQueue object handling audio stream                  </param>
 /// <returns>A CbContext struct to be passed to each callback</returns>
-let makeStream config inputParameters outputParameters sampleRate withEchoRef withLoggingRef (cbMessageQueue: CbMessageQueue)  : CbContext =
+let makePaStream beesConfig inputParameters outputParameters sampleRate withEchoRef withLoggingRef cbMessageQueue  : CbContext =
   let cbContextRef = ResizeArray<CbContext>(1)  // indirection to solve the chicken or egg problem
   let callback = makeStreamCallback cbContextRef cbMessageQueue
-  let stream = new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
-                                         outParams       = Nullable<_>(outputParameters)        ,
-                                         sampleRate      = sampleRate                           ,
-                                         framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
-                                         streamFlags     = StreamFlags.ClipOff                  ,
-                                         callback        = callback                             ,
-                                         userData        = Nullable()                           )
+  let paStream = new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
+                                           outParams       = Nullable<_>(outputParameters)        ,
+                                           sampleRate      = sampleRate                           ,
+                                           framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
+                                           streamFlags     = StreamFlags.ClipOff                  ,
+                                           callback        = callback                             ,
+                                           userData        = Nullable()                           )
   let startTime = DateTime.Now
   let logger = Logger(8000, startTime)
   let cbContext = {
-    Config         = config
-    Stream         = stream
-    CbMessagePool  = makeCbMessagePool config stream cbMessageQueue logger
+    BeesConfig     = beesConfig
+    PaStream       = paStream
+    CbMessagePool  = makeCbMessagePool beesConfig paStream cbMessageQueue logger
     CbMessageQueue = cbMessageQueue
     Logger         = logger
     WithEchoRef    = withEchoRef

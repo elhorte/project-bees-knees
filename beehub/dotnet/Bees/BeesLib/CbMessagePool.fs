@@ -3,35 +3,12 @@ module BeesLib.CbMessagePool
 
 open System
 
+open System.Threading
 open Util
 open PortAudioSharp
 open BeesLib.Logger
 open BeesLib.AsyncConcurrentQueue
 open BeesLib.ItemPool
-
-
-type BufType     = float32
-type BufArray    = BufType array
-type Buf         = Buf    of BufArray
-type BufRef      = BufRef of BufArray ref
-type BufRefMaker = unit -> BufRef
-
-
-let frameCountToByteCount frameCount =  int frameCount * sizeof<BufType>
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// Config
-
-type BeesConfig = {
-  LocationId     : int
-  HiveId         : int
-  PrimaryDir     : string
-  MonitorDir     : string
-  PlotDir        : string
-  callbackDuration : TimeSpan
-  ringBufferDuration : TimeSpan
-  nChannels      : int
-  inSampleRate   : int  }
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // CbMessage pool
@@ -39,8 +16,8 @@ type BeesConfig = {
 // The callback uses this for context.
 [<Struct>]
 type CbContext = {
-  Config         : BeesConfig
-  Stream         : PortAudioSharp.Stream
+  BeesConfig     : BeesConfig
+  PaStream       : PortAudioSharp.Stream
   CbMessagePool  : CbMessagePool // The callback grabs a CbMessage from here.
   CbMessageQueue : CbMessageQueue   // The callback fills in the CbMessage and enqueues it here.
   Logger         : Logger
@@ -50,10 +27,10 @@ type CbContext = {
   SeqNumRef      : int ref }
 
 /// This is the message that the callback sends to the managed-code handler.
-and CbMessage(config: BeesConfig, stream: PortAudioSharp.Stream, cbMessageQueue: CbMessageQueue, logger: Logger, bufSize: int, bufRefMaker: BufRefMaker) =
+and CbMessage(beesConfig: BeesConfig, paStream: PortAudioSharp.Stream, cbMessageQueue: CbMessageQueue, logger: Logger, bufSize: int, bufRefMaker: BufRefMaker) =
   inherit IPoolItem()
 
-  let cbMessagePoolPlaceHolder = CbMessagePool(bufSize, 0, 0, config, stream, cbMessageQueue, logger, bufRefMaker)
+  let cbMessagePoolPlaceHolder = CbMessagePool(bufSize, 0, 0, beesConfig, paStream, cbMessageQueue, logger, bufRefMaker)
   let ti = StreamCallbackTimeInfo() // Replace with actual time info.
   let sf = StreamCallbackFlags.PrimingOutput
   let bufRef = bufRefMaker()
@@ -61,8 +38,8 @@ and CbMessage(config: BeesConfig, stream: PortAudioSharp.Stream, cbMessageQueue:
   // Most initializer values here are placeholders that will be overwritten by the callback.
 
   let cbCtxDummy: CbContext = {
-    Config         = config
-    Stream         = stream
+    BeesConfig     = beesConfig
+    PaStream       = paStream
     CbMessagePool  = cbMessagePoolPlaceHolder
     CbMessageQueue = cbMessageQueue
     Logger         = logger

@@ -15,9 +15,11 @@
         <Compile Include="PortAudioUtils.fs" />
         <Compile Include="Mp3.fs" />
         <Compile Include="ItemPool.fs" />
+        <Compile Include="BeesConfig.fs" />
+        <Compile Include="RingBuffer.fs" />
         <Compile Include="CbMessagePool.fs" />
         <Compile Include="CbMessageWorkList.fs" />
-        <Compile Include="RingBuffer.fs" />
+        <Compile Include="RingBufferOld.fs" />
         <Compile Include="Recording.fs" />
         <Compile Include="Stream.fs" />
         <Compile Include="Commands.fs" />

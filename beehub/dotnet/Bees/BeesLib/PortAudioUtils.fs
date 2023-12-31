@@ -18,6 +18,8 @@ let initPortAudio() =
     PortAudio.Initialize()
   with :? PortAudioException as e -> exitWithTrouble 2 e "Initializing PortAudio"
 
+let terminatePortAudio() =
+  PortAudio.Terminate()
 
 let floatToMicrosecondsFractionOnly (time: float) : int =
   int (1_000_000.0 * (time % 1.0))

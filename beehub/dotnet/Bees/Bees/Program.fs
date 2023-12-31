@@ -7,6 +7,7 @@ open BeesLib.CbMessageWorkList
 open FSharp.Control
 open PortAudioSharp
 open BeesLib.PortAudioUtils
+open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open BeesLib.Keyboard
 open BeesLib.Stream
@@ -45,26 +46,26 @@ let prepareArgumentsForStreamCreation() =
 // for debug
 let printCallback (m: CbMessage) =
   let microseconds = floatToMicrosecondsFractionOnly m.TimeInfo.currentTime
-  let percentCPU   = m.CbContext.Stream.CpuLoad * 100.0
+  let percentCPU   = m.CbContext.PaStream.CpuLoad * 100.0
   let sDebug = sprintf "%3d: %A %s" m.SeqNum m.Timestamp m.PoolStats
   let sWork  = sprintf $"work: %6d{microseconds} frameCount=%A{m.FrameCount} cpuLoad=%5.1f{percentCPU}%%"
   Console.WriteLine($"{sDebug}   ––   {sWork}")
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
-let run stream cancellationTokenSource = task {
-  let paStream = (stream: PortAudioSharp.Stream)
-  printfn "Starting..."    ; paStream.Start()
+let run cbContext cancellationTokenSource = task {
+  let cbContext = (cbContext: CbContext)
+  printfn "Starting..."    ; cbContext.PaStream.Start()
   printfn "Reading..."
   do! keyboardKeyInput cancellationTokenSource
-  printfn "Stopping..."    ; paStream.Stop()
+  printfn "Stopping..."    ; cbContext.PaStream.Stop()
   printfn "Stopped"
-  printfn "Terminating..." ; PortAudio.Terminate()
+  printfn "Terminating..." ; terminatePortAudio()
   printfn "Terminated" }
 
 //–––––––––––––––––––––––––––––––––––––
-// Config
+// BeesConfig
 
-let config: BeesConfig = {
+let beesConfig: BeesConfig = {
   LocationId         = 1
   HiveId             = 1
   PrimaryDir         = "primary"
@@ -99,15 +100,15 @@ let main _ =
   let cbMessageWorkList = CbMessageWorkList()
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
-  config.nChannels    = inputParameters.channelCount
-  config.inSampleRate = int sampleRate
+  beesConfig.nChannels    = inputParameters.channelCount
+  beesConfig.inSampleRate = int sampleRate
   let cbMessageQueue = makeAndStartCbMessageQueue cbMessageWorkList.HandleCbMessage
-  let cbContext      = makeStream config inputParameters outputParameters sampleRate withEchoRef withLoggingRef cbMessageQueue
+  let cbContext      = makePaStream beesConfig inputParameters outputParameters sampleRate withEchoRef withLoggingRef cbMessageQueue
   keyboardInputInit()
   task {
     try
       use cts = new CancellationTokenSource()
-      do! run cbContext.Stream cts
+      do! run cbContext cts
     with
     | :? PortAudioException as e -> exitWithTrouble 2 e "Running PortAudio Stream" }
   |> Task.WaitAll

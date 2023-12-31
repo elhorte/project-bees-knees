@@ -62,8 +62,8 @@ and ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, item
 
   let addNewItem() =
     seqNumNext  <- seqNumNext + 1
-    let item = itemCreator seqNumNext
-    assert (item.SeqNum = seqNumNext)
+    let item = itemCreator()
+    item.SeqNum <- seqNumNext
     addToPool item
 
   let createAndAddNewItems n =
