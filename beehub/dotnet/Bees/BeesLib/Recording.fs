@@ -5,6 +5,7 @@ open System.Collections.Generic
 open System.Threading
 
 open System.Threading.Tasks
+open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open BeesLib.CbMessageWorkList
 
@@ -112,9 +113,10 @@ let rangePosition todRange now =
 
 
 let doRecording r (queue: Queue<CbMessage option>) =
-  let makeFilename config r =
+  let makeFilename beesConfig r =
+    let beesConfig = (beesConfig: BeesConfig)
     let timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
-    let name = $"%s{timestamp}_%s{r.label}_%A{r.recordingPeriod}_%A{r.interval}_{config.LocationId}_{config.HiveId}"
+    let name = $"%s{timestamp}_%s{r.label}_%A{r.recordingPeriod}_%A{r.interval}_{beesConfig.LocationId}_{beesConfig.HiveId}"
     $"%s{name}.{r.filenameExtension.ToLower()}"
   let downSampleIfNeeded r buf =
     if r.targetSampleRate < r.inputSampleRate then  downsampleAudio buf inputSampleRate r.targetSampleRate

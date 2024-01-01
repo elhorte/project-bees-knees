@@ -6,9 +6,17 @@ open System
 open System.Threading
 open Util
 open PortAudioSharp
+open BeesLib.BeesConfig
 open BeesLib.Logger
 open BeesLib.AsyncConcurrentQueue
 open BeesLib.ItemPool
+
+
+type BufType     = float32
+type BufArray    = BufType array
+type Buf         = Buf    of BufArray
+type BufRef      = BufRef of BufArray ref
+type BufRefMaker = unit -> BufRef
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // CbMessage pool
@@ -70,12 +78,12 @@ and CbMessageQueue = AsyncConcurrentQueue<CbMessage>
 and CbMessagePool( bufSize        : int                   ,
                    startCount     : int                   ,
                    minCount       : int                   ,
-                   config         : BeesConfig            ,
+                   beesConfig     : BeesConfig            ,
                    stream         : PortAudioSharp.Stream ,
                    cbMessageQueue : CbMessageQueue        ,
                    logger         : Logger                ,
                    bufRefMaker    : BufRefMaker           ) =
-  inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(config, stream, cbMessageQueue, logger, bufSize, bufRefMaker))
+  inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(beesConfig, stream, cbMessageQueue, logger, bufSize, bufRefMaker))
     
 
   // static member test() =

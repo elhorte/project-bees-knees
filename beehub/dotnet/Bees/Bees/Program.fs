@@ -10,7 +10,7 @@ open BeesLib.PortAudioUtils
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open BeesLib.Keyboard
-open BeesLib.Stream
+open BeesLib.PaStream
 
 // See Theory of Operation comment before main at the end of this file.
 

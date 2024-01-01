@@ -1,4 +1,4 @@
-module BeesLib.Stream
+module BeesLib.PaStream
 
 
 open System
@@ -7,7 +7,9 @@ open System.Threading
 open System.Threading.Tasks
 
 open PortAudioSharp
+open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
+open BeesLib.RingBuffer
 open BeesLib.Logger
 
 // See Theory of Operation comment before main at the end of this file.
@@ -27,7 +29,7 @@ open BeesLib.Logger
 /// <param name="cbContextRef"> A reference to the associated <c>CbContext</c> </param>
 /// <param name="cbMessageQueue" > The <c>CbMessageQueue</c> to post to           </param>
 /// <returns> A Stream.Callback to be called by PortAudioSharp                 </returns>
-let makeStreamCallback (cbContextRef: ResizeArray<CbContext>) (cbMessageQueue: CbMessageQueue)  : PortAudioSharp.Stream.Callback =
+let makeStreamCallback (beesConfig: BeesConfig) (cbContextRef: ResizeArray<CbContext>) (cbMessageQueue: CbMessageQueue)  : PortAudioSharp.Stream.Callback =
   let ringBuffer = RingBuffer(beesConfig, cbMessageQueue)
   PortAudioSharp.Stream.Callback(
     fun input output frameCount timeInfo statusFlags userDataPtr ->
@@ -45,9 +47,7 @@ let makeStreamCallback (cbContextRef: ResizeArray<CbContext>) (cbMessageQueue: C
         StreamCallbackResult.Continue
       | Some cbMessage ->
         do
-          let (BufRef bufRef) = cbMessage.InputSamplesCopyRef
-          let inputCopy = Volatile.Read &bufRef.contents
-          Marshal.Copy(input, inputCopy, startIndex = 0, length = (int frameCount))
+          ringBuffer.WriteBlock(input, frameCount)
         if Volatile.Read &cbContext.WithLoggingRef.contents then
           cbContext.Logger.Add seqNum timeStamp "cb bufs=" cbMessage.PoolStats
         // the callback args
@@ -102,12 +102,12 @@ let makeAndStartCbMessageQueue workPerCallback  : CbMessageQueue =
 // PortAudioSharp.Stream
 
 /// <summary>Make the pool of CbMessages used by the stream callback</summary>
-let makeCbMessagePool config stream cbMessageQueue logger =
+let makeCbMessagePool beesConfig stream cbMessageQueue logger =
   let bufSize    = 1024
   let startCount = Environment.ProcessorCount * 4    // many more than number of cores
   let minCount   = 4
   let bufRefMaker() = BufRef (ref (Array.zeroCreate<BufType> bufSize))
-  CbMessagePool(bufSize, startCount, minCount, config, stream, cbMessageQueue, logger, bufRefMaker)
+  CbMessagePool(bufSize, startCount, minCount, beesConfig, stream, cbMessageQueue, logger, bufRefMaker)
 
 /// <summary>
 ///   Creates an audio stream, to be started by the caller.
@@ -122,7 +122,7 @@ let makeCbMessagePool config stream cbMessageQueue logger =
 /// <returns>A CbContext struct to be passed to each callback</returns>
 let makePaStream beesConfig inputParameters outputParameters sampleRate withEchoRef withLoggingRef cbMessageQueue  : CbContext =
   let cbContextRef = ResizeArray<CbContext>(1)  // indirection to solve the chicken or egg problem
-  let callback = makeStreamCallback cbContextRef cbMessageQueue
+  let callback = makeStreamCallback beesConfig cbContextRef cbMessageQueue
   let paStream = new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                            outParams       = Nullable<_>(outputParameters)        ,
                                            sampleRate      = sampleRate                           ,

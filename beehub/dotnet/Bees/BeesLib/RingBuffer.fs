@@ -1,44 +1,52 @@
 module BeesLib.RingBuffer
 
 open System
+open System.Runtime.CompilerServices
 open System.Runtime.InteropServices
 open System.Threading.Tasks
 open BeesLib.AsyncConcurrentQueue
 open BeesLib.BeesConfig
-
-
-type BufType     = float32
-type BufArray    = BufType array
-type Buf         = Buf    of BufArray
-type BufRef      = BufRef of BufArray ref
-type BufRefMaker = unit -> BufRef
+open BeesLib.CbMessagePool
+open Microsoft.FSharp.NativeInterop
 
 
   
-type RingBuffer(beesConfig: BeesConfig) =
+type RingBuffer(beesConfig: BeesConfig, cbMessageQueue: CbMessageQueue) =
 
   let frameSize = beesConfig.InChannelCount * sizeof<BufType>
+  let nFrames   = beesConfig.RingBufferDuration.Seconds * beesConfig.InSampleRate
+  let nBytes    = int nFrames * frameSize
+  let ringPtr   = Marshal.AllocHGlobal(nBytes).ToPointer()
+//let ringPtr   = Unsafe.AsRef<byte>(ringPtr)
+  let mutable nextIndex = 0
+  let mutable highWater = 0
 
-  let frameCountToByteCount frameCount =  int frameCount * frameSize
-
-  let nFrames   = beesConfig.RingBufferDuration.Seconds * beesConfig.InSampleRate * frameSize
-  let nBytes    = frameCountToByteCount nFrames
-  let ring = Marshal.AllocHGlobal(nBytes)
-  let ringSpan =
-    new Span<byte>(ring.ToPointer(), nBytes)
-    |> MemoryMarshal.Cast<byte, float32>
-
-  let mutable nextInput = 0
-    
   let advanceIndex nBytes =
-    let indexNew = nextInput + nBytes
+    let indexNew = nextIndex + nBytes
     let excess = indexNew - nBytes
-    nextInput <- if excess < 0 then  nextInput + int nBytes else  0
+    nextIndex <- if excess < 0 then  nextIndex + int nBytes else  0
 
-  let getPtr nFrames =
-    let result = ringSpan.Slice(nextInput, sliceLength)
-    advanceIndex (frameCountToByteCount nFrames)
-    result
+  let mutable ringPtr : nativeptr<float32> = 0
+  let ringPtr = Marshal.AllocHGlobal(nBytes) |> NativePtr.ofNativeInt
+
+  let pointerToNextInput nextIndex: nativeptr<float32> = ringPtr + (nextIndex * sizeof<float32>)
+
+  let ringPtr = Marshal.AllocHGlobal(nBytes).ToPointer()
+  let pointerToNextInput nextIndex  : System.IntPtr =
+    &ringPtr[nextIndex] 
+
+  let writeBlock (block: nativeint) nFrames =
+    let room = nFrames - nextIndex
+    if nFrames > room then
+      highWater <- nextIndex
+      nextIndex <- 0
+    let toPtr = pointerToNextInput nextIndex
+    Marshal.Copy(toPtr, block, startIndex = 0, length = (int nFrames))
+    
+    toPtr
+
+  member this.WriteBlock(block: IntPtr, nFrames: int) =
+    writeBlock block nFrames
 
   // let mutable bufBegin = DateTime.Now
   // let mutable earliest = DateTime.Now
