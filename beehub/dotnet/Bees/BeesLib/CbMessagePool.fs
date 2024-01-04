@@ -12,11 +12,12 @@ open BeesLib.AsyncConcurrentQueue
 open BeesLib.ItemPool
 
 
-type BufType     = float32
-type BufArray    = BufType array
+type SampleType  = float32
+type BufArray    = SampleType array
 type Buf         = Buf    of BufArray
 type BufRef      = BufRef of BufArray ref
 type BufRefMaker = unit -> BufRef
+
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // CbMessage pool

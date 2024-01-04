@@ -106,7 +106,7 @@ let makeCbMessagePool beesConfig stream cbMessageQueue logger =
   let bufSize    = 1024
   let startCount = Environment.ProcessorCount * 4    // many more than number of cores
   let minCount   = 4
-  let bufRefMaker() = BufRef (ref (Array.zeroCreate<BufType> bufSize))
+  let bufRefMaker() = BufRef (ref (Array.zeroCreate<SampleType> bufSize))
   CbMessagePool(bufSize, startCount, minCount, beesConfig, stream, cbMessageQueue, logger, bufRefMaker)
 
 /// <summary>

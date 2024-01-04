@@ -19,7 +19,6 @@
         <Compile Include="CbMessagePool.fs" />
         <Compile Include="RingBuffer.fs" />
         <Compile Include="CbMessageWorkList.fs" />
-        <Compile Include="RingBufferOld.fs" />
         <Compile Include="Recording.fs" />
         <Compile Include="PaStream.fs" />
         <Compile Include="Commands.fs" />
