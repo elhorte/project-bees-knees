@@ -17,7 +17,7 @@
         <Compile Include="ItemPool.fs" />
         <Compile Include="BeesConfig.fs" />
         <Compile Include="CbMessagePool.fs" />
-        <Compile Include="RingBuffer.fs" />
+        <Compile Include="InputBuffer.fs" />
         <Compile Include="CbMessageWorkList.fs" />
         <Compile Include="Recording.fs" />
         <Compile Include="PaStream.fs" />
@@ -26,8 +26,8 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\..\..\..\..\..\..\PortAudioSharp2\PortAudioSharp\PortAudioSharp.csproj" />
-<!--        <PackageReference Include="PortAudioSharp2" Version="0.4.0" />-->
+<!--    <ProjectReference Include="..\..\..\..\..\..\..\PortAudioSharp2\PortAudioSharp\PortAudioSharp.csproj" />    -->
+        <PackageReference Include="PortAudioSharp2" Version="0.4.0" />
         <PackageReference Include="NAudio.Lame" Version="2.1.0" />
         <None Include="..\..\..\..\..\..\..\..\.nuget\packages\naudio.lame\2.1.0\build\libmp3lame.32.dll">
             <Link>libmp3lame.32.dll</Link>

@@ -1,4 +1,4 @@
-module BeesLib.RingBuffer
+module BeesLib.InputBuffer
 
 open System
 open System.Collections.Concurrent
@@ -34,17 +34,18 @@ type Seg() =
   member this.size  : int =
     assert (this.head >= this.tail)
     this.head - this.tail
-  member this.isEmpty  : bool = this.size = 0
+  member this.isEmpty  : bool =  this.size = 0
   
   /// Trim nFrames from the tail.
-  /// The result might be an empty Seg.
+  /// May result in an empty Seg.
   member this.trim nFrames  : unit =
     if this.size > nFrames then  this.tail <- this.tail + nFrames
                            else  this.head <- 0
                                  this.tail <- 0
 
 
-type RingBuffer(beesConfig: BeesConfig) =
+type InputBuffer(beesConfig     : BeesConfig     ,
+                 cbMessageQueue : CbMessageQueue ) =
 
   let jobQueue = AsyncConcurrentQueue<Job>()
 
@@ -115,10 +116,6 @@ type RingBuffer(beesConfig: BeesConfig) =
     let toPtr = indexToPointer segCur.head
     Marshal.Copy(toPtr, block, startIndex = 0, length = (int nFrames))
     segCur.head <- segCur.head + nFrames
-
-    
-  member this.WriteBlock(block: nativeptr<SampleType>, nFrames: int) = 
-    writeBlock block nFrames
   
   let mutable bufBegin = DateTime.Now
   let mutable earliest = DateTime.Now
@@ -159,14 +156,17 @@ type RingBuffer(beesConfig: BeesConfig) =
     return! processQueue() }
 
   // Submit a job
-  let doCallback cbMessage _ _ =
+  let doCallback beesConfig (cbMessage: CbMessage) =
+    let fromPtr = cbMessage.InputSamples.ToPointer()
+    let (BufRef toPtr) = cbMessage.InputSamplesCopyRef
+    let count   = int cbMessage.FrameCount * frameSize
+    Marshal.Copy(fromPtr, 0, toPtr, count)
     let callbackJob = {
       CbMessage        = cbMessage
       CompletionSource = TaskCompletionSource<unit>() }
     jobQueue.Enqueue(Callback callbackJob)
 
   do
-    cbMessageWorkList.Subscribe(doCallback)
     Task.Run<unit> (fun () -> task { do! processQueue() }) |> ignore
 
   
@@ -195,6 +195,6 @@ type RingBuffer(beesConfig: BeesConfig) =
   /// and return the start DateTime of what is currently kept.
   member this.Keep(duration: TimeSpan)  : DateTime = keep duration
 
-  // Method to submit a job
-  member this.Callback(cbMessage: CbMessage, workId: WorkId, unsubscribeMe: Unsubscriber) =
-    doCallback cbMessage workId unsubscribeMe
+  // Called from the callback
+  member this.Callback(beesConfig: BeesConfig, cbMessage: CbMessage) =
+    doCallback beesConfig cbMessage

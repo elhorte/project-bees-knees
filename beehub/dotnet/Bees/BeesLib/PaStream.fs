@@ -9,7 +9,7 @@ open System.Threading.Tasks
 open PortAudioSharp
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
-open BeesLib.RingBuffer
+open BeesLib.InputBuffer
 open BeesLib.Logger
 
 // See Theory of Operation comment before main at the end of this file.
@@ -30,7 +30,7 @@ open BeesLib.Logger
 /// <param name="cbMessageQueue" > The <c>CbMessageQueue</c> to post to           </param>
 /// <returns> A Stream.Callback to be called by PortAudioSharp                 </returns>
 let makeStreamCallback (beesConfig: BeesConfig) (cbContextRef: ResizeArray<CbContext>) (cbMessageQueue: CbMessageQueue)  : PortAudioSharp.Stream.Callback =
-  let ringBuffer = RingBuffer(beesConfig, cbMessageQueue)
+  let inputBuffer = InputBuffer(beesConfig, cbMessageQueue)
   PortAudioSharp.Stream.Callback(
     fun input output frameCount timeInfo statusFlags userDataPtr ->
       let cbContext = cbContextRef[0]
@@ -46,8 +46,6 @@ let makeStreamCallback (beesConfig: BeesConfig) (cbContextRef: ResizeArray<CbCon
         cbContext.Logger.Add seqNum timeStamp "CbMessagePool is empty" null
         StreamCallbackResult.Continue
       | Some cbMessage ->
-        do
-          ringBuffer.WriteBlock(input, frameCount)
         if Volatile.Read &cbContext.WithLoggingRef.contents then
           cbContext.Logger.Add seqNum timeStamp "cb bufs=" cbMessage.PoolStats
         // the callback args
@@ -62,10 +60,10 @@ let makeStreamCallback (beesConfig: BeesConfig) (cbContextRef: ResizeArray<CbCon
         cbMessage.WithEcho     <- withEcho 
         cbMessage.SeqNum       <- seqNum
         cbMessage.Timestamp    <- timeStamp
-        cbMessage |> cbMessageQueue.Enqueue
         match cbContext.CbMessagePool.CountAvail with
         | 0 -> StreamCallbackResult.Complete // todo should continue?
-        | _ -> StreamCallbackResult.Continue )
+        | _ -> inputBuffer.Callback(beesConfig, cbMessage)
+               StreamCallbackResult.Continue )
 
 //–––––––––––––––––––––––––––––––––––––
 
