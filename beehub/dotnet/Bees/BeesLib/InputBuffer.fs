@@ -4,20 +4,42 @@ open System
 open System.Collections.Concurrent
 open System.Runtime.InteropServices
 open System.Threading.Tasks
+
 open BeesLib.AsyncConcurrentQueue
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
-open Microsoft.FSharp.NativeInterop
+
 
 type Worker = Buf -> int -> int
 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+
+type Seg(head: int, tail: int) =
+  member val Head = 0  with get, set
+  member val Tail = 0  with get, set
+  member this.Size  : int =
+    assert (this.Head >= this.Tail)
+    this.Head - this.Tail
+  member this.IsEmpty  : bool =  this.Size = 0
+  
+  /// Trim nFrames from the tail.  May result in an empty Seg.
+  member this.TrimTail nFrames  : unit =
+    if this.Size > nFrames then  this.Tail <- this.Tail + nFrames
+                           else  this.Head <- 0
+                                 this.Tail <- 0
+
+  member this.Copy()  : Seg =  Seg(this.Head, this.Tail)
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 type TakeFunctions =
   | TakeWrite of (BufRef -> int -> unit)
   | TakeDone  of (int -> unit)
 
-type CallbackJob = {
+type CallbackAcceptanceJob = {
   CbMessage        : CbMessage
+  SegCur           : Seg
+  SegOld           : Seg
   CompletionSource : TaskCompletionSource<unit> }
 
 type TakeJob = {
@@ -25,24 +47,10 @@ type TakeJob = {
   CompletionSource: TaskCompletionSource<unit> }
 
 type Job =
-  | Callback of CallbackJob
-  | Take     of TakeJob
+  | CallbackAcceptance of CallbackAcceptanceJob
+  | Take               of TakeJob
 
-type Seg() =
-  member val head  = 0  with get, set
-  member val tail  = 0  with get, set
-  member this.size  : int =
-    assert (this.head >= this.tail)
-    this.head - this.tail
-  member this.isEmpty  : bool =  this.size = 0
-  
-  /// Trim nFrames from the tail.
-  /// May result in an empty Seg.
-  member this.trim nFrames  : unit =
-    if this.size > nFrames then  this.tail <- this.tail + nFrames
-                           else  this.head <- 0
-                                 this.tail <- 0
-
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 type InputBuffer(beesConfig     : BeesConfig     ,
                  cbMessageQueue : CbMessageQueue ) =
@@ -52,93 +60,115 @@ type InputBuffer(beesConfig     : BeesConfig     ,
   let frameSize   = beesConfig.InChannelCount * sizeof<SampleType>
   let nRingFrames = beesConfig.RingBufferDuration.Seconds * beesConfig.InSampleRate
   let nRingBytes  = int nRingFrames * frameSize
-  let ringPtr =
-    Marshal.AllocHGlobal(nRingBytes)
-    |> NativePtr.ofNativeInt<float32>
+  let ring        = Marshal.AllocHGlobal(nRingBytes)
+  let gapDuration = TimeSpan.FromMilliseconds 10
+  let mutable nGapFrames = gapDuration.Seconds * beesConfig.InSampleRate
+  
+  let indexToPointer index  : voidptr =
+    let indexByteOffset = index * frameSize
+    let intPtr = IntPtr (int ring + indexByteOffset)
+    intPtr.ToPointer()
 
-  // These are used only at callback time.
-  let mutable gap = 0 // gap maintained between head and tail as head advances
-  let seg0 = Seg()
-  let seg1 = Seg()
-  let segs = [| seg0; seg1 |]
-  let mutable segCur = seg0
-  let mutable segOld = seg1
-  let mutable segCurNum = 0
-  let mutable segOldNum = 1
+  // These are used only when getting data from the callback.
+  let mutable cbSegCur = Seg(0, 0)
+  let mutable cbSegOld = Seg(0, 0)
+  // These are used only for giving out ring data.
+  let mutable segCur = Seg(0, 0)
+  let mutable segOld = Seg(0, 0)
+  
+  //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+  // getting data from the callback
 
   let exchangeSegs() =
-    assert segOld.isEmpty
-    assert (segOld.head = 0)
-    segCurNum <- 1 - segCurNum
-    segOldNum <- 1 - segOldNum
-    segCur <- segs[segCurNum]
-    segOld <- segs[segOldNum]
+    assert  cbSegOld.IsEmpty
+    assert (cbSegOld.Head = 0)
+    let tmp = cbSegCur
+    cbSegCur <- cbSegOld
+    cbSegOld <- tmp
 
-  let adjustSegs nFrames =
-    let roomAhead = nRingFrames - (segCur.head + nFrames)
-    if roomAhead >= 0 then
-      // The block will fit at the head of curSeg
-      if not segOld.isEmpty then
-        assert (segCur.head < segOld.tail)
-        segOld.trim nFrames
-      if segOld.isEmpty then
-        // ensure that there is a gap made up of
-        // - room after  segCur.head + nFrames -> room
-        // - room before segCur.tail           -> gap - room
-        let roomBehind = gap - roomAhead
-        if roomBehind > 0 then
-          segCur.tail <- roomBehind
-        else
-          assert (segCur.tail = 0)
-    else
-      // The block will not fit at the head of curSeg.
-      exchangeSegs()
-      // segCur starts fresh with head = 0, tail = 0, and we trim away segOld.tail to ensure the gap.
-      segOld.tail <- nFrames + gap
-
-  // If the callback nFrames arg varies,
-  // adjust the gap for the maximum nFrames seen.
-  // The goal is plenty of room between head and tail as head advances.
-  let adjustGapSize nFrames =
-    let gapCandidate = nFrames * 10
-    gap <- max gap gapCandidate
-
-  // let modulo index =
-  //   let excess = index - nRingFrames
-  //   if excess >= 0 then  excess // wraps
-  //                  else  index
+  // In case the callback’s nFrames arg varies from one callback to the next,
+  // adjust the gap for the maximum nFrames arg seen.
+  // The goal is plenty of room between head and tail.
+  let adjustRingGapSize nFrames =
+    let gapCandidate = nFrames * 10 // Code assumes that gap > nFrames
+    nGapFrames <- max nGapFrames gapCandidate
   
-  let indexToPointer index  : nativeptr<SampleType> =  NativePtr.add ringPtr (index * sizeof<float32>)
+  // type State = // |––––––––– ring ––––––––––|                                        
+  //   | Empty    // |           gap           |                                        
+  //   | AtBegin  // | segCur |      gap       |  gap >= minimum                        
+  //   | Middle   // | gapB |  segCur   | gapA |  segCur has been trimmed      
+  //   | AtEnd    // | gap |      segCur       |  unlikely: segCur fits exactly         
+  //   | Chasing  // | segCur | gap |  segOld  |  There is likely some unused after segOld
+  let prepRingHead nFrames =
+    adjustRingGapSize nFrames
+    let roomAhead = nRingFrames - (cbSegCur.Head + nFrames)
+    if roomAhead >= 0 then
+      // The block will fit after segCur.Head
+      // state is Empty, AtBegin, Middle, Chasing
+      if not cbSegOld.IsEmpty then
+        // state is Chasing
+        // segOld is active and ahead of us.
+        assert (cbSegCur.Head < cbSegOld.Tail)
+        cbSegOld.TrimTail nFrames  // may result in segOld being empty
+        // state is AtBegin, Chasing
+      if cbSegOld.IsEmpty then
+        // state is Empty, AtBegin, Middle
+        assert (cbSegCur.Tail = 0)
+        let roomBehind = nGapFrames - roomAhead
+        if roomBehind > 0 then
+          // Some of the gap will be at the beginning of the ring.
+          cbSegCur.Tail <- roomBehind
+          // state is Middle, AtEnd
+        else ()
+          // state is AtBegin, Middle
+    else
+      // state is Middle
+      // The block will not fit at the segCur.Head.
+      exchangeSegs()
+      assert (cbSegCur.Head = 0)
+      // segCur starts fresh with head = 0, tail = 0, and we trim away segOld.Tail to ensure the gap.
+      cbSegOld.Tail <- nFrames + nGapFrames
+      // state is Chasing
+
+  let copy (fromPtr: voidptr) (toPtr: voidptr) nFrames =
+    let size = int64 (nFrames * frameSize)
+    Buffer.MemoryCopy(fromPtr, toPtr, size, size)
+
+  let finshCallback (cbMessage: CbMessage) =
+    let writeCallbackBlockToRing (callbackBlockPtr: voidptr) =
+      let nFrames = int cbMessage.FrameCount
+      prepRingHead nFrames  // mutates segCur.Head
+      let ringHeadPtr = indexToPointer cbSegCur.Head
+      copy callbackBlockPtr ringHeadPtr nFrames
+      cbSegCur.Head <- cbSegCur.Head + nFrames
+      let callbackAcceptanceJob = {
+        CbMessage        = cbMessage
+        SegCur           = cbSegCur.Copy()
+        SegOld           = cbSegOld.Copy()
+        CompletionSource = TaskCompletionSource<unit>() }
+      callbackAcceptanceJob
+    let submitCallbackAcceptanceJob callbackAcceptanceJob =
+      jobQueue.Enqueue(CallbackAcceptance callbackAcceptanceJob)
+    // Copy the data then Submit a FinshCallback job.
+    let callbackBlockPtr = cbMessage.InputSamples.ToPointer()
+    let callbackAcceptanceJob = writeCallbackBlockToRing callbackBlockPtr
+    submitCallbackAcceptanceJob callbackAcceptanceJob
+    callbackAcceptanceJob.CompletionSource.SetResult()
+  
+  //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+  // giving out ring data
+  
+  let handleCallbackAcceptance callbackAcceptance =
+    segCur <- callbackAcceptance.SegCur
+    segOld <- callbackAcceptance.SegOld
       
-  let writeBlock (block: nativeptr<SampleType>) nFrames =
-    adjustGapSize nFrames
-    adjustSegs nFramesf
-    let toPtr = indexToPointer segCur.head
-    Marshal.Copy(toPtr, block, startIndex = 0, length = (int nFrames))
-    segCur.head <- segCur.head + nFrames
   
   let mutable bufBegin = DateTime.Now
   let mutable earliest = DateTime.Now
-  let mutable index    = 0
-  let duration = beesConfig.ringBufferDuration
-  let nSamples = beesConfig.ringBufferDuration.Seconds * beesConfig.inSampleRate * beesConfig.nChannels
-  let nBytes = frameCountToByteCount nSamples
-  let buffer = Array.init nSamples (fun _ -> float32 0.0f)
-
-  let advanceIndex count =
-    let indexNew = index + count
-    let excess = indexNew - nBytes
-    index <- if excess < 0 then  index + int count else  0
+  let duration = beesConfig.RingBufferDuration
+ 
   
-  let handleCallback inputCallback =
-    let cbMessage = inputCallback.CbMessage
-    let (BufRef bufArrayRef) = cbMessage.InputSamplesCopyRef
-    let from = !bufArrayRef
-    let size = int cbMessage.FrameCount 
-    System.Buffer.BlockCopy(from, 0, buffer, index, size)
-    advanceIndex size
-    inputCallback.CompletionSource.SetResult()
-  
+ 
   let handleTake inputTake =
     ()
     // let from = match inputTake.FromRef with BufRef arrRef -> !arrRef
@@ -148,26 +178,20 @@ type InputBuffer(beesConfig     : BeesConfig     ,
     // inputTake.CompletionSource.SetResult()
   
   // Method to process jobQueue items
-  let rec processQueue() = task {
-    let! job = jobQueue.DequeueAsync()
-    match job with
-    | Callback x ->  handleCallback x
-    | Take     x ->  handleTake     x
-    return! processQueue() }
 
-  // Submit a job
-  let doCallback beesConfig (cbMessage: CbMessage) =
-    let fromPtr = cbMessage.InputSamples.ToPointer()
-    let (BufRef toPtr) = cbMessage.InputSamplesCopyRef
-    let count   = int cbMessage.FrameCount * frameSize
-    Marshal.Copy(fromPtr, 0, toPtr, count)
-    let callbackJob = {
-      CbMessage        = cbMessage
-      CompletionSource = TaskCompletionSource<unit>() }
-    jobQueue.Enqueue(Callback callbackJob)
-
+  let processQueue() =
+    let run job =
+      match job with
+      | CallbackAcceptance x ->  handleCallbackAcceptance x
+      | Take               x ->  handleTake               x
+    let rec loop() = task {
+      let! job = jobQueue.DequeueAsync()
+      run job
+      return! loop() }
+    task { do! loop() }
+   
   do
-    Task.Run<unit> (fun () -> task { do! processQueue() }) |> ignore
+    Task.Run<unit> processQueue |> ignore
 
   
   let get (dateTime: DateTime) (duration: TimeSpan) (worker: Worker) =
@@ -186,6 +210,9 @@ type InputBuffer(beesConfig     : BeesConfig     ,
       if dateTime < earliest then  earliest
                              else  dateTime
     earliest
+
+  // Called from the callback
+  member this.FinishCallback(cbMessage: CbMessage) =  finshCallback cbMessage
     
   /// Reach back as close as possible to a time in the past.
   member this.Get(dateTime: DateTime, duration: TimeSpan, worker: Worker)  : unit =
@@ -194,7 +221,3 @@ type InputBuffer(beesConfig     : BeesConfig     ,
   /// Keep as much as possible of the given TimeSpan
   /// and return the start DateTime of what is currently kept.
   member this.Keep(duration: TimeSpan)  : DateTime = keep duration
-
-  // Called from the callback
-  member this.Callback(beesConfig: BeesConfig, cbMessage: CbMessage) =
-    doCallback beesConfig cbMessage

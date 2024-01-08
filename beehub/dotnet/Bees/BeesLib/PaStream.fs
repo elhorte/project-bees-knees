@@ -62,7 +62,7 @@ let makeStreamCallback (beesConfig: BeesConfig) (cbContextRef: ResizeArray<CbCon
         cbMessage.Timestamp    <- timeStamp
         match cbContext.CbMessagePool.CountAvail with
         | 0 -> StreamCallbackResult.Complete // todo should continue?
-        | _ -> inputBuffer.Callback(beesConfig, cbMessage)
+        | _ -> inputBuffer.FinishCallback(cbMessage)
                StreamCallbackResult.Continue )
 
 //–––––––––––––––––––––––––––––––––––––

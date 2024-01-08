@@ -65,16 +65,18 @@ let run cbContext cancellationTokenSource = task {
 //–––––––––––––––––––––––––––––––––––––
 // BeesConfig
 
-let beesConfig: BeesConfig = {
+let mutable beesConfig: BeesConfig = {
+  // pro forma.  Actually set in main.
   LocationId         = 1
   HiveId             = 1
   PrimaryDir         = "primary"
   MonitorDir         = "monitor"
   PlotDir            = "plot"
-  callbackDuration   = TimeSpan.FromMilliseconds 16
-  ringBufferDuration = TimeSpan.FromMinutes 16
-  nChannels          = 1
-  inSampleRate       = 4800  }
+  CallbackDuration   = TimeSpan.FromMilliseconds 16
+  RingBufferDuration = TimeSpan.FromMinutes 16
+  SampleSize         = sizeof<SampleType>
+  InChannelCount     =  1
+  InSampleRate       = 4800  }
 
 //–––––––––––––––––––––––––––––––––––––
 // Main
@@ -100,8 +102,18 @@ let main _ =
   let cbMessageWorkList = CbMessageWorkList()
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
-  beesConfig.nChannels    = inputParameters.channelCount
-  beesConfig.inSampleRate = int sampleRate
+  beesConfig <- {
+    LocationId         = 1
+    HiveId             = 1
+    PrimaryDir         = "primary"
+    MonitorDir         = "monitor"
+    PlotDir            = "plot"
+    CallbackDuration   = TimeSpan.FromMilliseconds 16
+    RingBufferDuration = TimeSpan.FromMinutes 16
+    SampleSize         = sizeof<SampleType>
+    InChannelCount     = inputParameters.channelCount
+    InSampleRate       = int sampleRate  }
+
   let cbMessageQueue = makeAndStartCbMessageQueue cbMessageWorkList.HandleCbMessage
   let cbContext      = makePaStream beesConfig inputParameters outputParameters sampleRate withEchoRef withLoggingRef cbMessageQueue
   keyboardInputInit()
