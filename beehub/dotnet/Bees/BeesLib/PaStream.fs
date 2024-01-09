@@ -29,7 +29,10 @@ open BeesLib.Logger
 /// <param name="cbContextRef"> A reference to the associated <c>CbContext</c> </param>
 /// <param name="cbMessageQueue" > The <c>CbMessageQueue</c> to post to           </param>
 /// <returns> A Stream.Callback to be called by PortAudioSharp                 </returns>
-let makeStreamCallback (beesConfig: BeesConfig) (cbContextRef: ResizeArray<CbContext>) (cbMessageQueue: CbMessageQueue)  : PortAudioSharp.Stream.Callback =
+let makeStreamCallback ( beesConfig     : BeesConfig             )
+                       ( cbContextRef   : ResizeArray<CbContext> )
+                       ( cbMessageQueue : CbMessageQueue         )
+                       : PortAudioSharp.Stream.Callback =
   let inputBuffer = InputBuffer(beesConfig, cbMessageQueue)
   PortAudioSharp.Stream.Callback(
     fun input output frameCount timeInfo statusFlags userDataPtr ->

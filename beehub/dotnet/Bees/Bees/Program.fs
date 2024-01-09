@@ -65,18 +65,8 @@ let run cbContext cancellationTokenSource = task {
 //–––––––––––––––––––––––––––––––––––––
 // BeesConfig
 
-let mutable beesConfig: BeesConfig = {
-  // pro forma.  Actually set in main.
-  LocationId         = 1
-  HiveId             = 1
-  PrimaryDir         = "primary"
-  MonitorDir         = "monitor"
-  PlotDir            = "plot"
-  CallbackDuration   = TimeSpan.FromMilliseconds 16
-  RingBufferDuration = TimeSpan.FromMinutes 16
-  SampleSize         = sizeof<SampleType>
-  InChannelCount     =  1
-  InSampleRate       = 4800  }
+// pro forma.  Actually set in main.
+let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 
 //–––––––––––––––––––––––––––––––––––––
 // Main
@@ -97,7 +87,7 @@ let mutable beesConfig: BeesConfig = {
 
 [<EntryPoint>]
 let main _ =
-  let mutable withEchoRef    = ref false
+  let mutable withEchoRef    = ref true
   let mutable withLoggingRef = ref false
   let cbMessageWorkList = CbMessageWorkList()
   initPortAudio()
