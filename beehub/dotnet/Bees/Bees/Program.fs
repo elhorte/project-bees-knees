@@ -3,7 +3,7 @@ open System
 open System.Threading
 open System.Threading.Tasks
 
-open BeesLib.CbMessageWorkList
+open BeesLib.WorkList
 open FSharp.Control
 open PortAudioSharp
 open BeesLib.PortAudioUtils
@@ -89,7 +89,7 @@ let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 let main _ =
   let mutable withEchoRef    = ref true
   let mutable withLoggingRef = ref false
-  let cbMessageWorkList = CbMessageWorkList()
+  let cbMessageWorkList = WorkList<CbMessage>()
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   beesConfig <- {
@@ -104,7 +104,7 @@ let main _ =
     InChannelCount     = inputParameters.channelCount
     InSampleRate       = int sampleRate  }
 
-  let cbMessageQueue = makeAndStartCbMessageQueue cbMessageWorkList.HandleCbMessage
+  let cbMessageQueue = makeAndStartCbMessageQueue cbMessageWorkList.HandleItem
   let cbContext      = makePaStream beesConfig inputParameters outputParameters sampleRate withEchoRef withLoggingRef cbMessageQueue
   keyboardInputInit()
   task {

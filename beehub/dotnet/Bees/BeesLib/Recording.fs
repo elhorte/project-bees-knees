@@ -7,7 +7,7 @@ open System.Threading
 open System.Threading.Tasks
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
-open BeesLib.CbMessageWorkList
+open BeesLib.WorkList
 
 // def recording_worker_thread(record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
 //  
@@ -165,7 +165,7 @@ let doRecording r (queue: Queue<CbMessage option>) =
 
   
 /// Start recording.
-let startRecordingAsync (config: BeesConfig) (cbMessageWorkList: CbMessageWorkList) recordingParams = task {
+let startRecordingAsync (config: BeesConfig) (cbMessageWorkList: WorkList<CbMessage>) recordingParams = task {
   let r = recordingParams
   let queue = Queue<CbMessage option>()
   let handleFrame (cbMessage: CbMessage) (workId: WorkId) unregisterMe =

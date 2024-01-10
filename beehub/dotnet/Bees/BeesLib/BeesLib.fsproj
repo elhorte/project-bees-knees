@@ -18,7 +18,7 @@
         <Compile Include="BeesConfig.fs" />
         <Compile Include="CbMessagePool.fs" />
         <Compile Include="InputBuffer.fs" />
-        <Compile Include="CbMessageWorkList.fs" />
+        <Compile Include="WorkList.fs" />
         <Compile Include="Recording.fs" />
         <Compile Include="PaStream.fs" />
         <Compile Include="Commands.fs" />

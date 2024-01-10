@@ -1,32 +1,36 @@
 ﻿
 open BeesLib.CbMessagePool
-open BeesLib.CbMessageWorkList
+open BeesLib.WorkList
 open BeesLib.Util
 
 
-let workList = CbMessageWorkList()
+let workList = WorkList<CbMessage>()
+
+// Exercising
 
 let handleCbMessage() =
-  dummyInstance<CbMessage>() |> workList.HandleCbMessage
+  dummyInstance<CbMessage>() |> workList.HandleItem
 
-let workFunc (_: CbMessage) (workId: WorkId) unregisterMe =
-  match workId with WorkId id ->  printfn "WorkItem %d runs and unregisters itself." id
-  unregisterMe()
-
-let printHowManyRegisteredHandlers expected =
+let printHowManySubscribedHandlers expected =
   printActualVsExpected workList.Count expected "workList.Count"
 
+// A demo func to be registered
 
-printHowManyRegisteredHandlers 0
+let workFunc (_: CbMessage) (workId: WorkId) unsubscribeMe =
+  match workId with WorkId id ->  printfn "WorkItem %d runs and unsubscribes itself." id
+  unsubscribeMe()
+
+
+printHowManySubscribedHandlers 0
 
 handleCbMessage() // workFunc is not called bc it is not registered yet
-printHowManyRegisteredHandlers 0
+printHowManySubscribedHandlers 0
 
 workList.Subscribe workFunc
-printHowManyRegisteredHandlers 1
+printHowManySubscribedHandlers 1
 
 handleCbMessage() // workFunc is called and unregisters itself
-printHowManyRegisteredHandlers 0
+printHowManySubscribedHandlers 0
 
 handleCbMessage() // workFunc is not called bc it is no longer registered
-printHowManyRegisteredHandlers 0
+printHowManySubscribedHandlers 0

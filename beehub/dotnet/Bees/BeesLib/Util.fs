@@ -2,7 +2,7 @@ module BeesLib.Util
 
 
 let dummyInstance<'T>() =
-  System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject typeof<'T>
+  System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof<'T>)
   |> unbox<'T>
 
 

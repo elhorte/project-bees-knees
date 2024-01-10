@@ -20,9 +20,9 @@ type Seg(head: int, tail: int, nRingFrames: int) =
   member this.Size  : int =
     assert (this.Head >= this.Tail)
     this.Head - this.Tail
-  member this.IsEmpty  : bool =  this.Size = 0
+  member this.IsActive  : bool =  this.Size <> 0
 
-  member this.Copy()  : Seg =  Seg(this.Head, this.Tail, nRingFrames)
+  member this.Copy() =  Seg(this.Head, this.Tail, nRingFrames)
 
   member this.AdvanceHead nFrames =
     let headNew = this.Head + nFrames
@@ -46,6 +46,7 @@ type CallbackAcceptanceJob = {
   CbMessage        : CbMessage
   SegCur           : Seg
   SegOld           : Seg
+  Latest           : DateTime
   CompletionSource : TaskCompletionSource<unit> }
 
 type TakeJob = {
@@ -72,27 +73,24 @@ type InputBuffer(beesConfig     : BeesConfig     ,
   let ringDuration = TimeSpan.FromMilliseconds(200) // beesConfig.RingBufferDuration
   let nRingFrames  = durationToNFrames ringDuration
   let nRingBytes   = int nRingFrames * frameSize
-  let ring         = Marshal.AllocHGlobal(nRingBytes)
+  let ringPtr      = Marshal.AllocHGlobal(nRingBytes)
   let gapDuration  = TimeSpan.FromMilliseconds 10
   let mutable nGapFrames = durationToNFrames gapDuration
   
   let indexToVoidptr index  : voidptr =
     let indexByteOffset = index * frameSize
-    let intPtr = IntPtr (int ring + indexByteOffset)
+    let intPtr = IntPtr (int ringPtr + indexByteOffset)
     intPtr.ToPointer()
 
-  // These are used only when getting data from the callback.
+  //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+  // Putting data from the callback into the ring
+
   let mutable cbSegCur = Seg(0, 0, nRingFrames)
   let mutable cbSegOld = Seg(0, 0, nRingFrames)
-  // These are used only for giving out ring data.
-  let mutable segCur = cbSegCur.Copy()
-  let mutable segOld = cbSegOld.Copy()
-  
-  //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-  // getting data from the callback
+  let mutable cbLatest = DateTime.Now
 
   let exchangeSegs() =
-    assert  cbSegOld.IsEmpty
+    assert not cbSegOld.IsActive
     assert (cbSegOld.Head = 0)
     let tmp = cbSegCur
     cbSegCur <- cbSegOld
@@ -102,7 +100,7 @@ type InputBuffer(beesConfig     : BeesConfig     ,
   // adjust nGapFrames for the maximum nFrames arg seen.
   // The goal is plenty of room between head and tail.
   // Code assumes that nRingFrames > 2 * nGapFrames
-  let adjustRingGapSize nFrames =
+  let adjustNGapFrames nFrames =
     let gapCandidate = nFrames * 4
     nGapFrames <- max nGapFrames gapCandidate
     if nRingFrames < 2 * nGapFrames then
@@ -114,19 +112,19 @@ type InputBuffer(beesConfig     : BeesConfig     ,
   //   | Middle   // | gapB |  segCur   | gapA |  segCur has been trimmed      
   //   | AtEnd    // | gap |      segCur       |  unlikely: segCur fits exactly         
   //   | Chasing  // | segCur | gap |  segOld  |  There is likely some unused after segOld
-  let prepRingHead nFrames =
-    adjustRingGapSize nFrames
+  let prepForNewFrames nFrames =
+    adjustNGapFrames nFrames
     let roomAhead = nRingFrames - (cbSegCur.Head + nFrames)
     if roomAhead >= 0 then
       // The block will fit after segCur.Head
       // state is Empty, AtBegin, Middle, Chasing
-      if not cbSegOld.IsEmpty then
+      if cbSegOld.IsActive then
         // state is Chasing
         // segOld is active and ahead of us.
         assert (cbSegCur.Head < cbSegOld.Tail)
         cbSegOld.TrimTail nFrames  // may result in segOld being empty
         // state is AtBegin, Chasing
-      if cbSegOld.IsEmpty then
+      if not cbSegOld.IsActive then
         // state is Empty, AtBegin, Middle
         let roomBehind = nGapFrames - roomAhead
         if roomBehind > 0 then
@@ -153,9 +151,10 @@ type InputBuffer(beesConfig     : BeesConfig     ,
   let finshCallback (cbMessage: CbMessage) =
     let writeCallbackBlockToRing (callbackBlockPtr: IntPtr) =
       let nFrames = int cbMessage.FrameCount
-      prepRingHead nFrames  // may update segCur.Head
+      prepForNewFrames nFrames  // may update segCur.Head
       copy callbackBlockPtr cbSegCur.Head nFrames
       cbSegCur.AdvanceHead nFrames
+      cbLatest <- cbMessage.Timestamp
     let submitCallbackAcceptanceJob callbackAcceptanceJob =
       jobQueue.Enqueue(CallbackAcceptance callbackAcceptanceJob)
     // Copy the data then Submit a FinshCallback job.
@@ -165,16 +164,22 @@ type InputBuffer(beesConfig     : BeesConfig     ,
       CbMessage        = cbMessage
       SegCur           = cbSegCur.Copy()
       SegOld           = cbSegOld.Copy()
+      Latest           = cbLatest
       CompletionSource = TaskCompletionSource<unit>() }
     submitCallbackAcceptanceJob callbackAcceptanceJob
     callbackAcceptanceJob.CompletionSource.SetResult()
   
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-  // giving out ring data
+  // Getting data from the ring
+  
+  let mutable segCur = cbSegCur.Copy()
+  let mutable segOld = cbSegOld.Copy()
+  let mutable latest = DateTime.Now
   
   let handleCallbackAcceptance callbackAcceptance =
     segCur <- callbackAcceptance.SegCur
     segOld <- callbackAcceptance.SegOld
+    latest <- callbackAcceptance.Latest
     Console.WriteLine $"{segCur.Head}"
 //  let cbMessage = callbackAcceptance.CbMessage
 //  let nFrames = int cbMessage.FrameCount
@@ -185,7 +190,6 @@ type InputBuffer(beesConfig     : BeesConfig     ,
 
   let mutable bufBegin = DateTime.Now
   let mutable earliest = DateTime.Now
-  let duration = beesConfig.RingBufferDuration
  
   
  
@@ -233,7 +237,7 @@ type InputBuffer(beesConfig     : BeesConfig     ,
                              else  dateTime
     earliest
 
-  // Called from the callback
+  // Called from the callback; internal use.
   member this.FinishCallback(cbMessage: CbMessage) =  finshCallback cbMessage
     
   /// Reach back as close as possible to a time in the past.
