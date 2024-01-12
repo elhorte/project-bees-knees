@@ -201,8 +201,9 @@ type InputBuffer(beesConfig     : BeesConfig     ,
     // System.Buffer.BlockCopy(from, 0, buffer, index, size)
     // advanceIndex inputTake.FrameCount
     // inputTake.CompletionSource.SetResult()
-  
-  // Method to process jobQueue items
+   
+  //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+  // Process jobs from jobQueue
 
   let processQueue() =
     let run job =
