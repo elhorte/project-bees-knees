@@ -174,6 +174,7 @@ type InputBuffer(beesConfig     : BeesConfig     ,
   
   let mutable segCur = cbSegCur.Copy()
   let mutable segOld = cbSegOld.Copy()
+  let mutable oldest = DateTime.Now
   let mutable latest = DateTime.Now
   
   let handleCallbackAcceptance callbackAcceptance =
@@ -236,13 +237,27 @@ type InputBuffer(beesConfig     : BeesConfig     ,
       if dateTime < earliest then  earliest
                              else  dateTime
     earliest
+    
+  let locationOfDateTime dateTime: DateTime =
+    if not (oldest <= dateTime <= latest) then None
+    Some segCur, 1
 
   // Called from the callback; internal use.
   member this.FinishCallback(cbMessage: CbMessage) =  finshCallback cbMessage
+
+  /// Create a stream of samples starting at a past DateTime.
+  /// The stream is exhausted when it gets to the end of buffered data.
+  /// The recipient is responsible for separating out channels from the sequence.
+  member this.Get(dateTime: DateTime, worker: Worker)  : SampleType seq option = seq {
+     let segIndex = segOfDateTime dateTime
+     match seg with
+     | None: return! None
+     | Some seg :
+     if isInSegOld dateTime then
+       
+       
+  }
     
-  /// Reach back as close as possible to a time in the past.
-  member this.Get(dateTime: DateTime, duration: TimeSpan, worker: Worker)  : unit =
-    get dateTime duration worker
 
   /// Keep as much as possible of the given TimeSpan
   /// and return the start DateTime of what is currently kept.

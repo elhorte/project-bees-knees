@@ -168,7 +168,7 @@ let doRecording r (queue: Queue<CbMessage option>) =
 let startRecordingAsync (config: BeesConfig) (cbMessageWorkList: WorkList<CbMessage>) recordingParams = task {
   let r = recordingParams
   let queue = Queue<CbMessage option>()
-  let handleFrame (cbMessage: CbMessage) (workId: WorkId) unregisterMe =
+  let handleFrame (cbMessage: CbMessage) (workId: SubscriptionId) unregisterMe =
     if r.cancellationToken.IsCancellationRequested then
       unregisterMe()
       queue.Enqueue None

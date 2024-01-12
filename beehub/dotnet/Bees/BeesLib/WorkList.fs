@@ -1,36 +1,50 @@
 module BeesLib.WorkList
 
+open System.Threading
+open System.Threading.Tasks
+open FSharp.Control
+open System.Linq
 
-type Unsubscriber = unit -> unit 
-type WorkId       = WorkId of int
+/// A subscription service for a generic event
 
-type WorkFunc<'T> = 'T -> WorkId -> Unsubscriber -> unit
-and  WorkItem<'T> = WorkItem of (WorkId * WorkFunc<'T>)
+type Unsubscriber   = unit -> unit 
+type SubscriptionId = SubscriptionId of int
 
-type WorkList<'T>() =
+type SubscriberHandler<'Event> = 'Event -> SubscriptionId -> Unsubscriber -> unit
+and  Subscription<'Event>   = Subscription of (SubscriptionId * SubscriberHandler<'Event>)
+
+
+type WorkList<'Event>() =
   
-  let subscriptions = ResizeArray<WorkItem<'T>>()
+  let subscriptions = ResizeArray<Subscription<'Event>>()
   let mutable idCurrent = 0
 
-  let nextWorkId() =
+  let nextId() =
     idCurrent <- idCurrent + 1
-    WorkId idCurrent
+    SubscriptionId idCurrent
 
-  let unsubscribe workItem = subscriptions.Remove workItem |> ignore
+  let unsubscribe subscription = subscriptions.Remove subscription |> ignore
 
+  //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+  // members
+  
+  /// Handle the event by running each subscription in order subscribed.
+  /// The subscriber handler can remove itself when done.
+  member this.HandleEvent(t: 'Event)  : unit =
+    for s in subscriptions.ToArray() do
+      let unsubscribeMe() = unsubscribe s  
+      match s with
+      | Subscription (id, handler) -> handler t id unsubscribeMe
 
-  /// Run each subscribed post-callback workItem, not at interrupt time.
-  member this.HandleItem(t: 'T)  : unit =
-    let workList = subscriptions.ToArray()
-    for workItem in workList do
-      let unsubscribeMe() = unsubscribe workItem  
-      match workItem with WorkItem (workId, workFunc) -> workFunc t workId unsubscribeMe
+  /// Subscribe a handler to be called every time an Event is handled.
+  member this.Subscribe(handler: SubscriberHandler<'Event>)  : Subscription<'Event> =
+    let s = Subscription (nextId(), handler)
+    subscriptions.Add s
+    s
 
-  /// Subscribe a function to be called after every callback.
-  member this.Subscribe(workFunc: WorkFunc<'T>)  : unit =
-    let workItem = WorkItem (nextWorkId(), workFunc)
-    subscriptions.Add workItem
+  /// Unsubscribe.
+  member this.Unsubscribe(s: Subscription<'Event>)  : bool =
+    subscriptions.Remove s
 
-  /// The number of subscribed WorkItems.
-  member this.Count = subscriptions.Count
-
+  /// The number of subscriptions.
+  member this.SubscriberCount = subscriptions.Count

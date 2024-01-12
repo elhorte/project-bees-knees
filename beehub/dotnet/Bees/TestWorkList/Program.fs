@@ -12,12 +12,12 @@ let handleCbMessage() =
   dummyInstance<CbMessage>() |> workList.HandleItem
 
 let printHowManySubscribedHandlers expected =
-  printActualVsExpected workList.Count expected "workList.Count"
+  printActualVsExpected workList.SubscriberCount expected "workList.Count"
 
 // A demo func to be registered
 
-let workFunc (_: CbMessage) (workId: WorkId) unsubscribeMe =
-  match workId with WorkId id ->  printfn "WorkItem %d runs and unsubscribes itself." id
+let workFunc (_: CbMessage) (workId: SubscriptionId) unsubscribeMe =
+  match workId with SubscriptionId id ->  printfn "WorkItem %d runs and unsubscribes itself." id
   unsubscribeMe()
 
 

@@ -35,6 +35,7 @@
         <None Include="..\..\..\..\..\..\..\..\.nuget\packages\naudio.lame\2.1.0\build\libmp3lame.64.dll">
             <Link>libmp3lame.64.dll</Link>
         </None>
+        <PackageReference Include="Xabe.FFmpeg" Version="5.2.6" />
     </ItemGroup>
 
     <ItemGroup>
