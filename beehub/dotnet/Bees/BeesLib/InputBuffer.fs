@@ -12,33 +12,39 @@ open BeesLib.CbMessagePool
 
 type Worker = Buf -> int -> int
 
+let tbdTimeHead = DateTime.MinValue
+
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
-type Seg(head: int, tail: int, nRingFrames: int) =
-  member val  Head = head  with get, set
-  member val  Tail = tail  with get, set
-  member this.Size  : int =
-    assert (this.Head >= this.Tail)
-    this.Head - this.Tail
-  member this.IsActive  : bool =  this.Size <> 0
+type Seg(head: int, tail: int, nRingFrames: int, beesConfig: BeesConfig) =
+  let duration nFrames = TimeSpan.FromSeconds (float nFrames / float beesConfig.InSampleRate)
+  member val  Head     = head                                                     with get, set
+  member val  Tail     = tail                                                     with get, set
+  member this.Size     = assert (this.Head >= this.Tail) ; this.Head - this.Tail
+  member this.Duration = duration this.Size
+  member val  TimeHead = tbdTimeHead                                              with get, set
+  member this.TimeTail = this.TimeHead - this.Duration
+  member this.IsActive = this.Size <> 0
 
-  member this.Copy() =  Seg(this.Head, this.Tail, nRingFrames)
+  member this.Copy()   = Seg(this.Head, this.Tail, nRingFrames, beesConfig)
 
-  member this.AdvanceHead nFrames =
+  member this.Reset() = this.Head <- 0 ; this.Tail <- 0
+
+  member this.AdvanceHead nFrames timestamp =
     let headNew = this.Head + nFrames
     assert (headNew < nRingFrames)
     this.Head <- headNew
-  
+    this.TimeHead <- timestamp
+
   /// Trim nFrames from the tail.  May result in an empty Seg.
   member this.TrimTail nFrames  : unit =
     if this.Size > nFrames then  this.Tail <- this.Tail + nFrames
-                           else  this.Head <- 0
-                                 this.Tail <- 0
+                           else  this.Reset()
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
-type TakeFunctions =
+type TakeFunction =
   | TakeWrite of (BufRef -> int -> unit)
   | TakeDone  of (int -> unit)
 
@@ -46,11 +52,10 @@ type CallbackAcceptanceJob = {
   CbMessage        : CbMessage
   SegCur           : Seg
   SegOld           : Seg
-  Latest           : DateTime
   CompletionSource : TaskCompletionSource<unit> }
 
 type TakeJob = {
-  Data: TakeFunctions
+  Data: TakeFunction
   CompletionSource: TaskCompletionSource<unit> }
 
 type Job =
@@ -85,16 +90,16 @@ type InputBuffer(beesConfig     : BeesConfig     ,
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // Putting data from the callback into the ring
 
-  let mutable cbSegCur = Seg(0, 0, nRingFrames)
-  let mutable cbSegOld = Seg(0, 0, nRingFrames)
-  let mutable cbLatest = DateTime.Now
+  let mutable cbSegCur = Seg(0, 0, nRingFrames, beesConfig)
+  let mutable cbSegOld = Seg(0, 0, nRingFrames, beesConfig)
 
   let exchangeSegs() =
     assert not cbSegOld.IsActive
-    assert (cbSegOld.Head = 0)
     let tmp = cbSegCur
     cbSegCur <- cbSegOld
     cbSegOld <- tmp
+    assert (cbSegCur.Head = 0)
+    cbSegCur.TimeHead <- tbdTimeHead
 
   // In case the callback’s nFrames arg varies from one callback to the next,
   // adjust nGapFrames for the maximum nFrames arg seen.
@@ -112,6 +117,11 @@ type InputBuffer(beesConfig     : BeesConfig     ,
   //   | Middle   // | gapB |  segCur   | gapA |  segCur has been trimmed      
   //   | AtEnd    // | gap |      segCur       |  unlikely: segCur fits exactly         
   //   | Chasing  // | segCur | gap |  segOld  |  There is likely some unused after segOld
+  //
+  //       | time  –>
+  // seg0 || cur growing  | old shrinking | inactive | cur growing              | ...
+  // seg1 || inactive     | cur growing              | old shrinking | inactive | ...
+  
   let prepForNewFrames nFrames =
     adjustNGapFrames nFrames
     let roomAhead = nRingFrames - (cbSegCur.Head + nFrames)
@@ -151,10 +161,9 @@ type InputBuffer(beesConfig     : BeesConfig     ,
   let finshCallback (cbMessage: CbMessage) =
     let writeCallbackBlockToRing (callbackBlockPtr: IntPtr) =
       let nFrames = int cbMessage.FrameCount
-      prepForNewFrames nFrames  // may update segCur.Head
+      prepForNewFrames nFrames // may update segCur.Head
       copy callbackBlockPtr cbSegCur.Head nFrames
-      cbSegCur.AdvanceHead nFrames
-      cbLatest <- cbMessage.Timestamp
+      cbSegCur.AdvanceHead nFrames cbMessage.Timestamp
     let submitCallbackAcceptanceJob callbackAcceptanceJob =
       jobQueue.Enqueue(CallbackAcceptance callbackAcceptanceJob)
     // Copy the data then Submit a FinshCallback job.
@@ -164,7 +173,6 @@ type InputBuffer(beesConfig     : BeesConfig     ,
       CbMessage        = cbMessage
       SegCur           = cbSegCur.Copy()
       SegOld           = cbSegOld.Copy()
-      Latest           = cbLatest
       CompletionSource = TaskCompletionSource<unit>() }
     submitCallbackAcceptanceJob callbackAcceptanceJob
     callbackAcceptanceJob.CompletionSource.SetResult()
@@ -174,23 +182,23 @@ type InputBuffer(beesConfig     : BeesConfig     ,
   
   let mutable segCur = cbSegCur.Copy()
   let mutable segOld = cbSegOld.Copy()
-  let mutable oldest = DateTime.Now
-  let mutable latest = DateTime.Now
+  let segOldest() = if segOld.IsActive then segCur else segOld
+  let mutable timeTail = segOldest().TimeTail
+  let mutable timeHead = segCur     .TimeHead
   
   let handleCallbackAcceptance callbackAcceptance =
+    let cbMessage = callbackAcceptance.CbMessage
+    cbMessage.CbContext.CbMessagePool.ItemUseBegin()
     segCur <- callbackAcceptance.SegCur
     segOld <- callbackAcceptance.SegOld
-    latest <- callbackAcceptance.Latest
     Console.WriteLine $"{segCur.Head}"
+    // ...
+    cbMessage.CbContext.CbMessagePool.ItemUseEnd(cbMessage)
 //  let cbMessage = callbackAcceptance.CbMessage
 //  let nFrames = int cbMessage.FrameCount
 //  let fromPtr = cbMessage.InputSamples.ToPointer()
 //  let ringHeadPtr = indexToPointer segCur.Head
 //  copy fromPtr ringHeadPtr nFrames
-
-
-  let mutable bufBegin = DateTime.Now
-  let mutable earliest = DateTime.Now
  
   
  
@@ -226,22 +234,22 @@ type InputBuffer(beesConfig     : BeesConfig     ,
     let now = DateTime.Now
     let beginDt =
       if   dateTime > now      then  now
-      elif dateTime < earliest then  earliest
+      elif dateTime < timeTail then  timeTail
                                else  dateTime
-    ()
+    () // todo WIP
     
   let keep (duration: TimeSpan) =
     assert (duration > TimeSpan.Zero)
     let now = DateTime.Now
     let dateTime = now - duration
-    earliest <- 
-      if dateTime < earliest then  earliest
+    timeTail <- 
+      if dateTime < timeTail then  timeTail
                              else  dateTime
-    earliest
+    timeTail
     
-  let locationOfDateTime dateTime: DateTime =
-    if not (oldest <= dateTime <= latest) then None
-    Some segCur, 1
+  let locationOfDateTime (dateTime: DateTime)  : Option<Seg * int> =
+    if not (timeTail <= dateTime && dateTime <= timeHead) then Some (segCur, 1)
+    else None
 
   // Called from the callback; internal use.
   member this.FinishCallback(cbMessage: CbMessage) =  finshCallback cbMessage
@@ -249,17 +257,12 @@ type InputBuffer(beesConfig     : BeesConfig     ,
   /// Create a stream of samples starting at a past DateTime.
   /// The stream is exhausted when it gets to the end of buffered data.
   /// The recipient is responsible for separating out channels from the sequence.
-  member this.Get(dateTime: DateTime, worker: Worker)  : SampleType seq option = seq {
-     let segIndex = segOfDateTime dateTime
-     match seg with
-     | None: return! None
-     | Some seg :
-     if isInSegOld dateTime then
-       
-       
-  }
-    
-
-  /// Keep as much as possible of the given TimeSpan
-  /// and return the start DateTime of what is currently kept.
-  member this.Keep(duration: TimeSpan)  : DateTime = keep duration
+  // member this.Get(dateTime: DateTime, worker: Worker)  : SampleType seq option = seq {
+  //    let segIndex = segOfDateTime dateTime
+  //    match seg with
+  //    | None: return! None
+  //    | Some seg :
+  //    if isInSegOld dateTime then
+  //    todo WIP
+  //      
+  // }

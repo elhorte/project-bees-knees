@@ -93,18 +93,18 @@ let main _ =
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   beesConfig <- {
-    LocationId         = 1
-    HiveId             = 1
-    PrimaryDir         = "primary"
-    MonitorDir         = "monitor"
-    PlotDir            = "plot"
-    CallbackDuration   = TimeSpan.FromMilliseconds 16
-    RingBufferDuration = TimeSpan.FromMinutes 16
-    SampleSize         = sizeof<SampleType>
-    InChannelCount     = inputParameters.channelCount
-    InSampleRate       = int sampleRate  }
+    LocationId          = 1
+    HiveId              = 1
+    PrimaryDir          = "primary"
+    MonitorDir          = "monitor"
+    PlotDir             = "plot"
+    CallbackDuration    = TimeSpan.FromMilliseconds 16
+    InputBufferDuration = TimeSpan.FromMinutes 16
+    SampleSize          = sizeof<SampleType>
+    InChannelCount      = inputParameters.channelCount
+    InSampleRate        = int sampleRate  }
 
-  let cbMessageQueue = makeAndStartCbMessageQueue cbMessageWorkList.HandleItem
+  let cbMessageQueue = makeAndStartCbMessageQueue cbMessageWorkList.HandleEvent
   let cbContext      = makePaStream beesConfig inputParameters outputParameters sampleRate withEchoRef withLoggingRef cbMessageQueue
   keyboardInputInit()
   task {
