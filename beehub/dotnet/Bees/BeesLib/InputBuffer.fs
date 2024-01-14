@@ -1,13 +1,14 @@
 module BeesLib.InputBuffer
 
 open System
-open System.Collections.Concurrent
 open System.Runtime.InteropServices
+open System.Threading
 open System.Threading.Tasks
 
-open BeesLib.AsyncConcurrentQueue
+open BeesUtil.AsyncConcurrentQueue
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
+open PortAudioSharp
 
 
 type Worker = Buf -> int -> int
@@ -32,8 +33,8 @@ type Seg(head: int, tail: int, nRingFrames: int, beesConfig: BeesConfig) =
 
   member this.AdvanceHead nFrames timestamp =
     let headNew = this.Head + nFrames
-    assert (headNew < nRingFrames)
-    this.Head <- headNew
+    assert (headNew <= nRingFrames)
+    this.Head     <- headNew
     this.TimeHead <- timestamp
 
   /// Trim nFrames from the tail.  May result in an empty Seg.
@@ -64,8 +65,7 @@ type Job =
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
-type InputBuffer(beesConfig     : BeesConfig     ,
-                 cbMessageQueue : CbMessageQueue ) =
+type InputBuffer(beesConfig: BeesConfig) =
 
   let jobQueue = AsyncConcurrentQueue<Job>()
 
@@ -76,7 +76,7 @@ type InputBuffer(beesConfig     : BeesConfig     ,
   let mutable beesConfig = beesConfig // so it’s visible in the debugger
   let frameSize    = beesConfig.InChannelCount * sizeof<SampleType>
   let ringDuration = TimeSpan.FromMilliseconds(200) // beesConfig.RingBufferDuration
-  let nRingFrames  = durationToNFrames ringDuration
+  let nRingFrames  = 8192 // durationToNFrames ringDuration
   let nRingBytes   = int nRingFrames * frameSize
   let ringPtr      = Marshal.AllocHGlobal(nRingBytes)
   let gapDuration  = TimeSpan.FromMilliseconds 10
@@ -89,9 +89,20 @@ type InputBuffer(beesConfig     : BeesConfig     ,
 
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // Putting data from the callback into the ring
+  
+  //          |––––––––– ring ––––––––––|                                        
+  // Empty    |           gap           |                                        
+  // AtBegin  | segCur |      gap       |  gap >= minimum                        
+  // Middle   | gapB |  segCur   | gapA |  segCur has been trimmed      
+  // AtEnd    | gap  |      segCur      |  unlikely: segCur fits exactly         
+  // Chasing  | segCur | gap |  segOld  |  After segOld there is likely unused (nRingFrames % nFrames)
+  //
+  //      || time  –>
+  // seg0 || cur growing  | old shrinking | inactive | cur growing              | ...
+  // seg1 || inactive     | cur growing              | old shrinking | inactive | ...
 
-  let mutable cbSegCur = Seg(0, 0, nRingFrames, beesConfig)
-  let mutable cbSegOld = Seg(0, 0, nRingFrames, beesConfig)
+  let mutable cbSegCur = Seg(0, 0, nRingFrames, beesConfig)  // seg0
+  let mutable cbSegOld = Seg(0, 0, nRingFrames, beesConfig)  // seg1
 
   let exchangeSegs() =
     assert not cbSegOld.IsActive
@@ -110,17 +121,6 @@ type InputBuffer(beesConfig     : BeesConfig     ,
     nGapFrames <- max nGapFrames gapCandidate
     if nRingFrames < 2 * nGapFrames then
       failwith $"nRingFrames is too small. nFrames: {nFrames}  nGapFrames: {nGapFrames}  nRingFrames: {nRingFrames}"
-  
-  // type State = // |––––––––– ring ––––––––––|                                        
-  //   | Empty    // |           gap           |                                        
-  //   | AtBegin  // | segCur |      gap       |  gap >= minimum                        
-  //   | Middle   // | gapB |  segCur   | gapA |  segCur has been trimmed      
-  //   | AtEnd    // | gap |      segCur       |  unlikely: segCur fits exactly         
-  //   | Chasing  // | segCur | gap |  segOld  |  There is likely some unused after segOld
-  //
-  //       | time  –>
-  // seg0 || cur growing  | old shrinking | inactive | cur growing              | ...
-  // seg1 || inactive     | cur growing              | old shrinking | inactive | ...
   
   let prepForNewFrames nFrames =
     adjustNGapFrames nFrames
@@ -158,7 +158,7 @@ type InputBuffer(beesConfig     : BeesConfig     ,
     let size    = int64 (nFrames * frameSize)
     () // Buffer.MemoryCopy(fromPtr, toPtr, size, size)
 
-  let finshCallback (cbMessage: CbMessage) =
+  let finishCallback (cbMessage: CbMessage) =
     let writeCallbackBlockToRing (callbackBlockPtr: IntPtr) =
       let nFrames = int cbMessage.FrameCount
       prepForNewFrames nFrames // may update segCur.Head
@@ -176,7 +176,42 @@ type InputBuffer(beesConfig     : BeesConfig     ,
       CompletionSource = TaskCompletionSource<unit>() }
     submitCallbackAcceptanceJob callbackAcceptanceJob
     callbackAcceptanceJob.CompletionSource.SetResult()
-  
+
+  // Called from the method
+  let callback input output frameCount timeInfo statusFlags userDataPtr cbContext =
+    let timeStamp = DateTime.Now
+    let (input : IntPtr) = input
+    let (output: IntPtr) = output
+    let withEcho  = Volatile.Read &cbContext.WithEchoRef.contents
+    let seqNum    = Volatile.Read &cbContext.SeqNumRef.contents
+    if withEcho then
+      let size = uint64 (frameCount * uint32 sizeof<float32>)
+      Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
+    Volatile.Write(cbContext.SeqNumRef, seqNum + 1)
+    match cbContext.CbMessagePool.Take() with
+    | None -> // Yikes, pool is empty
+      cbContext.Logger.Add seqNum timeStamp "CbMessagePool is empty" null
+      PortAudioSharp.StreamCallbackResult.Continue
+    | Some cbMessage ->
+      if Volatile.Read &cbContext.WithLoggingRef.contents then
+        cbContext.Logger.Add seqNum timeStamp "cb bufs=" cbMessage.PoolStats
+      // the callback args
+      cbMessage.InputSamples <- input
+      cbMessage.Output       <- output
+      cbMessage.FrameCount   <- frameCount
+      cbMessage.TimeInfo     <- timeInfo
+      cbMessage.StatusFlags  <- statusFlags
+      cbMessage.UserDataPtr  <- userDataPtr
+      // more from the callback
+      cbMessage.CbContext    <- cbContext
+      cbMessage.WithEcho     <- withEcho 
+      cbMessage.SeqNum       <- seqNum
+      cbMessage.Timestamp    <- timeStamp
+      match cbContext.CbMessagePool.CountAvail with
+      | 0 -> PortAudioSharp.StreamCallbackResult.Complete // todo should continue?
+      | _ -> finishCallback cbMessage
+             PortAudioSharp.StreamCallbackResult.Continue
+
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // Getting data from the ring
   
@@ -251,8 +286,10 @@ type InputBuffer(beesConfig     : BeesConfig     ,
     if not (timeTail <= dateTime && dateTime <= timeHead) then Some (segCur, 1)
     else None
 
-  // Called from the callback; internal use.
-  member this.FinishCallback(cbMessage: CbMessage) =  finshCallback cbMessage
+  
+  // Called from the PortAudio callback at interrupt time; internal use.
+  member this.Callback(input, output, frameCount, timeInfo, statusFlags, userDataPtr, cbContext) =
+    callback           input  output  frameCount  timeInfo  statusFlags  userDataPtr  cbContext
 
   /// Create a stream of samples starting at a past DateTime.
   /// The stream is exhausted when it gets to the end of buffered data.

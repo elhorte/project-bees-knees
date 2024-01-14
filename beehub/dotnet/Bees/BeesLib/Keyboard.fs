@@ -5,7 +5,7 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.FSharp.Data.UnitSystems.SI.UnitNames
 
-open CancelAfterDelay
+open BeesUtil.CancelAfterDelay
 open ConsoleReadAsync
 open BeesLib.Commands
 

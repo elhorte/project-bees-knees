@@ -1,5 +1,5 @@
 ﻿
-open BeesLib.ItemPool
+open BeesUtil.ItemPool
 
 let startCount = 4
 

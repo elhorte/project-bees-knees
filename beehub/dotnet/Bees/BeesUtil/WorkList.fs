@@ -1,4 +1,4 @@
-module BeesLib.WorkList
+module BeesUtil.WorkList
 
 open System.Threading
 open System.Threading.Tasks

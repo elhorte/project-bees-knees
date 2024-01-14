@@ -7,7 +7,8 @@ open System.Threading
 open System.Threading.Tasks
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
-open BeesLib.WorkList
+open BeesLib.InputBuffer
+open BeesUtil.WorkList
 
 // def recording_worker_thread(record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
 //  
@@ -112,7 +113,7 @@ let rangePosition todRange now =
 //                                          WaitingUntil dt
 
 
-let doRecording r (queue: Queue<CbMessage option>) =
+let doRecording r (inputBuffer: InputBuffer) =
   let makeFilename beesConfig r =
     let beesConfig = (beesConfig: BeesConfig)
     let timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
@@ -165,14 +166,7 @@ let doRecording r (queue: Queue<CbMessage option>) =
 
   
 /// Start recording.
-let startRecordingAsync (config: BeesConfig) (cbMessageWorkList: WorkList<CbMessage>) recordingParams = task {
+let startRecordingAsync (config: BeesConfig) (inputBuffer: InputBuffer) recordingParams = task {
   let r = recordingParams
-  let queue = Queue<CbMessage option>()
-  let handleFrame (cbMessage: CbMessage) (workId: SubscriptionId) unregisterMe =
-    if r.cancellationToken.IsCancellationRequested then
-      unregisterMe()
-      queue.Enqueue None
-    else
-      queue.Enqueue (Some cbMessage)
-  cbMessageWorkList.Subscribe handleFrame
-  doRecording r queue }
+
+  doRecording r inputBuffer }

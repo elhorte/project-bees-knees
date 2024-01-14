@@ -1,15 +1,14 @@
 module BeesLib.CbMessagePool
 
+open BeesUtil
 
 open System
 
-open System.Threading
-open Util
 open PortAudioSharp
 open BeesLib.BeesConfig
-open BeesLib.Logger
-open BeesLib.AsyncConcurrentQueue
-open BeesLib.ItemPool
+open BeesUtil.Logger
+open BeesUtil.AsyncConcurrentQueue
+open BeesUtil.ItemPool
 
 
 type SampleType  = float32
@@ -27,7 +26,7 @@ type BufRefMaker = unit -> BufRef
 type CbContext = {
   BeesConfig     : BeesConfig
   PaStream       : PortAudioSharp.Stream
-  CbMessagePool  : CbMessagePool // The callback grabs a CbMessage from here.
+  CbMessagePool  : CbMessagePool    // The callback grabs a CbMessage from here.
   CbMessageQueue : CbMessageQueue   // The callback fills in the CbMessage and enqueues it here.
   Logger         : Logger
   WithEchoRef    : bool ref
@@ -57,7 +56,7 @@ and CbMessage(beesConfig: BeesConfig, paStream: PortAudioSharp.Stream, cbMessage
     StartTime      = DateTime.Now
     SeqNumRef      = ref 0  }
 
-  // the callback args
+  // args to the callback called by PortAudioSharp
   member   val public InputSamples        : IntPtr                 = IntPtr.Zero        with get, set
   member   val public Output              : IntPtr                 = IntPtr.Zero        with get, set
   member   val public FrameCount          : uint32                 = 0u                 with get, set

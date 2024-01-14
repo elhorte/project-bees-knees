@@ -1,7 +1,7 @@
 ﻿
 open BeesLib.CbMessagePool
-open BeesLib.WorkList
-open BeesLib.Util
+open BeesUtil.WorkList
+open BeesUtil.Util
 
 
 let workList = WorkList<CbMessage>()
@@ -9,7 +9,7 @@ let workList = WorkList<CbMessage>()
 // Exercising
 
 let handleCbMessage() =
-  dummyInstance<CbMessage>() |> workList.HandleItem
+  dummyInstance<CbMessage>() |> workList.HandleEvent
 
 let printHowManySubscribedHandlers expected =
   printActualVsExpected workList.SubscriberCount expected "workList.Count"
@@ -26,7 +26,7 @@ printHowManySubscribedHandlers 0
 handleCbMessage() // workFunc is not called bc it is not registered yet
 printHowManySubscribedHandlers 0
 
-workList.Subscribe workFunc
+let subscription = workList.Subscribe workFunc
 printHowManySubscribedHandlers 1
 
 handleCbMessage() // workFunc is called and unregisters itself

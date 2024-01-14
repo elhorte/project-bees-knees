@@ -2,15 +2,14 @@ module BeesLib.PaStream
 
 
 open System
-open System.Runtime.InteropServices
-open System.Threading
 open System.Threading.Tasks
 
+open BeesUtil.WorkList
 open PortAudioSharp
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open BeesLib.InputBuffer
-open BeesLib.Logger
+open BeesUtil.Logger
 
 // See Theory of Operation comment before main at the end of this file.
 
@@ -22,51 +21,22 @@ open BeesLib.Logger
 ///   Creates a Stream.Callback that:
 ///   <list type="bullet">
 ///     <item><description> Allocates no memory because this is a system-level callback </description></item>
-///     <item><description> Ges a <c>CbMessage</c> from the pool and fills it in        </description></item>
+///     <item><description> Gets a <c>CbMessage</c> from the pool and fills it in        </description></item>
 ///     <item><description> Posts the <c>CbMessage</c> to the <c>cbMessageQueue</c>     </description></item>
 ///   </list>
 /// </summary>
 /// <param name="cbContextRef"> A reference to the associated <c>CbContext</c> </param>
 /// <param name="cbMessageQueue" > The <c>CbMessageQueue</c> to post to           </param>
 /// <returns> A Stream.Callback to be called by PortAudioSharp                 </returns>
-let makeStreamCallback ( beesConfig     : BeesConfig             )
-                       ( cbContextRef   : ResizeArray<CbContext> )
-                       ( cbMessageQueue : CbMessageQueue         )
-                       : PortAudioSharp.Stream.Callback =
-  let inputBuffer = InputBuffer(beesConfig, cbMessageQueue)
+let makePaStreamCallback ( beesConfig     : BeesConfig             )
+                         ( cbContextRef   : ResizeArray<CbContext> )
+                         ( inputBuffer    : InputBuffer            )
+                         : PortAudioSharp.Stream.Callback =
   PortAudioSharp.Stream.Callback(
-    fun input output frameCount timeInfo statusFlags userDataPtr ->
+    // This fun has to be here because of a limitation of the compiler, apparently.
+    fun                    input  output  frameCount  timeInfo  statusFlags  userDataPtr ->
       let cbContext = cbContextRef[0]
-      let withEcho  = Volatile.Read &cbContext.WithEchoRef.contents
-      let seqNum    = Volatile.Read &cbContext.SeqNumRef.contents
-      let timeStamp = DateTime.Now
-      if withEcho then
-        let size = uint64 (frameCount * uint32 sizeof<float32>)
-        Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
-      Volatile.Write(cbContext.SeqNumRef, seqNum + 1)
-      match cbContext.CbMessagePool.Take() with
-      | None -> // Yikes, pool is empty
-        cbContext.Logger.Add seqNum timeStamp "CbMessagePool is empty" null
-        StreamCallbackResult.Continue
-      | Some cbMessage ->
-        if Volatile.Read &cbContext.WithLoggingRef.contents then
-          cbContext.Logger.Add seqNum timeStamp "cb bufs=" cbMessage.PoolStats
-        // the callback args
-        cbMessage.InputSamples <- input
-        cbMessage.Output       <- output
-        cbMessage.FrameCount   <- frameCount
-        cbMessage.TimeInfo     <- timeInfo
-        cbMessage.StatusFlags  <- statusFlags
-        cbMessage.UserDataPtr  <- userDataPtr
-        // more from the callback
-        cbMessage.CbContext    <- cbContext
-        cbMessage.WithEcho     <- withEcho 
-        cbMessage.SeqNum       <- seqNum
-        cbMessage.Timestamp    <- timeStamp
-        match cbContext.CbMessagePool.CountAvail with
-        | 0 -> StreamCallbackResult.Complete // todo should continue?
-        | _ -> inputBuffer.FinishCallback(cbMessage)
-               StreamCallbackResult.Continue )
+      inputBuffer.Callback(input, output, frameCount, timeInfo, statusFlags, userDataPtr, cbContext) )
 
 //–––––––––––––––––––––––––––––––––––––
 
@@ -121,9 +91,11 @@ let makeCbMessagePool beesConfig stream cbMessageQueue logger =
 /// <param name="withLoggingRef"  > A Boolean determining if the callback should do logging         </param>
 /// <param name="cbMessageQueue"     > CbMessageQueue object handling audio stream                  </param>
 /// <returns>A CbContext struct to be passed to each callback</returns>
-let makePaStream beesConfig inputParameters outputParameters sampleRate withEchoRef withLoggingRef cbMessageQueue  : CbContext =
+let makePaStream beesConfig inputParameters outputParameters sampleRate withEchoRef withLoggingRef  : CbContext * InputBuffer =
+  let cbMessageWorkList = WorkList<CbMessage>()
   let cbContextRef = ResizeArray<CbContext>(1)  // indirection to solve the chicken or egg problem
-  let callback = makeStreamCallback beesConfig cbContextRef cbMessageQueue
+  let inputBuffer = InputBuffer(beesConfig)
+  let callback = makePaStreamCallback beesConfig cbContextRef inputBuffer
   let paStream = new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                            outParams       = Nullable<_>(outputParameters)        ,
                                            sampleRate      = sampleRate                           ,
@@ -131,6 +103,7 @@ let makePaStream beesConfig inputParameters outputParameters sampleRate withEcho
                                            streamFlags     = StreamFlags.ClipOff                  ,
                                            callback        = callback                             ,
                                            userData        = Nullable()                           )
+  let cbMessageQueue = makeAndStartCbMessageQueue cbMessageWorkList.HandleEvent
   let startTime = DateTime.Now
   let logger = Logger(8000, startTime)
   let cbContext = {
@@ -144,6 +117,6 @@ let makePaStream beesConfig inputParameters outputParameters sampleRate withEcho
     StartTime      = startTime
     SeqNumRef      = ref 1  }
   cbContextRef.Add(cbContext) // and here is where we provide the cbContext struct to be used by the callback
-  cbContext
+  cbContext, inputBuffer
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

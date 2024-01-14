@@ -1,4 +1,4 @@
-module BeesLib.Util
+module BeesUtil.Util
 
 
 let dummyInstance<'T>() =

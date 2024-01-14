@@ -1,4 +1,4 @@
-module BeesLib.PortAudioUtils
+module BeesUtil.PortAudioUtils
 
 open System
 open PortAudioSharp

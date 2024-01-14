@@ -1,0 +1,36 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net8.0</TargetFramework>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <RootNamespace>BeesLib</RootNamespace>
+    </PropertyGroup>
+    
+    <ItemGroup>
+        <Compile Include="Util.fs" />
+        <Compile Include="Parallel.fs" />
+        <Compile Include="CancelAfterDelay.fs" />
+        <Compile Include="CpuStopwatch.fs" />
+        <Compile Include="Logger.fs" />
+        <Compile Include="AsyncConcurrentQueue.fs" />
+        <Compile Include="ItemPool.fs" />
+        <Compile Include="WorkList.fs" />
+        <Compile Include="PortAudioUtils.fs" />
+        <Compile Include="Mp3.fs" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!--    <ProjectReference Include="..\..\..\..\..\..\..\PortAudioSharp2\PortAudioSharp\PortAudioSharp.csproj" />    -->
+        <PackageReference Include="FSharp.Control.AsyncSeq" Version="3.2.1" />
+        <PackageReference Include="PortAudioSharp2" Version="0.4.0" />
+        <PackageReference Include="NAudio.Lame" Version="2.1.0" />
+        <None Include="..\..\..\..\..\..\..\..\.nuget\packages\naudio.lame\2.1.0\build\libmp3lame.32.dll">
+            <Link>libmp3lame.32.dll</Link>
+        </None>
+        <None Include="..\..\..\..\..\..\..\..\.nuget\packages\naudio.lame\2.1.0\build\libmp3lame.64.dll">
+            <Link>libmp3lame.64.dll</Link>
+        </None>
+        <PackageReference Include="Xabe.FFmpeg" Version="5.2.6" />
+    </ItemGroup>
+
+</Project>

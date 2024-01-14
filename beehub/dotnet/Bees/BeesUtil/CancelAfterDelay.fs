@@ -1,4 +1,4 @@
-module BeesLib.CancelAfterDelay
+module BeesUtil.CancelAfterDelay
 
 open System.Threading
 open System.Threading.Tasks
