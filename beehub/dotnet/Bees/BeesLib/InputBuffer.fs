@@ -16,6 +16,20 @@ type Worker = Buf -> int -> int
 let tbdTimeHead = DateTime.MinValue
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// The ring buffer functions as 0, 1, or 2 active segments.
+//
+//            |––––––––– ring ––––––––––|
+// Empty    0 |           gap           |
+// AtBegin  1 | segCur |      gap       |  gap >= minimum
+// Middle   1 | gapB |  segCur   | gapA |  segCur growth has caused it to trim itself
+// AtEnd    1 | gap  |      segCur      |  segCur can go no further. (unlikely: segCur fits exactly)
+// Chasing  2 | segCur | gap |  segOld  |  After segOld there is likely unused (nRingFrames % nFrames)
+//
+// Empty –> AtBegin –> Middle –> AtEnd –> Chasing –> AtBegin ...
+//
+//      || time  –>                 A                                                     A
+// seg0 || inactive  | cur growing  | old shrinking | inactive | cur growing              | ...
+// seg1 || inactive  | inactive     | cur growing              | old shrinking | inactive | ...
 
 type Seg(head: int, tail: int, nRingFrames: int, beesConfig: BeesConfig) =
   let duration nFrames = TimeSpan.FromSeconds (float nFrames / float beesConfig.InSampleRate)
@@ -31,11 +45,11 @@ type Seg(head: int, tail: int, nRingFrames: int, beesConfig: BeesConfig) =
 
   member this.Reset() = this.Head <- 0 ; this.Tail <- 0
 
-  member this.AdvanceHead nFrames timestamp =
+  member this.AdvanceHead nFrames timeHead =
     let headNew = this.Head + nFrames
     assert (headNew <= nRingFrames)
     this.Head     <- headNew
-    this.TimeHead <- timestamp
+    this.TimeHead <- timeHead
 
   /// Trim nFrames from the tail.  May result in an empty Seg.
   member this.TrimTail nFrames  : unit =
@@ -76,7 +90,7 @@ type InputBuffer(beesConfig: BeesConfig) =
   let mutable beesConfig = beesConfig // so it’s visible in the debugger
   let frameSize    = beesConfig.InChannelCount * sizeof<SampleType>
   let ringDuration = TimeSpan.FromMilliseconds(200) // beesConfig.RingBufferDuration
-  let nRingFrames  = 8192 // durationToNFrames ringDuration
+  let nRingFrames  = durationToNFrames ringDuration
   let nRingBytes   = int nRingFrames * frameSize
   let ringPtr      = Marshal.AllocHGlobal(nRingBytes)
   let gapDuration  = TimeSpan.FromMilliseconds 10
@@ -89,17 +103,6 @@ type InputBuffer(beesConfig: BeesConfig) =
 
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // Putting data from the callback into the ring
-  
-  //          |––––––––– ring ––––––––––|                                        
-  // Empty    |           gap           |                                        
-  // AtBegin  | segCur |      gap       |  gap >= minimum                        
-  // Middle   | gapB |  segCur   | gapA |  segCur has been trimmed      
-  // AtEnd    | gap  |      segCur      |  unlikely: segCur fits exactly         
-  // Chasing  | segCur | gap |  segOld  |  After segOld there is likely unused (nRingFrames % nFrames)
-  //
-  //      || time  –>
-  // seg0 || cur growing  | old shrinking | inactive | cur growing              | ...
-  // seg1 || inactive     | cur growing              | old shrinking | inactive | ...
 
   let mutable cbSegCur = Seg(0, 0, nRingFrames, beesConfig)  // seg0
   let mutable cbSegOld = Seg(0, 0, nRingFrames, beesConfig)  // seg1
