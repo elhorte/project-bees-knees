@@ -3,9 +3,10 @@ open System
 open System.Threading
 open System.Threading.Tasks
 
-open BeesLib.InputBuffer
+open BeesLib.InputStream
 open FSharp.Control
 open PortAudioSharp
+open BeesUtil.Util
 open BeesUtil.PortAudioUtils
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
@@ -43,22 +44,13 @@ let prepareArgumentsForStreamCreation() =
   printfn $"outputParameters=%A{outputParameters}"
   sampleRate, inputParameters, outputParameters
 
-// for debug
-let printCallback (m: CbMessage) =
-  let microseconds = floatToMicrosecondsFractionOnly m.TimeInfo.currentTime
-  let percentCPU   = m.CbContext.PaStream.CpuLoad * 100.0
-  let sDebug = sprintf "%3d: %A %s" m.SeqNum m.Timestamp m.PoolStats
-  let sWork  = sprintf $"work: %6d{microseconds} frameCount=%A{m.FrameCount} cpuLoad=%5.1f{percentCPU}%%"
-  Console.WriteLine($"{sDebug}   ––   {sWork}")
-
 /// Run the stream for a while, then stop it and terminate PortAudio.
-let run cbContext inputBuffer cancellationTokenSource = task {
-  let cbContext = (cbContext: CbContext)
-  let inputBuffer = (inputBuffer: InputBuffer)
-  printfn "Starting..."    ; cbContext.PaStream.Start()
+let run inputStream cancellationTokenSource = task {
+  let inputStream = (inputStream: InputStream)
+  printfn "Starting..."    ; inputStream.PaStream.Start()
   printfn "Reading..."
   do! keyboardKeyInput cancellationTokenSource
-  printfn "Stopping..."    ; cbContext.PaStream.Stop()
+  printfn "Stopping..."    ; inputStream.PaStream.Stop()
   printfn "Stopped"
   printfn "Terminating..." ; terminatePortAudio()
   printfn "Terminated" }
@@ -88,8 +80,8 @@ let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 
 [<EntryPoint>]
 let main _ =
-  let mutable withEchoRef    = ref false
-  let mutable withLoggingRef = ref false
+  let withEcho    = false
+  let withLogging = false
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   beesConfig <- {
@@ -99,19 +91,19 @@ let main _ =
     MonitorDir          = "monitor"
     PlotDir             = "plot"
     CallbackDuration    = TimeSpan.FromMilliseconds 16
-    InputBufferDuration = TimeSpan.FromMinutes 16
+    inputStreamDuration = TimeSpan.FromMinutes 16
     SampleSize          = sizeof<SampleType>
     InChannelCount      = inputParameters.channelCount
     InSampleRate        = int sampleRate  }
 
-  let cbContext, inputBuffer = makePaStream beesConfig inputParameters outputParameters sampleRate withEchoRef withLoggingRef
+  use inputStream = makeInputStream beesConfig inputParameters outputParameters sampleRate withEcho withLogging
   keyboardInputInit()
   task {
     try
       use cts = new CancellationTokenSource()
-      do! run cbContext inputBuffer cts
+      do! tryCatchRethrow (fun () -> run inputStream cts)
     with
     | :? PortAudioException as e -> exitWithTrouble 2 e "Running PortAudio Stream" }
   |> Task.WaitAll
-  printfn "%s" (cbContext.Logger.ToString())
+  printfn "%s" (inputStream.Logger.ToString())
   0

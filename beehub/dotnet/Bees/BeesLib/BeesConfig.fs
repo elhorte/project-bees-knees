@@ -13,7 +13,7 @@ type BeesConfig = {
   MonitorDir          : string
   PlotDir             : string
   CallbackDuration    : TimeSpan
-  InputBufferDuration : TimeSpan
+  inputStreamDuration : TimeSpan
   SampleSize          : int
   InChannelCount      : int
   InSampleRate        : int  }
