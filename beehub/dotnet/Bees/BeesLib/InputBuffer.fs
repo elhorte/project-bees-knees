@@ -16,34 +16,47 @@ type Worker = Buf -> int -> int
 let tbdTimeHead = DateTime.MinValue
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// The ring buffer functions as 0, 1, or 2 active segments.
+// The ring buffer comprises 0, 1, or 2 active segments.
 //
 //            |––––––––– ring ––––––––––|
 // Empty    0 |           gap           |
 // AtBegin  1 | segCur |      gap       |  gap >= minimum
 // Middle   1 | gapB |  segCur   | gapA |  segCur growth has caused it to trim itself
-// AtEnd    1 | gap  |      segCur      |  segCur can go no further. (unlikely: segCur fits exactly)
+// AtEnd    1 | gap  |      segCur      |  segCur can go no further; happens on only one callback per repeating cycle
 // Chasing  2 | segCur | gap |  segOld  |  After segOld there is likely unused (nRingFrames % nFrames)
+//                                         Note: when AtEnd, segCur may fit exactly but this is unlikely.
 //
-// Empty –> AtBegin –> Middle –> AtEnd –> Chasing –> AtBegin ...
+// Repeating lifecycle:  Empty –> AtBegin –> Middle –> AtEnd –> Chasing –> AtBegin ...
 //
-//      || time  –>                 A                                                     A
-// seg0 || inactive  | cur growing  | old shrinking | inactive | cur growing              | ...
-// seg1 || inactive  | inactive     | cur growing              | old shrinking | inactive | ...
+//      || time  –>  A (repeat point)                    X (exchange point)                                                  A
+//      || Empty     | AtBegin      | Middle     | AtEnd | Chasing       | AtBegin      | Middle     | AtEnd | Chasing       |
+// seg0 || inactive  | cur growing  | cur moving         | old shrinking | inactive     | inactive           | cur growing   |
+// seg1 || inactive  | inactive     | inactive           | cur growing   | cur growing  | cur moving         | old shrinking |
+//
+// There are two pairs of segments:
+//
+//    callback  client
+//      time     task
+//    --------  ------
+//    cbSegCur  segCur   cur head is overall head of data
+//    cbSegOld  segOld   old tail is overall tail of data
+// 
+// A background task loop takes each job from jobQueue and runs it to completion.
+// Each callback    queues a job to copy cbSegCur/cbSegOld to segCur/segOld
+// Each client call queues a job to access data from the ring.
+// Client calls have to be asynchronous because they have to run in the jobQueue task.
 
 type Seg(head: int, tail: int, nRingFrames: int, beesConfig: BeesConfig) =
   let duration nFrames = TimeSpan.FromSeconds (float nFrames / float beesConfig.InSampleRate)
   member val  Head     = head                                                     with get, set
   member val  Tail     = tail                                                     with get, set
-  member this.Size     = assert (this.Head >= this.Tail) ; this.Head - this.Tail
-  member this.Duration = duration this.Size
+  member this.NFrames  = assert (this.Head >= this.Tail) ; this.Head - this.Tail
+  member this.Duration = duration this.NFrames
   member val  TimeHead = tbdTimeHead                                              with get, set
   member this.TimeTail = this.TimeHead - this.Duration
-  member this.IsActive = this.Size <> 0
-
+  member this.Active   = this.NFrames <> 0
   member this.Copy()   = Seg(this.Head, this.Tail, nRingFrames, beesConfig)
-
-  member this.Reset() = this.Head <- 0 ; this.Tail <- 0
+  member this.Reset()  = this.Head <- 0 ; this.Tail <- 0 ; assert (not this.Active)
 
   member this.AdvanceHead nFrames timeHead =
     let headNew = this.Head + nFrames
@@ -51,10 +64,10 @@ type Seg(head: int, tail: int, nRingFrames: int, beesConfig: BeesConfig) =
     this.Head     <- headNew
     this.TimeHead <- timeHead
 
-  /// Trim nFrames from the tail.  May result in an empty Seg.
+  /// Trim nFrames from the tail.  May result in an inactive Seg.
   member this.TrimTail nFrames  : unit =
-    if this.Size > nFrames then  this.Tail <- this.Tail + nFrames
-                           else  this.Reset()
+    if this.NFrames > nFrames then  this.Tail <- this.Tail + nFrames
+                              else  this.Reset()
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -108,7 +121,7 @@ type InputBuffer(beesConfig: BeesConfig) =
   let mutable cbSegOld = Seg(0, 0, nRingFrames, beesConfig)  // seg1
 
   let exchangeSegs() =
-    assert not cbSegOld.IsActive
+    assert not cbSegOld.Active
     let tmp = cbSegCur
     cbSegCur <- cbSegOld
     cbSegOld <- tmp
@@ -131,13 +144,13 @@ type InputBuffer(beesConfig: BeesConfig) =
     if roomAhead >= 0 then
       // The block will fit after segCur.Head
       // state is Empty, AtBegin, Middle, Chasing
-      if cbSegOld.IsActive then
+      if cbSegOld.Active then
         // state is Chasing
         // segOld is active and ahead of us.
         assert (cbSegCur.Head < cbSegOld.Tail)
-        cbSegOld.TrimTail nFrames  // may result in segOld being empty
+        cbSegOld.TrimTail nFrames  // may result in segOld being inactive
         // state is AtBegin, Chasing
-      if not cbSegOld.IsActive then
+      if not cbSegOld.Active then
         // state is Empty, AtBegin, Middle
         let roomBehind = nGapFrames - roomAhead
         if roomBehind > 0 then
@@ -220,7 +233,7 @@ type InputBuffer(beesConfig: BeesConfig) =
   
   let mutable segCur = cbSegCur.Copy()
   let mutable segOld = cbSegOld.Copy()
-  let segOldest() = if segOld.IsActive then segCur else segOld
+  let segOldest() = if segOld.Active then segCur else segOld
   let mutable timeTail = segOldest().TimeTail
   let mutable timeHead = segCur     .TimeHead
   
