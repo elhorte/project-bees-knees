@@ -47,10 +47,10 @@ let prepareArgumentsForStreamCreation() =
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run inputStream cancellationTokenSource = task {
   let inputStream = (inputStream: InputStream)
-  printfn "Starting..."    ; inputStream.PaStream.Start()
+  printfn "Starting..."    ; inputStream.Start()
   printfn "Reading..."
   do! keyboardKeyInput cancellationTokenSource
-  printfn "Stopping..."    ; inputStream.PaStream.Stop()
+  printfn "Stopping..."    ; inputStream.Stop()
   printfn "Stopped"
   printfn "Terminating..." ; terminatePortAudio()
   printfn "Terminated" }
@@ -96,7 +96,7 @@ let main _ =
     InChannelCount      = inputParameters.channelCount
     InSampleRate        = int sampleRate  }
 
-  use inputStream = makeInputStream beesConfig inputParameters outputParameters sampleRate withEcho withLogging
+  let inputStream = makeInputStream beesConfig inputParameters outputParameters sampleRate withEcho withLogging
   keyboardInputInit()
   task {
     try

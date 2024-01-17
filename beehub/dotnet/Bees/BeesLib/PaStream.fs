@@ -2,14 +2,10 @@ module BeesLib.PaStream
 
 
 open System
-open System.Threading.Tasks
 
-open BeesUtil.WorkList
+open BeesUtil.Util
 open PortAudioSharp
-open BeesLib.BeesConfig
-open BeesLib.CbMessagePool
 open BeesLib.InputStream
-open BeesUtil.Logger
 
 // See Theory of Operation comment before main at the end of this file.
 
@@ -50,13 +46,13 @@ let makeInputStream beesConfig inputParameters outputParameters sampleRate withE
     fun                    input  output  frameCount  timeInfo  statusFlags  userDataPtr ->
     // PortAudioSharp.StreamCallbackResult.Continue )
       inputStream.Callback(input, output, frameCount, timeInfo, statusFlags, userDataPtr) )
-  let paStream = new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
-                                           outParams       = Nullable<_>(outputParameters)        ,
-                                           sampleRate      = sampleRate                           ,
-                                           framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
-                                           streamFlags     = StreamFlags.ClipOff                  ,
-                                           callback        = callback                             ,
-                                           userData        = Nullable()                           )
+  let paStream = tryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
+                                                                      outParams       = Nullable<_>(outputParameters)        ,
+                                                                      sampleRate      = sampleRate                           ,
+                                                                      framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
+                                                                      streamFlags     = StreamFlags.ClipOff                  ,
+                                                                      callback        = callback                             ,
+                                                                      userData        = Nullable()                           ) )
   inputStream.PaStream <- paStream
   inputStream
 
