@@ -47,7 +47,7 @@ let prepareArgumentsForStreamCreation() =
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run inputStream cancellationTokenSource = task {
   let inputStream = (inputStream: InputStream)
-  printfn "Starting..."    ; inputStream.Start()
+  printfn "Starting..."    ; tryCatchRethrow(fun() -> inputStream.Start())
   printfn "Reading..."
   do! keyboardKeyInput cancellationTokenSource
   printfn "Stopping..."    ; inputStream.Stop()
@@ -64,25 +64,11 @@ let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 //–––––––––––––––––––––––––––––––––––––
 // Main
 
-/// Main does the following:
-/// - Initialize PortAudio.
-/// - Create everything the callback will need.
-///   - sampleRate, inputParameters, outputParameters
-///   - a CbMessageQueue, which
-///     - accepts a CbMessage from each callback
-///     - calls the given handler asap for each CbMessage queued
-///   - a CbContext struct, which is passed to each callback
-/// - runs the cbMessageQueue
-/// The audio callback is designed to do as little as possible at interrupt time:
-/// - grabs a CbMessage from a preallocated ItemPool
-/// - copies the input data buf into the CbMessage
-/// - inserts the CbMessage into in the CbMessageQueue for later processing
 
 [<EntryPoint>]
 let main _ =
   let withEcho    = false
   let withLogging = false
-  initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   beesConfig <- {
     LocationId          = 1

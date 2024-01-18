@@ -24,12 +24,6 @@
         <PackageReference Include="FSharp.Control.AsyncSeq" Version="3.2.1" />
         <PackageReference Include="PortAudioSharp2" Version="0.4.0" />
         <PackageReference Include="NAudio.Lame" Version="2.1.0" />
-        <None Include="..\..\..\..\..\..\..\..\.nuget\packages\naudio.lame\2.1.0\build\libmp3lame.32.dll">
-            <Link>libmp3lame.32.dll</Link>
-        </None>
-        <None Include="..\..\..\..\..\..\..\..\.nuget\packages\naudio.lame\2.1.0\build\libmp3lame.64.dll">
-            <Link>libmp3lame.64.dll</Link>
-        </None>
         <PackageReference Include="Xabe.FFmpeg" Version="5.2.6" />
     </ItemGroup>
 

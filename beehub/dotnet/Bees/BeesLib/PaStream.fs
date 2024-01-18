@@ -6,12 +6,27 @@ open System
 open BeesUtil.Util
 open PortAudioSharp
 open BeesLib.InputStream
+open BeesUtil.PortAudioUtils
 
 // See Theory of Operation comment before main at the end of this file.
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // callback –> CbMessage –> CbMessageQueue handler
+
+/// Main does the following:
+/// - Initialize PortAudio.
+/// - Create everything the callback will need.
+///   - sampleRate, inputParameters, outputParameters
+///   - a CbMessageQueue, which
+///     - accepts a CbMessage from each callback
+///     - calls the given handler asap for each CbMessage queued
+///   - a CbContext struct, which is passed to each callback
+/// - runs the cbMessageQueue
+/// The audio callback is designed to do as little as possible at interrupt time:
+/// - grabs a CbMessage from a preallocated ItemPool
+/// - copies the input data buf into the CbMessage
+/// - inserts the CbMessage into in the CbMessageQueue for later processing
 
 // <summary>
 //   Creates a Stream.Callback that:
@@ -40,6 +55,7 @@ open BeesLib.InputStream
 /// <param name="cbMessageQueue"     > CbMessageQueue object handling audio stream                  </param>
 /// <returns>A CbContext struct to be passed to each callback</returns>
 let makeInputStream beesConfig inputParameters outputParameters sampleRate withEcho withLogging  : InputStream =
+  initPortAudio()
   let inputStream = new InputStream(beesConfig, withEcho, withLogging)
   let callback = PortAudioSharp.Stream.Callback(
     // This fun has to be here because of a limitation of the compiler, apparently.

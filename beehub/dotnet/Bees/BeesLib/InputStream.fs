@@ -347,12 +347,16 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
       run job
       return! loop() }
     task { do! loop() }
-   
-  do
+  
+  let start() =
+    tryCatchRethrow(fun() -> paStream.Start())
     printfn $"InputStream size: {nRingBytes / 1_000_000} MB for {ringDuration}"
     printfn $"InputStream nFrames: {nRingFrames}"
     Task.Run<unit> processQueue |> ignore
 
+  let stop() =
+    paStream.Stop()
+    cancellationTokenSource.Cancel()
    
 //   let get (dateTime: DateTime) (duration: TimeSpan) (worker: Worker) =
 //     let now = DateTime.Now
@@ -374,8 +378,8 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
 //   let locationOfDateTime (dateTime: DateTime)  : Option<Seg * int> =
 //     if not (timeTail <= dateTime && dateTime <= timeHead) then Some (segCur, 1)
 //     else None
-//
-//   
+
+   
   member val PaStream       = dummyInstance<PortAudioSharp.Stream>()   with set, get // filled in after construction (chicken or egg)
   member val CbMessagePool  = cbMessagePool
   member val CbMessageQueue = cbMessageQueue
@@ -387,29 +391,28 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   member this.WithLogging with get()     = getWithLogging()
                           and  set value = Volatile.Write(&withLogging, value)
 
-  member this.Start() = paStream.Start()
-  member this.Stop () = paStream.Stop () ; cancellationTokenSource.Cancel()
+  member this.Start() = start()
+  member this.Stop () = stop ()
   // Called from the PortAudio callback at interrupt time; internal use.
   member this.Callback(input, output, frameCount, timeInfo, statusFlags, userDataPtr) =
     callback           input  output  frameCount  timeInfo  statusFlags  userDataPtr
     // PortAudioSharp.StreamCallbackResult.Continue
+
+  /// Create a stream of samples starting at a past DateTime.
+  /// The stream is exhausted when it gets to the end of buffered data.
+  /// The recipient is responsible for separating out channels from the sequence.
+  // member this.Get(dateTime: DateTime, worker: Worker)  : SampleType seq option = seq {
+  //    let segIndex = segOfDateTime dateTime
+  //    match seg with
+  //    | None: return! None
+  //    | Some seg :
+  //    if isInSegOld dateTime then
+  //    WIP
+  //      
+  // }
 
   interface IDisposable with
     member this.Dispose() =
       cancellationTokenSource.Cancel()
       // Explicitly release any other managed resources here if needed//   member val BeesConfig     = beesConfig
 
-//
-//   /// Create a stream of samples starting at a past DateTime.
-//   /// The stream is exhausted when it gets to the end of buffered data.
-//   /// The recipient is responsible for separating out channels from the sequence.
-//   // member this.Get(dateTime: DateTime, worker: Worker)  : SampleType seq option = seq {
-//   //    let segIndex = segOfDateTime dateTime
-//   //    match seg with
-//   //    | None: return! None
-//   //    | Some seg :
-//   //    if isInSegOld dateTime then
-//   //    WIP
-//   //      
-//   // }
-//
