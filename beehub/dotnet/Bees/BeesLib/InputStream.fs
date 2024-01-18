@@ -154,7 +154,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   let durationToNFrames (duration: TimeSpan) =
     let nFramesApprox = duration.TotalSeconds * float beesConfig.InSampleRate
     int (Math.Ceiling nFramesApprox)
-    
+
   let mutable beesConfig = beesConfig // so it’s visible in the debugger
   let frameSize    = beesConfig.InChannelCount * sizeof<SampleType>
   let ringDuration = TimeSpan.FromMilliseconds(200) // beesConfig.RingBufferDuration
