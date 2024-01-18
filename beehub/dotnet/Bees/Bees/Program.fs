@@ -47,7 +47,6 @@ let prepareArgumentsForStreamCreation() =
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run inputStream cancellationTokenSource = task {
   let inputStream = (inputStream: InputStream)
-  printfn "Starting..."    ; tryCatchRethrow(fun() -> inputStream.Start())
   printfn "Reading..."
   do! keyboardKeyInput cancellationTokenSource
   printfn "Stopping..."    ; inputStream.Stop()

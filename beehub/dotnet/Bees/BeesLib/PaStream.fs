@@ -70,6 +70,7 @@ let makeInputStream beesConfig inputParameters outputParameters sampleRate withE
                                                                       callback        = callback                             ,
                                                                       userData        = Nullable()                           ) )
   inputStream.PaStream <- paStream
+  tryCatchRethrow(fun() -> inputStream.Start())
   inputStream
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

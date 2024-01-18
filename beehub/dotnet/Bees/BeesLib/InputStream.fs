@@ -137,13 +137,13 @@ let makeAndStartCbMessageQueue workPerCallback  : CbMessageQueue =
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
+  let startTime = DateTime.Now
+  let logger = Logger(8000, startTime)
   let cancellationTokenSource = new CancellationTokenSource()
   let jobQueue = AsyncConcurrentQueue<Job>()
   let cbMessageWorkList = WorkList<CbMessage>()
   let cbMessageQueue = makeAndStartCbMessageQueue cbMessageWorkList.HandleEvent
   let cbMessagePool: CbMessagePool = makeCbMessagePool beesConfig
-  let startTime = DateTime.Now
-  let logger = Logger(8000, startTime)
   let mutable paStream = dummyInstance<PortAudioSharp.Stream>()
   let mutable seqNum = 0
   let mutable withEcho = false
@@ -385,6 +385,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   member val CbMessageQueue = cbMessageQueue
   member val Logger         = logger
   member val StartTime      = startTime
+  member val BeesConfig     = beesConfig
 
   member this.WithEcho    with get()     = getWithEcho()
                           and  set value = Volatile.Write(&withEcho, value)
@@ -413,6 +414,6 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
 
   interface IDisposable with
     member this.Dispose() =
-      cancellationTokenSource.Cancel()
-      // Explicitly release any other managed resources here if needed//   member val BeesConfig     = beesConfig
+      this.Stop()
+      // Explicitly release any other managed resources here if needed
 
