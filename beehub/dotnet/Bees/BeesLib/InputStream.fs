@@ -227,7 +227,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
     let fromPtr = callbackBlockPtr.ToPointer()
     let toPtr   = indexToVoidptr head
     let size    = int64 (nFrames * frameSize)
-    tryCatchRethrow (fun () -> Buffer.MemoryCopy(fromPtr, toPtr, size, size))
+    paTryCatchRethrow (fun () -> Buffer.MemoryCopy(fromPtr, toPtr, size, size))
     IntPtr toPtr
 
   // // for debug
@@ -349,7 +349,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
     task { do! loop() }
   
   let start() =
-    tryCatchRethrow(fun() -> paStream.Start())
+    paTryCatchRethrow(fun() -> paStream.Start())
     printfn $"InputStream size: {nRingBytes / 1_000_000} MB for {ringDuration}"
     printfn $"InputStream nFrames: {nRingFrames}"
     Task.Run<unit> processQueue |> ignore

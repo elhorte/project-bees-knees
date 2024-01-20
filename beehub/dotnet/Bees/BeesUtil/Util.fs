@@ -1,5 +1,7 @@
 module BeesUtil.Util
 
+open PortAudioSharp
+
 
 let dummyInstance<'T>() =
   System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof<'T>)
@@ -14,5 +16,7 @@ let printActualVsExpected actual expected message =
 
 let tryCatchRethrow f =
   try f()
-  with ex -> printfn $"Exception: %s{ex.Message}"
-             raise ex
+  with ex ->
+    printfn $"Exception: %s{ex.Message}"
+    raise ex
+    

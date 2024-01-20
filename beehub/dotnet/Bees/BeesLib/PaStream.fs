@@ -62,15 +62,15 @@ let makeInputStream beesConfig inputParameters outputParameters sampleRate withE
     fun                    input  output  frameCount  timeInfo  statusFlags  userDataPtr ->
     // PortAudioSharp.StreamCallbackResult.Continue )
       inputStream.Callback(input, output, frameCount, timeInfo, statusFlags, userDataPtr) )
-  let paStream = tryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
-                                                                      outParams       = Nullable<_>(outputParameters)        ,
-                                                                      sampleRate      = sampleRate                           ,
-                                                                      framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
-                                                                      streamFlags     = StreamFlags.ClipOff                  ,
-                                                                      callback        = callback                             ,
-                                                                      userData        = Nullable()                           ) )
+  let paStream = paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
+                                                                        outParams       = Nullable<_>(outputParameters)        ,
+                                                                        sampleRate      = sampleRate                           ,
+                                                                        framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
+                                                                        streamFlags     = StreamFlags.ClipOff                  ,
+                                                                        callback        = callback                             ,
+                                                                        userData        = Nullable()                           ) )
   inputStream.PaStream <- paStream
-  tryCatchRethrow(fun() -> inputStream.Start())
+  paTryCatchRethrow(fun() -> inputStream.Start())
   inputStream
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

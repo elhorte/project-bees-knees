@@ -6,8 +6,18 @@ open PortAudioSharp
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // PortAudio Utils
 
+let paTryCatchRethrow f =
+  try f()
+  with
+  | :? PortAudioException as ex -> 
+    printfn $"PortAudioException: ErrorCode: %A{ex.ErrorCode} %s{ex.Message}"
+    raise ex
+  | ex ->
+    printfn $"Exception: %s{ex.Message}"
+    raise ex
+
 let exitWithTrouble exitValue (e: PortAudioException) message =
-  printfn "Trouble: %s: %A %A" message e.ErrorCode e.Message
+  printfn "Exiting with trouble: %s: %A %A" message e.ErrorCode e.Message
   Environment.Exit exitValue
 
 

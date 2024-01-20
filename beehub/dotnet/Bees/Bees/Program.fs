@@ -20,6 +20,7 @@ open BeesLib.PaStream
 
 /// Creates and returns the sample rate and the input parameters.
 let prepareArgumentsForStreamCreation() =
+  initPortAudio()
   let defaultInput = PortAudio.DefaultInputDevice         in printfn $"Default input device = %d{defaultInput}"
   let inputInfo    = PortAudio.GetDeviceInfo defaultInput
   let nChannels    = inputInfo.maxInputChannels           in printfn $"Number of channels = %d{nChannels}"
@@ -86,7 +87,7 @@ let main _ =
   task {
     try
       use cts = new CancellationTokenSource()
-      do! tryCatchRethrow (fun () -> run inputStream cts)
+      do! paTryCatchRethrow (fun () -> run inputStream cts)
     with
     | :? PortAudioException as e -> exitWithTrouble 2 e "Running PortAudio Stream" }
   |> Task.WaitAll
