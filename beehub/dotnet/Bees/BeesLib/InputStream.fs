@@ -102,37 +102,6 @@ let makeCbMessagePool beesConfig =
   let minCount   = 4
   CbMessagePool(bufSize, startCount, minCount)
 
-//–––––––––––––––––––––––––––––––––––––
-
-/// <summary>
-///   Continuously receives messages from a CbMessageQueue;
-///   processes each message with the provided function.
-/// </summary>
-/// <param name="workPerCallback"> A function to process each message.                     </param>
-/// <param name="cbMessageQueue"    > A CbMessageQueue from which to receive the messages. </param>
-let cbMessageQueueHandler workPerCallback (cbMessageQueue: CbMessageQueue) =
-//let mutable callbackMessage = Unchecked.defaultof<CbMessage>
-  let doOne (m: CbMessage) =
-    let cbMessagePool = m.CbMessagePool
-    cbMessagePool.ItemUseBegin()
-    workPerCallback m
-    cbMessagePool.ItemUseEnd   m
-  cbMessageQueue.iter doOne
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// CbMessageQueue
-
-/// <summary>
-///   Creates and starts a CbMessageQueue that will process CbMessages inserted by callbacks.
-/// </summary>
-/// <param name="workPerCallback">A function that processes a CbMessageQueueMessage</param>
-/// <returns>Returns a started CbMessageQueue</returns>
-let makeAndStartCbMessageQueue workPerCallback  : CbMessageQueue =
-  let cbMessageQueue = CbMessageQueue()
-  let handler() = cbMessageQueueHandler workPerCallback cbMessageQueue
-  Task.Run handler |> ignore
-  cbMessageQueue
-
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -142,7 +111,6 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   let cancellationTokenSource = new CancellationTokenSource()
   let jobQueue = AsyncConcurrentQueue<Job>()
   let cbMessageWorkList = WorkList<CbMessage>()
-  let cbMessageQueue = makeAndStartCbMessageQueue cbMessageWorkList.HandleEvent
   let cbMessagePool: CbMessagePool = makeCbMessagePool beesConfig
   let mutable paStream = dummyInstance<PortAudioSharp.Stream>()
   let mutable seqNum = 0
@@ -168,6 +136,38 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
     let indexByteOffset = index * frameSize
     let intPtr = ringPtr + IntPtr indexByteOffset
     intPtr.ToPointer()
+
+  //–––––––––––––––––––––––––––––––––––––
+
+  /// <summary>
+  ///   Continuously receives messages from a CbMessageQueue;
+  ///   processes each message with the provided function.
+  /// </summary>
+  /// <param name="workPerCallback"> A function to process each message.                     </param>
+  /// <param name="cbMessageQueue"    > A CbMessageQueue from which to receive the messages. </param>
+  let cbMessageQueueHandler workPerCallback (cbMessageQueue: CbMessageQueue) =
+  //let mutable callbackMessage = Unchecked.defaultof<CbMessage>
+    let doOne (m: CbMessage) =
+      cbMessagePool.ItemUseBegin()
+      workPerCallback m
+      cbMessagePool.ItemUseEnd   m
+    cbMessageQueue.iter doOne
+
+  //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+  // CbMessageQueue
+
+  /// <summary>
+  ///   Creates and starts a CbMessageQueue that will process CbMessages inserted by callbacks.
+  /// </summary>
+  /// <param name="workPerCallback">A function that processes a CbMessageQueueMessage</param>
+  /// <returns>Returns a started CbMessageQueue</returns>
+  let makeAndStartCbMessageQueue workPerCallback  : CbMessageQueue =
+    let cbMessageQueue = CbMessageQueue()
+    let handler() = cbMessageQueueHandler workPerCallback cbMessageQueue
+    Task.Run handler |> ignore
+    cbMessageQueue
+
+  let cbMessageQueue = makeAndStartCbMessageQueue cbMessageWorkList.HandleEvent
 
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // Putting data from the callback into the ring
@@ -238,38 +238,29 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   //   let sWork  = sprintf $"work: %6d{microseconds} frameCount=%A{m.FrameCount} cpuLoad=%5.1f{percentCPU}%%"
   //   Console.WriteLine($"{sDebug}   ––   {sWork}")
 
-  let finishCallback (cbMessage: CbMessage) =
-    let writeCallbackBlockToRing (callbackBlockPtr: IntPtr) =
-      let nFrames = int cbMessage.FrameCount
-      prepForNewFrames nFrames // may update segCur.Head
-      let ptr = copy callbackBlockPtr cbSegCur.Head nFrames
-      cbSegCur.AdvanceHead nFrames cbMessage.Timestamp
-      ptr
-    let submitCallbackAcceptanceJob callbackAcceptanceJob =
-      jobQueue.Enqueue(CallbackAcceptance callbackAcceptanceJob)
-    // Copy the data then Submit a FinshCallback job.
-    let callbackBlockPtr = cbMessage.InputSamples
-    let ptr = writeCallbackBlockToRing callbackBlockPtr
-    let callbackAcceptanceJob = {
-      CbMessage        = cbMessage
-      SegCur           = cbSegCur.Copy()
-      SegOld           = cbSegOld.Copy()
-      CompletionSource = TaskCompletionSource<unit>() }
-    cbMessage.InputSamplesRingCopy <- ptr
-    submitCallbackAcceptanceJob callbackAcceptanceJob
-    callbackAcceptanceJob.CompletionSource.SetResult()
-
-  // - Allocates no memory because this is a system-level callback
-  // - Gets a CbMessage from the pool and fills it in
-  // - Posts the CbMessage to cbMessageQueue
-  //   </list>
-  // </summary>
-  // <param name="cbContextRef"> A reference to the associated <c>CbContext</c> </param>
-  // <param name="cbMessageQueue" > The <c>CbMessageQueue</c> to post to           </param>
-  // <returns> A Stream.Callback to be called by PortAudioSharp                 </returns>
-
   // Called from the Callback method
+  // Must not allocate memory because this is a system-level callback
   let callback input output frameCount timeInfo statusFlags userDataPtr =
+    let finishCallback (cbMessage: CbMessage) =
+      let writeCallbackBlockToRing (callbackBlockPtr: IntPtr) =
+        let nFrames = int cbMessage.FrameCount
+        prepForNewFrames nFrames // may update segCur.Head
+        let ptr = copy callbackBlockPtr cbSegCur.Head nFrames
+        cbSegCur.AdvanceHead nFrames cbMessage.Timestamp
+        ptr
+      let submitCallbackAcceptanceJob callbackAcceptanceJob =
+        jobQueue.Enqueue(CallbackAcceptance callbackAcceptanceJob)
+      // Copy the data then Submit a FinshCallback job.
+      let callbackBlockPtr = cbMessage.InputSamples
+      let ptr = writeCallbackBlockToRing callbackBlockPtr
+      let callbackAcceptanceJob = {
+        CbMessage        = cbMessage
+        SegCur           = cbSegCur.Copy()
+        SegOld           = cbSegOld.Copy()
+        CompletionSource = TaskCompletionSource<unit>() }
+      cbMessage.InputSamplesRingCopy <- ptr
+      submitCallbackAcceptanceJob callbackAcceptanceJob
+      callbackAcceptanceJob.CompletionSource.SetResult()
     let timeStamp = DateTime.Now
     let (input : IntPtr) = input
     let (output: IntPtr) = output
@@ -283,7 +274,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
       PortAudioSharp.StreamCallbackResult.Continue
     | Some cbMessage ->
       if getWithLogging() then
-        logger.Add seqNum timeStamp "cb bufs=" cbMessage.PoolStats
+        logger.Add seqNum timeStamp "cb bufs=" cbMessagePool.PoolStats
       // the callback args
       cbMessage.InputSamples <- input
       cbMessage.Output       <- output
@@ -380,13 +371,14 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
 //     else None
 
    
-  member val PaStream       = dummyInstance<PortAudioSharp.Stream>()   with set, get // filled in after construction (chicken or egg)
   member val CbMessagePool  = cbMessagePool
   member val CbMessageQueue = cbMessageQueue
   member val Logger         = logger
   member val StartTime      = startTime
   member val BeesConfig     = beesConfig
 
+  member this.PaStream    with get()     = paStream // filled in after construction (chicken or egg)
+                          and  set value = paStream <- value
   member this.WithEcho    with get()     = getWithEcho()
                           and  set value = Volatile.Write(&withEcho, value)
   member this.WithLogging with get()     = getWithLogging()

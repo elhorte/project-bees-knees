@@ -97,3 +97,5 @@ and ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, item
   member this.Release    (item: 'Item) = releaseToPool  item
   member this.CountAvail               = Volatile.Read &countAvail.contents
   member this.CountInUse               = Volatile.Read &countInUse.contents
+  
+  member this.PoolStats with get()     = sprintf "pool=%A:%A" this.CountAvail this.CountInUse

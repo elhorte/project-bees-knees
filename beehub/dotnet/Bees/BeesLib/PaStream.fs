@@ -14,6 +14,7 @@ open BeesUtil.PortAudioUtils
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // callback –> CbMessage –> CbMessageQueue handler
 
+/// NEEDS WORK
 /// Main does the following:
 /// - Initialize PortAudio.
 /// - Create everything the callback will need.
@@ -52,8 +53,8 @@ open BeesUtil.PortAudioUtils
 /// <param name="sampleRate"      > Audio sample rate                                               </param>
 /// <param name="withEchoRef"     > A Boolean determining if input should be echoed to output       </param>
 /// <param name="withLoggingRef"  > A Boolean determining if the callback should do logging         </param>
-/// <param name="cbMessageQueue"     > CbMessageQueue object handling audio stream                  </param>
-/// <returns>A CbContext struct to be passed to each callback</returns>
+/// <param name="cbMessageQueue"  > CbMessageQueue object handling audio stream                     </param>
+/// <returns>An <c>InputStream</c></returns>
 let makeInputStream beesConfig inputParameters outputParameters sampleRate withEcho withLogging  : InputStream =
   initPortAudio()
   let inputStream = new InputStream(beesConfig, withEcho, withLogging)

@@ -18,20 +18,7 @@ type BufRef      = BufRef of BufArray ref
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// CbMessage pool
-
-// The callback uses this for context.
-[<Struct>]
-type CbContext = {
-  BeesConfig     : BeesConfig
-  PaStream       : PortAudioSharp.Stream
-  CbMessagePool  : CbMessagePool    // The callback grabs a CbMessage from here.
-  CbMessageQueue : CbMessageQueue   // The callback fills in the CbMessage and enqueues it here.
-  Logger         : Logger
-  WithEchoRef    : bool ref
-  WithLoggingRef : bool ref
-  StartTime      : DateTime
-  SeqNumRef      : int ref }
+// CbMessage, CbMessagePool, CbMessageQueue
 
 /// This is the message that the callback sends to the managed-code handler.
 and CbMessage() =
@@ -40,7 +27,6 @@ and CbMessage() =
   let ti = StreamCallbackTimeInfo() // Replace with actual time info.
   let sf = StreamCallbackFlags.PrimingOutput
   let cbMessagePoolDummy = dummyInstance<CbMessagePool>()
-  let intPtr0 = IntPtr 0
 
   // Most initializer values here are placeholders that will be overwritten by the callback.
 
@@ -53,21 +39,18 @@ and CbMessage() =
   member   val public StatusFlags           : StreamCallbackFlags    = sf                 with get, set
   member   val public UserDataPtr           : IntPtr                 = IntPtr.Zero        with get, set
   // more from the callback
-  member   val public CbMessagePool         : CbMessagePool          = cbMessagePoolDummy with get, set
   member   val public Timestamp             : DateTime               = DateTime.MinValue  with get, set
   member   val public WithEcho              : bool                   = false              with get, set
-  member   val public InputSamplesRingCopy  : IntPtr                 = intPtr0            with get, set
-  
-  member   m.PoolStats with get() = sprintf "pool=%A:%A" m.CbMessagePool.CountAvail m.CbMessagePool.CountInUse
+  member   val public InputSamplesRingCopy  : IntPtr                 = IntPtr 0           with get, set
   
   override m.ToString() = sprintf "%A %A" m.SeqNum m.TimeInfo
-
-and CbMessageQueue = AsyncConcurrentQueue<CbMessage>
 
 and CbMessagePool( bufSize    : int ,
                    startCount : int ,
                    minCount   : int ) =
   inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage())
+
+and CbMessageQueue = AsyncConcurrentQueue<CbMessage>
     
 
   // static member test() =
