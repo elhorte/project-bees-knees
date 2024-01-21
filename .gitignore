@@ -1,5 +1,33 @@
+.DS_Store
+
+#################
+#Jetbrains
+
+# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+
+#################
+# PyCharm
+
 _archive/
 *.pyc
+venv*/
 acoustic_sensor_3d/Bee Mic and Sensor/BeeMicSensorBaseKeelAngled_50mmClamp.stl
-*Period_recording*
-.venv
+/beehub/python/src/plot/
+/beehub/python/src/primary/
+venv*
+
+#################
+# Rider
+
+bin/
+obj/
+/packages/
+riderModule.iml
+/_ReSharper.Caches/

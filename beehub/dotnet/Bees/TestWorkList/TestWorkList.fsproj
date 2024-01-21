@@ -2,7 +2,7 @@
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net7.0</TargetFramework>
+        <TargetFramework>net8.0</TargetFramework>
     </PropertyGroup>
 
     <ItemGroup>
@@ -10,7 +10,8 @@
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="PortAudioSharp2" Version="0.4.0" />
+      <ProjectReference Include="..\BeesLib\BeesLib.fsproj" />
+      <ProjectReference Include="..\BeesUtil\BeesUtil.fsproj" />
     </ItemGroup>
 
 </Project>

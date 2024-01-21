@@ -2,25 +2,16 @@
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net7.0</TargetFramework>
+        <TargetFramework>net8.0</TargetFramework>
+        <LangVersion>latest</LangVersion>
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Include="Parallel.fs" />
-        <Compile Include="Logger.fs" />
-        <Compile Include="BufferPool.fs" />
-        <Compile Include="AsyncConcurrentQueue.fs" />
-        <Compile Include="PortAudioUtils.fs" />
-        <Compile Include="StreamGeneric.fs" />
-        <Compile Include="Mp3.fs" />
         <Compile Include="Program.fs"/>
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="FSharp.Collections.ParallelSeq" Version="1.2.0" />
-      <PackageReference Include="FSharp.Control.AsyncSeq" Version="3.2.1" />
-      <PackageReference Include="NAudio.Lame" Version="2.1.0" />
-      <PackageReference Include="PortAudioSharp2" Version="0.4.0" />
+      <ProjectReference Include="..\BeesLib\BeesLib.fsproj" />
     </ItemGroup>
 
 </Project>
