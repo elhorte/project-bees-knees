@@ -1,12 +1,11 @@
 ﻿
 open System
 open System.Threading
-open System.Threading.Tasks
 
+open System.Threading.Tasks
 open BeesLib.InputStream
 open FSharp.Control
 open PortAudioSharp
-open BeesUtil.Util
 open BeesUtil.PortAudioUtils
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
@@ -20,7 +19,6 @@ open BeesLib.PaStream
 
 /// Creates and returns the sample rate and the input parameters.
 let prepareArgumentsForStreamCreation() =
-  initPortAudio()
   let defaultInput = PortAudio.DefaultInputDevice         in printfn $"Default input device = %d{defaultInput}"
   let inputInfo    = PortAudio.GetDeviceInfo defaultInput
   let nChannels    = inputInfo.maxInputChannels           in printfn $"Number of channels = %d{nChannels}"
@@ -46,10 +44,11 @@ let prepareArgumentsForStreamCreation() =
   sampleRate, inputParameters, outputParameters
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
-let run inputStream cancellationTokenSource = task {
+let run inputStream = task {
   let inputStream = (inputStream: InputStream)
+  use cts = new CancellationTokenSource()
   printfn "Reading..."
-  do! keyboardKeyInput cancellationTokenSource
+  do! keyboardKeyInput cts
   printfn "Stopping..."    ; inputStream.Stop()
   printfn "Stopped"
   printfn "Terminating..." ; terminatePortAudio()
@@ -69,6 +68,7 @@ let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 let main _ =
   let withEcho    = false
   let withLogging = false
+  initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   beesConfig <- {
     LocationId          = 1
@@ -81,15 +81,11 @@ let main _ =
     SampleSize          = sizeof<SampleType>
     InChannelCount      = inputParameters.channelCount
     InSampleRate        = int sampleRate  }
-
-  let inputStream = makeInputStream beesConfig inputParameters outputParameters sampleRate withEcho withLogging
   keyboardInputInit()
-  task {
-    try
-      use cts = new CancellationTokenSource()
-      do! paTryCatchRethrow (fun () -> run inputStream cts)
-    with
-    | :? PortAudioException as e -> exitWithTrouble 2 e "Running PortAudio Stream" }
-  |> Task.WaitAll
-  printfn "%s" (inputStream.Logger.ToString())
+  paTryCatchRethrow (fun () ->
+    task {
+      use inputStream = makeInputStream beesConfig inputParameters outputParameters sampleRate withEcho withLogging
+      do! run inputStream
+      printfn "%s" (inputStream.Logger.ToString())
+    } |> Task.WaitAny )
   0

@@ -23,10 +23,9 @@ let exitWithTrouble exitValue (e: PortAudioException) message =
 
 /// Load the native library and initialize the PortAudio library.  
 let initPortAudio() =
-  try
+  paTryCatchRethrow(fun () -> 
     PortAudio.LoadNativeLibrary()
-    PortAudio.Initialize()
-  with :? PortAudioException as e -> exitWithTrouble 2 e "Initializing PortAudio"
+    PortAudio.Initialize() )
 
 let terminatePortAudio() =
   PortAudio.Terminate()
