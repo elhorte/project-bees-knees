@@ -1,6 +1,6 @@
 $fn=75;
 
-BOX_W = 38;
+BOX_W = 40;
 BOX_L = 105;
 BOX_H = 2.0;
 
@@ -8,7 +8,7 @@ CORNER_RADIUS = 1.0;
 
 WALL = 1.0;
 
-SENSOR_MOUNT_OFFSET = 10;
+SENSOR_MOUNT_OFFSET = 5;
 MIC_MOUNT_OFFSET = 100;
 CABLE_GUIDE_OFFSET = 42;
 
@@ -50,9 +50,9 @@ module mountingStuds() {
     // Sensor Mounting Studs and Cable Runs
     union() {
         // sensor mounts
-        translate([-10, SENSOR_MOUNT_OFFSET-0, 0]) cylinder(h=7, d=1.5); 
-        translate([0, SENSOR_MOUNT_OFFSET+30, 0]) cylinder(h=7, d=1.5); 
-        translate([10, SENSOR_MOUNT_OFFSET-0, 0]) cylinder(h=7, d=1.5); 
+        translate([-10, SENSOR_MOUNT_OFFSET+30, 0]) cylinder(h=7, d=1.5); 
+        translate([0, SENSOR_MOUNT_OFFSET-0, 0]) cylinder(h=7, d=1.5); 
+        translate([10, SENSOR_MOUNT_OFFSET+30, 0]) cylinder(h=7, d=1.5); 
         // cable guides
         translate([-11, CABLE_GUIDE_OFFSET-0, 0]) cylinder(h=7, d=2.5);
         translate([11, CABLE_GUIDE_OFFSET-0, 0]) cylinder(h=7, d=2.5);
@@ -63,22 +63,21 @@ module mountingStuds() {
 
 // Cutouts
 module cutouts() {
-    // Center Vent
-    translate([-1.0, 0,-1])
-    rotate([90,0,90])
-    cube([30, 4, 2]);
+    // Center Vent y,x,z
+    translate([-1.5, 10,-2])
+    cube([3, 22, 6]);
 
     // Mic Vents
     for(pos = [-62, -67, -72])
         translate([0.0, pos, -1]) cylinder(h=4, d=2.5); 
 
     // Screw Holes
-    for(pos = [-5, 45])
+    for(pos = [-2, 45])
         translate([0.0, pos, -1]) cylinder(h=4, d=2.9);
 }
 
 // Combine modules
-rotate([180, 180, 0]) {
+rotate([180, 180, -90]) {
     translate([0, -BOX_L/2, 0]) {
         difference() {
             union() {

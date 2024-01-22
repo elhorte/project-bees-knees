@@ -1,4 +1,286 @@
 make.exe all --print-data-base --no-builtin-variables --no-builtin-rules --question
-'make.exe' is not recognized as an internal or external command,
-operable program or batch file.
+make: *** No rule to make target 'all'.  Stop.
 
+# GNU Make 4.4.1
+# Built for x86_64-pc-msys
+# Copyright (C) 1988-2023 Free Software Foundation, Inc.
+# License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>
+# This is free software: you are free to change and redistribute it.
+# There is NO WARRANTY, to the extent permitted by law.
+
+# Make data base, printed on Sun Dec 31 11:16:23 2023
+
+# Variables
+
+# environment
+SYSTEMDRIVE = C:
+# environment
+LC_ALL = C
+# environment
+ACSVCPORT = 17532
+# environment
+USERPROFILE = C:\Users\elhorte
+# environment
+LOCALAPPDATA = C:\Users\elhorte\AppData\Local
+# environment
+VSCODE_CRASH_REPORTER_PROCESS_TYPE = extensionHost
+# environment
+VSCODE_CWD = C:\Users\elhorte\AppData\Local\Programs\Microsoft VS Code
+# environment
+SYSTEMROOT = C:\WINDOWS
+# environment
+PROCESSOR_LEVEL = 6
+# environment
+PSMODULEPATH = C:\Program Files\WindowsPowerShell\Modules;C:\WINDOWS\system32\WindowsPowerShell\v1.0\Modules
+# default
+MAKE_COMMAND := make
+# environment
+GOPATH = C:\Users\elhorte\go
+# automatic
+@D = $(patsubst %/,%,$(dir $@))
+# environment
+CHROME_CRASHPAD_PIPE_NAME = \\.\pipe\crashpad_22960_JAGHTMDPNYIDMVYT
+# environment
+VSCODE_HANDLES_UNCAUGHT_ERRORS = true
+# default
+.VARIABLES := 
+# automatic
+%D = $(patsubst %/,%,$(dir $%))
+# environment
+IGCCSVC_DB = AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAAeoxqXVFu1ECRPaW68Ppk1QQAAAACAAAAAAAQZgAAAAEAACAAAAAt9JiXuN7yEKsksrQ3IomRWYgd5cxRBi6Ulmt+CfniNwAAAAAOgAAAAAIAACAAAADo2TOpkGj35chNF6c6/QvCxLtCZRTJQG3fQc7IQgog/WAAAADx44a7wxfkGEPOeYHLghqI35p+f1jEQ+whcUd1SPN1fwphR2ki5emW0oQOj9a09RHILkIpBNXUZv6td1m3IVdXyS3kshyftu1QkUD2ACHVnGK1Kg9irno9FrLBQ/7Jv31AAAAAs38OrqUi0ufJuUJhre1kt6aua/h+pzQ9eAr13BGVv1kMgyVl8yf404cC7lfyTBSr0bHv1WBw0Pm2Bxjpc8f3+g==
+# automatic
+^D = $(patsubst %/,%,$(dir $^))
+# automatic
+%F = $(notdir $%)
+# environment
+VSCODE_CODE_CACHE_PATH = C:\Users\elhorte\AppData\Roaming\Code\CachedData\1a5daa3a0231a0fbba4f14db7ec463cf99d7768e
+# environment
+LANG = C
+# default
+.LOADED := 
+# environment
+TMP = /c/Users/elhorte/AppData/Local/Temp
+# default
+.INCLUDE_DIRS := /usr/include
+# environment
+EFC_15672 = 1
+# makefile
+MAKEFLAGS = pqrR
+# environment
+INTEL_DEV_REDIST = C:\Program Files (x86)\Common Files\Intel\Shared Libraries\
+# environment
+ONEDRIVE = D:\OneDrive
+# environment
+POWERSHELL_DISTRIBUTION_CHANNEL = MSI:Windows 10 Pro
+# makefile
+CURDIR := /d/git/en/project-bees-knees
+# environment
+APPLICATION_INSIGHTS_NO_DIAGNOSTIC_CHANNEL = 1
+# environment
+VSCODE_L10N_BUNDLE_LOCATION = 
+# automatic
+*D = $(patsubst %/,%,$(dir $*))
+# environment
+PROGRAMFILES = C:\Program Files
+# environment
+MFLAGS = -pqrR
+# default
+.SHELLFLAGS := -c
+# environment
+COMMONPROGRAMW6432 = C:\Program Files\Common Files
+# automatic
++D = $(patsubst %/,%,$(dir $+))
+# makefile
+MAKEFILE_LIST := 
+# automatic
+@F = $(notdir $@)
+# environment
+VSCODE_PID = 22960
+# automatic
+?D = $(patsubst %/,%,$(dir $?))
+# automatic
+*F = $(notdir $*)
+# automatic
+<D = $(patsubst %/,%,$(dir $<))
+# environment
+VSCODE_NLS_CONFIG = {"locale":"en-us","osLocale":"en-us","availableLanguages":{},"_languagePackSupport":true}
+# environment
+ONEDRIVECONSUMER = D:\OneDrive
+# default
+MAKE_HOST := x86_64-pc-msys
+# environment
+PROGRAMDATA = C:\ProgramData
+# default
+SHELL := /bin/sh
+# environment
+HOMEPATH = \Users\elhorte
+# default
+MAKECMDGOALS := all
+# environment
+DRIVERDATA = C:\Windows\System32\Drivers\DriverData
+# environment
+COMSPEC = C:\WINDOWS\system32\cmd.exe
+# environment
+WINDIR = C:\WINDOWS
+# environment
+MAKELEVEL := 0
+# default
+MAKE = $(MAKE_COMMAND)
+# environment
+PATH = /c/Program Files (x86)/VMware/VMware Workstation/bin:/c/Program Files/Common Files/Oracle/Java/javapath:/c/Program Files (x86)/Common Files/Intel/Shared Libraries/redist/intel64/compiler:/c/WINDOWS/system32:/c/WINDOWS:/c/WINDOWS/System32/Wbem:/c/WINDOWS/System32/WindowsPowerShell/v1.0:/c/WINDOWS/System32/OpenSSH:/c/Program Files/MATLAB/R2021a/bin:/c/Program Files (x86)/NVIDIA Corporation/PhysX/Common:/c/Program Files/IDM Computer Solutions/UltraCompare:/c/Program Files/IDM Computer Solutions/UEStudio:/c/Program Files/IDM Computer Solutions/UltraEdit:/c/Program Files/IDM Computer Solutions/UltraFinder:/c/Program Files/IDM Computer Solutions/UltraFTP:/c/Program Files/Go/bin:/c/WINDOWS/system32:/c/WINDOWS:/c/WINDOWS/System32/Wbem:/c/WINDOWS/System32/WindowsPowerShell/v1.0:/c/WINDOWS/System32/OpenSSH:/c/Program Files/Tailscale:/c/Program Files/Git/cmd:/c/Program Files/Git/bin/git.exe:/usr/bin:/c/Program Files/dotnet:/c/Program Files/NVIDIA Corporation/NVIDIA NvDLISR:/c/Program Files/PowerShell/7:/c/Users/elhorte/AppData/Local/Microsoft/WindowsApps:/c/Users/elhorte/AppData/Local/Programs/Microsoft VS Code/bin:/c/Users/elhorte/AppData/Local/atom/bin:/c/Users/elhorte/AppData/Local/GitHubDesktop/bin:/c/Users/elhorte/AppData/Local/Microsoft/WindowsApps:/c/Users/elhorte/go/bin:/c/Program Files/Git/bin/git.exe:/c/Program Files/Git/cmd:/c/Users/elhorte/.dotnet/tools
+# environment
+ZES_ENABLE_SYSMAN = 1
+# environment
+COMPUTERNAME = I9-14
+# default
+MAKEFILES := 
+# automatic
+^F = $(notdir $^)
+# environment
+PROMPT = $P$G
+# environment
+LOGONSERVER = \\I9-14
+# environment
+USERNAME = elhorte
+# environment
+COMMONPROGRAMFILES = C:\Program Files\Common Files
+# automatic
+?F = $(notdir $?)
+# environment
+PROGRAMW6432 = C:\Program Files
+# environment
+PATHEXT = .COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC
+# automatic
++F = $(notdir $+)
+# environment
+ORIGINAL_XDG_CURRENT_DESKTOP = undefined
+# environment
+USERDOMAIN = I9-14
+# 'override' directive
+GNUMAKEFLAGS := 
+# environment
+OS = Windows_NT
+# makefile
+.DEFAULT_GOAL := 
+# default
+MAKE_VERSION := 4.4.1
+# environment
+RLSSVCPORT = 22112
+# environment
+PROGRAMFILES(X86) = C:\Program Files (x86)
+# environment
+!D: = d:\git\en\project-bees-knees
+# environment
+USERDOMAIN_ROAMINGPROFILE = I9-14
+# environment
+NUMBER_OF_PROCESSORS = 32
+# environment
+PUBLIC = C:\Users\Public
+# environment
+APPDATA = C:\Users\elhorte\AppData\Roaming
+# environment
+HOMEDRIVE = C:
+# environment
+PROCESSOR_ARCHITECTURE = AMD64
+# environment
+VSCODE_AMD_ENTRYPOINT = vs/workbench/api/node/extensionHostProcess
+# environment
+HOME = /c/Users/elhorte
+# environment
+COMMONPROGRAMFILES(X86) = C:\Program Files (x86)\Common Files
+# environment
+ELECTRON_RUN_AS_NODE = 1
+# environment
+TEMP = /c/Users/elhorte/AppData/Local/Temp
+# environment
+VSCODE_IPC_HOOK = \\.\pipe\06b7c0c41fb33b7b85b3c71a214d3d71-1.84.2-main-sock
+# environment
+TERM = xterm-256color
+# default
+.RECIPEPREFIX := 
+# automatic
+<F = $(notdir $<)
+# default
+SUFFIXES := 
+# environment
+ALLUSERSPROFILE = C:\ProgramData
+# environment
+SESSIONNAME = Console
+# default
+.FEATURES := target-specific order-only second-expansion else-if shortest-stem undefine oneshell nocomment grouped-target extra-prereqs notintermediate shell-export archives jobserver output-sync check-symlink load dospaths
+# environment
+MIC_LD_LIBRARY_PATH = C:\Program Files (x86)\Common Files\Intel\Shared Libraries\compiler\lib\mic
+# environment
+PROCESSOR_REVISION = b701
+# environment
+PROCESSOR_IDENTIFIER = Intel64 Family 6 Model 183 Stepping 1, GenuineIntel
+# variable set hash-table stats:
+# Load=101/1024=10%, Rehash=0, Collisions=13/124=10%
+
+# Pattern-specific Variable Values
+
+# No pattern-specific variable values.
+
+# Directories
+
+# . (device 1319880544, inode 10696049115194359): 15 files, no impossibilities.
+
+# 15 files, no impossibilities in 1 directories.
+
+# Implicit Rules
+
+# No implicit rules.
+
+# Files
+
+# Not a target:
+Makefile:
+#  Implicit rule search has been done.
+#  File does not exist.
+#  File has been updated.
+#  Failed to be updated.
+
+# Not a target:
+.DEFAULT:
+#  Implicit rule search has not been done.
+#  Modification time never checked.
+#  File has not been updated.
+
+# Not a target:
+all:
+#  Command line target.
+#  Implicit rule search has been done.
+#  File does not exist.
+#  File has not been updated.
+
+# Not a target:
+makefile:
+#  Implicit rule search has been done.
+#  File does not exist.
+#  File has been updated.
+#  Failed to be updated.
+
+# Not a target:
+GNUmakefile:
+#  Implicit rule search has been done.
+#  File does not exist.
+#  File has been updated.
+#  Failed to be updated.
+
+# files hash-table stats:
+# Load=6/1024=1%, Rehash=0, Collisions=0/16=0%
+# VPATH Search Paths
+
+# No 'vpath' search paths.
+
+# No general ('VPATH' variable) search path.
+
+# strcache buffers: 1 (0) / strings = 22 / storage = 225 B / avg = 10 B
+# current buf: size = 8162 B / used = 225 B / count = 22 / avg = 10 B
+
+# strcache performance: lookups = 24 / hit rate = 8%
+# hash-table stats:
+# Load=22/8192=0%, Rehash=0, Collisions=0/24=0%
+# Finished Make data base on Sun Dec 31 11:16:23 2023
+
+ 
