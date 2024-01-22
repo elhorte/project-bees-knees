@@ -4,11 +4,11 @@ BOX_W = 40;
 BOX_L = 100;
 BOX_H = 12;
 
-WALL = 0.8;
+WALL = 1.0;
 CORNER_RADIUS = 0.8;
 
 MIC_OUTSIDE_W=8.3;
-MIC_OUTSIDE_H=10.5;
+MIC_OUTSIDE_H=14;
 MIC_INSIDE_W=6.3;
 MIC_L=27.5;
 
@@ -31,7 +31,7 @@ module mainLid() {
     // backwall on top of battery platform
     translate([0, 9, 8]) {
         rotate([90, 90, 0])
-        #linear_extrude(1) square([7, 42], center=true);    
+        #linear_extrude(1) square([7, 41.5], center=true);    
     }
     
     // battery platform
@@ -41,7 +41,7 @@ module mainLid() {
 }
 
 module micBox() {
-    translate([0, -50.5, 4])
+    translate([0, -50.5, 5.0]) //y,x,z
     rotate([90, 0, 0])
     linear_extrude(MIC_L) square([MIC_OUTSIDE_W, MIC_OUTSIDE_H], center=true);
 }
@@ -56,40 +56,43 @@ module vent(x, y, vent_offset) {
 }
 */
 module cutouts() {
-    translate([45, 0, 3])
+    translate([45, 0, 2])
     // Inside mic channel
     rotate([90, 0, 90])  // x,y,z
-    #linear_extrude(MIC_L  +4.1) square([MIC_INSIDE_W, MIC_OUTSIDE_H], center=true);
+    #linear_extrude(MIC_L  +4.1) square([MIC_INSIDE_W, 10], center=true);
       
     // front of keel slope
-    translate([72, 4.5, 10])
+    translate([65, 4.5, 15]) // x, y, z
     rotate([-45, 0, -90])
-    //(x, z, y)
-    #cube([10, 11, 8]); 
+    //(y, z, x)
+    #cube([10, 21, 8]); 
     
     // battery platform
     translate([-30, 0, 4.5])
     rotate([0, 0, 0])
     linear_extrude(10.0) square([42, 42], center=true);
-
+    /*
     // Cable exit
     translate([0, -51.0, BOX_H-18.5])
     rotate([90, 0, 0])
     #linear_extrude(3.0) square([10, 6], center=true);
+    */
 }
 
 // put it all together x,y,z
-translate([50, 0, 0]) { // offset model to start on 0, 0, 0
-    difference() {
-        rotate([180, 180, 270]) { // Flipping the entire object along the X axis
-            union() {
-                // y, x, z
-                translate([0, 0, 0]) { 
-                    mainLid();
-                    micBox();
+rotate([180, 0, 0]){
+    translate([50, 0, -12]) { // offset model to start on 0, 0, 0
+        difference() {
+            rotate([180, 180, 270]) { // Flipping the entire object along the X axis
+                union() {
+                    // y, x, z
+                    translate([0, 0, 0]) { 
+                        mainLid();
+                        micBox();
+                    }
                 }
             }
+            cutouts();
         }
-        cutouts();
     }
 }
