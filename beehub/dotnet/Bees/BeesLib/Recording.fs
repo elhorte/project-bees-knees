@@ -1,14 +1,11 @@
 module BeesLib.Recording
 
 open System
-open System.Collections.Generic
 open System.Threading
 
-open System.Threading.Tasks
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open BeesLib.InputStream
-open BeesUtil.WorkList
 
 // def recording_worker_thread(record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
 //  

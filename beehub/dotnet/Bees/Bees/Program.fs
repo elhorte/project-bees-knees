@@ -64,6 +64,7 @@ let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 // Main
 
 
+
 [<EntryPoint>]
 let main _ =
   let withEcho    = false
@@ -76,8 +77,7 @@ let main _ =
     PrimaryDir          = "primary"
     MonitorDir          = "monitor"
     PlotDir             = "plot"
-    CallbackDuration    = TimeSpan.FromMilliseconds 16
-    inputStreamDuration = TimeSpan.FromMinutes 16
+    inputStreamBufferedDuration = TimeSpan.FromMinutes 16
     SampleSize          = sizeof<SampleType>
     InChannelCount      = inputParameters.channelCount
     InSampleRate        = int sampleRate  }
@@ -87,5 +87,5 @@ let main _ =
       use inputStream = makeInputStream beesConfig inputParameters outputParameters sampleRate withEcho withLogging
       do! run inputStream
       printfn "%s" (inputStream.Logger.ToString())
-    } |> Task.WaitAny )
+    } |> Task.WaitAny |> ignore )
   0

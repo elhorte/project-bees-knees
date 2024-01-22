@@ -251,14 +251,13 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
       let submitCallbackAcceptanceJob callbackAcceptanceJob =
         jobQueue.Enqueue(CallbackAcceptance callbackAcceptanceJob)
       // Copy the data then Submit a FinshCallback job.
-      let callbackBlockPtr = cbMessage.InputSamples
-      let ptr = writeCallbackBlockToRing callbackBlockPtr
+      let ptrToCopy = writeCallbackBlockToRing cbMessage.InputSamples
+      cbMessage.InputSamplesRingCopy <- ptrToCopy
       let callbackAcceptanceJob = {
         CbMessage        = cbMessage
         SegCur           = cbSegCur.Copy()
         SegOld           = cbSegOld.Copy()
         CompletionSource = TaskCompletionSource<unit>() }
-      cbMessage.InputSamplesRingCopy <- ptr
       submitCallbackAcceptanceJob callbackAcceptanceJob
       callbackAcceptanceJob.CompletionSource.SetResult()
     let timeStamp = DateTime.Now
@@ -273,8 +272,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
       logger.Add seqNum timeStamp "CbMessagePool is empty" null
       PortAudioSharp.StreamCallbackResult.Continue
     | Some cbMessage ->
-      if getWithLogging() then
-        logger.Add seqNum timeStamp "cb bufs=" cbMessagePool.PoolStats
+      if getWithLogging() then  logger.Add seqNum timeStamp "cb bufs=" cbMessagePool.PoolStats
       // the callback args
       cbMessage.InputSamples <- input
       cbMessage.Output       <- output
@@ -283,7 +281,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
       cbMessage.StatusFlags  <- statusFlags
       cbMessage.UserDataPtr  <- userDataPtr
       // more from the callback
-      cbMessage.WithEcho     <- withEcho 
+      cbMessage.WithEcho     <- withEcho
       cbMessage.Timestamp    <- timeStamp
       cbMessage.SeqNum       <- seqNum
       match cbMessagePool.CountAvail with
@@ -296,7 +294,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   
   let mutable segCur = cbSegCur.Copy()
   let mutable segOld = cbSegOld.Copy()
-  let segOldest() = if segOld.Active then segCur else segOld
+  let segOldest() = if segOld.Active then segOld else segCur
   let mutable timeTail = segOldest().TimeTail
   let mutable timeHead = segCur     .TimeHead
   

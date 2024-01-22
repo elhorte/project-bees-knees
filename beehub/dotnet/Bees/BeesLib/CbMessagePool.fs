@@ -26,7 +26,6 @@ and CbMessage() =
 
   let ti = StreamCallbackTimeInfo() // Replace with actual time info.
   let sf = StreamCallbackFlags.PrimingOutput
-  let cbMessagePoolDummy = dummyInstance<CbMessagePool>()
 
   // Most initializer values here are placeholders that will be overwritten by the callback.
 

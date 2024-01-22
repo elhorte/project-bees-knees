@@ -13,10 +13,8 @@ let printActualVsExpected actual expected message =
   printfn $"%d{actual} %s{op} %d{expected}  %s{message} actual%s{op}expeced"
 
 
-
 let tryCatchRethrow f =
   try f()
   with ex ->
     printfn $"Exception: %s{ex.Message}"
     raise ex
-    

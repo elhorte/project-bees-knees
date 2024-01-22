@@ -14,12 +14,6 @@
     <Compile Include="PaStream.fs" />
     <Compile Include="Commands.fs" />
     <Compile Include="Keyboard.fs" />
-    <Content Include="..\..\..\..\..\..\..\..\..\.nuget\packages\naudio.lame\2.1.0\build\libmp3lame.64.dll">
-      <Link>libmp3lame.64.dll</Link>
-    </Content>
-    <Content Include="..\..\..\..\..\..\..\..\..\.nuget\packages\naudio.lame\2.1.0\build\libmp3lame.32.dll">
-      <Link>libmp3lame.32.dll</Link>
-    </Content>
   </ItemGroup>
 
   <ItemGroup>

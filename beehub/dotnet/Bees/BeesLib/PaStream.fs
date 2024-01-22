@@ -3,7 +3,6 @@ module BeesLib.PaStream
 
 open System
 
-open BeesUtil.Util
 open PortAudioSharp
 open BeesLib.InputStream
 open BeesUtil.PortAudioUtils
