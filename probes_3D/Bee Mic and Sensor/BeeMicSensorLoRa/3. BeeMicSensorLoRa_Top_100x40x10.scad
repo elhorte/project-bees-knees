@@ -3,9 +3,9 @@ $fn=75;
 BOX_W = 40;
 BOX_L = 100;
 BOX_H = 12;
-
-WALL = 1.0;
-CORNER_RADIUS = 0.8;
+BATT_H = 3.0;
+WALL = 1.1;
+CORNER_RADIUS = 1.0;
 
 MIC_OUTSIDE_W=8.3;
 MIC_OUTSIDE_H=14;
@@ -15,7 +15,7 @@ MIC_L=27.5;
 module roundedRectangle(width, length, radius) {
     difference() {
         offset(r=radius) square([width, length], center=true);
-        offset(r=radius - WALL) square([width-WALL, length-WALL], center=true);
+        offset(r=radius-WALL) square([width-WALL, length-WALL], center=true);
     }
 }
 
@@ -29,14 +29,14 @@ module mainLid() {
     }
     
     // backwall on top of battery platform
-    translate([0, 9, 8]) {
+    translate([0, 9, 7.0]) {
         rotate([90, 90, 0])
-        #linear_extrude(1) square([7, 41.5], center=true);    
+        #linear_extrude(WALL) square([8, 41.5], center=true);    
     }
     
     // battery platform
-    translate([0, 29, 3.5]) {
-        linear_extrude(1) square([40, 42], center=true);
+    translate([0, 28.9, 2]) {
+        #linear_extrude(WALL) square([40, 42], center=true);
     }
 }
 
@@ -46,18 +46,9 @@ module micBox() {
     linear_extrude(MIC_L) square([MIC_OUTSIDE_W, MIC_OUTSIDE_H], center=true);
 }
 
-/*
-module vent(x, y, vent_offset) {
-    translate([x, y, BOX_H + vent_offset]) {
-        rotate([90, 0, 90]) {
-            cylinder(h=3.0, d=2.0, center=true);
-        }
-    }
-}
-*/
 module cutouts() {
-    translate([45, 0, 2])
     // Inside mic channel
+    translate([45, 0, 2])
     rotate([90, 0, 90])  // x,y,z
     #linear_extrude(MIC_L  +4.1) square([MIC_INSIDE_W, 10], center=true);
       
@@ -68,7 +59,7 @@ module cutouts() {
     #cube([10, 21, 8]); 
     
     // battery platform
-    translate([-30, 0, 4.5])
+    translate([-30, 0, 3.0])
     rotate([0, 0, 0])
     linear_extrude(10.0) square([42, 42], center=true);
     /*
