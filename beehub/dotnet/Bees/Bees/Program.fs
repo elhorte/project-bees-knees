@@ -72,15 +72,16 @@ let main _ =
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   beesConfig <- {
-    LocationId          = 1
-    HiveId              = 1
-    PrimaryDir          = "primary"
-    MonitorDir          = "monitor"
-    PlotDir             = "plot"
+    LocationId                  = 1
+    HiveId                      = 1
+    PrimaryDir                  = "primary"
+    MonitorDir                  = "monitor"
+    PlotDir                     = "plot"
     inputStreamBufferedDuration = TimeSpan.FromMinutes 16
-    SampleSize          = sizeof<SampleType>
-    InChannelCount      = inputParameters.channelCount
-    InSampleRate        = int sampleRate  }
+    SampleSize                  = sizeof<SampleType>
+    InChannelCount              = inputParameters.channelCount
+    InSampleRate                = int sampleRate  }
+  printBeesConfig beesConfig
   keyboardInputInit()
   paTryCatchRethrow (fun () ->
     task {

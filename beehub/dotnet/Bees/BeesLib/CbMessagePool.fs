@@ -1,12 +1,8 @@
 module BeesLib.CbMessagePool
 
-open BeesUtil.Util
-
 open System
 
 open PortAudioSharp
-open BeesLib.BeesConfig
-open BeesUtil.Logger
 open BeesUtil.AsyncConcurrentQueue
 open BeesUtil.ItemPool
 

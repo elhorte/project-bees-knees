@@ -12,7 +12,6 @@ open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open BeesUtil.WorkList
 open BeesUtil.PortAudioUtils
-open PortAudioSharp
 
 
 type Worker = Buf -> int -> int
@@ -50,18 +49,25 @@ let tbdTimeHead = DateTime.MinValue
 // Each client call queues a job to access data from the ring.
 // Client calls have to be asynchronous because they have to run in the jobQueue task.
 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// Seg class
+
 type Seg(head: int, tail: int, nRingFrames: int, beesConfig: BeesConfig) =
-  let duration nFrames = TimeSpan.FromSeconds (float nFrames / float beesConfig.InSampleRate)
+  let durationOf nFrames = TimeSpan.FromSeconds (float nFrames / float beesConfig.InSampleRate)
+  let nFramesOf duration = int ((duration: TimeSpan).TotalMicroseconds / 1_000_000.0 * float beesConfig.InSampleRate)
+
   member val  Head     = head                                                     with get, set
   member val  Tail     = tail                                                     with get, set
   member this.NFrames  = assert (this.Head >= this.Tail) ; this.Head - this.Tail
-  member this.Duration = duration this.NFrames
+  member this.Duration = durationOf this.NFrames
   member val  TimeHead = tbdTimeHead                                              with get, set
   member this.TimeTail = this.TimeHead - this.Duration
   member this.Active   = this.NFrames <> 0
   member this.Copy()   = Seg(this.Head, this.Tail, nRingFrames, beesConfig)
   member this.Reset()  = this.Head <- 0 ; this.Tail <- 0 ; assert (not this.Active)
 
+  member this.NFramesOf duration = nFramesOf duration
+  
   member this.AdvanceHead nFrames timeHead =
     let headNew = this.Head + nFrames
     assert (headNew <= nRingFrames)
@@ -94,6 +100,10 @@ type Job =
   | CallbackAcceptance of CallbackAcceptanceJob
   | Take               of TakeJob
 
+  
+type InputGetResult =
+  | Error   of string
+  | Success of DateTime
 
 /// <summary>Make the pool of CbMessages used by the stream callback</summary>
 let makeCbMessagePool beesConfig =
@@ -104,6 +114,7 @@ let makeCbMessagePool beesConfig =
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// InputStream class
 
 type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   let startTime = DateTime.Now
@@ -113,11 +124,12 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   let cbMessageWorkList = WorkList<CbMessage>()
   let cbMessagePool: CbMessagePool = makeCbMessagePool beesConfig
   let mutable paStream = dummyInstance<PortAudioSharp.Stream>()
+  let mutable timeStamp = DateTime.Now
   let mutable seqNum = 0
   let mutable withEcho = false
   let mutable withLogging = false
-  let getWithEcho   () = Volatile.Read &withEcho
-  let getWithLogging() = Volatile.Read &withEcho
+  let echoEnabled   () = Volatile.Read &withEcho
+  let loggingEnabled() = Volatile.Read &withEcho
 
   let durationToNFrames (duration: TimeSpan) =
     let nFramesApprox = duration.TotalSeconds * float beesConfig.InSampleRate
@@ -223,56 +235,35 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
       cbSegOld.Tail <- nFrames + nGapFrames
       // state is Chasing
   
-  let copy (callbackBlockPtr: IntPtr) (head: int) nFrames  : IntPtr =
+  // Copy from callback data to the head of the ring and return a pointer to the copy.
+  let copyToRing (callbackBlockPtr: IntPtr) nFrames  : IntPtr =
     let fromPtr = callbackBlockPtr.ToPointer()
-    let toPtr   = indexToVoidptr head
+    let toPtr   = indexToVoidptr cbSegCur.Head
     let size    = int64 (nFrames * frameSize)
     paTryCatchRethrow (fun () -> Buffer.MemoryCopy(fromPtr, toPtr, size, size))
     IntPtr toPtr
 
-  // // for debug
-  // let printCallback (i: InputStream) (m: CbMessage) =
-  //   let microseconds = floatToMicrosecondsFractionOnly m.TimeInfo.currentTime
-  //   let percentCPU   = i.PaStream.CpuLoad * 100.0
-  //   let sDebug = sprintf "%3d: %A %s" m.SeqNum m.Timestamp m.PoolStats
-  //   let sWork  = sprintf $"work: %6d{microseconds} frameCount=%A{m.FrameCount} cpuLoad=%5.1f{percentCPU}%%"
-  //   Console.WriteLine($"{sDebug}   ––   {sWork}")
-
   // Called from the Callback method
   // Must not allocate memory because this is a system-level callback
   let callback input output frameCount timeInfo statusFlags userDataPtr =
-    let finishCallback (cbMessage: CbMessage) =
-      let writeCallbackBlockToRing (callbackBlockPtr: IntPtr) =
-        let nFrames = int cbMessage.FrameCount
-        prepForNewFrames nFrames // may update segCur.Head
-        let ptr = copy callbackBlockPtr cbSegCur.Head nFrames
-        cbSegCur.AdvanceHead nFrames cbMessage.Timestamp
-        ptr
-      let submitCallbackAcceptanceJob callbackAcceptanceJob =
-        jobQueue.Enqueue(CallbackAcceptance callbackAcceptanceJob)
-      // Copy the data then Submit a FinshCallback job.
-      let ptrToCopy = writeCallbackBlockToRing cbMessage.InputSamples
-      cbMessage.InputSamplesRingCopy <- ptrToCopy
-      let callbackAcceptanceJob = {
-        CbMessage        = cbMessage
-        SegCur           = cbSegCur.Copy()
-        SegOld           = cbSegOld.Copy()
-        CompletionSource = TaskCompletionSource<unit>() }
-      submitCallbackAcceptanceJob callbackAcceptanceJob
-      callbackAcceptanceJob.CompletionSource.SetResult()
-    let timeStamp = DateTime.Now
     let (input : IntPtr) = input
     let (output: IntPtr) = output
-    if getWithEcho() then
-      let size = uint64 (frameCount * uint32 sizeof<float32>)
+    timeStamp <- DateTime.Now
+    seqNum    <- seqNum + 1
+    if echoEnabled() then
+      let size = uint64 (frameCount * uint32 frameSize)
       Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
-    seqNum <- seqNum + 1
     match cbMessagePool.Take() with
     | None -> // Yikes, pool is empty
-      logger.Add seqNum timeStamp "CbMessagePool is empty" null
+      logger.Add seqNum timeStamp "cbMessagePool is empty" null
       PortAudioSharp.StreamCallbackResult.Continue
     | Some cbMessage ->
-      if getWithLogging() then  logger.Add seqNum timeStamp "cb bufs=" cbMessagePool.PoolStats
+    match cbMessagePool.CountAvail with
+    | 0 -> PortAudioSharp.StreamCallbackResult.Complete // should continue?
+    | _ ->
+    let callbackSetup cbMessage =
+      let (cbMessage: CbMessage) = cbMessage
+      if loggingEnabled() then  logger.Add seqNum timeStamp "cb bufs=" cbMessagePool.PoolStats
       // the callback args
       cbMessage.InputSamples <- input
       cbMessage.Output       <- output
@@ -284,10 +275,40 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
       cbMessage.WithEcho     <- withEcho
       cbMessage.Timestamp    <- timeStamp
       cbMessage.SeqNum       <- seqNum
-      match cbMessagePool.CountAvail with
-      | 0 -> PortAudioSharp.StreamCallbackResult.Complete // should continue?
-      | _ -> finishCallback cbMessage
-             PortAudioSharp.StreamCallbackResult.Continue
+    let callbackCopy cbMessage =
+      let (cbMessage: CbMessage) = cbMessage
+      let writeCallbackBlockToRing (callbackBlockPtr: IntPtr) =
+        let nFrames = int cbMessage.FrameCount
+        prepForNewFrames nFrames // may update segCur.Head
+        let ptr = copyToRing callbackBlockPtr nFrames
+        cbSegCur.AdvanceHead nFrames cbMessage.Timestamp
+        ptr
+      // Copy the data then Submit a FinshCallback job.
+      let ptrToCopy = writeCallbackBlockToRing cbMessage.InputSamples
+      cbMessage.InputSamplesRingCopy <- ptrToCopy
+    let callbackFinish cbMessage =
+      let (cbMessage: CbMessage) = cbMessage
+      let submitCallbackAcceptanceJob callbackAcceptanceJob =
+        jobQueue.Enqueue(CallbackAcceptance callbackAcceptanceJob)
+      let callbackAcceptanceJob = {
+        CbMessage        = cbMessage
+        SegCur           = cbSegCur.Copy()
+        SegOld           = cbSegOld.Copy()
+        CompletionSource = TaskCompletionSource<unit>() }
+      submitCallbackAcceptanceJob callbackAcceptanceJob
+      callbackAcceptanceJob.CompletionSource.SetResult()
+    callbackSetup  cbMessage
+    callbackCopy   cbMessage
+    callbackFinish cbMessage
+    PortAudioSharp.StreamCallbackResult.Continue
+
+  // for debug
+  let printCallback (i: InputStream) (m: CbMessage) =
+    let microseconds = floatToMicrosecondsFractionOnly m.TimeInfo.currentTime
+    let percentCPU   = paStream.CpuLoad * 100.0
+    let sDebug = sprintf "%3d: %A %s" seqNum timeStamp cbMessagePool.PoolStats
+    let sWork  = sprintf $"work: %6d{microseconds} frameCount=%A{m.FrameCount} cpuLoad=%5.1f{percentCPU}%%"
+    Console.WriteLine($"{sDebug}   ––   {sWork}")
 
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // Getting data from the ring
@@ -313,6 +334,45 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
 //  copy fromPtr ringHeadPtr nFrames
  
   
+  let getSome timeStart count  : (int * int) seq = seq {
+    if segOld.Active then
+      let timeOffset = timeStart - segOld.TimeTail
+      assert (timeOffset >= 0)
+      let nFrames = segOld.NFramesOf timeOffset
+      let indexStart = segOld.Tail + nFrames
+      if indexStart < segOld.Head then
+        yield (indexStart, nFrames)
+    if segCur.Active then yield (segCur.Tail, segCur.NFrames)
+  }
+    
+    
+  let x = timeTail
+  let get (dateTime: DateTime) (duration: TimeSpan) (worker: Worker) =
+    let now = DateTime.Now
+    let timeStart = max dateTime timeTail
+    if timeStart + duration > now then  Error "insufficient buffered data" else
+    let rec deliver timeStart nFrames =
+      let nSamples = nFrames / frameSize
+      let r = worker fromPtr nSamples
+    let nextIndex = ringIndex timeStart
+    let count = 
+    deliver next timeStart
+    Success timeStart
+    
+
+  // let keep (duration: TimeSpan) =
+    // assert (duration > TimeSpan.Zero)
+    // let now = DateTime.Now
+    // let dateTime = now - duration
+    // timeTail <- 
+    //   if dateTime < timeTail then  timeTail
+    //                          else  dateTime
+    // timeTail
+    
+  let locationOfDateTime (dateTime: DateTime)  : Option<Seg * int> =
+    if not (timeTail <= dateTime && dateTime <= timeHead) then Some (segCur, 1)
+    else None
+
  
   let handleTake inputTake =
     ()
@@ -346,27 +406,6 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   let stop() =
     paStream.Stop()
     cancellationTokenSource.Cancel()
-   
-//   let get (dateTime: DateTime) (duration: TimeSpan) (worker: Worker) =
-//     let now = DateTime.Now
-//     let beginDt =
-//       if   dateTime > now      then  now
-//       elif dateTime < timeTail then  timeTail
-//                                else  dateTime
-//     () // WIP
-//     
-//   let keep (duration: TimeSpan) =
-//     assert (duration > TimeSpan.Zero)
-//     let now = DateTime.Now
-//     let dateTime = now - duration
-//     timeTail <- 
-//       if dateTime < timeTail then  timeTail
-//                              else  dateTime
-//     timeTail
-//     
-//   let locationOfDateTime (dateTime: DateTime)  : Option<Seg * int> =
-//     if not (timeTail <= dateTime && dateTime <= timeHead) then Some (segCur, 1)
-//     else None
 
    
   member val CbMessagePool  = cbMessagePool
@@ -377,9 +416,9 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
 
   member this.PaStream    with get()     = paStream // filled in after construction (chicken or egg)
                           and  set value = paStream <- value
-  member this.WithEcho    with get()     = getWithEcho()
+  member this.WithEcho    with get()     = echoEnabled()
                           and  set value = Volatile.Write(&withEcho, value)
-  member this.WithLogging with get()     = getWithLogging()
+  member this.WithLogging with get()     = loggingEnabled()
                           and  set value = Volatile.Write(&withLogging, value)
 
   member this.Start() = start()

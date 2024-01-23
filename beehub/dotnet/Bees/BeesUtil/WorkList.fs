@@ -1,10 +1,5 @@
 module BeesUtil.WorkList
 
-open System.Threading
-open System.Threading.Tasks
-open FSharp.Control
-open System.Linq
-
 /// A subscription service for a generic event
 
 type Unsubscriber   = unit -> unit 

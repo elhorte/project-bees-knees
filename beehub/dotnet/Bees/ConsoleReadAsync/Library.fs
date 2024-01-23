@@ -1,7 +1,6 @@
 ﻿namespace ConsoleReadAsync
 
 open System
-open System.Drawing
 open System.Threading
 open System.Threading.Tasks
 
