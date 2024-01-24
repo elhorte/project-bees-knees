@@ -21,11 +21,11 @@ type Seg(head: int, tail: int, nRingFrames: int, inSampleRate: int) =
 
   new (nRingFrames: int, inSampleRate: int) = Seg(0, 0, nRingFrames, inSampleRate)
   
-  member val  Head     = head                                                     with get, set
-  member val  Tail     = tail                                                     with get, set
+  member val  Head     = head         with get, set
+  member val  Tail     = tail         with get, set
+  member val  TimeHead = tbdDateTime  with get, set
   member this.NFrames  = assert (this.Head >= this.Tail) ; this.Head - this.Tail
   member this.Duration = durationOf this.NFrames
-  member val  TimeHead = tbdDateTime                                              with get, set
   member this.TimeTail = this.TimeHead - this.Duration
   member this.Active   = this.NFrames <> 0
   member this.Copy()   = Seg(this.Head, this.Tail, nRingFrames, inSampleRate)
@@ -71,7 +71,7 @@ and CbMessage(beesConfig: BeesConfig) =
   member   val public StatusFlags          = primingOutputFlag     with get, set
   member   val public UserDataPtr          = IntPtr.Zero           with get, set
   // more from the callback
-  member   val public Timestamp            = DateTime.MinValue     with get, set
+  member   val public TimeStamp            = DateTime.MinValue     with get, set
   member   val public WithEcho             = false                 with get, set
   member   val public InputSamplesRingCopy = IntPtr 0              with get, set
   member   val public SegCur               = dummyInstance<Seg>()  with get, set
