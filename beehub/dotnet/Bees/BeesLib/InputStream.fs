@@ -150,14 +150,12 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // Putting data from the callback into the ring
 
-  let mutable cbSegCur = Seg(0, 0, nRingFrames, beesConfig)  // seg0
-  let mutable cbSegOld = Seg(0, 0, nRingFrames, beesConfig)  // seg1
+  let mutable cbSegCur = Seg(nRingFrames, beesConfig.InSampleRate)
+  let mutable cbSegOld = Seg(nRingFrames, beesConfig.InSampleRate)
 
   let exchangeSegs() =
     assert not cbSegOld.Active
-    let tmp = cbSegCur
-    cbSegCur <- cbSegOld
-    cbSegOld <- tmp
+    let tmp = cbSegCur  in  cbSegCur <- cbSegOld  ;  cbSegOld <- tmp
     assert (cbSegCur.Head = 0)
     cbSegCur.TimeHead <- tbdDateTime
 
@@ -227,9 +225,8 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
     match cbMessagePool.CountAvail with
     | 0 -> PortAudioSharp.StreamCallbackResult.Complete // should continue?
     | _ ->
-    let callbackSetup cbMessage =
+    let fillCbMessage cbMessage =
       let (cbMessage: CbMessage) = cbMessage
-      if loggingEnabled() then  logger.Add seqNum timeStamp "cb bufs=" cbMessagePool.PoolStats
       // the callback args
       cbMessage.InputSamples <- input
       cbMessage.Output       <- output
@@ -241,9 +238,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
       cbMessage.WithEcho     <- withEcho
       cbMessage.Timestamp    <- timeStamp
       cbMessage.SeqNum       <- seqNum
-      cbMessage.SegCur       <- cbSegCur.Copy()
-      cbMessage.SegOld       <- cbSegOld.Copy()
-    let callbackCopy cbMessage =
+    let copyFrames cbMessage =
       let (cbMessage: CbMessage) = cbMessage
       let writeCallbackBlockToRing (callbackBlockPtr: IntPtr) =
         let nFrames = int cbMessage.FrameCount
@@ -252,20 +247,23 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
         cbSegCur.AdvanceHead nFrames cbMessage.Timestamp
         ptr
       // Copy the data then Submit a FinshCallback job.
-      let ptrToCopy = writeCallbackBlockToRing cbMessage.InputSamples
-      cbMessage.InputSamplesRingCopy <- ptrToCopy
-    let callbackFinish cbMessage =
+      let ptrToTheCopy = writeCallbackBlockToRing cbMessage.InputSamples
+      cbMessage.InputSamplesRingCopy <- ptrToTheCopy
+    let finish cbMessage =
       let (cbMessage: CbMessage) = cbMessage
       let submitCallbackAcceptanceJob callbackAcceptanceJob =
         jobQueue.Enqueue(CallbackAcceptance callbackAcceptanceJob)
+      cbMessage.SegCur <- cbSegCur.Copy()
+      cbMessage.SegOld <- cbSegOld.Copy()
       let callbackAcceptanceJob = {
         CbMessage        = cbMessage
         CompletionSource = TaskCompletionSource<unit>() }
       submitCallbackAcceptanceJob callbackAcceptanceJob
       callbackAcceptanceJob.CompletionSource.SetResult()
-    callbackSetup  cbMessage
-    callbackCopy   cbMessage
-    callbackFinish cbMessage
+    if loggingEnabled() then  logger.Add seqNum timeStamp "cb bufs=" cbMessagePool.PoolStats
+    fillCbMessage cbMessage
+    copyFrames    cbMessage
+    finish        cbMessage
     PortAudioSharp.StreamCallbackResult.Continue
 
   // for debug
@@ -282,13 +280,13 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   // The most recent cbMessage
   let mutable cbMessage = dummyInstance<CbMessage>()
   let segOldest() = if cbMessage.SegOld.Active then cbMessage.SegOld else cbMessage.SegCur
-  let mutable timeTail = segOldest()     .TimeTail
-  let mutable timeHead = cbMessage.SegCur.TimeHead
+  let timeTail() = segOldest()     .TimeTail
+  let timeHead() = cbMessage.SegCur.TimeHead
   
   let handleCallbackAcceptance callbackAcceptance =
     cbMessagePool.ItemUseBegin()
     cbMessage <- callbackAcceptance.CbMessage
-    Console.WriteLine $"{cbMessage.SegCur.Head}"
+    Console.WriteLine $"%d{cbMessage.SegCur.Head}"
     // ...
     cbMessagePool.ItemUseEnd(cbMessage)
 //  let cbMessage = callbackAcceptance.CbMessage
@@ -338,7 +336,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
     // timeTail
     
   let locationOfDateTime (dateTime: DateTime)  : Option<Seg * int> =
-    if not (timeTail <= dateTime && dateTime <= timeHead) then Some (cbMessage.SegCur, 1)
+    if not (timeTail() <= dateTime && dateTime <= timeHead()) then Some (cbMessage.SegCur, 1)
     else None
 
  

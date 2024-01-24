@@ -20,14 +20,14 @@ type BeesConfig = {
 
 let printBeesConfig bc =
   let sb = StringBuilder()
-  sb.AppendLine "BeesConfig:"
-  sb.AppendLine $"  LocationId                  {bc.LocationId                 }"
-  sb.AppendLine $"  HiveId                      {bc.HiveId                     }"
-  sb.AppendLine $"  PrimaryDir                  {bc.PrimaryDir                 }"
-  sb.AppendLine $"  MonitorDir                  {bc.MonitorDir                 }"
-  sb.AppendLine $"  PlotDir                     {bc.PlotDir                    }"
-  sb.AppendLine $"  inputStreamBufferedDuration {bc.inputStreamBufferedDuration}"
-  sb.AppendLine $"  SampleSize                  {bc.SampleSize                 }"
-  sb.AppendLine $"  InChannelCount              {bc.InChannelCount             }"
-  sb.AppendLine $"  InSampleRate                {bc.InSampleRate               }"
+  sb.AppendLine "BeesConfig:"                                                     |> ignore
+  sb.AppendLine $"  LocationId                  {bc.LocationId                 }" |> ignore
+  sb.AppendLine $"  HiveId                      {bc.HiveId                     }" |> ignore
+  sb.AppendLine $"  PrimaryDir                  {bc.PrimaryDir                 }" |> ignore
+  sb.AppendLine $"  MonitorDir                  {bc.MonitorDir                 }" |> ignore
+  sb.AppendLine $"  PlotDir                     {bc.PlotDir                    }" |> ignore
+  sb.AppendLine $"  inputStreamBufferedDuration {bc.inputStreamBufferedDuration}" |> ignore
+  sb.AppendLine $"  SampleSize                  {bc.SampleSize                 }" |> ignore
+  sb.AppendLine $"  InChannelCount              {bc.InChannelCount             }" |> ignore
+  sb.AppendLine $"  InSampleRate                {bc.InSampleRate               }" |> ignore
   System.Console.WriteLine (sb.ToString())
