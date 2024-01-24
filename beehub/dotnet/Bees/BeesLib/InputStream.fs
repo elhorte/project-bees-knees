@@ -16,8 +16,6 @@ open BeesUtil.PortAudioUtils
 
 type Worker = Buf -> int -> int
 
-let tbdTimeHead = DateTime.MinValue
-
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The ring buffer comprises 0, 1, or 2 active segments.
 //
@@ -49,36 +47,6 @@ let tbdTimeHead = DateTime.MinValue
 // Each client call queues a job to access data from the ring.
 // Client calls have to be asynchronous because they have to run in the jobQueue task.
 
-//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// Seg class
-
-type Seg(head: int, tail: int, nRingFrames: int, beesConfig: BeesConfig) =
-  let durationOf nFrames = TimeSpan.FromSeconds (float nFrames / float beesConfig.InSampleRate)
-  let nFramesOf duration = int ((duration: TimeSpan).TotalMicroseconds / 1_000_000.0 * float beesConfig.InSampleRate)
-
-  member val  Head     = head                                                     with get, set
-  member val  Tail     = tail                                                     with get, set
-  member this.NFrames  = assert (this.Head >= this.Tail) ; this.Head - this.Tail
-  member this.Duration = durationOf this.NFrames
-  member val  TimeHead = tbdTimeHead                                              with get, set
-  member this.TimeTail = this.TimeHead - this.Duration
-  member this.Active   = this.NFrames <> 0
-  member this.Copy()   = Seg(this.Head, this.Tail, nRingFrames, beesConfig)
-  member this.Reset()  = this.Head <- 0 ; this.Tail <- 0 ; assert (not this.Active)
-
-  member this.NFramesOf duration = nFramesOf duration
-  
-  member this.AdvanceHead nFrames timeHead =
-    let headNew = this.Head + nFrames
-    assert (headNew <= nRingFrames)
-    this.Head     <- headNew
-    this.TimeHead <- timeHead
-
-  /// Trim nFrames from the tail.  May result in an inactive Seg.
-  member this.TrimTail nFrames  : unit =
-    if this.NFrames > nFrames then  this.Tail <- this.Tail + nFrames
-                              else  this.Reset()
-
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -88,8 +56,6 @@ type TakeFunction =
 
 type CallbackAcceptanceJob = {
   CbMessage        : CbMessage
-  SegCur           : Seg
-  SegOld           : Seg
   CompletionSource : TaskCompletionSource<unit> }
 
 type TakeJob = {
@@ -110,7 +76,7 @@ let makeCbMessagePool beesConfig =
   let bufSize    = 1024
   let startCount = Environment.ProcessorCount * 4    // many more than number of cores
   let minCount   = 4
-  CbMessagePool(bufSize, startCount, minCount)
+  CbMessagePool(bufSize, startCount, minCount, beesConfig)
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -193,7 +159,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
     cbSegCur <- cbSegOld
     cbSegOld <- tmp
     assert (cbSegCur.Head = 0)
-    cbSegCur.TimeHead <- tbdTimeHead
+    cbSegCur.TimeHead <- tbdDateTime
 
   // In case the callback’s nFrames arg varies from one callback to the next,
   // adjust nGapFrames for the maximum nFrames arg seen.
@@ -275,6 +241,8 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
       cbMessage.WithEcho     <- withEcho
       cbMessage.Timestamp    <- timeStamp
       cbMessage.SeqNum       <- seqNum
+      cbMessage.SegCur       <- cbSegCur.Copy()
+      cbMessage.SegOld       <- cbSegOld.Copy()
     let callbackCopy cbMessage =
       let (cbMessage: CbMessage) = cbMessage
       let writeCallbackBlockToRing (callbackBlockPtr: IntPtr) =
@@ -292,8 +260,6 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
         jobQueue.Enqueue(CallbackAcceptance callbackAcceptanceJob)
       let callbackAcceptanceJob = {
         CbMessage        = cbMessage
-        SegCur           = cbSegCur.Copy()
-        SegOld           = cbSegOld.Copy()
         CompletionSource = TaskCompletionSource<unit>() }
       submitCallbackAcceptanceJob callbackAcceptanceJob
       callbackAcceptanceJob.CompletionSource.SetResult()
@@ -313,18 +279,16 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // Getting data from the ring
   
-  let mutable segCur = cbSegCur.Copy()
-  let mutable segOld = cbSegOld.Copy()
-  let segOldest() = if segOld.Active then segOld else segCur
-  let mutable timeTail = segOldest().TimeTail
-  let mutable timeHead = segCur     .TimeHead
+  // The most recent cbMessage
+  let mutable cbMessage = dummyInstance<CbMessage>()
+  let segOldest() = if cbMessage.SegOld.Active then cbMessage.SegOld else cbMessage.SegCur
+  let mutable timeTail = segOldest()     .TimeTail
+  let mutable timeHead = cbMessage.SegCur.TimeHead
   
   let handleCallbackAcceptance callbackAcceptance =
-    let cbMessage = callbackAcceptance.CbMessage
     cbMessagePool.ItemUseBegin()
-    segCur <- callbackAcceptance.SegCur
-    segOld <- callbackAcceptance.SegOld
-    Console.WriteLine $"{segCur.Head}"
+    cbMessage <- callbackAcceptance.CbMessage
+    Console.WriteLine $"{cbMessage.SegCur.Head}"
     // ...
     cbMessagePool.ItemUseEnd(cbMessage)
 //  let cbMessage = callbackAcceptance.CbMessage
@@ -334,30 +298,34 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
 //  copy fromPtr ringHeadPtr nFrames
  
   
-  let getSome timeStart count  : (int * int) seq = seq {
-    if segOld.Active then
-      let timeOffset = timeStart - segOld.TimeTail
-      assert (timeOffset >= 0)
-      let nFrames = segOld.NFramesOf timeOffset
-      let indexStart = segOld.Tail + nFrames
-      if indexStart < segOld.Head then
-        yield (indexStart, nFrames)
-    if segCur.Active then yield (segCur.Tail, segCur.NFrames)
-  }
+  // let (|TooEarly|SegCur|SegOld|)  (dateTime: DateTime) (duration: TimeSpan) =
     
     
-  let x = timeTail
-  let get (dateTime: DateTime) (duration: TimeSpan) (worker: Worker) =
-    let now = DateTime.Now
-    let timeStart = max dateTime timeTail
-    if timeStart + duration > now then  Error "insufficient buffered data" else
-    let rec deliver timeStart nFrames =
-      let nSamples = nFrames / frameSize
-      let r = worker fromPtr nSamples
-    let nextIndex = ringIndex timeStart
-    let count = 
-    deliver next timeStart
-    Success timeStart
+  
+  // let getSome timeStart count  : (int * int) seq = seq {
+  //   if segOld.Active then
+  //     let timeOffset = timeStart - segOld.TimeTail
+  //     assert (timeOffset >= 0)
+  //     let nFrames = segOld.NFramesOf timeOffset
+  //     let indexStart = segOld.Tail + nFrames
+  //     if indexStart < segOld.Head then
+  //       yield (indexStart, nFrames)
+  //   if segCur.Active then yield (segCur.Tail, segCur.NFrames)
+  // }
+    
+  //   
+  // let x = timeTail
+  // let get (dateTime: DateTime) (duration: TimeSpan) (worker: Worker) =
+  //   let now = DateTime.Now
+  //   let timeStart = max dateTime timeTail
+  //   if timeStart + duration > now then  Error "insufficient buffered data" else
+  //   let rec deliver timeStart nFrames =
+  //     let nSamples = nFrames / frameSize
+  //     let r = worker fromPtr nSamples
+  //   let nextIndex = ringIndex timeStart
+  //   let count = 
+  //   deliver next timeStart
+  //   Success timeStart
     
 
   // let keep (duration: TimeSpan) =
@@ -370,7 +338,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
     // timeTail
     
   let locationOfDateTime (dateTime: DateTime)  : Option<Seg * int> =
-    if not (timeTail <= dateTime && dateTime <= timeHead) then Some (segCur, 1)
+    if not (timeTail <= dateTime && dateTime <= timeHead) then Some (cbMessage.SegCur, 1)
     else None
 
  
