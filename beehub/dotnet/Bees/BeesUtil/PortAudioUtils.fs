@@ -10,14 +10,14 @@ let paTryCatchRethrow f =
   try f()
   with
   | :? PortAudioException as ex -> 
-    printfn $"PortAudioException: ErrorCode: %A{ex.ErrorCode} %s{ex.Message}"
+    Console.WriteLine $"PortAudioException: ErrorCode: %A{ex.ErrorCode} %s{ex.Message}"
     raise ex
   | ex ->
-    printfn $"Exception: %s{ex.Message}"
+    Console.WriteLine $"Exception: %s{ex.Message}"
     raise ex
 
 let exitWithTrouble exitValue (e: PortAudioException) message =
-  printfn "Exiting with trouble: %s: %A %A" message e.ErrorCode e.Message
+  Console.WriteLine "Exiting with trouble: %s{message}: %A{e.ErrorCode} %A{e.Message}"
   Environment.Exit exitValue
 
 

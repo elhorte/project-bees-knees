@@ -191,9 +191,9 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
       cbSegOld.Tail <- nFrames + nGapFrames
       // state is Chasing
   
-  // returns 0 on the last callback, > 0 after the last callback
-  let debugHitMaxNumberOfCallbacks (cbMessage: CbMessage) =
-    cbMessage.SeqNum - 100
+  let debugMaxNumberOfCallbacks = Int32.MaxValue
+  // returns = 0 on the last callback, > 0 after the last callback
+  let debugHitMaxNumberOfCallbacks n = n - debugMaxNumberOfCallbacks
 
   // Called from the PortAudio Callback method
   // Must not allocate memory because this is a system-level callback
@@ -212,7 +212,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
     | Some cbMessage ->
     match cbMessagePool.CountAvail with
     | 0 -> PortAudioSharp.StreamCallbackResult.Complete // should continue?
-    | _ when debugHitMaxNumberOfCallbacks cbMessage > 0 ->
+    | _ when debugHitMaxNumberOfCallbacks seqNum > 0 ->
       PortAudioSharp.StreamCallbackResult.Complete
     | _ ->
     let fillCbMessage() =
@@ -281,7 +281,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
     cbMessagePool.ItemUseBegin()
     cbMessage <- callbackAcceptance.CbMessage
     Console.WriteLine $"%4d{cbMessage.SegCur.Head}  %d{cbMessage.SeqNum}"
-    if debugHitMaxNumberOfCallbacks cbMessage >= 0 then
+    if debugHitMaxNumberOfCallbacks cbMessage.SeqNum >= 0 then
       Console.WriteLine $"No more callbacks – debugging"
       printCallback cbMessage
     // ...
@@ -390,8 +390,9 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   member this.Stop () = stop ()
   // Called from the PortAudio callback at interrupt time; internal use.
   member this.Callback(input, output, frameCount, timeInfo, statusFlags, userDataPtr) =
-    callback           input  output  frameCount  timeInfo  statusFlags  userDataPtr
-    // PortAudioSharp.StreamCallbackResult.Continue
+    paTryCatchRethrow(fun () ->
+              callback input  output  frameCount  timeInfo  statusFlags  userDataPtr)
+//  PortAudioSharp.StreamCallbackResult.Continue
 
   /// Create a stream of samples starting at a past DateTime.
   /// The stream is exhausted when it gets to the end of buffered data.
