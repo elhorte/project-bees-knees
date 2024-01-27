@@ -54,36 +54,38 @@ type BufRef      = BufRef of BufArray ref
 // CbMessage, CbMessagePool, CbMessageQueue
 
 /// This is the message that the callback sends to the managed-code handler.
-and CbMessage(beesConfig: BeesConfig) =
+and CbMessage(beesConfig: BeesConfig, nRingFrames: int) =
   inherit IPoolItem()
 
   let timeInfo          = StreamCallbackTimeInfo() // Replace with actual time info.
   let primingOutputFlag = StreamCallbackFlags.PrimingOutput
-
+  let newSeg()          = Seg(nRingFrames, beesConfig.InSampleRate)
+  
   // Most initializer values here are placeholders that will be overwritten by the callback.
   // as this is an object recycled in a pool so there is no allocation.
 
   // args to the callback called by PortAudioSharp
-  member   val public InputSamples         = IntPtr.Zero           with get, set
-  member   val public Output               = IntPtr.Zero           with get, set
-  member   val public FrameCount           = 0u                    with get, set
-  member   val public TimeInfo             = timeInfo              with get, set
-  member   val public StatusFlags          = primingOutputFlag     with get, set
-  member   val public UserDataPtr          = IntPtr.Zero           with get, set
+  member   val public InputSamples         = IntPtr.Zero        with get, set
+  member   val public Output               = IntPtr.Zero        with get, set
+  member   val public FrameCount           = 0u                 with get, set
+  member   val public TimeInfo             = timeInfo           with get, set
+  member   val public StatusFlags          = primingOutputFlag  with get, set
+  member   val public UserDataPtr          = IntPtr.Zero        with get, set
   // more from the callback
-  member   val public TimeStamp            = DateTime.MinValue     with get, set
-  member   val public WithEcho             = false                 with get, set
-  member   val public InputSamplesRingCopy = IntPtr 0              with get, set
-  member   val public SegCur               = dummyInstance<Seg>()  with get, set
-  member   val public SegOld               = dummyInstance<Seg>()  with get, set
+  member   val public TimeStamp            = DateTime.MinValue  with get, set
+  member   val public WithEcho             = false              with get, set
+  member   val public InputSamplesRingCopy = IntPtr 0           with get, set
+  member   val public SegCur               = newSeg()           with get, set
+  member   val public SegOld               = newSeg()           with get, set
 
   override m.ToString() = sprintf "%A %A" m.SeqNum m.TimeInfo
 
-and CbMessagePool( bufSize    : int        ,
-                   startCount : int        ,
-                   minCount   : int        ,
-                   beesConfig : BeesConfig ) =
-  inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(beesConfig))
+and CbMessagePool( bufSize     : int        ,
+                   startCount  : int        ,
+                   minCount    : int        ,
+                   beesConfig  : BeesConfig ,
+                   nRingFrames : int        ) =
+  inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(beesConfig, nRingFrames))
 
 and CbMessageQueue = AsyncConcurrentQueue<CbMessage>
     

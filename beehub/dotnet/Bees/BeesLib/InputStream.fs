@@ -55,16 +55,12 @@ type TakeFunction =
   | TakeWrite of (BufRef -> int -> unit)
   | TakeDone  of (int -> unit)
 
-type CallbackAcceptanceJob = {
-  CbMessage        : CbMessage
-  CompletionSource : TaskCompletionSource<unit> }
-
 type TakeJob = {
   Data: TakeFunction
   CompletionSource: TaskCompletionSource<unit> }
 
 type Job =
-  | CallbackAcceptance of CallbackAcceptanceJob
+  | CallbackAcceptance of CbMessage
   | Take               of TakeJob
 
   
@@ -73,28 +69,27 @@ type InputGetResult =
   | Success of DateTime
 
 /// <summary>Make the pool of CbMessages used by the stream callback</summary>
-let makeCbMessagePool beesConfig =
+let makeCbMessagePool beesConfig nRingFrames =
   let bufSize    = 1024
   let startCount = Environment.ProcessorCount * 4    // many more than number of cores
   let minCount   = 4
-  CbMessagePool(bufSize, startCount, minCount, beesConfig)
+  CbMessagePool(bufSize, startCount, minCount, beesConfig, nRingFrames)
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // InputStream class
 
-type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
+type InputStream(beesConfig: BeesConfig, withEchoArg: bool, withLoggingArg: bool, inputParameters: StreamParameters, outputParameters: StreamParameters) =
   let startTime = DateTime.Now
   let logger = Logger(8000, startTime)
   let cancellationTokenSource = new CancellationTokenSource()
   let jobQueue = AsyncConcurrentQueue<Job>()
   let cbMessageWorkList = WorkList<CbMessage>()
-  let cbMessagePool: CbMessagePool = makeCbMessagePool beesConfig
   let mutable paStream = dummyInstance<PortAudioSharp.Stream>()
   let mutable timeStamp = DateTime.Now
   let mutable seqNum = 0
-  let mutable withEcho = false
-  let mutable withLogging = false
+  let mutable withEcho    = withEchoArg
+  let mutable withLogging = withLoggingArg
   let echoEnabled   () = Volatile.Read &withEcho
   let loggingEnabled() = Volatile.Read &withEcho
 
@@ -110,6 +105,7 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   let ringPtr      = Marshal.AllocHGlobal(nRingBytes)
   let gapDuration  = TimeSpan.FromMilliseconds 10
   let mutable nGapFrames = durationToNFrames gapDuration
+  let cbMessagePool: CbMessagePool = makeCbMessagePool beesConfig nRingFrames
   
   let indexToVoidptr index  : voidptr =
     let indexByteOffset = index * frameSize
@@ -245,19 +241,16 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
       let ptrToTheCopy = writeCallbackBlockToRing()
       cbMessage.InputSamplesRingCopy <- ptrToTheCopy
     let finish() =
-      let submitCallbackAcceptanceJob callbackAcceptanceJob =
-        jobQueue.Enqueue(CallbackAcceptance callbackAcceptanceJob)
-      cbMessage.SegCur <- cbSegCur.Copy()
-      cbMessage.SegOld <- cbSegOld.Copy()
-      let callbackAcceptanceJob = {
-        CbMessage        = cbMessage
-        CompletionSource = TaskCompletionSource<unit>() }
-      submitCallbackAcceptanceJob callbackAcceptanceJob
-      callbackAcceptanceJob.CompletionSource.SetResult()
+      cbMessage.SegCur.Head <- cbSegCur.Head
+      cbMessage.SegCur.Tail <- cbSegCur.Tail
+      cbMessage.SegOld.Head <- cbSegOld.Head
+      cbMessage.SegOld.Tail <- cbSegOld.Tail
+      jobQueue.Enqueue(CallbackAcceptance cbMessage)
     if loggingEnabled() then  logger.Add seqNum timeStamp "cb bufs=" cbMessagePool.PoolStats
     fillCbMessage()
     copyFrames   ()
     finish       ()
+    // Console.Write(".")
     PortAudioSharp.StreamCallbackResult.Continue
 
   // for debug
@@ -272,14 +265,14 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
   // Getting data from the ring – not at interrupt time
     
   // The most recent cbMessage
-  let mutable cbMessage = dummyInstance<CbMessage>()
+  let mutable cbMessage = CbMessage(beesConfig, nRingFrames)
   let segOldest() = if cbMessage.SegOld.Active then cbMessage.SegOld else cbMessage.SegCur
   let timeTail() = segOldest()     .TimeTail
   let timeHead() = cbMessage.SegCur.TimeHead
   
-  let handleCallbackAcceptance callbackAcceptance =
+  let handleCallbackAcceptance cbMessageJob =
     cbMessagePool.ItemUseBegin()
-    cbMessage <- callbackAcceptance.CbMessage
+    cbMessage <- cbMessageJob
     Console.WriteLine $"%4d{cbMessage.SegCur.Head}  %d{cbMessage.SeqNum}"
     if debugHitMaxNumberOfCallbacks cbMessage.SeqNum >= 0 then
       Console.WriteLine $"No more callbacks – debugging"
@@ -372,6 +365,21 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
     paStream.Stop()
     cancellationTokenSource.Cancel()
 
+  do
+    initPortAudio()
+    let callback = PortAudioSharp.Stream.Callback( // The fun has to be here because of a limitation of the compiler, apparently.
+      fun                    input  output  frameCount  timeInfo  statusFlags  userDataPtr ->
+        callback input output frameCount timeInfo statusFlags userDataPtr )
+        // Console.Write(".")
+        // PortAudioSharp.StreamCallbackResult.Continue )
+    paStream <- paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
+                                                                       outParams       = Nullable<_>(outputParameters)        ,
+                                                                       sampleRate      = beesConfig.InSampleRate                           ,
+                                                                       framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
+                                                                       streamFlags     = StreamFlags.ClipOff                  ,
+                                                                       callback        = callback                             ,
+                                                                       userData        = Nullable()                           ) )
+
    
   member val CbMessagePool  = cbMessagePool
   member val CbMessageQueue = cbMessageQueue
@@ -388,11 +396,6 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
 
   member this.Start() = start()
   member this.Stop () = stop ()
-  // Called from the PortAudio callback at interrupt time; internal use.
-  member this.Callback(input, output, frameCount, timeInfo, statusFlags, userDataPtr) =
-    paTryCatchRethrow(fun () ->
-              callback input  output  frameCount  timeInfo  statusFlags  userDataPtr)
-//  PortAudioSharp.StreamCallbackResult.Continue
 
   /// Create a stream of samples starting at a past DateTime.
   /// The stream is exhausted when it gets to the end of buffered data.
@@ -461,22 +464,24 @@ type InputStream(beesConfig: BeesConfig, withEcho: bool, withLogging: bool) =
 /// <param name="withLoggingRef"  > A Boolean determining if the callback should do logging         </param>
 /// <param name="cbMessageQueue"  > CbMessageQueue object handling audio stream                     </param>
 /// <returns>An <c>InputStream</c></returns>
-let makeInputStream beesConfig inputParameters outputParameters sampleRate withEcho withLogging  : InputStream =
-  initPortAudio()
-  let inputStream = new InputStream(beesConfig, withEcho, withLogging)
-  let callback = PortAudioSharp.Stream.Callback( // The fun has to be here because of a limitation of the compiler, apparently.
-    fun                    input  output  frameCount  timeInfo  statusFlags  userDataPtr ->
-      inputStream.Callback(input, output, frameCount, timeInfo, statusFlags, userDataPtr) )
-  let paStream = paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
-                                                                        outParams       = Nullable<_>(outputParameters)        ,
-                                                                        sampleRate      = sampleRate                           ,
-                                                                        framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
-                                                                        streamFlags     = StreamFlags.ClipOff                  ,
-                                                                        callback        = callback                             ,
-                                                                        userData        = Nullable()                           ) )
-  inputStream.PaStream <- paStream
-  paTryCatchRethrow(fun() -> inputStream.Start())
-  inputStream
+// let makeInputStream beesConfig inputParameters outputParameters sampleRate withEcho withLogging  : InputStream =
+//   initPortAudio()
+//   let inputStream = new InputStream(beesConfig, withEcho, withLogging)
+//   let callback = PortAudioSharp.Stream.Callback( // The fun has to be here because of a limitation of the compiler, apparently.
+//     fun                    input  output  frameCount  timeInfo  statusFlags  userDataPtr ->
+//       // inputStream.Callback(input, output, frameCount, timeInfo, statusFlags, userDataPtr) )
+//       Console.Write(".\007")
+//       PortAudioSharp.StreamCallbackResult.Continue )
+//   let paStream = paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
+//                                                                         outParams       = Nullable<_>(outputParameters)        ,
+//                                                                         sampleRate      = sampleRate                           ,
+//                                                                         framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
+//                                                                         streamFlags     = StreamFlags.ClipOff                  ,
+//                                                                         callback        = callback                             ,
+//                                                                         userData        = Nullable()                           ) )
+//   inputStream.PaStream <- paStream
+//   paTryCatchRethrow(fun() -> inputStream.Start())
+//   inputStream
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 

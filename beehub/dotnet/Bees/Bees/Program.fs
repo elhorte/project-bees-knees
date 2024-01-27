@@ -45,6 +45,7 @@ let prepareArgumentsForStreamCreation() =
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run inputStream = task {
   let inputStream = (inputStream: InputStream)
+  inputStream.Start()
   use cts = new CancellationTokenSource()
   printfn "Reading..."
   do! keyboardKeyInput cts
@@ -84,7 +85,7 @@ let main _ =
   keyboardInputInit()
   paTryCatchRethrow (fun () ->
     task {
-      use inputStream = makeInputStream beesConfig inputParameters outputParameters sampleRate withEcho withLogging
+      use inputStream = InputStream(beesConfig, withEcho, withLogging, inputParameters, outputParameters)
       do! run inputStream
       printfn "%s" (inputStream.Logger.ToString())
     } |> Task.WaitAny |> ignore )
