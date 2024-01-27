@@ -257,8 +257,8 @@ type InputStream(beesConfig: BeesConfig, withEchoArg: bool, withLoggingArg: bool
   let printCallback (m: CbMessage) =
     let microseconds = floatToMicrosecondsFractionOnly m.TimeInfo.currentTime
     let percentCPU   = paStream.CpuLoad * 100.0
-    let sDebug = sprintf "%3d: %A %s" seqNum timeStamp cbMessagePool.PoolStats
-    let sWork  = sprintf $"work: %6d{microseconds} frameCount=%A{m.FrameCount} cpuLoad=%5.1f{percentCPU}%%"
+    let sDebug = sprintf "%3d: %A %s" seqNum timeStamp.TimeOfDay cbMessagePool.PoolStats
+    let sWork  = sprintf $"microsec: %6d{microseconds} frameCount=%A{m.FrameCount} cpuLoad=%5.1f{percentCPU}%%"
     Console.WriteLine($"{sDebug}   ––   {sWork}")
 
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -274,9 +274,8 @@ type InputStream(beesConfig: BeesConfig, withEchoArg: bool, withLoggingArg: bool
     cbMessagePool.ItemUseBegin()
     cbMessage <- cbMessageJob
     Console.WriteLine $"%4d{cbMessage.SegCur.Head}  %d{cbMessage.SeqNum}"
-    if debugHitMaxNumberOfCallbacks cbMessage.SeqNum >= 0 then
-      Console.WriteLine $"No more callbacks – debugging"
-      printCallback cbMessage
+    if debugHitMaxNumberOfCallbacks cbMessage.SeqNum >= 0 then  Console.WriteLine $"No more callbacks – debugging"
+    printCallback cbMessage
     // ...
     cbMessagePool.ItemUseEnd(cbMessage)
 //  let cbMessage = callbackAcceptance.CbMessage
