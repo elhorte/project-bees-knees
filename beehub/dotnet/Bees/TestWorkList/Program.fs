@@ -9,7 +9,7 @@ let workList = WorkList<CbMessage>()
 // Exercising
 
 let handleCbMessage() =
-  dummyInstance<CbMessage>() |> workList.HandleEvent
+  dummyInstance<CbMessage>() |> workList.Broadcast
 
 let printHowManySubscribedHandlers expected =
   printActualVsExpected workList.SubscriberCount expected "workList.Count"

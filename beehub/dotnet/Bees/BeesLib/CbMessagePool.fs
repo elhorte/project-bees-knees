@@ -65,18 +65,20 @@ and CbMessage(beesConfig: BeesConfig, nRingFrames: int) =
   // as this is an object recycled in a pool so there is no allocation.
 
   // args to the callback called by PortAudioSharp
-  member   val public InputSamples         = IntPtr.Zero        with get, set
-  member   val public Output               = IntPtr.Zero        with get, set
-  member   val public FrameCount           = 0u                 with get, set
-  member   val public TimeInfo             = timeInfo           with get, set
-  member   val public StatusFlags          = primingOutputFlag  with get, set
-  member   val public UserDataPtr          = IntPtr.Zero        with get, set
+  member   val public InputSamples         : IntPtr                 = IntPtr.Zero        with get, set
+  member   val public Output               : IntPtr                 = IntPtr.Zero        with get, set
+  member   val public FrameCount           : uint32                 = 0u                 with get, set
+  member   val public TimeInfo             : StreamCallbackTimeInfo = timeInfo           with get, set
+  member   val public StatusFlags          : StreamCallbackFlags    = primingOutputFlag  with get, set
+  member   val public UserDataPtr          : IntPtr                 = IntPtr.Zero        with get, set
   // more from the callback
-  member   val public TimeStamp            = DateTime.MinValue  with get, set
-  member   val public WithEcho             = false              with get, set
-  member   val public InputSamplesRingCopy = IntPtr 0           with get, set
-  member   val public SegCur               = newSeg()           with get, set
-  member   val public SegOld               = newSeg()           with get, set
+  member   val public TimeStamp            : DateTime               = DateTime.MinValue  with get, set
+  member   val public WithEcho             : bool                   = false              with get, set
+  member   val public InputSamplesRingCopy : IntPtr                 = IntPtr 0           with get, set
+  member   val public SegCur               : Seg                    = newSeg()           with get, set
+  member   val public SegOld               : Seg                    = newSeg()           with get, set
+
+  member this.SegOldest() = if this.SegOld.Active then this.SegOld else this.SegCur
 
   override m.ToString() = sprintf "%A %A" m.SeqNum m.TimeInfo
 

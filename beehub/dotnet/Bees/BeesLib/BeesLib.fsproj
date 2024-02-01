@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="BeesConfig.fs" />
     <Compile Include="CbMessagePool.fs" />
+    <Compile Include="DebugGlobals.fs" />
     <Compile Include="InputStream.fs" />
     <Compile Include="Recording.fs" />
     <Compile Include="Commands.fs" />

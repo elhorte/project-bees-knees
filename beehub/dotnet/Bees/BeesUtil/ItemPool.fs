@@ -10,7 +10,8 @@ open System.Threading
 
 // [<AbstractClass>]
 type IPoolItem() =
-  member val SeqNum   = 0         with get, set
+  member val IdNum    = 0         with get, set // debugging
+  member val SeqNum   = 0         with get, set // debugging, probably
   member val UseCount = 0         with get, set
   member val Locker   = Object()  with get
   member val Pool     = null      with get, set
@@ -44,7 +45,7 @@ and ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, item
   
   // Never used at interrupt time
 
-  let mutable seqNumNext = 0  // ok to be overwritten when item is used
+  let mutable idNumNext = 0  // ok to be overwritten when item is used
 
   let addToPool (item: 'Item) =
     pool.Enqueue item // can cause allocation and thus GC
@@ -61,9 +62,9 @@ and ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, item
     if item.UseCount = 0 then  addToPool item
 
   let addNewItem() =
-    seqNumNext  <- seqNumNext + 1
+    idNumNext  <- idNumNext + 1
     let item = itemCreator()
-    item.SeqNum <- seqNumNext
+    item.IdNum <- idNumNext
     addToPool item
 
   let createAndAddNewItems n =

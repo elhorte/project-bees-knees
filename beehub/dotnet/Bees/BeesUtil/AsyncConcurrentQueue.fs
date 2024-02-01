@@ -6,9 +6,9 @@ open FSharp.Control
 /// Like ConcurrentQueue but with DequeueAsync() method.
 type AsyncConcurrentQueue<'T> () =
 
-  let queue = ConcurrentQueue<'T>()
+  let queue  = ConcurrentQueue<'T>()
   let signal = new System.Threading.SemaphoreSlim(0)
-
+  
   /// <summary>
   /// Adds an object to the end of the ConcurrentQueue.
   /// No allocation or locking is done.

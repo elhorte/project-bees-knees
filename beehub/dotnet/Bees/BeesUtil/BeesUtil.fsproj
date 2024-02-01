@@ -3,20 +3,21 @@
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
-        <RootNamespace>BeesLib</RootNamespace>
+        <RootNamespace>BeesUtil</RootNamespace>
     </PropertyGroup>
     
     <ItemGroup>
-        <Compile Include="Util.fs" />
-        <Compile Include="Parallel.fs" />
-        <Compile Include="CancelAfterDelay.fs" />
-        <Compile Include="CpuStopwatch.fs" />
-        <Compile Include="Logger.fs" />
+        <Compile Include="Util.fs"                 />
+        <Compile Include="CompletionHandoff.fs"    />
+        <Compile Include="Parallel.fs"             />
+        <Compile Include="CancelAfterDelay.fs"     />
+        <Compile Include="CpuStopwatch.fs"         />
+        <Compile Include="Logger.fs"               />
         <Compile Include="AsyncConcurrentQueue.fs" />
-        <Compile Include="ItemPool.fs" />
-        <Compile Include="WorkList.fs" />
-        <Compile Include="PortAudioUtils.fs" />
-        <Compile Include="Mp3.fs" />
+        <Compile Include="ItemPool.fs"             />
+        <Compile Include="WorkList.fs"             />
+        <Compile Include="PortAudioUtils.fs"       />
+        <Compile Include="Mp3.fs"                  />
     </ItemGroup>
 
     <ItemGroup>

@@ -1,7 +1,5 @@
 module BeesUtil.Util
 
-open PortAudioSharp
-
 
 let dummyInstance<'T>() =
   System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof<'T>)

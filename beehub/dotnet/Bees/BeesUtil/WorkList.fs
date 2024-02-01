@@ -6,13 +6,13 @@ type Unsubscriber   = unit -> unit
 type SubscriptionId = SubscriptionId of int
 
 type SubscriberHandler<'Event> = 'Event -> SubscriptionId -> Unsubscriber -> unit
-and  Subscription<'Event>   = Subscription of (SubscriptionId * SubscriberHandler<'Event>)
+and  Subscription<'Event>      = Subscription of (SubscriptionId * SubscriberHandler<'Event>)
 
 
 type WorkList<'Event>() =
   
-  let subscriptions = ResizeArray<Subscription<'Event>>()
-  let mutable idCurrent = 0
+  let         subscriptions = ResizeArray<Subscription<'Event>>()
+  let mutable idCurrent     = 0
 
   let nextId() =
     idCurrent <- idCurrent + 1
@@ -25,7 +25,7 @@ type WorkList<'Event>() =
   
   /// Handle the event by running each subscription in order subscribed.
   /// The subscriber handler can remove itself when done.
-  member this.HandleEvent(t: 'Event)  : unit =
+  member this.Broadcast(t: 'Event)  : unit =
     for s in subscriptions.ToArray() do
       let unsubscribeMe() = unsubscribe s  
       match s with
