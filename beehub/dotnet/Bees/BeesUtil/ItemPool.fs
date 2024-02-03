@@ -68,21 +68,21 @@ and ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, item
     addToPool item
 
   let createAndAddNewItems n =
-    if n > 0 then
-      for i in 1..n do  addNewItem() // Add to the pool.
-      assert (Volatile.Read &countAvail.contents  = pool.Count)
-      Volatile.Write(&countInUse.contents, 0)
+    if n <= 0 then  () else
+    for i in 1..n do  addNewItem() // Add to the pool.
+    assert (Volatile.Read &countAvail.contents  = pool.Count)
+    Volatile.Write(&countInUse.contents, 0)
 
   let addMoreItemsIfNeeded() = createAndAddNewItems (minCount - Volatile.Read &countAvail.contents)
 
         
   do
-    if startCount <> 0 then  // see CbMessage constructor
-      // Stock the pool.
-      assert (Volatile.Read &countAvail.contents = 0)
-      assert pool.IsEmpty
-      let n = max minCount startCount
-      createAndAddNewItems n
+    if startCount = 0 then  () else // see CbMessage constructor
+    // Stock the pool.
+    assert (Volatile.Read &countAvail.contents = 0)
+    assert pool.IsEmpty
+    let n = max minCount startCount
+    createAndAddNewItems n
 
 
   // Always used at interrupt time
