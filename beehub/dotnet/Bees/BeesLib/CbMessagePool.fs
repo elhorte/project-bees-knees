@@ -51,11 +51,31 @@ type BufRef      = BufRef of BufArray ref
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// CbMessage, CbMessagePool, CbMessageQueue
+// CbMessage
 
 /// This is the message that the callback sends to the managed-code handler.
-and CbMessage(beesConfig: BeesConfig, nRingFrames: int) =
-  inherit IPoolItem()
+type CbMessage = {
+  mutable InputSamples         : IntPtr                
+  mutable Output               : IntPtr                
+  mutable FrameCount           : uint32                
+  mutable TimeInfo             : StreamCallbackTimeInfo
+  mutable StatusFlags          : StreamCallbackFlags   
+  mutable UserDataPtr          : IntPtr                
+  // more from the callback
+  mutable SeqNum               : int
+  mutable TimeStamp            : DateTime              
+  mutable WithEcho             : bool                  
+  mutable InputSamplesRingCopy : IntPtr                
+  mutable SegCur               : Seg                   
+  mutable SegOld               : Seg }
+  
+  with
+  
+  member m.SegOldest    = if m.SegOld.Active then m.SegOld else m.SegCur
+
+  override m.ToString() = sprintf "%A %A" m.SeqNum m.TimeInfo
+
+let makeCbMessage (ip: ItemPool<CbMessage>) (beesConfig: BeesConfig) (nRingFrames: int) =
 
   let timeInfo          = StreamCallbackTimeInfo() // Replace with actual time info.
   let primingOutputFlag = StreamCallbackFlags.PrimingOutput
@@ -64,33 +84,40 @@ and CbMessage(beesConfig: BeesConfig, nRingFrames: int) =
   // Most initializer values here are placeholders that will be overwritten by the callback.
   // as this is an object recycled in a pool so there is no allocation.
 
-  // args to the callback called by PortAudioSharp
-  member   val public InputSamples         : IntPtr                 = IntPtr.Zero        with get, set
-  member   val public Output               : IntPtr                 = IntPtr.Zero        with get, set
-  member   val public FrameCount           : uint32                 = 0u                 with get, set
-  member   val public TimeInfo             : StreamCallbackTimeInfo = timeInfo           with get, set
-  member   val public StatusFlags          : StreamCallbackFlags    = primingOutputFlag  with get, set
-  member   val public UserDataPtr          : IntPtr                 = IntPtr.Zero        with get, set
-  // more from the callback
-  member   val public TimeStamp            : DateTime               = DateTime.MinValue  with get, set
-  member   val public WithEcho             : bool                   = false              with get, set
-  member   val public InputSamplesRingCopy : IntPtr                 = IntPtr 0           with get, set
-  member   val public SegCur               : Seg                    = newSeg()           with get, set
-  member   val public SegOld               : Seg                    = newSeg()           with get, set
+  let cbMessage = {
+    // args to the callback called by PortAudioSharp
+    InputSamples         = IntPtr.Zero       
+    Output               = IntPtr.Zero       
+    FrameCount           = 0u                
+    TimeInfo             = timeInfo          
+    StatusFlags          = primingOutputFlag 
+    UserDataPtr          = IntPtr.Zero       
+    // more from the callback
+    SeqNum               = 0
+    TimeStamp            = DateTime.MinValue 
+    WithEcho             = false             
+    InputSamplesRingCopy = IntPtr 0          
+    SegCur               = newSeg()          
+    SegOld               = newSeg()           }
+  cbMessage
 
-  member this.SegOldest() = if this.SegOld.Active then this.SegOld else this.SegCur
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// CbMessagePool
 
-  override m.ToString() = sprintf "%A %A" m.SeqNum m.TimeInfo
+type CbMessagePool = ItemPool<CbMessage>
 
-and CbMessagePool( bufSize     : int        ,
-                   startCount  : int        ,
-                   minCount    : int        ,
-                   beesConfig  : BeesConfig ,
-                   nRingFrames : int        ) =
-  inherit ItemPool<CbMessage>(startCount, minCount, fun () -> CbMessage(beesConfig, nRingFrames))
+let makeCbMessagePool (startCount  : int        )
+                      (minCount    : int        )
+                      (beesConfig  : BeesConfig )
+                      (nRingFrames : int        ) : CbMessagePool =
+  makeItemPool<CbMessage> startCount minCount (fun (ip: ItemPool<CbMessage>) -> makeCbMessage ip  beesConfig  nRingFrames)
 
-and CbMessageQueue = AsyncConcurrentQueue<CbMessage>
-    
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// CbMessageQueue
+
+type CbMessageQueue = AsyncConcurrentQueue<PoolItem<CbMessage>>
+
+   
 
   // static member test() =
   //   let startCount = 3

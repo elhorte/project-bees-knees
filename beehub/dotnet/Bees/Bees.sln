@@ -14,8 +14,7 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "BeesLib", "BeesLib\BeesLib.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PortAudioSharp", "..\..\..\..\PortAudioSharp2\PortAudioSharp\PortAudioSharp.csproj", "{555BF3F0-7CC7-4FE3-AA4E-63D0892D3F03}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Scratch", "Scratch\Scratch.fsproj", "{2AF7B37B-53E4-4CBC-92A5-489949112FD5}"
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Scratch", "Scratch\Scratch.fsproj", "{2AF7B37B-53E4-4CBC-92A5-489949112FD5}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "ScratchApp", "ScratchApp\ScratchApp.fsproj", "{37589819-87D9-4F98-8D7F-ABEF4BC281CB}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -51,9 +50,9 @@ Global
 		{555BF3F0-7CC7-4FE3-AA4E-63D0892D3F03}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{555BF3F0-7CC7-4FE3-AA4E-63D0892D3F03}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{555BF3F0-7CC7-4FE3-AA4E-63D0892D3F03}.Release|Any CPU.Build.0 = Release|Any CPU
-		{2AF7B37B-53E4-4CBC-92A5-489949112FD5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{2AF7B37B-53E4-4CBC-92A5-489949112FD5}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{2AF7B37B-53E4-4CBC-92A5-489949112FD5}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{2AF7B37B-53E4-4CBC-92A5-489949112FD5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{37589819-87D9-4F98-8D7F-ABEF4BC281CB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{37589819-87D9-4F98-8D7F-ABEF4BC281CB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{37589819-87D9-4F98-8D7F-ABEF4BC281CB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{37589819-87D9-4F98-8D7F-ABEF4BC281CB}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

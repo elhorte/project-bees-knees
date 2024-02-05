@@ -5,98 +5,106 @@ open System
 open System.Collections.Concurrent
 open System.Threading
 
+// We use records with extension functions here instead of classes with methods
+// because calling a class method can allocate and eventually cause a crash when used in the callback.
+// Actually happened.
+
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // A pool of items that can be taken from the pool without risk of a GC.
 
-// [<AbstractClass>]
-type IPoolItem() =
-  member val IdNum    = 0         with get, set // debugging
-  member val SeqNum   = 0         with get, set // debugging, probably
-  member val UseCount = 0         with get, set
-  member val Locker   = Object()  with get
-  member val Pool     = null      with get, set
-  // member this.Hold   () = this.Pool.Hold    this
-  // member this.Release() = this.Pool.Release this
+type PoolItem<'T> = {
+  Data             : 'T
+  Pool             : ItemPool<'T>
+  Locker           : Object  
+  mutable IdNum    : int }            // debugging
 
+and ItemPool<'T> = {
+  Pool        : ConcurrentQueue<PoolItem<'T>>
+  MinCount    : int
+  DataCreator : ItemPool<'T> -> 'T
+  mutable IdNumNext    : int
+  mutable SeqNumNext   : int  // for use by 'T
+  mutable CountAvailV  : int
+  mutable CountInUseV  : int }
 
-and ItemPool<'Item when 'Item :> IPoolItem>(startCount: int, minCount: int, itemCreator: unit -> 'Item) =
+//––––––––––––––––––––––––––––––––––
 
-  let pool = ConcurrentQueue<'Item>() // TryTake() at interrupt time
+type PoolItem<'T>
 
-  
-  // At interrupt time or at other times
-  
-  let countAvail = ref 0
-  let countInUse = ref 0
+  with
 
-  let changeAvail n = Volatile.Write(&countAvail.contents, Volatile.Read &countAvail.contents + n)
-  let changeInUse n = Volatile.Write(&countInUse.contents, Volatile.Read &countInUse.contents + n)
- 
-  
-  // Always used at interrupt time
+  override item.ToString() = $"id={item.IdNum} %A{item.Data}" 
 
-  let takeFromPool() =
-    match pool.TryDequeue() with
-    | true, obj ->  changeAvail -1
-                    changeInUse +1
-                    assert (Volatile.Read &countAvail.contents = pool.Count)
-                    Some obj
-    | false, _  ->  None
-  
-  // Never used at interrupt time
+let makePoolItem<'T> (pool : ItemPool<'T>) (t: 'T) = {
+  Data     = t
+  Pool     = pool
+  Locker   = Object()
+  IdNum    = 0 }       
 
-  let mutable idNumNext = 0  // ok to be overwritten when item is used
+//––––––––––––––––––––––––––––––––––
 
-  let addToPool (item: 'Item) =
-    pool.Enqueue item // can cause allocation and thus GC
-    changeAvail +1
-    changeInUse -1
-    assert (Volatile.Read &countAvail.contents = pool.Count)
+type ItemPool<'T>
 
-  let changeItemUseCount (item: 'Item) n = lock item.Locker (fun () -> item.UseCount <- item.UseCount + n)
+  with
 
-  let holdTilRelease (item: 'Item) = changeItemUseCount item +1
-
-  let releaseToPool (item: 'Item) =
-    if item.UseCount > 0 then  changeItemUseCount item -1
-    if item.UseCount = 0 then  addToPool item
-
-  let addNewItem() =
-    idNumNext  <- idNumNext + 1
-    let item = itemCreator()
-    item.IdNum <- idNumNext
-    addToPool item
-
-  let createAndAddNewItems n =
-    if n <= 0 then  () else
-    for i in 1..n do  addNewItem() // Add to the pool.
-    assert (Volatile.Read &countAvail.contents  = pool.Count)
-    Volatile.Write(&countInUse.contents, 0)
-
-  let addMoreItemsIfNeeded() = createAndAddNewItems (minCount - Volatile.Read &countAvail.contents)
-
-        
-  do
-    if startCount = 0 then  () else // see CbMessage constructor
-    // Stock the pool.
-    assert (Volatile.Read &countAvail.contents = 0)
-    assert pool.IsEmpty
-    let n = max minCount startCount
-    createAndAddNewItems n
-
-
-  // Always used at interrupt time
-
-  member this.Take() = takeFromPool()
-
+  member ip.CountAvail = Volatile.Read &ip.CountAvailV
+  member ip.CountInUse = Volatile.Read &ip.CountInUseV
+  member private ip.changeAvail n = Volatile.Write(&ip.CountAvailV, ip.CountAvail + n)
+  member private ip.changeInUse n = Volatile.Write(&ip.CountInUseV, ip.CountInUse + n)
     
   // Never used at interrupt time
 
-  member this.ItemUseBegin()           = addMoreItemsIfNeeded()
-  member this.ItemUseEnd (item: 'Item) = addToPool item
-  member this.Hold       (item: 'Item) = holdTilRelease item
-  member this.Release    (item: 'Item) = releaseToPool  item
-  member this.CountAvail               = Volatile.Read &countAvail.contents
-  member this.CountInUse               = Volatile.Read &countInUse.contents
-  
-  member this.PoolStats with get()     = sprintf "pool=%A:%A" this.CountAvail this.CountInUse
+  member private ip.addToPool (item: PoolItem<'T>) =
+    ip.Pool.Enqueue item // can cause allocation and thus GC
+    ip.changeAvail +1
+    ip.changeInUse -1
+    assert (ip.CountAvail = ip.Pool.Count)
+
+  member private ip.addNewItem<'T>()  =
+    ip.IdNumNext  <- ip.IdNumNext + 1
+    let item = makePoolItem ip (ip.DataCreator ip)
+    item.IdNum <- ip.IdNumNext
+    ip.addToPool item
+
+  member         ip.createAndAddNewItems<'T> n =
+    if n <= 0 then  () else
+    for i in 1..n do  ip.addNewItem() 
+    assert (Volatile.Read &ip.CountAvailV  = ip.Pool.Count)
+    Volatile.Write(&ip.CountInUseV, 0)
+    
+  member private ip.AddMoreItemsIfNeeded() =
+    ip.createAndAddNewItems (ip.MinCount - Volatile.Read &ip.CountAvailV)
+
+  member         ip.ItemUseBegin ()   = ip.AddMoreItemsIfNeeded()
+  member         ip.ItemUseEnd   item = ip.addToPool     item
+  member         ip.PoolStats         = sprintf "pool=%A:%A" ip.CountAvail ip.CountInUse
+
+  // Always used at interrupt time
+
+  member         ip.Take() =
+    match ip.Pool.TryDequeue() with
+    | true, item -> ip.changeAvail -1
+                    ip.changeInUse +1
+                    assert (ip.CountAvail = ip.Pool.Count)
+                    Some item
+    | false, _  ->  None
+
+
+let makeItemPool<'T> (startCount: int) (minCount: int) (dataCreator: ItemPool<'T> -> 'T) =
+  let ip = {
+    Pool        = ConcurrentQueue<PoolItem<'T>>()
+    MinCount    = minCount
+    DataCreator = dataCreator
+    IdNumNext   = 0 
+    SeqNumNext  = 0 
+    CountAvailV = 0
+    CountInUseV = 0 }
+  if startCount <> 0 then  // see CbMessage constructor
+    // Stock the pool.
+    assert (ip.CountAvail = 0)
+    assert ip.Pool.IsEmpty
+    let n = max minCount startCount
+    ip.createAndAddNewItems n
+  ip
+
+//––––––––––––––––––––––––––––––––––

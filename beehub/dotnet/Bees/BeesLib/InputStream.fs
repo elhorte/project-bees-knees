@@ -8,6 +8,7 @@ open System.Threading.Tasks
 open PortAudioSharp
 open BeesUtil.Util
 open BeesUtil.Logger
+open BeesUtil.ItemPool
 open BeesUtil.WorkList
 open BeesUtil.PortAudioUtils
 open BeesUtil.CompletionHandoff
@@ -41,8 +42,8 @@ type Worker = Buf -> int -> int
 //    callback  client
 //      time     task
 //    --------  ------
-//    cbSegCur  segCur   .Head is overall head of data
-//    cbSegOld  segOld   .Tail is overall tail of data
+//    cbSegCur  cbMessageCurrent.SegCur.Head is overall head of data
+//    cbSegOld  cbMessageCurrent.SegOld.Tail is overall tail of data
 // 
 // A background task loop takes each job from jobQueue and runs it to completion.
 // Each callback    queues a job to copy cbSegCur/cbSegOld to segCur/segOld
@@ -51,14 +52,6 @@ type Worker = Buf -> int -> int
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-
-type TakeFunction =
-  | TakeWrite of (BufRef -> int -> unit)
-  | TakeDone  of (int -> unit)
-
-type TakeJob = {
-  Data: TakeFunction
-  CompletionSource: TaskCompletionSource<unit> }
   
 type InputGetResult =
   | Error   of string
@@ -67,14 +60,16 @@ type InputGetResult =
 
 /// <summary>Make the pool of CbMessages used by the stream callback</summary>
 let makeCbMessagePool beesConfig nRingFrames =
-  let bufSize    = 1024
   let startCount = Environment.ProcessorCount * 4    // many more than number of cores
   let minCount   = 4
-  CbMessagePool(bufSize, startCount, minCount, beesConfig, nRingFrames)
+  CbMessagePool.makeCbMessagePool startCount minCount beesConfig nRingFrames
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // InputStream class
+let durationToNFrames (beesConfig: BeesConfig) (duration: TimeSpan) =
+  let nFramesApprox = duration.TotalSeconds * float beesConfig.InSampleRate
+  int (Math.Ceiling nFramesApprox)
 
 type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outputParameters: StreamParameters, withEchoArg: bool, withLoggingArg: bool) =
   let startTime = DateTime.Now
@@ -86,20 +81,15 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
   let mutable withLogging = withLoggingArg
   let echoEnabled   () = Volatile.Read &withEcho
   let loggingEnabled() = Volatile.Read &withEcho
-
-  let durationToNFrames (duration: TimeSpan) =
-    let nFramesApprox = duration.TotalSeconds * float beesConfig.InSampleRate
-    int (Math.Ceiling nFramesApprox)
-
-  let mutable beesConfig = beesConfig // so it’s visible in the debugger
-  let frameSize    = beesConfig.InChannelCount * sizeof<SampleType>
-  let ringDuration = TimeSpan.FromMilliseconds(200) // beesConfig.RingBufferDuration
-  let nRingFrames  = durationToNFrames ringDuration
-  let nRingBytes   = int nRingFrames * frameSize
-  let ringPtr      = Marshal.AllocHGlobal(nRingBytes)
-  let gapDuration  = TimeSpan.FromMilliseconds 10
-  let mutable nGapFrames = durationToNFrames gapDuration
-  let cbMessagePool: CbMessagePool = makeCbMessagePool beesConfig nRingFrames
+  let mutable beesConfig    = beesConfig // so it’s visible in the debugger
+  let         frameSize     = beesConfig.InChannelCount * sizeof<SampleType>
+  let         ringDuration  = TimeSpan.FromMilliseconds(200) // beesConfig.RingBufferDuration
+  let         nRingFrames   = durationToNFrames beesConfig ringDuration
+  let         nRingBytes    = int nRingFrames * frameSize
+  let         ringPtr       = Marshal.AllocHGlobal(nRingBytes)
+  let         gapDuration   = TimeSpan.FromMilliseconds 10
+  let mutable nGapFrames    = durationToNFrames beesConfig gapDuration
+  let         cbMessagePool = makeCbMessagePool beesConfig nRingFrames
   
   let indexToVoidptr index  : voidptr =
     let indexByteOffset = index * frameSize
@@ -133,7 +123,7 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
   let printCallback (m: CbMessage) =
     let microseconds = floatToMicrosecondsFractionOnly m.TimeInfo.currentTime
     let percentCPU   = paStream.CpuLoad * 100.0
-    let sDebug = sprintf "%3d: %A %s" seqNum timeStamp.TimeOfDay cbMessagePool.PoolStats
+    let sDebug = sprintf "%3d: %A %s" seqNum timeStamp.TimeOfDay (cbMessagePool.PoolStats)
     let sWork  = sprintf $"microsec: %6d{microseconds} frameCount=%A{m.FrameCount} cpuLoad=%5.1f{percentCPU}%%"
     Console.WriteLine($"{sDebug}   ––   {sWork}")
 
@@ -159,16 +149,17 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
   // Getting data from the ring – not at interrupt time
   
   // The most recent cbMessage
-  let mutable cbMessageCurrent = CbMessage(beesConfig, nRingFrames)
+  let mutable cbMessageCurrent = makeCbMessage cbMessagePool beesConfig nRingFrames
+  let mutable poolItemCurrent  = makePoolItem cbMessagePool cbMessageCurrent
 
   
   let finishCallback() =
     assert (not DebugGlobals.inCallback)
-    // cbMessagePool.ItemUseBegin()
-    // do
-    //   let cbMessage = Volatile.Read(&cbMessageCurrent)
-    //   cbMessageWorkList.Broadcast(cbMessage)
-    // cbMessagePool.ItemUseEnd(cbMessageCurrent)
+    cbMessagePool.ItemUseBegin()
+    do
+      let cbMessage = Volatile.Read(&cbMessageCurrent)
+      cbMessageWorkList.Broadcast(cbMessage)
+    cbMessagePool.ItemUseEnd poolItemCurrent
 //  let cbMessage = callbackAcceptance.CbMessage
 //  let nFrames = int cbMessage.FrameCount
 //  let fromPtr = cbMessage.InputSamples.ToPointer()
@@ -184,8 +175,8 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
     // cbMessagePool.ItemUseEnd(cbMessageCurrent)
     BeesUtil.CompletionHandoff.handOff callbackHandoff
   
-  let timeTail() = cbMessageCurrent.SegOldest().TimeTail
-  let timeHead() = cbMessageCurrent.SegCur     .TimeHead
+  let timeTail() = cbMessageCurrent.SegOldest.TimeTail
+  let timeHead() = cbMessageCurrent.SegCur   .TimeHead
  
   
   // let (|TooEarly|SegCur|SegOld|)  (dateTime: DateTime) (duration: TimeSpan) =
@@ -314,7 +305,8 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
     //   logger.Add seqNum timeStamp "cbMessagePool is empty" null
     //   Volatile.Write(&inCallback, false)
     //   PortAudioSharp.StreamCallbackResult.Continue
-    // | Some cbMessage ->
+    // | Some item ->
+    // let cbMessage = item.Data
     // match cbMessagePool.CountAvail with
     // | 0 -> Volatile.Write(&inCallback, false)
     //        PortAudioSharp.StreamCallbackResult.Complete // should continue?
@@ -322,45 +314,50 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
     //   Volatile.Write(&inCallback, false)
     //   PortAudioSharp.StreamCallbackResult.Complete
     // | _ ->
-//     let fillCbMessage() =
-//       // the callback args
-//       cbMessage.InputSamples <- input
-//       cbMessage.Output       <- output
-//       cbMessage.FrameCount   <- frameCount
-//       cbMessage.TimeInfo     <- timeInfo
-//       cbMessage.StatusFlags  <- statusFlags
-//       cbMessage.UserDataPtr  <- userDataPtr
-//       // more from the callback
-//       cbMessage.WithEcho     <- withEcho
-//       cbMessage.TimeStamp    <- timeStamp
-//       cbMessage.SeqNum       <- seqNum
-//     let nFrames = int frameCount
-//     let copyFrames() =
-//       let writeCallbackBlockToRing() =
-//         // Copy from callback data to the head of the ring and return a pointer to the copy.
-//         let copyToRing()  : IntPtr =
-//           let fromPtr = input.ToPointer()
-//           let toPtr   = indexToVoidptr cbSegCur.Head
-//           let size    = int64 (nFrames * frameSize)
-//           paTryCatchRethrow (fun () -> Buffer.MemoryCopy(fromPtr, toPtr, size, size))
-//           IntPtr toPtr
-//         prepForNewFrames nFrames // may update cbSegCur.Head
-//         let ptr = copyToRing()
-//         cbSegCur.AdvanceHead nFrames timeStamp
-//         ptr
-//       // Copy the data then Submit a FinshCallback job.
-//       let ptrToTheCopy = writeCallbackBlockToRing()
-//       cbMessage.InputSamplesRingCopy <- ptrToTheCopy
-//     let finish() =
-//       cbMessage.SegCur.Head <- cbSegCur.Head
-//       cbMessage.SegCur.Tail <- cbSegCur.Tail
-//       cbMessage.SegOld.Head <- cbSegOld.Head
-//       cbMessage.SegOld.Tail <- cbSegOld.Tail
-//       Volatile.Write(&cbMessageCurrent, cbMessage)
-// //  if loggingEnabled() then  logger.Add seqNum timeStamp "cb bufs=" cbMessagePool.PoolStats
-//     fillCbMessage()
-//     copyFrames   ()
-//     finish       ()
+    let taken = cbMessagePool.Take()
+    if taken.IsNone then PortAudioSharp.StreamCallbackResult.Complete else
+    let item = taken.Value
+    let cbMessage = item.Data
+    let fillCbMessage() =
+      // the callback args
+      cbMessage.InputSamples <- input
+      cbMessage.Output       <- output
+      cbMessage.FrameCount   <- frameCount
+      cbMessage.TimeInfo     <- timeInfo
+      cbMessage.StatusFlags  <- statusFlags
+      cbMessage.UserDataPtr  <- userDataPtr
+      // more from the callback
+      cbMessage.WithEcho     <- withEcho
+      cbMessage.TimeStamp    <- timeStamp
+      cbMessage.SeqNum       <- seqNum
+    let nFrames = int frameCount
+    let copyFrames() =
+      let writeCallbackBlockToRing() =
+        // Copy from callback data to the head of the ring and return a pointer to the copy.
+        let copyToRing()  : IntPtr =
+          let fromPtr = input.ToPointer()
+          let toPtr   = indexToVoidptr cbSegCur.Head
+          let size    = int64 (nFrames * frameSize)
+          Buffer.MemoryCopy(fromPtr, toPtr, size, size)
+          IntPtr toPtr
+        prepForNewFrames nFrames // may update cbSegCur.Head, used by copyToRing()
+        let ptr = paTryCatchRethrow copyToRing
+        cbSegCur.AdvanceHead nFrames timeStamp
+        ptr
+      // Copy the data then Submit a FinshCallback job.
+      let ptrToTheCopy = writeCallbackBlockToRing()
+      cbMessage.InputSamplesRingCopy <- ptrToTheCopy
+    let finish() =
+      cbMessage.SegCur.Head <- cbSegCur.Head
+      cbMessage.SegCur.Tail <- cbSegCur.Tail
+      cbMessage.SegOld.Head <- cbSegOld.Head
+      cbMessage.SegOld.Tail <- cbSegOld.Tail
+      Volatile.Write(&cbMessageCurrent, cbMessage)
+      Volatile.Write(&poolItemCurrent , item     )
+//  if loggingEnabled() then  logger.Add seqNum timeStamp "cb bufs=" cbMessagePool.PoolStats
+    fillCbMessage()
+    copyFrames   ()
+    finish       ()
     Console.Write(".")
     handOff()
     Volatile.Write(&inCallback, false)

@@ -4,28 +4,39 @@ open BeesUtil.ItemPool
 let startCount = 4
 
 // Run with breakpoints to see how it works.
-type TestItem() =
-  inherit IPoolItem()
-  let mutable num = 0
-  override this.ToString() = sprintf "TestItem %d ha" this.SeqNum
+type Thingy(pool: ItemPool<Thingy>) =
+  
+  member val SeqNum = 0  with get, set
 
-let test (pool: ItemPool<TestItem>) =
-  let busies = ResizeArray<TestItem>()
-  let rec takeWhileOk n =
-    match pool.Take() with
-    | Some item -> busies.Add item
-                   pool.ItemUseBegin()
-                   if n > 1 then takeWhileOk (n - 1) 
-    | None   -> printf "None available"
-  takeWhileOk startCount
-  while busies.Count > 0 do
-    let item = busies[0] in busies.RemoveAt 0
-    pool.ItemUseEnd item
-  printfn "pool count: %d" pool.CountAvail
+  override this.ToString() = sprintf "Thingy seq %d" this.SeqNum
 
+let bumpSeqNum (item: PoolItem<Thingy>) =
+    item.Pool.SeqNumNext <- item.Pool.SeqNumNext + 1
+    item.Data.SeqNum     <- item.Pool.SeqNumNext
+    
+let test (pool: ItemPool<Thingy>) =
+  let busies = ResizeArray<PoolItem<Thingy>>()
+  let once() =
+    let rec takeWhileOk n =
+      match pool.Take() with
+      | Some item -> bumpSeqNum item
+                     busies.Add item
+                     pool.ItemUseBegin()
+                     if n > 1 then takeWhileOk (n - 1) 
+      | None   -> printf "None available"
+    takeWhileOk startCount
+    while busies.Count > 0 do
+      let item = busies[0] in busies.RemoveAt 0
+      pool.ItemUseEnd item
+    printfn "pool count: %d" pool.CountAvail
+  once()  // breakpoint here. Inspect the pool.Pool and step, twice 
+  once()
+
+let makeThingy (pool: ItemPool<Thingy>) =
+  Thingy pool 
 
 do
-  let minCount   = 2
-  let pool = ItemPool<TestItem>(startCount, minCount, fun () -> new TestItem())
+  let minCount = 2
+  let pool = makeItemPool<Thingy> startCount minCount makeThingy
   test pool
 
