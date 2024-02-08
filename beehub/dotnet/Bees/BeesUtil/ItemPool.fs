@@ -68,7 +68,9 @@ type ItemPool<'T>
 
   member         ip.createAndAddNewItems<'T> n =
     if n <= 0 then  () else
-    for i in 1..n do  ip.addNewItem() 
+    for i in 1..n do
+      ip.addNewItem()
+      ip.changeInUse +1
     assert (Volatile.Read &ip.CountAvailV  = ip.Pool.Count)
     Volatile.Write(&ip.CountInUseV, 0)
     

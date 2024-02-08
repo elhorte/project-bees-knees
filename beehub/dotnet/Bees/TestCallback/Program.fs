@@ -1,8 +1,10 @@
 ﻿
 open System
+open System.Runtime.InteropServices
 open System.Threading
 
 open System.Threading.Tasks
+open BeesLib
 open BeesLib.InputStream
 open FSharp.Control
 open PortAudioSharp
@@ -11,7 +13,27 @@ open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open BeesLib.Keyboard
 
-// See Theory of Operation comment before main at the end of this file.
+
+open System
+
+// A function to consume a lot of memory quickly
+let consumeMemory() =
+  // let mutable data = []
+  // data <- (Array.init 1 (fun _ -> "")) :: data
+  "" :: []
+  // Create objects in a list, then discard them.
+  // for _ in 1..1 do  data <- (Array.init 1 (fun _ -> Guid.NewGuid().ToString())) :: data
+  // for _ in 1..1 do  data <- (Array.init 1 (fun _ -> "")) :: data
+  // Here, 'data' goes out of scope and becomes eligible for garbage collection
+  
+let churn() =
+  for _ in 1..1 do 
+    // consumeMemory() |> ignore
+    // Optionally, force garbage collection to see its effect (though not recommended in production code)
+    GC.Collect()
+    GC.WaitForPendingFinalizers()
+  Console.WriteLine "Churn done."
+    
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // App
@@ -42,17 +64,40 @@ let prepareArgumentsForStreamCreation() =
   printfn $"outputParameters=%A{outputParameters}"
   sampleRate, inputParameters, outputParameters
 
+let foo count =
+  let inputArray = Array.create count (float 0.0)
+  let handle = GCHandle.Alloc(inputArray, GCHandleType.Pinned)
+  handle.AddrOfPinnedObject()
+
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run inputStream = task {
   let inputStream = (inputStream: InputStream)
-  inputStream.Start()
+//inputStream.Start()
+
+  let t() =
+    (Task.Delay 100).Wait()
+    printfn "calling callback ...\n"
+    let frameCount = 512
+    let input  = foo frameCount
+    let output = foo frameCount
+    let timeInfo = PortAudioSharp.StreamCallbackTimeInfo()
+    let statusFlags = PortAudioSharp.StreamCallbackFlags()
+    let userDataPtr = IntPtr.Zero
+    for i in 1..9000 do
+      inputStream.TestCallback input output (uint32 frameCount) timeInfo statusFlags userDataPtr
+      Console.WriteLine $"{i}"
+      (Task.Delay 1).Wait()
+    printfn "\n\ncalling callback done"
+  DebugGlobals.simulating = true
+  Task.Run(churn)
+  // Task.Run(t)
+  // t()
+  
   use cts = new CancellationTokenSource()
   printfn "Reading..."
   do! keyboardKeyInput cts
-  printfn "Stopping..."    ; inputStream.Stop()
-  printfn "Stopped"
-  printfn "Terminating..." ; terminatePortAudio()
-  printfn "Terminated" }
+
+ }
 
 //–––––––––––––––––––––––––––––––––––––
 // BeesConfig
@@ -82,18 +127,13 @@ let main _ =
     InChannelCount              = inputParameters.channelCount
     InSampleRate                = int sampleRate  }
   printBeesConfig beesConfig
-  keyboardInputInit()
-  try
-    paTryCatchRethrow (fun () ->
-      task {
-        use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
-        try
-          do! run inputStream
-        with e ->
-          printfn $"Main caught {e}"
-        printfn "%s" (inputStream.Logger.ToString())
-      } |> Task.WaitAny |> ignore )
-    printfn "Task done."
-  finally
-    printfn "Exiting with 0."
+//keyboardInputInit()
+  paTryCatchRethrow (fun () ->
+    task {
+      let inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
+      do! run inputStream
+      printfn "%s" (inputStream.Logger.ToString())
+    } |> Task.WaitAny |> ignore )
   0
+
+

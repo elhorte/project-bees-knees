@@ -154,12 +154,14 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
 
   
   let finishCallback() =
-    assert (not DebugGlobals.inCallback)
+    Console.Write ","
+//  assert (DebugGlobals.simulating || not DebugGlobals.inCallback)
     cbMessagePool.ItemUseBegin()
-    do
-      let cbMessage = Volatile.Read(&cbMessageCurrent)
-      cbMessageWorkList.Broadcast(cbMessage)
+    // do
+    //   let cbMessage = Volatile.Read(&cbMessageCurrent)
+    //   cbMessageWorkList.Broadcast(cbMessage)
     cbMessagePool.ItemUseEnd poolItemCurrent
+    Console.Write ":"
 //  let cbMessage = callbackAcceptance.CbMessage
 //  let nFrames = int cbMessage.FrameCount
 //  let fromPtr = cbMessage.InputSamples.ToPointer()
@@ -314,9 +316,10 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
     //   Volatile.Write(&inCallback, false)
     //   PortAudioSharp.StreamCallbackResult.Complete
     // | _ ->
-    let taken = cbMessagePool.Take()
-    if taken.IsNone then PortAudioSharp.StreamCallbackResult.Complete else
-    let item = taken.Value
+    // let item = cbMessagePool.Take()
+    let item = Some poolItemCurrent
+    if item.IsNone then PortAudioSharp.StreamCallbackResult.Complete else
+    let item = item.Value
     let cbMessage = item.Data
     let fillCbMessage() =
       // the callback args
@@ -368,7 +371,7 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
   let start() =
     let publishCallbackEvents() = BeesUtil.CompletionHandoff.start callbackHandoff
     publishCallbackEvents()
-    paTryCatchRethrow(fun() -> paStream.Start())
+//    paTryCatchRethrow(fun() -> paStream.Start())
     printfn $"InputStream size: {nRingBytes / 1_000_000} MB for {ringDuration}"
     printfn $"InputStream nFrames: {nRingFrames}"
 
@@ -376,18 +379,22 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
     paStream.Stop()
     BeesUtil.CompletionHandoff.stop callbackHandoff 
 
-  do
-    initPortAudio()
-    let callback = PortAudioSharp.Stream.Callback( // The fun has to be here because of a limitation of the compiler, apparently.
+  let makeCallback beesConfig =
+    // The intermediate lambda here is required to avoid a compiler error.
+    PortAudioSharp.Stream.Callback(
       fun        input output frameCount timeInfo statusFlags userDataPtr ->
         callback input output frameCount timeInfo statusFlags userDataPtr )
+
+  do
+    initPortAudio()
     paStream <- paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                                                        outParams       = Nullable<_>(outputParameters)        ,
-                                                                       sampleRate      = beesConfig.InSampleRate                           ,
+                                                                       sampleRate      = beesConfig.InSampleRate              ,
                                                                        framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
                                                                        streamFlags     = StreamFlags.ClipOff                  ,
-                                                                       callback        = callback                             ,
+                                                                       callback        = makeCallback callback                ,
                                                                        userData        = Nullable()                           ) )
+
 
   member val CbMessagePool  = cbMessagePool
 //member val CbMessageQueue = cbMessageQueue
@@ -403,7 +410,9 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
                           and  set value = Volatile.Write(&withLogging, value)
   member this.Start() = start()
   member this.Stop () = stop ()
-
+  member this.TestCallback input output frameCount timeInfo statusFlags userDataPtr =
+    callback input output frameCount timeInfo statusFlags userDataPtr
+    
   static member val InCallback = false  with get, set
 
   /// Create a stream of samples starting at a past DateTime.
