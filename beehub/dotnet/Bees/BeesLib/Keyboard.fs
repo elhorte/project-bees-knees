@@ -62,17 +62,17 @@ let keyboardInputInit() =
   Console.CancelKeyPress.AddHandler(ConsoleCancelEventHandler ctrlCEventHandler)
   
 
-let keyboardKeyInput cancellationTokenSource = task {
+let keyboardKeyInput message cancellationTokenSource = task {
   let cts = (cancellationTokenSource: CancellationTokenSource)
   let takeKeys() = task {
     use consoleRead = new ConsoleReadAsync()
-    printfn "Type a command or q for quit"
     while not cts.IsCancellationRequested do
       let! command = consoleRead.readKeyAsync(cts.Token)
       match command with
       | None -> ()
       | Some c -> performKey c consoleRead cts }
   if false then cancelAfterDelay cts 0.5<second> (Some "canceled") |> ignore else ()
+  printfn $"{message}\nType a command or q for quit"
   do! takeKeys()
   printfn "Quitting per ‘q’ keyboard command" }
 

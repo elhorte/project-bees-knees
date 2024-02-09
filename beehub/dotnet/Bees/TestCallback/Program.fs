@@ -8,6 +8,7 @@ open BeesLib
 open BeesLib.InputStream
 open FSharp.Control
 open PortAudioSharp
+open BeesUtil.Util
 open BeesUtil.PortAudioUtils
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
@@ -25,13 +26,15 @@ let consumeMemory() =
   // for _ in 1..1 do  data <- (Array.init 1 (fun _ -> Guid.NewGuid().ToString())) :: data
   // for _ in 1..1 do  data <- (Array.init 1 (fun _ -> "")) :: data
   // Here, 'data' goes out of scope and becomes eligible for garbage collection
-  
+
 let churn() =
+  Console.WriteLine "Churn starting"
   for _ in 1..1 do 
     // consumeMemory() |> ignore
     // Optionally, force garbage collection to see its effect (though not recommended in production code)
-    GC.Collect()
-    GC.WaitForPendingFinalizers()
+  gc()
+  delayMs 300
+  // GC.WaitForPendingFinalizers()
   Console.WriteLine "Churn done."
     
 
@@ -74,8 +77,7 @@ let run inputStream = task {
   let inputStream = (inputStream: InputStream)
 //inputStream.Start()
 
-  let t() =
-    (Task.Delay 100).Wait()
+  let test() =
     printfn "calling callback ...\n"
     let frameCount = 512
     let input  = foo frameCount
@@ -84,18 +86,22 @@ let run inputStream = task {
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = IntPtr.Zero
     for i in 1..9000 do
-      inputStream.TestCallback input output (uint32 frameCount) timeInfo statusFlags userDataPtr
+      inputStream.TestCallback input output (uint32 frameCount) timeInfo statusFlags userDataPtr |> ignore
       Console.WriteLine $"{i}"
       (Task.Delay 1).Wait()
     printfn "\n\ncalling callback done"
-  DebugGlobals.simulating = true
-  Task.Run(churn)
-  // Task.Run(t)
-  // t()
+  
+  delayMs 300
+  DebugGlobals.simulating <- true
+  
+  Console.WriteLine "Main task start."
+  Task.Run(churn).Wait()
+  // Task.Run(task)
+  Console.WriteLine "Main task done."
+  delayMs 300
   
   use cts = new CancellationTokenSource()
-  printfn "Reading..."
-  do! keyboardKeyInput cts
+  do! keyboardKeyInput "Keyboard ready." cts
 
  }
 
@@ -127,10 +133,10 @@ let main _ =
     InChannelCount              = inputParameters.channelCount
     InSampleRate                = int sampleRate  }
   printBeesConfig beesConfig
-//keyboardInputInit()
+  keyboardInputInit()
   paTryCatchRethrow (fun () ->
     task {
-      let inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
+      use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
       do! run inputStream
       printfn "%s" (inputStream.Logger.ToString())
     } |> Task.WaitAny |> ignore )

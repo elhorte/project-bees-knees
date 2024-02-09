@@ -1,5 +1,9 @@
 module BeesUtil.Util
 
+open System
+open System.Threading
+open System.Threading.Tasks
+
 
 let dummyInstance<'T>() =
   System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof<'T>)
@@ -16,3 +20,15 @@ let tryCatchRethrow f =
   with ex ->
     printfn $"Exception: %s{ex.Message}"
     raise ex
+
+let delayMs ms =
+  Console.Write $"Delay %d{ms}ms. {{"
+  (Task.Delay ms).Wait()
+  Console.WriteLine "}"
+
+
+let gc() =
+  Console.Write "GC {"
+  GC.Collect()
+  Console.WriteLine "}"
+  // GC.WaitForPendingFinalizers()

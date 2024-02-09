@@ -155,7 +155,7 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
   
   let finishCallback() =
     Console.Write ","
-//  assert (DebugGlobals.simulating || not DebugGlobals.inCallback)
+    assert (DebugGlobals.simulating || not DebugGlobals.inCallback)
     cbMessagePool.ItemUseBegin()
     // do
     //   let cbMessage = Volatile.Read(&cbMessageCurrent)
@@ -410,7 +410,7 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
                           and  set value = Volatile.Write(&withLogging, value)
   member this.Start() = start()
   member this.Stop () = stop ()
-  member this.TestCallback input output frameCount timeInfo statusFlags userDataPtr =
+  member this.TestCallback input output frameCount timeInfo statusFlags userDataPtr  : StreamCallbackResult =
     callback input output frameCount timeInfo statusFlags userDataPtr
     
   static member val InCallback = false  with get, set
