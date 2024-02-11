@@ -14,7 +14,7 @@ open System.Threading
 
 type PoolItem<'T> = {
   Data             : 'T
-  Pool             : ItemPool<'T>
+  ItemPool             : ItemPool<'T>
   Locker           : Object  
   mutable IdNum    : int }            // debugging
 
@@ -37,7 +37,7 @@ type PoolItem<'T>
 
 let makePoolItem<'T> (pool : ItemPool<'T>) (t: 'T) = {
   Data     = t
-  Pool     = pool
+  ItemPool = pool
   Locker   = Object()
   IdNum    = 0 }       
 
@@ -47,11 +47,11 @@ type ItemPool<'T>
 
   with
 
-  member ip.CountAvail = Volatile.Read &ip.CountAvailV
-  member ip.CountInUse = Volatile.Read &ip.CountInUseV
+  member         ip.CountAvail    = Volatile.Read  &ip.CountAvailV
+  member         ip.CountInUse    = Volatile.Read  &ip.CountInUseV
   member private ip.changeAvail n = Volatile.Write(&ip.CountAvailV, ip.CountAvail + n)
   member private ip.changeInUse n = Volatile.Write(&ip.CountInUseV, ip.CountInUse + n)
-    
+
   // Never used at interrupt time
 
   member private ip.addToPool (item: PoolItem<'T>) =

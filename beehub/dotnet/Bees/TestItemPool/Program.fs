@@ -11,8 +11,8 @@ type Thingy(pool: ItemPool<Thingy>) =
   override this.ToString() = sprintf "Thingy seq %d" this.SeqNum
 
 let bumpSeqNum (item: PoolItem<Thingy>) =
-    item.Pool.SeqNumNext <- item.Pool.SeqNumNext + 1
-    item.Data.SeqNum     <- item.Pool.SeqNumNext
+    item.ItemPool.SeqNumNext <- item.ItemPool.SeqNumNext + 1
+    item.Data.SeqNum     <- item.ItemPool.SeqNumNext
     
 let test (pool: ItemPool<Thingy>) =
   let busies = ResizeArray<PoolItem<Thingy>>()
