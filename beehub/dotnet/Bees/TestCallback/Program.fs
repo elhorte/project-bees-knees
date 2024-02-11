@@ -73,8 +73,8 @@ let foo count =
   handle.AddrOfPinnedObject()
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
-let run inputStream = task {
-  let inputStream = (inputStream: InputStream)
+let run stream = task {
+  let inputStream = (stream: Stream)
 //inputStream.Start()
 
   let test() =
@@ -86,7 +86,7 @@ let run inputStream = task {
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = IntPtr.Zero
     for i in 1..9000 do
-      inputStream.TestCallback input output (uint32 frameCount) timeInfo statusFlags userDataPtr |> ignore
+      // inputStream.TestCallback input output (uint32 frameCount) timeInfo statusFlags userDataPtr |> ignore
       Console.WriteLine $"{i}"
       (Task.Delay 1).Wait()
     printfn "\n\ncalling callback done"
@@ -114,6 +114,10 @@ let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 //–––––––––––––––––––––––––––––––––––––
 // Main
 
+let callback =
+  PortAudioSharp.Stream.Callback(
+    fun input output frameCount timeInfo statusFlags userDataPtr ->
+      PortAudioSharp.StreamCallbackResult.Continue)
 
 
 [<EntryPoint>]
@@ -136,9 +140,15 @@ let main _ =
   keyboardInputInit()
   paTryCatchRethrow (fun () ->
     task {
-      use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
-      do! run inputStream
-      printfn "%s" (inputStream.Logger.ToString())
+      let paStream = PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
+                                           outParams       = Nullable<_>(outputParameters)        ,
+                                           sampleRate      = sampleRate                           ,
+                                           framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
+                                           streamFlags     = StreamFlags.ClipOff                  ,
+                                           callback        = callback                             ,
+                                           userData        = Nullable()                           )
+      do! run paStream
+      printfn "%s" (paStream.ToString())
     } |> Task.WaitAny |> ignore )
   0
 

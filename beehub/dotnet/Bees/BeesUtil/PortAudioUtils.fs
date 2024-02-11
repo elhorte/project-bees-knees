@@ -6,17 +6,23 @@ open PortAudioSharp
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // PortAudio Utils
 
-let paTryCatchRethrow f =
-  try f()
+let paTryCatch f (die: exn -> unit) =
+  try
+    f()
   with
   | :? PortAudioException as ex -> 
     Console.WriteLine $"PortAudioException: ErrorCode: %A{ex.ErrorCode} %s{ex.Message}"
+    die ex
     raise ex
   | ex ->
     Console.WriteLine $"Exception: %s{ex.Message}"
+    die ex
     raise ex
 
-let exitWithTrouble exitValue (e: PortAudioException) message =
+let paTryCatchRethrow f = paTryCatch f (fun e -> ()                 )
+let paTryCatchExit    f = paTryCatch f (fun e -> Environment.Exit(2))
+
+let paExitWithTrouble exitValue (e: PortAudioException) message =
   Console.WriteLine "Exiting with trouble: %s{message}: %A{e.ErrorCode} %A{e.Message}"
   Environment.Exit exitValue
 

@@ -153,13 +153,13 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
   let mutable poolItemCurrent  = makePoolItem cbMessagePool cbMessageCurrent
 
   
-  let finishCallback() =
+  let afterCallback() =
     Console.Write ","
     assert (DebugGlobals.simulating || not DebugGlobals.inCallback)
     cbMessagePool.ItemUseBegin()
-    // do
-    //   let cbMessage = Volatile.Read(&cbMessageCurrent)
-    //   cbMessageWorkList.Broadcast(cbMessage)
+    do
+      let cbMessage = Volatile.Read(&cbMessageCurrent)
+      cbMessageWorkList.Broadcast(cbMessage)
     cbMessagePool.ItemUseEnd poolItemCurrent
     Console.Write ":"
 //  let cbMessage = callbackAcceptance.CbMessage
@@ -169,7 +169,7 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
 //  copy fromPtr ringHeadPtr nFrames
   
   let callbackHandoff = {
-    F         = finishCallback
+    F         = afterCallback
     Semaphore = new SemaphoreSlim(0)
     Cts       = new CancellationTokenSource() }
 
@@ -302,22 +302,22 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
     if echoEnabled() then
       let size = uint64 (frameCount * uint32 frameSize)
       Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
-    // match cbMessagePool.Take() with
-    // | None -> // Yikes, pool is empty
-    //   logger.Add seqNum timeStamp "cbMessagePool is empty" null
-    //   Volatile.Write(&inCallback, false)
-    //   PortAudioSharp.StreamCallbackResult.Continue
-    // | Some item ->
-    // let cbMessage = item.Data
-    // match cbMessagePool.CountAvail with
-    // | 0 -> Volatile.Write(&inCallback, false)
-    //        PortAudioSharp.StreamCallbackResult.Complete // should continue?
-    // | _ when debugExcessOfCallbacks seqNum > 0 ->
-    //   Volatile.Write(&inCallback, false)
-    //   PortAudioSharp.StreamCallbackResult.Complete
-    // | _ ->
-    // let item = cbMessagePool.Take()
-    let item = Some poolItemCurrent
+    match cbMessagePool.Take() with
+    | None -> // Yikes, pool is empty
+      logger.Add seqNum timeStamp "cbMessagePool is empty" null
+      Volatile.Write(&inCallback, false)
+      PortAudioSharp.StreamCallbackResult.Continue
+    | Some item ->
+    let cbMessage = item.Data
+    match cbMessagePool.CountAvail with
+    | 0 -> Volatile.Write(&inCallback, false)
+           PortAudioSharp.StreamCallbackResult.Complete // should continue?
+    | _ when debugExcessOfCallbacks seqNum > 0 ->
+      Volatile.Write(&inCallback, false)
+      PortAudioSharp.StreamCallbackResult.Complete
+    | _ ->
+    let item = cbMessagePool.Take()
+    // let item = Some poolItemCurrent
     if item.IsNone then PortAudioSharp.StreamCallbackResult.Complete else
     let item = item.Value
     let cbMessage = item.Data
@@ -371,7 +371,7 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
   let start() =
     let publishCallbackEvents() = BeesUtil.CompletionHandoff.start callbackHandoff
     publishCallbackEvents()
-//    paTryCatchRethrow(fun() -> paStream.Start())
+    paTryCatchRethrow(fun() -> paStream.Start())
     printfn $"InputStream size: {nRingBytes / 1_000_000} MB for {ringDuration}"
     printfn $"InputStream nFrames: {nRingFrames}"
 
@@ -379,20 +379,19 @@ type InputStream(beesConfig: BeesConfig, inputParameters: StreamParameters, outp
     paStream.Stop()
     BeesUtil.CompletionHandoff.stop callbackHandoff 
 
-  let makeCallback beesConfig =
-    // The intermediate lambda here is required to avoid a compiler error.
-    PortAudioSharp.Stream.Callback(
-      fun        input output frameCount timeInfo statusFlags userDataPtr ->
-        callback input output frameCount timeInfo statusFlags userDataPtr )
 
   do
+    // The intermediate lambda here is required to avoid a compiler error.
+    let callbackStub = PortAudioSharp.Stream.Callback(
+      fun        input output frameCount timeInfo statusFlags userDataPtr ->
+        callback input output frameCount timeInfo statusFlags userDataPtr )
     initPortAudio()
     paStream <- paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                                                        outParams       = Nullable<_>(outputParameters)        ,
                                                                        sampleRate      = beesConfig.InSampleRate              ,
                                                                        framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
                                                                        streamFlags     = StreamFlags.ClipOff                  ,
-                                                                       callback        = makeCallback callback                ,
+                                                                       callback        = callbackStub                         ,
                                                                        userData        = Nullable()                           ) )
 
 

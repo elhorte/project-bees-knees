@@ -48,7 +48,7 @@ let run inputStream = task {
   inputStream.Start()
   use cts = new CancellationTokenSource()
   printfn "Reading..."
-  do! keyboardKeyInput cts
+  do! keyboardKeyInput "" cts
   printfn "Stopping..."    ; inputStream.Stop()
   printfn "Stopped"
   printfn "Terminating..." ; terminatePortAudio()
@@ -85,15 +85,13 @@ let main _ =
   keyboardInputInit()
   try
     paTryCatchRethrow (fun () ->
-      task {
-        use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
-        try
-          do! run inputStream
-        with e ->
-          printfn $"Main caught {e}"
-        printfn "%s" (inputStream.Logger.ToString())
-      } |> Task.WaitAny |> ignore )
-    printfn "Task done."
+      use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
+      paTryCatchRethrow (fun () ->
+        let t = task {
+          do! run inputStream 
+          inputStream.Logger.Print "Log:" }
+        t.Wait() )
+      printfn "Task done." )
   finally
     printfn "Exiting with 0."
   0

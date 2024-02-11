@@ -55,3 +55,9 @@ type Logger (capacity: int, startTime: DateTime) =
     printfn ""
     sb.AppendFormat("Log entries: {0}\n", count) |> ignore
     sb.ToString()
+
+  member this.Print message =
+    if entries.Count <> 0 then
+      let (m: String) = message
+      Console.WriteLine m
+      Console.WriteLine (this.ToString())

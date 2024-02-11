@@ -20,7 +20,7 @@ let consumeMemory() =
 let churn() =
   for _ in 1..1_000_000 do 
     consumeMemory() |> ignore
-    // Optqionally, force garbage collection to see its effect (though not recommended in production code)
+    // Optionally, force garbage collection to see its effect (though not recommended in production code)
     GC.Collect()
     GC.WaitForPendingFinalizers()
   Console.WriteLine "Churn done."
