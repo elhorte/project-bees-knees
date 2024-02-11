@@ -85,7 +85,7 @@ let main _ =
   keyboardInputInit()
   try
     paTryCatchRethrow (fun () ->
-      use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
+      use inputStream = makeInputStream beesConfig inputParameters outputParameters withEcho withLogging
       paTryCatchRethrow (fun () ->
         let t = task {
           do! run inputStream 

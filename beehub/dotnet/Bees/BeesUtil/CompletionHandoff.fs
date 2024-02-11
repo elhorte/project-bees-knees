@@ -1,28 +1,40 @@
 module BeesUtil.CompletionHandoff
 
+open System
 open System.Threading
 open System.Threading.Tasks
 
 
 type CompletionHandoff = {
-  F         : unit -> unit
-  Semaphore : SemaphoreSlim
-  Cts       : CancellationTokenSource }
+  F            : unit -> unit
+  Semaphore    : SemaphoreSlim
+  Cts          : CancellationTokenSource
+  mutable Task : Task option }
 
 let handleCompletions (ch: CompletionHandoff) =
-  let loop() =
+  let loop() = 
     while not ch.Cts.Token.IsCancellationRequested do
+      Console.Write "hc {"
       ch.Semaphore.Wait()
+      Console.Write "}"
       ch.F()
     ch.Semaphore.Dispose()
     ch.Cts      .Dispose()
-  Task.Run(loop) |> ignore
+    ch.Task <- None
+  Console.WriteLine "HandleCompletions start"
+  match ch.Task with
+  | Some t -> ()
+  | _      -> ch.Task <- Some (Task.Run loop)
 
 let start   (ch: CompletionHandoff) = handleCompletions ch
 let stop    (ch: CompletionHandoff) = ch.Cts.Cancel()
 let handOff (ch: CompletionHandoff) = ch.Semaphore.Release() |> ignore
 
-
+let makeCompletionHandoff f = {
+  F         = f
+  Semaphore = new SemaphoreSlim(0)
+  Cts       = new CancellationTokenSource()
+  Task      = None }
 
 // type CompletionHandoff(f: unit -> unit) =
 //

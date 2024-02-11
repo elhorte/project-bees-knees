@@ -6,17 +6,17 @@ open PortAudioSharp
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // PortAudio Utils
 
-let paTryCatch f (die: exn -> unit) =
+let paTryCatch f (exit: Exception -> unit) =
   try
     f()
   with
   | :? PortAudioException as ex -> 
     Console.WriteLine $"PortAudioException: ErrorCode: %A{ex.ErrorCode} %s{ex.Message}"
-    die ex
+    exit  ex
     raise ex
   | ex ->
     Console.WriteLine $"Exception: %s{ex.Message}"
-    die ex
+    exit  ex
     raise ex
 
 let paTryCatchRethrow f = paTryCatch f (fun e -> ()                 )
@@ -38,3 +38,7 @@ let terminatePortAudio() =
 
 let floatToMicrosecondsFractionOnly (time: float) : int =
   int (1_000_000.0 * (time % 1.0))
+
+let durationToNFrames sampleRate (duration: TimeSpan) =
+  let nFramesApprox = duration.TotalSeconds * float sampleRate
+  int (Math.Ceiling nFramesApprox)
