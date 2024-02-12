@@ -67,7 +67,8 @@ type ItemPool<'T>
     ip.addToPool item
 
   member         ip.createAndAddNewItems<'T> n =
-    if n <= 0 then  () else
+    if n <= 0 then  ()
+    else
     for i in 1..n do
       ip.addNewItem()
       ip.changeInUse +1

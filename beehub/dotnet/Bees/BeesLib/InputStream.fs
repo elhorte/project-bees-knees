@@ -11,7 +11,7 @@ open BeesUtil.Logger
 open BeesUtil.ItemPool
 open BeesUtil.WorkList
 open BeesUtil.PortAudioUtils
-open BeesUtil.CompletionHandoff
+open BeesUtil.CallbackHandoff
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open BeesLib.DebugGlobals
@@ -90,6 +90,7 @@ type InputStream = {
   mutable cbSegOld : Seg
   mutable cbMessageCurrent : CbMessage
   mutable poolItemCurrent  : PoolItem<CbMessage>
+  mutable callbackHandoff : CallbackHandoff
   debugMaxCallbacks : int32
   mutable debugSubscription : Subscription<CbMessage> }
 
@@ -138,7 +139,6 @@ type InputStream = {
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // Subscribing to notifications of data added to the ring
   
-  
   // returns = 0 on the last callback, > 0 after the last callback
   member private is.debugExcessOfCallbacks n = n - is.debugMaxCallbacks
 
@@ -151,29 +151,24 @@ type InputStream = {
 
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // Getting data from the ring – not at interrupt time
-
   
-  
-  member private is.afterCallback() =
+  member is.afterCallback() =
     Console.Write ","
-    assert (DebugGlobals.simulating || not DebugGlobals.inCallback)
+    // assert (DebugGlobals.simulating || not DebugGlobals.inCallback)
     is.cbMessagePool.ItemUseBegin()
     do
       let cbMessage = Volatile.Read(&is.cbMessageCurrent)
       is.cbMessageWorkList.Broadcast(cbMessage)
     is.cbMessagePool.ItemUseEnd is.poolItemCurrent
-    Console.Write ":"
 //  let cbMessage = callbackAcceptance.CbMessage
 //  let nFrames = int cbMessage.FrameCount
 //  let fromPtr = cbMessage.InputSamples.ToPointer()
 //  let ringHeadPtr = indexToPointer cbMessage.SegCur.Head
 //  copy fromPtr ringHeadPtr nFrames
-  
-  member private is.callbackHandoff = makeCompletionHandoff is.afterCallback
 
   member private is.handOff() =
     // cbMessagePool.ItemUseEnd(cbMessageCurrent)
-    BeesUtil.CompletionHandoff.handOff is.callbackHandoff
+    BeesUtil.CallbackHandoff.handOff is.callbackHandoff
   
   member is.timeTail() = is.cbMessageCurrent.SegOldest.TimeTail
   member is.timeHead() = is.cbMessageCurrent.SegCur   .TimeHead
@@ -202,7 +197,8 @@ type InputStream = {
   // let get (dateTime: DateTime) (duration: TimeSpan) (worker: Worker) =
   //   let now = DateTime.Now
   //   let timeStart = max dateTime timeTail
-  //   if timeStart + duration > now then  Error "insufficient buffered data" else
+  //   if timeStart + duration > now then  Error "insufficient buffered data"
+  //   else
   //   let rec deliver timeStart nFrames =
   //     let nSamples = nFrames / frameSize
   //     let r = worker fromPtr nSamples
@@ -314,7 +310,8 @@ type InputStream = {
     | _ ->
     let item = is.cbMessagePool.Take()
     // let item = Some poolItemCurrent
-    if item.IsNone then PortAudioSharp.StreamCallbackResult.Complete else
+    if item.IsNone then PortAudioSharp.StreamCallbackResult.Complete
+    else
     let item = item.Value
     let cbMessage = item.Data
     let fillCbMessage() =
@@ -334,11 +331,11 @@ type InputStream = {
       let writeCallbackBlockToRing() =
         // Copy from callback data to the head of the ring and return a pointer to the copy.
         let copyToRing()  : IntPtr =
-          let fromPtr = input.ToPointer()
-          let toPtr   = is.indexToVoidptr is.cbSegCur.Head
+          let srcPtr = input.ToPointer()
+          let dstPtr = is.indexToVoidptr is.cbSegCur.Head
           let size    = int64 (nFrames * is.frameSize)
-          Buffer.MemoryCopy(fromPtr, toPtr, size, size)
-          IntPtr toPtr
+          Buffer.MemoryCopy(srcPtr, dstPtr, size, size)
+          IntPtr dstPtr
         is.prepForNewFrames nFrames // may update is.cbSegCur.Head, used by copyToRing()
         let ptr = paTryCatchRethrow copyToRing
         is.cbSegCur.AdvanceHead nFrames is.timeStamp
@@ -365,7 +362,7 @@ type InputStream = {
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   
   member is.Start() =
-    let publishCallbackEvents() = BeesUtil.CompletionHandoff.start is.callbackHandoff
+    let publishCallbackEvents() = BeesUtil.CallbackHandoff.start is.callbackHandoff
     publishCallbackEvents()
     paTryCatchRethrow(fun() -> is.paStream.Start())
     printfn $"InputStream size: {is.nRingBytes / 1_000_000} MB for {is.ringDuration}"
@@ -373,7 +370,7 @@ type InputStream = {
 
   member is.Stop() =
     is.paStream.Stop()
-    BeesUtil.CompletionHandoff.stop is.callbackHandoff 
+    BeesUtil.CallbackHandoff.stop is.callbackHandoff 
 
 
   /// Create a stream of samples starting at a past DateTime.
@@ -436,6 +433,7 @@ let makeInputStream( beesConfig       : BeesConfig       )
     poolItemCurrent   = makePoolItem cbMessagePool cbMessageCurrent
     cbSegCur          = Seg(nRingFrames, beesConfig.InSampleRate)
     cbSegOld          = Seg(nRingFrames, beesConfig.InSampleRate)
+    callbackHandoff   = makeCallbackHandoff (fun () -> ())
     debugMaxCallbacks = Int32.MaxValue
     debugSubscription = dummyInstance<Subscription<CbMessage>>()  }
   
@@ -447,6 +445,7 @@ let makeInputStream( beesConfig       : BeesConfig       )
     // printCallback cbMessage
 
   is.debugSubscription <- cbMessageWorkList.Subscribe debuggingSubscriber 
+  is.callbackHandoff <- makeCallbackHandoff is.afterCallback
 
   // The intermediate lambda here is required to avoid a compiler error.
   let callbackStub = PortAudioSharp.Stream.Callback(
