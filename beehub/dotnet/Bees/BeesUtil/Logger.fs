@@ -22,14 +22,15 @@ type Logger (capacity: int, startTime: DateTime) =
   member this.Entries  with get() = entries
 
   member this.Add seqNum (timestamp: DateTime) (message: string) (data: obj) =
-    if count < capacity then
-      let entry = entryBuf[count]
-      entry.seqNum    <- seqNum
-      entry.Timestamp <- timestamp
-      entry.Message   <- message
-      entry.Data      <- data
-      count <- count + 1
-      entries <- ArraySegment<LogEntry>(entryBuf, 0, count)
+    if count >= capacity then ()
+    else
+    let entry = entryBuf[count]
+    entry.seqNum    <- seqNum
+    entry.Timestamp <- timestamp
+    entry.Message   <- message
+    entry.Data      <- data
+    count <- count + 1
+    entries <- ArraySegment<LogEntry>(entryBuf, 0, count)
 
   member this.Clear() = count <- 0
     

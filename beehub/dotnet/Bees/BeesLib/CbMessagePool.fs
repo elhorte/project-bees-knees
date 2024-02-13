@@ -62,6 +62,7 @@ type Seg = {
     if seg.NFrames > nFrames then  seg.Tail <- seg.Tail + nFrames
                               else  seg.Reset()
   
+  member seg.Print name = $"{name} {seg.Tail} {seg.Head}"
 
 
 

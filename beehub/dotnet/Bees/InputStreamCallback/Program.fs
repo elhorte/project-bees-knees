@@ -4,6 +4,7 @@ open System.Runtime.InteropServices
 open System.Threading
 
 open System.Threading.Tasks
+open BeesLib
 open BeesLib.InputStream
 open FSharp.Control
 open PortAudioSharp
@@ -52,11 +53,11 @@ let foo count =
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run inputStream = task {
   let inputStream = (inputStream: InputStream)
-//inputStream.Start()
+  inputStream.Start()
   
   let test() =
     printfn "calling callback ...\n"
-    let frameCount = 512
+    let frameCount = 2
     let input  = foo frameCount
     let output = foo frameCount
     let timeInfo    = PortAudioSharp.StreamCallbackTimeInfo()
@@ -68,11 +69,11 @@ let run inputStream = task {
       (Task.Delay 1).Wait()
     printfn "\n\ncalling callback done"
   
-  
+  test()
   use cts = new CancellationTokenSource()
 //printfn "Reading..."
 //do! keyboardKeyInput "" cts
-//printfn "Stopping..."    ; inputStream.Stop()
+  printfn "Stopping..."    ; inputStream.Stop()
   printfn "Stopped"
   printfn "Terminating..." ; terminatePortAudio()
   printfn "Terminated" }
@@ -92,6 +93,7 @@ let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 let main _ =
   let withEcho    = false
   let withLogging = false
+  DebugGlobals.simulatingCallbacks <- true
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   beesConfig <- {

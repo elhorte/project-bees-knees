@@ -92,7 +92,7 @@ let run stream = task {
     printfn "\n\ncalling callback done"
   
   delayMs 300
-  DebugGlobals.simulating <- true
+  DebugGlobals.simulatingCallbacks <- true
   
   Console.WriteLine "Main task start."
   Task.Run(churn).Wait()
@@ -140,13 +140,13 @@ let main _ =
   keyboardInputInit()
   paTryCatchRethrow (fun () ->
     task {
-      let paStream = PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
-                                           outParams       = Nullable<_>(outputParameters)        ,
-                                           sampleRate      = sampleRate                           ,
-                                           framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
-                                           streamFlags     = StreamFlags.ClipOff                  ,
-                                           callback        = callback                             ,
-                                           userData        = Nullable()                           )
+      use paStream = new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
+                                               outParams       = Nullable<_>(outputParameters)        ,
+                                               sampleRate      = sampleRate                           ,
+                                               framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
+                                               streamFlags     = StreamFlags.ClipOff                  ,
+                                               callback        = callback                             ,
+                                               userData        = Nullable()                           )
       do! run paStream
       printfn "%s" (paStream.ToString())
     } |> Task.WaitAny |> ignore )
