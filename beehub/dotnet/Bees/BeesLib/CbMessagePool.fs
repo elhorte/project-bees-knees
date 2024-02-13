@@ -15,34 +15,55 @@ let tbdDateTime = DateTime.MinValue
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // Seg class, used by InputStream.  The ring buffer can comprise 0, 1, or 2 segs.
 
-type Seg(head: int, tail: int, nRingFrames: int, inSampleRate: int) =
-  let durationOf nFrames = TimeSpan.FromSeconds (float nFrames / float inSampleRate)
-  let nFramesOf duration = int ((duration: TimeSpan).TotalMicroseconds / 1_000_000.0 * float inSampleRate)
-
-  new (nRingFrames: int, inSampleRate: int) = Seg(0, 0, nRingFrames, inSampleRate)
+type Seg = {
+  mutable Head     : int
+  mutable Tail     : int
+  mutable TimeHead : DateTime
+  NFrames          : int
+  NRingFrames      : int
+  InSampleRate     : int  }
   
-  member val  Head     = head         with get, set
-  member val  Tail     = tail         with get, set
-  member val  TimeHead = tbdDateTime  with get, set
-  member this.NFrames  = assert (this.Head >= this.Tail) ; this.Head - this.Tail
-  member this.Duration = durationOf this.NFrames
-  member this.TimeTail = this.TimeHead - this.Duration
-  member this.Active   = this.NFrames <> 0
-  member this.Copy()   = Seg(this.Head, this.Tail, nRingFrames, inSampleRate)
-  member this.Reset()  = this.Head <- 0 ; this.Tail <- 0 ; assert (not this.Active)
+  with
 
-  member this.NFramesOf duration = nFramesOf duration
+  static member New (head: int) (tail: int) (nRingFrames: int) (inSampleRate: int) =
+    assert (head >= tail)
+    let seg = {
+      Head         = head
+      Tail         = tail
+      NFrames      = head - tail
+      NRingFrames  = nRingFrames
+      InSampleRate = inSampleRate
+      TimeHead     = tbdDateTime  }
+    seg
+
+  static member NewEmpty (nRingFrames: int) (inSampleRate: int) =  Seg.New 0 0 nRingFrames inSampleRate
+
+  member seg.Copy  = Seg.New seg.Head seg.Tail seg.NRingFrames seg.InSampleRate
+
+    
+  member seg.durationOf nFrames = TimeSpan.FromSeconds (float nFrames / float seg.InSampleRate)
+  member seg.nFramesOf duration = int ((duration: TimeSpan).TotalMicroseconds / 1_000_000.0 * float seg.InSampleRate)
   
-  member this.AdvanceHead nFrames timeHead =
-    let headNew = this.Head + nFrames
-    assert (headNew <= nRingFrames)
-    this.Head     <- headNew
-    this.TimeHead <- timeHead
+  member seg.Duration = seg.durationOf seg.NFrames
+  member seg.TimeTail = seg.TimeHead - seg.Duration
+  member seg.Active   = seg.NFrames <> 0
+  member seg.Reset()  = seg.Head <- 0 ; seg.Tail <- 0 ; assert (not seg.Active)
+
+  member seg.NFramesOf duration = seg.nFramesOf duration
+  
+  member seg.AdvanceHead nFrames timeHead =
+    let headNew = seg.Head + nFrames
+    assert (headNew <= seg.NRingFrames)
+    seg.Head     <- headNew
+    seg.TimeHead <- timeHead
 
   /// Trim nFrames from the tail.  May result in an inactive Seg.
-  member this.TrimTail nFrames  : unit =
-    if this.NFrames > nFrames then  this.Tail <- this.Tail + nFrames
-                              else  this.Reset()
+  member seg.TrimTail nFrames  : unit =
+    if seg.NFrames > nFrames then  seg.Tail <- seg.Tail + nFrames
+                              else  seg.Reset()
+  
+
+
 
 type SampleType  = float32
 type BufArray    = SampleType array
@@ -79,7 +100,7 @@ let makeCbMessage (ip: ItemPool<CbMessage>) (beesConfig: BeesConfig) (nRingFrame
 
   let timeInfo          = StreamCallbackTimeInfo() // Replace with actual time info.
   let primingOutputFlag = StreamCallbackFlags.PrimingOutput
-  let newSeg()          = Seg(nRingFrames, beesConfig.InSampleRate)
+  let newSeg()          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
   
   // Most initializer values here are placeholders that will be overwritten by the callback.
   // as this is an object recycled in a pool so there is no allocation.

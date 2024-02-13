@@ -1,6 +1,5 @@
 module BeesUtil.CallbackHandoff
 
-open System
 open System.Threading
 open System.Threading.Tasks
 
@@ -9,31 +8,29 @@ type CallbackHandoff = {
   F            : unit -> unit
   Semaphore    : SemaphoreSlim
   Cts          : CancellationTokenSource
-  mutable Task : Task option }
+  mutable Task : Task option } with
+ 
+  static member New f = {
+    F         = f
+    Semaphore = new SemaphoreSlim(0)
+    Cts       = new CancellationTokenSource()
+    Task      = None }
 
-let doHandoffs (ch: CallbackHandoff) =
-  let loop() = 
-    while not ch.Cts.Token.IsCancellationRequested do
-      ch.Semaphore.WaitAsync().Wait()
-      ch.F()
-    ch.Semaphore.Dispose()
-    ch.Cts      .Dispose()
-    ch.Task <- None
-  match ch.Task with
-  | Some t -> ()
-  | _      -> Console.WriteLine "DoHandoffs start"    
-              ch.Task <- Some (Task.Run loop)
-              printfn $"Start completions loop %A{ch.Task}"
+  member private ch.doHandoffs() =
+    let loop() = 
+      while not ch.Cts.Token.IsCancellationRequested do
+        ch.Semaphore.WaitAsync().Wait()
+        ch.F()
+      ch.Semaphore.Dispose()
+      ch.Cts      .Dispose()
+      ch.Task <- None
+    match ch.Task with
+    | Some _ -> ()
+    | _      -> ch.Task <- Some (Task.Run loop)
 
-let start   (ch: CallbackHandoff) = doHandoffs ch
-let stop    (ch: CallbackHandoff) = ch.Cts.Cancel()
-let handOff (ch: CallbackHandoff) = ch.Semaphore.Release() |> ignore
-
-let makeCallbackHandoff f = {
-  F         = f
-  Semaphore = new SemaphoreSlim(0)
-  Cts       = new CancellationTokenSource()
-  Task      = None }
+  member ch.Start   () = ch.doHandoffs()
+  member ch.Stop    () = ch.Cts.Cancel()
+  member ch.HandOff () = ch.Semaphore.Release() |> ignore
 
 // type  CallbackHandoff(f: unit -> unit) =
 //
