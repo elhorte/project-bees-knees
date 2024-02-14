@@ -1,0 +1,5 @@
+<Project>
+    <PropertyGroup>
+        <WarningsAsErrors>FS0020</WarningsAsErrors> <!-- The result of this equality expression has type 'bool' and is implicitly discarded. Consider using 'let' to bind the result to a name, e.g. 'let result = expression'. -->
+    </PropertyGroup>
+</Project>
