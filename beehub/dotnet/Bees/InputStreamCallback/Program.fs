@@ -7,6 +7,7 @@ open System.Threading.Tasks
 open BeesLib
 open BeesLib.InputStream
 open FSharp.Control
+open Microsoft.Win32.SafeHandles
 open PortAudioSharp
 open BeesUtil.PortAudioUtils
 open BeesLib.BeesConfig
@@ -45,21 +46,23 @@ let prepareArgumentsForStreamCreation() =
   sampleRate, inputParameters, outputParameters
 
 
-let foo count =
-  let inputArray = Array.create count (float 0.0)
+let getArrayPointer byteCount =
+  let inputArray = Array.create byteCount (float 0.0)
   let handle = GCHandle.Alloc(inputArray, GCHandleType.Pinned)
   handle.AddrOfPinnedObject()
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
-let run inputStream = task {
+let run beesConfig inputStream = task {
   let inputStream = (inputStream: InputStream)
   inputStream.Start()
   
   let test() =
     printfn "calling callback ...\n"
     let frameCount = 2
-    let input  = foo frameCount
-    let output = foo frameCount
+    let frameSize = (beesConfig: BeesConfig).FrameSize
+    let byteCount = frameCount * frameSize
+    let input  = getArrayPointer byteCount
+    let output = getArrayPointer byteCount
     let timeInfo    = PortAudioSharp.StreamCallbackTimeInfo()
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = IntPtr.Zero
@@ -96,6 +99,7 @@ let main _ =
   DebugGlobals.simulatingCallbacks <- true
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
+  let sampleSize = sizeof<SampleType>
   beesConfig <- {
     LocationId                  = 1
     HiveId                      = 1
@@ -103,9 +107,9 @@ let main _ =
     MonitorDir                  = "monitor"
     PlotDir                     = "plot"
     inputStreamBufferedDuration = TimeSpan.FromMinutes 16
-    SampleSize                  = sizeof<SampleType>
+    SampleSize                  = sampleSize
     InChannelCount              = inputParameters.channelCount
-    InSampleRate                = int sampleRate  }
+    InSampleRate                = int sampleRate }
   printBeesConfig beesConfig
 //keyboardInputInit()
   try
@@ -113,7 +117,7 @@ let main _ =
       use inputStream = InputStream.New beesConfig inputParameters outputParameters withEcho withLogging
       paTryCatchRethrow (fun () ->
         let t = task {
-          do! run inputStream 
+          do! run beesConfig inputStream 
           inputStream.Logger.Print "Log:" }
         t.Wait() )
       printfn "Task done." )

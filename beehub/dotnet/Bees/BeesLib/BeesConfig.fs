@@ -16,7 +16,9 @@ type BeesConfig = {
   inputStreamBufferedDuration : TimeSpan
   SampleSize                  : int
   InChannelCount              : int
-  InSampleRate                : int  }
+  InSampleRate                : int  } with
+
+  member this.FrameSize = this.SampleSize * this.InChannelCount
 
 let printBeesConfig bc =
   let sb = StringBuilder()

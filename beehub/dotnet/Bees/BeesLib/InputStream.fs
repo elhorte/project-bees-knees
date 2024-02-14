@@ -80,6 +80,7 @@ type InputStream = {
   frameSize                 : int
   ringDuration              : TimeSpan
   nRingFrames               : int
+  mutable nUsableRingFrames : int
   nRingBytes                : int
   ringPtr                   : IntPtr
   gapDuration               : TimeSpan
@@ -104,7 +105,7 @@ type InputStream = {
     let startTime         = DateTime.Now
     let ringDuration      = TimeSpan.FromMilliseconds(200) // beesConfig.RingBufferDuration
     let nRingFrames       = if DebugGlobals.simulatingCallbacks then 13 else durationToNFrames beesConfig.InSampleRate ringDuration
-    let frameSize         = beesConfig.InChannelCount * sizeof<SampleType>
+    let frameSize         = beesConfig.FrameSize
     let nRingBytes        = int nRingFrames * frameSize
     let gapDuration       = TimeSpan.FromMilliseconds 10
     let cbMessageWorkList = WorkList<CbMessage>()
@@ -124,10 +125,11 @@ type InputStream = {
       frameSize         = frameSize
       ringDuration      = ringDuration
       nRingFrames       = nRingFrames
+      nUsableRingFrames = nRingFrames
       nRingBytes        = nRingBytes
       ringPtr           = Marshal.AllocHGlobal(nRingBytes)
       gapDuration       = TimeSpan.FromMilliseconds 10
-      nGapFrames        = if DebugGlobals.simulatingCallbacks then 8 else durationToNFrames beesConfig.InSampleRate gapDuration
+      nGapFrames        = if DebugGlobals.simulatingCallbacks then 2 else durationToNFrames beesConfig.InSampleRate gapDuration
       cbMessagePool     = cbMessagePool
       cbMessageWorkList = WorkList<CbMessage>()
       cbMessageCurrent  = makeCbMessage cbMessagePool beesConfig nRingFrames
@@ -314,17 +316,18 @@ type InputStream = {
   // The goal is plenty of room between head and tail.
   // Code assumes that nRingFrames > 2 * nGapFrames
   member private is.adjustNGapFrames nFrames =
-    let gapCandidate = nFrames * 4
+    let gapCandidate = if simulatingCallbacks then 2 else nFrames * 4
     is.nGapFrames <- max is.nGapFrames gapCandidate
-    if is.nRingFrames < 2 * is.nGapFrames then
+    is.nUsableRingFrames <- nFrames * (is.nRingFrames / nFrames) 
+    if is.nUsableRingFrames < 2 * is.nGapFrames then
       failwith $"nRingFrames is too small. nFrames: {nFrames}  nGapFrames: {is.nGapFrames}  nRingFrames: {is.nRingFrames}"
   
   member private is.prepForNewFrames nFrames =
     let sCur = is.cbSegCur.Print "cur"
     let sOld = is.cbSegOld.Print "old"
-    Console.WriteLine $"%A{sCur}  %A{sOld}"
+    Console.WriteLine $"%A{sOld}  %A{sCur}"
     is.adjustNGapFrames nFrames
-    let roomAhead = is.nRingFrames - (is.cbSegCur.Head + nFrames)
+    let roomAhead = is.nUsableRingFrames - (is.cbSegCur.Head + nFrames)
     if roomAhead >= 0 then
       // The block will fit after is.cbSegCur.Head
       // state is Empty, AtBegin, Middle, Chasing
