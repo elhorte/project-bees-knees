@@ -26,7 +26,7 @@ type CallbackHandoff = {
       ch.Task <- None
     match ch.Task with
     | Some _ -> ()
-    | _      -> ch.Task <- Some (Task.Run loop)
+    | None   -> ch.Task <- Some (Task.Run loop)
 
   member ch.Start   () = ch.doHandoffs()
   member ch.Stop    () = ch.Cts.Cancel()

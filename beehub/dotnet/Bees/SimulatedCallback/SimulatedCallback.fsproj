@@ -6,10 +6,6 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Include="Program.fs"/>
-    </ItemGroup>
-
-    <ItemGroup>
       <ProjectReference Include="..\BeesLib\BeesLib.fsproj" />
       <ProjectReference Include="..\BeesUtil\BeesUtil.fsproj" />
     </ItemGroup>

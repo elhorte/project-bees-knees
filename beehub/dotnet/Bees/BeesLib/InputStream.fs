@@ -307,8 +307,8 @@ type InputStream = {
   member private this.exchangeSegs() =
     assert not this.cbSegOld.Active
     let tmp = this.cbSegCur  in  this.cbSegCur <- this.cbSegOld  ;  this.cbSegOld <- tmp
-    if this.cbSegCur.Head <> 0 then Console.WriteLine "head != 0"
-    assert (this.cbSegCur.Head = 0)
+    // if this.cbSegCur.Head <> 0 then  Console.WriteLine "head != 0"
+    // assert (this.cbSegCur.Head = 0)
     this.cbSegCur.TimeHead <- tbdDateTime
 
   // In case the callback’s nFrames arg varies from one callback to the next,
@@ -321,11 +321,15 @@ type InputStream = {
     is.nUsableRingFrames <- nFrames * (is.nRingFrames / nFrames) 
     if is.nUsableRingFrames < 2 * is.nGapFrames then
       failwith $"nRingFrames is too small. nFrames: {nFrames}  nGapFrames: {is.nGapFrames}  nRingFrames: {is.nRingFrames}"
-  
-  member private is.prepForNewFrames nFrames =
+
+  member private is.printCurAndOld msg =
     let sCur = is.cbSegCur.Print "cur"
     let sOld = is.cbSegOld.Print "old"
-    Console.WriteLine $"%A{sOld}  %A{sCur}"
+    Console.WriteLine $"%s{msg} %s{sOld} %s{sCur}"
+    
+
+  member private is.prepForNewFrames nFrames =
+    is.printCurAndOld ""
     is.adjustNGapFrames nFrames
     let roomAhead = is.nUsableRingFrames - (is.cbSegCur.Head + nFrames)
     if roomAhead >= 0 then
@@ -337,7 +341,7 @@ type InputStream = {
         assert (is.cbSegCur.Head < is.cbSegOld.Tail)
         is.cbSegOld.TrimTail nFrames  // may result in is.cbSegOld being inactive
         // state is AtBegin, Chasing
-      if not is.cbSegOld.Active then
+      if is.cbSegOld.Active then
         // state is Empty, AtBegin, Middle
         let roomBehind = is.nGapFrames - roomAhead
         if roomBehind > 0 then
@@ -350,6 +354,7 @@ type InputStream = {
       // state is Middle
       // The block will not fit at the is.cbSegCur.Head.
       is.exchangeSegs()
+      is.printCurAndOld "exchanged"
       assert (is.cbSegCur.Head = 0)
       // is.cbSegCur starts fresh with head = 0, tail = 0, and we trim away is.cbSegOld.Tail to ensure the gap.
       is.cbSegOld.Tail <- nFrames + is.nGapFrames

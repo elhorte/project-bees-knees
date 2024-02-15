@@ -20,7 +20,7 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestCallback", "TestCallbac
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "GcKillsPortAudioSharp", "GcKillsPortAudioSharp\GcKillsPortAudioSharp.fsproj", "{97108125-0A99-4907-847E-2E901BC97055}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "InputStreamCallback", "InputStreamCallback\InputStreamCallback.fsproj", "{A3993C20-1F42-4484-A5D0-5E5EF143F0B4}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "SimulatedCallback", "SimulatedCallback\SimulatedCallback.fsproj", "{A3993C20-1F42-4484-A5D0-5E5EF143F0B4}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

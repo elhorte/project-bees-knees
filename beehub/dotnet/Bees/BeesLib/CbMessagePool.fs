@@ -16,10 +16,9 @@ let tbdDateTime = DateTime.MinValue
 // Seg class, used by InputStream.  The ring buffer can comprise 0, 1, or 2 segs.
 
 type Seg = {
-  mutable Head     : int
   mutable Tail     : int
+  mutable Head     : int
   mutable TimeHead : DateTime
-  NFrames          : int
   NRingFrames      : int
   InSampleRate     : int  }
   
@@ -28,9 +27,8 @@ type Seg = {
   static member New (head: int) (tail: int) (nRingFrames: int) (inSampleRate: int) =
     assert (head >= tail)
     let seg = {
-      Head         = head
       Tail         = tail
-      NFrames      = head - tail
+      Head         = head
       NRingFrames  = nRingFrames
       InSampleRate = inSampleRate
       TimeHead     = tbdDateTime  }
@@ -44,6 +42,7 @@ type Seg = {
   member seg.durationOf nFrames = TimeSpan.FromSeconds (float nFrames / float seg.InSampleRate)
   member seg.nFramesOf duration = int ((duration: TimeSpan).TotalMicroseconds / 1_000_000.0 * float seg.InSampleRate)
   
+  member seg.NFrames  = seg.Head - seg.Tail
   member seg.Duration = seg.durationOf seg.NFrames
   member seg.TimeTail = seg.TimeHead - seg.Duration
   member seg.Active   = seg.NFrames <> 0
@@ -62,7 +61,7 @@ type Seg = {
     if seg.NFrames > nFrames then  seg.Tail <- seg.Tail + nFrames
                               else  seg.Reset()
   
-  member seg.Print name = $"{name} {seg.Tail} {seg.Head}"
+  member seg.Print name = $"{name} {seg.Tail}.{seg.Head}"
 
 
 
