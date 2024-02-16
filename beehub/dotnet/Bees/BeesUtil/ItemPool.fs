@@ -33,7 +33,7 @@ type PoolItem<'T>
 
   with
 
-  override item.ToString() = $"id={item.IdNum} %A{item.Data}" 
+  member item.String = $"id={item.IdNum} %A{item.Data}" 
 
 let makePoolItem<'T> (pool : ItemPool<'T>) (t: 'T) = {
   Data     = t

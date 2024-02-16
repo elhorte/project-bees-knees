@@ -124,13 +124,13 @@ let main _ =
 
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   
-  let paStream = PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
-                                       outParams       = Nullable<_>(outputParameters)        ,
-                                       sampleRate      = sampleRate                           ,
-                                       framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
-                                       streamFlags     = StreamFlags.ClipOff                  ,
-                                       callback        = makeCallback()                       ,
-                                       userData        = Nullable()                           )
+  let paStream = new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
+                                           outParams       = Nullable<_>(outputParameters)        ,
+                                           sampleRate      = sampleRate                           ,
+                                           framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
+                                           streamFlags     = StreamFlags.ClipOff                  ,
+                                           callback        = makeCallback()                       ,
+                                           userData        = Nullable()                           )
   paTryCatchRethrow (fun () ->
     task {
       churn()

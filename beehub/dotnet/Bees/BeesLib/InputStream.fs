@@ -331,7 +331,8 @@ type InputStream = {
   member private is.prepForNewFrames nFrames =
     is.printCurAndOld ""
     is.adjustNGapFrames nFrames
-    let roomAhead = is.nUsableRingFrames - (is.cbSegCur.Head + nFrames)
+    let newHead = is.cbSegCur.Head + nFrames
+    let roomAhead = is.nUsableRingFrames - newHead
     if roomAhead >= 0 then
       // The block will fit after is.cbSegCur.Head
       // state is Empty, AtBegin, Middle, Chasing
