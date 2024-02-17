@@ -85,6 +85,7 @@ type InputStream = {
   ringPtr                   : IntPtr
   gapDuration               : TimeSpan
   mutable nGapFrames        : int
+  mutable maxNonGapFrames   : int
   cbMessagePool             : CbMessagePool
   cbMessageWorkList         : WorkList<CbMessage>
   mutable cbSegCur          : Seg
@@ -105,10 +106,12 @@ type InputStream = {
     let startTime         = DateTime.Now
     let ringDuration      = TimeSpan.FromMilliseconds(200) // beesConfig.RingBufferDuration
     let nRingFrames       = if DebugGlobals.simulatingCallbacks then 13 else durationToNFrames beesConfig.InSampleRate ringDuration
+    let nUsableRingFrames = nRingFrames
     let frameSize         = beesConfig.FrameSize
     let nRingBytes        = int nRingFrames * frameSize
     let gapDuration       = TimeSpan.FromMilliseconds 10
     let cbMessageWorkList = WorkList<CbMessage>()
+    let nGapFrames        = if DebugGlobals.simulatingCallbacks then 2 else durationToNFrames beesConfig.InSampleRate gapDuration 
     let cbMessagePool     = makeCbMessagePool beesConfig nRingFrames
     let cbMessageCurrent  = makeCbMessage cbMessagePool beesConfig nRingFrames
     let poolItemCurrent   = makePoolItem cbMessagePool cbMessageCurrent
@@ -129,7 +132,8 @@ type InputStream = {
       nRingBytes        = nRingBytes
       ringPtr           = Marshal.AllocHGlobal(nRingBytes)
       gapDuration       = TimeSpan.FromMilliseconds 10
-      nGapFrames        = if DebugGlobals.simulatingCallbacks then 2 else durationToNFrames beesConfig.InSampleRate gapDuration
+      nGapFrames        = nGapFrames
+      maxNonGapFrames   = nUsableRingFrames - nGapFrames
       cbMessagePool     = cbMessagePool
       cbMessageWorkList = WorkList<CbMessage>()
       cbMessageCurrent  = makeCbMessage cbMessagePool beesConfig nRingFrames
@@ -318,7 +322,8 @@ type InputStream = {
   member private is.adjustNGapFrames nFrames =
     let gapCandidate = if simulatingCallbacks then 2 else nFrames * 4
     is.nGapFrames <- max is.nGapFrames gapCandidate
-    is.nUsableRingFrames <- nFrames * (is.nRingFrames / nFrames) 
+    is.nUsableRingFrames <- nFrames * (is.nRingFrames / nFrames)
+    is.maxNonGapFrames <- is.nUsableRingFrames - is.nGapFrames
     if is.nUsableRingFrames < 2 * is.nGapFrames then
       failwith $"nRingFrames is too small. nFrames: {nFrames}  nGapFrames: {is.nGapFrames}  nRingFrames: {is.nRingFrames}"
 
@@ -328,29 +333,19 @@ type InputStream = {
     Console.WriteLine $"%s{msg} %s{sOld} %s{sCur}"
     
 
-  member private is.prepForNewFrames nFrames =
+  member private is.prepSegs nFrames =
     is.printCurAndOld ""
-    is.adjustNGapFrames nFrames
-    let newHead = is.cbSegCur.Head + nFrames
-    let roomAhead = is.nUsableRingFrames - newHead
-    if roomAhead >= 0 then
+    let nextHead = is.cbSegCur.Head + nFrames
+    if nextHead <= is.nUsableRingFrames then
       // The block will fit after is.cbSegCur.Head
       // state is Empty, AtBegin, Middle, Chasing
+      is.cbSegCur.Tail <- max is.cbSegCur.Tail (nextHead - is.maxNonGapFrames)
       if is.cbSegOld.Active then
         // state is Chasing
         // is.cbSegOld is active and ahead of us.
         assert (is.cbSegCur.Head < is.cbSegOld.Tail)
         is.cbSegOld.TrimTail nFrames  // may result in is.cbSegOld being inactive
         // state is AtBegin, Chasing
-      if is.cbSegOld.Active then
-        // state is Empty, AtBegin, Middle
-        let roomBehind = is.nGapFrames - roomAhead
-        if roomBehind > 0 then
-          // Some of the gap will be at the beginning of the ring.
-          is.cbSegCur.Tail <- roomBehind
-          // state is Middle, AtEnd
-        else ()
-          // state is AtBegin, Middle
     else
       // state is Middle
       // The block will not fit at the is.cbSegCur.Head.
@@ -388,6 +383,8 @@ type InputStream = {
     else
     let cbMessage = item.Data
     let nFrames   = int frameCount
+    is.adjustNGapFrames nFrames
+    is.prepSegs nFrames // may update is.cbSegCur.Head, used by copyToRing()
     let fillCbMessage() =
       // the callback args
       cbMessage.InputSamples <- input
@@ -409,7 +406,6 @@ type InputStream = {
           let size   = int64 (nFrames * is.frameSize)
           Buffer.MemoryCopy(srcPtr, dstPtr, size, size)
           IntPtr dstPtr
-        is.prepForNewFrames nFrames // may update is.cbSegCur.Head, used by copyToRing()
         let ptr = paTryCatchRethrow copyToRing
         is.cbSegCur.AdvanceHead nFrames is.timeStamp
         ptr
