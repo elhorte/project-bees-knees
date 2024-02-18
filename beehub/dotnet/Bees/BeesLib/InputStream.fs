@@ -316,7 +316,7 @@ type InputStream = {
 
   // In case the callback’s nFrames arg varies from one callback to the next,
   // adjust nGapFrames for the maximum nFrames arg seen.
-  // The goal is plenty of room, i.e. time gap between cbSegCur.Head and cbSegOld.Tail.
+  // The goal is plenty of room, i.e. time, between cbSegCur.Head and cbSegOld.Tail.
   // Code assumes that nRingFrames > 2 * nGapFrames
   member private is.adjustNGapFrames nFrames =
     let gapCandidate = if simulatingCallbacks then 2 else nFrames * 4
