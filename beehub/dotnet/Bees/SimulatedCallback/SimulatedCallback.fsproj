@@ -10,4 +10,8 @@
       <ProjectReference Include="..\BeesUtil\BeesUtil.fsproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <Compile Include="Program.fs" />
+    </ItemGroup>
+
 </Project>
