@@ -112,7 +112,7 @@ type InputStream = {
     let cbMessagePool     = makeCbMessagePool beesConfig nRingFrames
     let cbMessageCurrent  = makeCbMessage cbMessagePool beesConfig nRingFrames
     let poolItemCurrent   = makePoolItem cbMessagePool cbMessageCurrent
-
+    
     let is = {
       startTime         = startTime
       Logger            = Logger(8000, startTime)
@@ -166,7 +166,6 @@ type InputStream = {
                                                                           callback        = callbackStub                         ,
                                                                           userData        = Nullable()                           ) )
     is
-
   
   member  is.echoEnabled   () = Volatile.Read &is.withEcho
   member  is.loggingEnabled() = Volatile.Read &is.withEcho
@@ -313,7 +312,7 @@ type InputStream = {
 
   // In case the callback’s nFrames arg varies from one callback to the next,
   // adjust nGapFrames for the maximum nFrames arg seen.
-  // The goal is plenty of room between head and tail.
+  // The goal is plenty of room, i.e. time gap between cbSegCur.Head and cbSegOld.Tail.
   // Code assumes that nRingFrames > 2 * nGapFrames
   member private is.adjustNGapFrames nFrames =
     let gapCandidate = if simulatingCallbacks then 2 else nFrames * 4
