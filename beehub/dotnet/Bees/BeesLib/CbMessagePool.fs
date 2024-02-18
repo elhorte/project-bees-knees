@@ -59,7 +59,7 @@ type Seg = {
   /// Trim nFrames from the tail.  May result in an inactive Seg.
   member seg.TrimTail nFrames  : unit =
     if seg.NFrames > nFrames then  seg.Tail <- seg.Tail + nFrames
-                              else  seg.Reset()
+                             else  seg.Reset()
   
   member seg.Print name = $"{name} {seg.Tail}.{seg.Head}"
 
