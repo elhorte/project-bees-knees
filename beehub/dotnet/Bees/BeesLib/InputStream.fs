@@ -85,7 +85,6 @@ type InputStream = {
   ringPtr                   : IntPtr
   gapDuration               : TimeSpan
   mutable nGapFrames        : int
-  mutable maxNonGapFrames   : int
   cbMessagePool             : CbMessagePool
   cbMessageWorkList         : WorkList<CbMessage>
   mutable cbSegCur          : Seg
@@ -95,7 +94,8 @@ type InputStream = {
   mutable callbackHandoff   : CallbackHandoff
   BeesConfig                : BeesConfig
   debugMaxCallbacks         : int32
-  mutable debugSubscription : Subscription<CbMessage> } with
+  mutable debugSubscription : Subscription<CbMessage>
+  mutable debugData         : string list  } with
 
   static member New( beesConfig       : BeesConfig       )
                    ( inputParameters  : StreamParameters )
@@ -105,8 +105,8 @@ type InputStream = {
 
     let startTime         = DateTime.Now
     let ringDuration      = TimeSpan.FromMilliseconds(200) // beesConfig.RingBufferDuration
-    let nRingFrames       = if DebugGlobals.simulatingCallbacks then 13 else durationToNFrames beesConfig.InSampleRate ringDuration
-    let nUsableRingFrames = nRingFrames
+    let nRingFrames       = if DebugGlobals.simulatingCallbacks then 37 else durationToNFrames beesConfig.InSampleRate ringDuration
+    let nUsableRingFrames = 0 // calculated later
     let frameSize         = beesConfig.FrameSize
     let nRingBytes        = int nRingFrames * frameSize
     let gapDuration       = TimeSpan.FromMilliseconds 10
@@ -128,12 +128,11 @@ type InputStream = {
       frameSize         = frameSize
       ringDuration      = ringDuration
       nRingFrames       = nRingFrames
-      nUsableRingFrames = nRingFrames
+      nUsableRingFrames = nUsableRingFrames
       nRingBytes        = nRingBytes
       ringPtr           = Marshal.AllocHGlobal(nRingBytes)
       gapDuration       = TimeSpan.FromMilliseconds 10
       nGapFrames        = nGapFrames
-      maxNonGapFrames   = nUsableRingFrames - nGapFrames
       cbMessagePool     = cbMessagePool
       cbMessageWorkList = WorkList<CbMessage>()
       cbMessageCurrent  = makeCbMessage cbMessagePool beesConfig nRingFrames
@@ -143,7 +142,8 @@ type InputStream = {
       callbackHandoff   = CallbackHandoff.New (fun () -> ())
       BeesConfig        = beesConfig
       debugMaxCallbacks = Int32.MaxValue
-      debugSubscription = dummyInstance<Subscription<CbMessage>>()  }
+      debugSubscription = dummyInstance<Subscription<CbMessage>>()
+      debugData         = ["a"] }
     
     let debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
       Console.Write ","
@@ -307,7 +307,10 @@ type InputStream = {
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // Putting data from the callback into the ring
 
-  member private this.exchangeSegs() =
+  member private this.exchangeSegs nFrames =
+    if this.cbSegOld.NFrames < nFrames then
+      // callback frameCount has increased and there is some leftover.
+      this.cbSegOld.Reset() 
     assert not this.cbSegOld.Active
     let tmp = this.cbSegCur  in  this.cbSegCur <- this.cbSegOld  ;  this.cbSegOld <- tmp
     // if this.cbSegCur.Head <> 0 then  Console.WriteLine "head != 0"
@@ -319,17 +322,20 @@ type InputStream = {
   // The goal is plenty of room, i.e. time gap between cbSegCur.Head and cbSegOld.Tail.
   // Code assumes that nRingFrames > 2 * nGapFrames
   member private is.adjustNGapFrames nFrames =
-    let gapCandidate = if simulatingCallbacks then 2 else nFrames * 4
-    is.nGapFrames <- max is.nGapFrames gapCandidate
-    is.nUsableRingFrames <- nFrames * (is.nRingFrames / nFrames)
-    is.maxNonGapFrames <- is.nUsableRingFrames - is.nGapFrames
-    if is.nUsableRingFrames < 2 * is.nGapFrames then
+    let gapCandidate = if simulatingCallbacks then nFrames else nFrames * 4
+    let nGapNew    = max is.nGapFrames gapCandidate
+    let nUsableNew = nFrames * (is.nRingFrames / nFrames)
+    if (is.nUsableRingFrames < nUsableNew  ||  is.nGapFrames < nGapNew)  &&  DebugGlobals.simulatingCallbacks then
+      Console.WriteLine $"adjusted %d{is.nUsableRingFrames} to %d{nUsableNew}  gap %d{is.nGapFrames}"
+    if nUsableNew < nGapNew then
       failwith $"nRingFrames is too small. nFrames: {nFrames}  nGapFrames: {is.nGapFrames}  nRingFrames: {is.nRingFrames}"
+    is.nGapFrames        <- nGapNew
+    is.nUsableRingFrames <- nUsableNew
 
   member private is.printCurAndOld msg =
     let sCur = is.cbSegCur.Print "cur"
     let sOld = is.cbSegOld.Print "old"
-    Console.WriteLine $"%s{msg} %s{sOld} %s{sCur}"
+    Console.WriteLine $"%s{sCur} %s{sOld} %s{msg}"
     
 
   member private is.prepSegs nFrames =
@@ -338,7 +344,8 @@ type InputStream = {
     if nextHead <= is.nUsableRingFrames then
       // The block will fit after is.cbSegCur.Head
       // state is Empty, AtBegin, Middle, Chasing
-      is.cbSegCur.Tail <- max is.cbSegCur.Tail (nextHead - is.maxNonGapFrames)
+      let maxNonGapFrames = is.nUsableRingFrames - is.nGapFrames
+      is.cbSegCur.Tail <- max is.cbSegCur.Tail (nextHead - maxNonGapFrames)
       if is.cbSegOld.Active then
         // state is Chasing
         // is.cbSegOld is active and ahead of us.
@@ -348,7 +355,7 @@ type InputStream = {
     else
       // state is Middle
       // The block will not fit at the is.cbSegCur.Head.
-      is.exchangeSegs()
+      is.exchangeSegs nFrames
       is.printCurAndOld "exchanged"
       assert (is.cbSegCur.Head = 0)
       // is.cbSegCur starts fresh with head = 0, tail = 0, and we trim away is.cbSegOld.Tail to ensure the gap.
@@ -363,6 +370,8 @@ type InputStream = {
 
   member is.callback input output frameCount timeInfo statusFlags userDataPtr =
     Volatile.Write(&DebugGlobals.inCallback, true)
+    // is.debugData <- "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"::is.debugData
+    // Console.WriteLine $"data length %d{is.debugData.Length}"
     let (input : IntPtr) = input
     let (output: IntPtr) = output
     is.timeStamp <- DateTime.Now
@@ -384,7 +393,8 @@ type InputStream = {
     let nFrames   = int frameCount
     is.adjustNGapFrames nFrames
     is.prepSegs nFrames // may update is.cbSegCur.Head, used by copyToRing()
-    let fillCbMessage() =
+    is.Logger.Add is.seqNum is.timeStamp "cb bufs=" is.cbMessagePool.PoolStats
+    do 
       // the callback args
       cbMessage.InputSamples <- input
       cbMessage.Output       <- output
@@ -396,32 +406,22 @@ type InputStream = {
       cbMessage.WithEcho     <- is.withEcho
       cbMessage.TimeStamp    <- is.timeStamp
       cbMessage.SeqNum       <- is.seqNum
-    let copyFrames() =
-      let writeCallbackBlockToRing() =
-        // Copy from callback data to the head of the ring and return a pointer to the copy.
-        let copyToRing()  : IntPtr =
-          let srcPtr = input.ToPointer()
-          let dstPtr = is.indexToVoidptr is.cbSegCur.Head
-          let size   = int64 (nFrames * is.frameSize)
-          Buffer.MemoryCopy(srcPtr, dstPtr, size, size)
-          IntPtr dstPtr
-        let ptr = paTryCatchRethrow copyToRing
-        is.cbSegCur.AdvanceHead nFrames is.timeStamp
-        ptr
+    do
       // Copy the data then Submit a FinshCallback job.
-      let ptrToTheCopy = writeCallbackBlockToRing()
-      cbMessage.InputSamplesRingCopy <- ptrToTheCopy
-    let finish() =
+      // Copy from callback data to the head of the ring and return a pointer to the copy.
+      let srcPtr = input.ToPointer()
+      let dstPtr = is.indexToVoidptr is.cbSegCur.Head
+      let size   = int64 (nFrames * is.frameSize)
+      Buffer.MemoryCopy(srcPtr, dstPtr, size, size)
+      cbMessage.InputSamplesRingCopy <- IntPtr dstPtr
+      is.cbSegCur.AdvanceHead nFrames is.timeStamp
+    do
       cbMessage.SegCur.Head <- is.cbSegCur.Head
       cbMessage.SegCur.Tail <- is.cbSegCur.Tail
       cbMessage.SegOld.Head <- is.cbSegOld.Head
       cbMessage.SegOld.Tail <- is.cbSegOld.Tail
       Volatile.Write(&is.cbMessageCurrent, cbMessage)
       Volatile.Write(&is.poolItemCurrent , item     )
-    is.Logger.Add is.seqNum is.timeStamp "cb bufs=" is.cbMessagePool.PoolStats
-    fillCbMessage()
-    copyFrames   ()
-    finish       ()
     Console.Write(".")
     is.handOff()
     Volatile.Write(&DebugGlobals.inCallback, false)

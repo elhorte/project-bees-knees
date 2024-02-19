@@ -51,6 +51,14 @@ let getArrayPointer byteCount =
   let handle = GCHandle.Alloc(inputArray, GCHandleType.Pinned)
   handle.AddrOfPinnedObject()
 
+let showGC f =
+  System.GC.Collect()
+  let starting = GC.GetTotalMemory(true)
+  f()
+  let m = GC.GetTotalMemory(true) - starting
+  Console.WriteLine $"gc memory: %i{ m }";
+
+  
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run beesConfig inputStream = task {
   let inputStream = (inputStream: InputStream)
@@ -58,7 +66,7 @@ let run beesConfig inputStream = task {
   
   let test() =
     printfn "calling callback ...\n"
-    let frameCount = 2
+    let frameCount = 4
     let frameSize = (beesConfig: BeesConfig).FrameSize
     let byteCount = frameCount * frameSize
     let input  = getArrayPointer byteCount
@@ -66,9 +74,11 @@ let run beesConfig inputStream = task {
     let timeInfo    = PortAudioSharp.StreamCallbackTimeInfo()
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = IntPtr.Zero
-    for i in 1..9000 do
-      inputStream.callback input output (uint32 frameCount) timeInfo statusFlags userDataPtr |> ignore
-      Console.WriteLine $"{i}"
+    for i in 1..40 do
+      let fc = if i < 20 then  frameCount else  2 * frameCount
+      let m = showGC (fun () -> 
+        inputStream.callback input output (uint32 fc) timeInfo statusFlags userDataPtr |> ignore 
+        Console.WriteLine $"{i}" )
       (Task.Delay 1).Wait()
     printfn "\n\ncalling callback done"
   
