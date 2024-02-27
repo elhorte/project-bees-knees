@@ -94,6 +94,8 @@ type InputStream = {
   mutable callbackHandoff   : CallbackHandoff
   BeesConfig                : BeesConfig
   debugMaxCallbacks         : int32
+  mutable debugSimulating   : bool
+  mutable debugInCallback   : bool
   mutable debugSubscription : Subscription<CbMessage>
   mutable debugData         : string list  } with
 
@@ -141,6 +143,8 @@ type InputStream = {
       cbSegOld          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
       callbackHandoff   = CallbackHandoff.New (fun () -> ())
       BeesConfig        = beesConfig
+      debugSimulating   = DebugGlobals.simulatingCallbacks
+      debugInCallback   = false
       debugMaxCallbacks = Int32.MaxValue
       debugSubscription = dummyInstance<Subscription<CbMessage>>()
       debugData         = ["a"] }
@@ -155,7 +159,7 @@ type InputStream = {
     is.debugSubscription <- cbMessageWorkList.Subscribe debuggingSubscriber 
     is.callbackHandoff   <- CallbackHandoff.New is.afterCallback
 
-    if DebugGlobals.simulatingCallbacks then is else 
+    if is.debugSimulating then is else 
 
     let callbackStub = PortAudioSharp.Stream.Callback(
       // The intermediate lambda here is required to avoid a compiler error.
@@ -229,7 +233,7 @@ type InputStream = {
   
   member is.afterCallback() =
     Console.Write ","
-    assert (DebugGlobals.simulatingCallbacks || not DebugGlobals.inCallback)
+    assert (is.debugSimulating || not is.debugInCallback)
     is.cbMessagePool.ItemUseBegin()
     do
       let cbMessage = Volatile.Read(&is.cbMessageCurrent)
@@ -325,7 +329,7 @@ type InputStream = {
     let gapCandidate = if simulatingCallbacks then nFrames else nFrames * 4
     let nGapNew    = max is.nGapFrames gapCandidate
     let nUsableNew = nFrames * (is.nRingFrames / nFrames)
-    if (is.nUsableRingFrames < nUsableNew  ||  is.nGapFrames < nGapNew)  &&  DebugGlobals.simulatingCallbacks then
+    if (is.nUsableRingFrames < nUsableNew  ||  is.nGapFrames < nGapNew)  &&  is.debugSimulating then
       Console.WriteLine $"adjusted %d{is.nUsableRingFrames} to %d{nUsableNew}  gap %d{is.nGapFrames}"
     if nUsableNew < nGapNew then
       failwith $"nRingFrames is too small. nFrames: {nFrames}  nGapFrames: {is.nGapFrames}  nRingFrames: {is.nRingFrames}"
@@ -369,7 +373,7 @@ type InputStream = {
     PortAudioSharp.StreamCallbackResult.Continue
 
   member is.callback input output frameCount timeInfo statusFlags userDataPtr =
-    Volatile.Write(&DebugGlobals.inCallback, true)
+    Volatile.Write(&is.debugInCallback, true)
     // is.debugData <- "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"::is.debugData
     // Console.WriteLine $"data length %d{is.debugData.Length}"
     let (input : IntPtr) = input
@@ -382,11 +386,11 @@ type InputStream = {
     match is.cbMessagePool.Take() with
     | None ->
       is.Logger.Add is.seqNum is.timeStamp "cbMessagePool is empty" null
-      Volatile.Write(&DebugGlobals.inCallback, false)
+      Volatile.Write(&is.debugInCallback, false)
       PortAudioSharp.StreamCallbackResult.Continue
     | Some item ->
     if is.debugExcessOfCallbacks() > 0 then
-      Volatile.Write(&DebugGlobals.inCallback, false)
+      Volatile.Write(&is.debugInCallback, false)
       PortAudioSharp.StreamCallbackResult.Complete
     else
     let cbMessage = item.Data
@@ -422,16 +426,16 @@ type InputStream = {
       cbMessage.SegOld.Tail <- is.cbSegOld.Tail
       Volatile.Write(&is.cbMessageCurrent, cbMessage)
       Volatile.Write(&is.poolItemCurrent , item     )
-    Console.Write(".")
+//  Console.Write(".")
     is.handOff()
-    Volatile.Write(&DebugGlobals.inCallback, false)
+    Volatile.Write(&is.debugInCallback, false)
     PortAudioSharp.StreamCallbackResult.Continue
 
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   
   member is.Start() =
     is.callbackHandoff.Start()
-    if DebugGlobals.simulatingCallbacks then ()
+    if is.debugSimulating then ()
     else
     paTryCatchRethrow(fun() -> is.paStream.Start())
     printfn $"InputStream size: {is.nRingBytes / 1_000_000} MB for {is.ringDuration}"
@@ -439,7 +443,7 @@ type InputStream = {
 
   member is.Stop() =
     is.callbackHandoff.Stop() 
-    if DebugGlobals.simulatingCallbacks then ()
+    if is.debugSimulating then ()
     is.paStream.Stop()
 
 
