@@ -37,6 +37,6 @@ let makeThingy (pool: ItemPool<Thingy>) =
 
 do
   let minCount = 2
-  let pool = makeItemPool<Thingy> startCount minCount makeThingy
+  let pool = ItemPool.New<Thingy> startCount minCount makeThingy
   test pool
 

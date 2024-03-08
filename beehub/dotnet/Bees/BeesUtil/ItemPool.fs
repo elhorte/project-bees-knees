@@ -14,7 +14,7 @@ open System.Threading
 
 type PoolItem<'T> = {
   Data             : 'T
-  ItemPool             : ItemPool<'T>
+  ItemPool         : ItemPool<'T>
   Locker           : Object  
   mutable IdNum    : int }            // debugging
 
@@ -33,19 +33,36 @@ type PoolItem<'T>
 
   with
 
-  member item.String = $"id={item.IdNum} %A{item.Data}" 
+  static member New<'T> (pool : ItemPool<'T>) (t: 'T) = {
+    Data     = t
+    ItemPool = pool
+    Locker   = Object()
+    IdNum    = 0 }       
 
-let makePoolItem<'T> (pool : ItemPool<'T>) (t: 'T) = {
-  Data     = t
-  ItemPool = pool
-  Locker   = Object()
-  IdNum    = 0 }       
+  member item.String = $"id={item.IdNum} %A{item.Data}" 
 
 //––––––––––––––––––––––––––––––––––
 
 type ItemPool<'T>
 
   with
+
+  static member New<'T> (startCount: int) (minCount: int) (dataCreator: ItemPool<'T> -> 'T) =
+    let ip = {
+      Pool        = ConcurrentQueue<PoolItem<'T>>()
+      MinCount    = minCount
+      DataCreator = dataCreator
+      IdNumNext   = 0 
+      SeqNumNext  = 0 
+      CountAvailV = 0
+      CountInUseV = 0 }
+    if startCount <> 0 then  // see CbMessage constructor
+      // Stock the pool.
+      assert (ip.CountAvail = 0)
+      assert ip.Pool.IsEmpty
+      let n = max minCount startCount
+      ip.createAndAddNewItems n
+    ip
 
   member         ip.CountAvail    = Volatile.Read  &ip.CountAvailV
   member         ip.CountInUse    = Volatile.Read  &ip.CountInUseV
@@ -62,7 +79,7 @@ type ItemPool<'T>
 
   member private ip.addNewItem<'T>()  =
     ip.IdNumNext  <- ip.IdNumNext + 1
-    let item = makePoolItem ip (ip.DataCreator ip)
+    let item = PoolItem.New ip (ip.DataCreator ip)
     item.IdNum <- ip.IdNumNext
     ip.addToPool item
 
@@ -91,23 +108,5 @@ type ItemPool<'T>
                     assert (ip.CountAvail = ip.Pool.Count)
                     Some item
     | false, _  ->  None
-
-
-let makeItemPool<'T> (startCount: int) (minCount: int) (dataCreator: ItemPool<'T> -> 'T) =
-  let ip = {
-    Pool        = ConcurrentQueue<PoolItem<'T>>()
-    MinCount    = minCount
-    DataCreator = dataCreator
-    IdNumNext   = 0 
-    SeqNumNext  = 0 
-    CountAvailV = 0
-    CountInUseV = 0 }
-  if startCount <> 0 then  // see CbMessage constructor
-    // Stock the pool.
-    assert (ip.CountAvail = 0)
-    assert ip.Pool.IsEmpty
-    let n = max minCount startCount
-    ip.createAndAddNewItems n
-  ip
 
 //––––––––––––––––––––––––––––––––––

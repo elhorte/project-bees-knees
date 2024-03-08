@@ -96,42 +96,41 @@ type CbMessage = {
 
   override m.ToString() = sprintf "%A %A" m.SeqNum m.TimeInfo
 
-let makeCbMessage (ip: ItemPool<CbMessage>) (beesConfig: BeesConfig) (nRingFrames: int) =
+  static member New (ip: ItemPool<CbMessage>) (beesConfig: BeesConfig) (nRingFrames: int) =
+    let timeInfo          = StreamCallbackTimeInfo() // Replace with actual time info.
+    let primingOutputFlag = StreamCallbackFlags.PrimingOutput
+    let newSeg()          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
+    
+    // Most initializer values here are placeholders that will be overwritten by the callback.
+    // as this is an object recycled in a pool so there is no allocation.
 
-  let timeInfo          = StreamCallbackTimeInfo() // Replace with actual time info.
-  let primingOutputFlag = StreamCallbackFlags.PrimingOutput
-  let newSeg()          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
-  
-  // Most initializer values here are placeholders that will be overwritten by the callback.
-  // as this is an object recycled in a pool so there is no allocation.
-
-  let cbMessage = {
-    // args to the callback called by PortAudioSharp
-    InputSamples         = IntPtr.Zero       
-    Output               = IntPtr.Zero       
-    FrameCount           = 0u                
-    TimeInfo             = timeInfo          
-    StatusFlags          = primingOutputFlag 
-    UserDataPtr          = IntPtr.Zero       
-    // more from the callback
-    SeqNum               = 0
-    TimeStamp            = DateTime.MinValue 
-    WithEcho             = false             
-    InputSamplesRingCopy = IntPtr 0          
-    SegCur               = newSeg()          
-    SegOld               = newSeg()           }
-  cbMessage
+    let cbMessage = {
+      // args to the callback called by PortAudioSharp
+      InputSamples         = IntPtr.Zero       
+      Output               = IntPtr.Zero       
+      FrameCount           = 0u                
+      TimeInfo             = timeInfo          
+      StatusFlags          = primingOutputFlag 
+      UserDataPtr          = IntPtr.Zero       
+      // more from the callback
+      SeqNum               = 0
+      TimeStamp            = DateTime.MinValue 
+      WithEcho             = false             
+      InputSamplesRingCopy = IntPtr 0          
+      SegCur               = newSeg()          
+      SegOld               = newSeg()           }
+    cbMessage
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // CbMessagePool
 
 type CbMessagePool = ItemPool<CbMessage>
 
-let makeCbMessagePool (startCount  : int        )
-                      (minCount    : int        )
-                      (beesConfig  : BeesConfig )
-                      (nRingFrames : int        ) : CbMessagePool =
-  makeItemPool<CbMessage> startCount minCount (fun (ip: ItemPool<CbMessage>) -> makeCbMessage ip  beesConfig  nRingFrames)
+let makeCbMessagePool( startCount  : int        )
+                     ( minCount    : int        )
+                     ( beesConfig  : BeesConfig )
+                     ( nRingFrames : int        ) : CbMessagePool =
+  ItemPool.New<CbMessage> startCount minCount (fun (ip: ItemPool<CbMessage>) -> CbMessage.New ip  beesConfig  nRingFrames)
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // CbMessageQueue

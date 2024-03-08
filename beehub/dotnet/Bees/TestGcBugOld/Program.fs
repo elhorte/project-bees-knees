@@ -5,7 +5,6 @@ open System.Threading
 
 open System.Threading.Tasks
 open BeesLib
-open BeesLib.InputStream
 open FSharp.Control
 open PortAudioSharp
 open BeesUtil.Util

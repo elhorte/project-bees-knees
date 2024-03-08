@@ -97,7 +97,6 @@ type InputStream = {
   mutable debugSubscription : Subscription<CbMessage>
   mutable debugData         : string list  } with
 
-  // initPortAudio() must be called before this.
   static member New( beesConfig       : BeesConfig       )
                    ( inputParameters  : StreamParameters )
                    ( outputParameters : StreamParameters )
@@ -162,13 +161,14 @@ type InputStream = {
       // The intermediate lambda here is required to avoid a compiler error.
       fun           input output frameCount timeInfo statusFlags userDataPtr ->
         is.callback input output frameCount timeInfo statusFlags userDataPtr )
+    initPortAudio()
     is.paStream <- paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                                                           outParams       = Nullable<_>(outputParameters)        ,
                                                                           sampleRate      = beesConfig.InSampleRate              ,
                                                                           framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
                                                                           streamFlags     = StreamFlags.ClipOff                  ,
                                                                           callback        = callbackStub                         ,
-                                                                          userData        = 17                                   ) )
+                                                                          userData        = Nullable()                           ) )
     is
   
   member  is.echoEnabled   () = Volatile.Read &is.withEcho

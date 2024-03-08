@@ -16,11 +16,15 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PortAudioSharp", "..\..\..\
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "ScratchApp", "ScratchApp\ScratchApp.fsproj", "{37589819-87D9-4F98-8D7F-ABEF4BC281CB}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestCallback", "TestCallback\TestCallback.fsproj", "{9DA57BB9-F4A4-41B2-8D3F-6ADD7B571341}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestGcBugOld", "TestGcBugOld\TestGcBugOld.fsproj", "{9DA57BB9-F4A4-41B2-8D3F-6ADD7B571341}"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "GcKillsPortAudioSharp", "GcKillsPortAudioSharp\GcKillsPortAudioSharp.fsproj", "{97108125-0A99-4907-847E-2E901BC97055}"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "SimulatedCallback", "SimulatedCallback\SimulatedCallback.fsproj", "{A3993C20-1F42-4484-A5D0-5E5EF143F0B4}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestGcBug", "TestGcBug\TestGcBug.fsproj", "{1A5F6AE4-56E8-477F-BD99-14F7E8E5E05F}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestGcBug2", "TestGcBug2\TestGcBug2.fsproj", "{E29E9357-5A91-4AE9-B171-3B00833FCEE1}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -72,5 +76,13 @@ Global
 		{A3993C20-1F42-4484-A5D0-5E5EF143F0B4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A3993C20-1F42-4484-A5D0-5E5EF143F0B4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A3993C20-1F42-4484-A5D0-5E5EF143F0B4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A5F6AE4-56E8-477F-BD99-14F7E8E5E05F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A5F6AE4-56E8-477F-BD99-14F7E8E5E05F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A5F6AE4-56E8-477F-BD99-14F7E8E5E05F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A5F6AE4-56E8-477F-BD99-14F7E8E5E05F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E29E9357-5A91-4AE9-B171-3B00833FCEE1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E29E9357-5A91-4AE9-B171-3B00833FCEE1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E29E9357-5A91-4AE9-B171-3B00833FCEE1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E29E9357-5A91-4AE9-B171-3B00833FCEE1}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

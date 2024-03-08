@@ -1,12 +1,11 @@
 ﻿
 open System
 open System.Threading
-
-open System.Threading.Tasks
-open BeesLib.InputStream
 open FSharp.Control
+
 open PortAudioSharp
 open BeesUtil.PortAudioUtils
+open BeesLib.InputStream
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open BeesLib.Keyboard
@@ -17,20 +16,21 @@ open BeesLib.Keyboard
 // App
 
 /// Creates and returns the sample rate and the input parameters.
-let prepareArgumentsForStreamCreation() =
-  let defaultInput = PortAudio.DefaultInputDevice         in printfn $"Default input device = %d{defaultInput}"
+let prepareArgumentsForStreamCreation verbose =
+  let log string = if verbose then  printfn string else  ()
+  let defaultInput = PortAudio.DefaultInputDevice         in log $"Default input device = %d{defaultInput}"
   let inputInfo    = PortAudio.GetDeviceInfo defaultInput
-  let nChannels    = inputInfo.maxInputChannels           in printfn $"Number of channels = %d{nChannels}"
-  let sampleRate   = inputInfo.defaultSampleRate          in printfn $"Sample rate = %f{sampleRate} (default)"
+  let nChannels    = inputInfo.maxInputChannels           in log $"Number of channels = %d{nChannels}"
+  let sampleRate   = inputInfo.defaultSampleRate          in log $"Sample rate = %f{sampleRate} (default)"
   let inputParameters = PortAudioSharp.StreamParameters(
     device                    = defaultInput                      ,
     channelCount              = nChannels                         ,
     sampleFormat              = SampleFormat.Float32              ,
     suggestedLatency          = inputInfo.defaultHighInputLatency ,
     hostApiSpecificStreamInfo = IntPtr.Zero                       )
-  printfn $"%s{inputInfo.ToString()}"
-  printfn $"inputParameters=%A{inputParameters}"
-  let defaultOutput = PortAudio .DefaultOutputDevice      in printfn $"Default output device = %d{defaultOutput}"
+  log $"%s{inputInfo.ToString()}"
+  log $"inputParameters=%A{inputParameters}"
+  let defaultOutput = PortAudio .DefaultOutputDevice      in log $"Default output device = %d{defaultOutput}"
   let outputInfo    = PortAudio .GetDeviceInfo defaultOutput
   let outputParameters = PortAudioSharp.StreamParameters(
     device                    = defaultOutput                       ,
@@ -38,8 +38,8 @@ let prepareArgumentsForStreamCreation() =
     sampleFormat              = SampleFormat.Float32                ,
     suggestedLatency          = outputInfo.defaultHighOutputLatency ,
     hostApiSpecificStreamInfo = IntPtr.Zero                         )
-  printfn $"%s{outputInfo.ToString()}"
-  printfn $"outputParameters=%A{outputParameters}"
+  log $"%s{outputInfo.ToString()}"
+  log $"outputParameters=%A{outputParameters}"
   sampleRate, inputParameters, outputParameters
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
@@ -70,7 +70,7 @@ let main _ =
   let withEcho    = false
   let withLogging = false
   initPortAudio()
-  let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
+  let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation false
   beesConfig <- {
     LocationId                  = 1
     HiveId                      = 1

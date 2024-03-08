@@ -456,11 +456,11 @@ type InputStream = {
   //      
   // }
 
-  interface IDisposable with
-    member this.Dispose() =
-      System.Console.WriteLine("Disposing inputStream")
-      this.Stop()
-      // Explicitly release any other managed resources here if needed
+  // interface IDisposable with
+  //   member this.Dispose() =
+  //     System.Console.WriteLine("Disposing inputStream")
+  //     this.Stop()
+  //     // Explicitly release any other managed resources here if needed
 
 
 
