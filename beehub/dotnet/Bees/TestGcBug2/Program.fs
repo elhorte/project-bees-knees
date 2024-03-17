@@ -153,26 +153,26 @@ let main _ =
     InSampleRate                = int sampleRate  }
 //printBeesConfig beesConfig
 //keyboardInputInit()
-  let inputStream = InputStream.New beesConfig inputParameters outputParameters withEcho withLogging
-  gc()
-  try
-    let work = Trivial
-    printfn $"\nDoing {work}\n"
-    let f() = churnGc 1_000_000
-    match work with
-    | Trivial      -> ()
-    | GcCreateOnly -> withStartStop inputStream.paStream false f
-    | GcGcOnly     -> withStartStop inputStream.paStream true  gc
-    | GcNormal     -> withStartStop inputStream.paStream true  f
-    | Normal       -> withStartStop inputStream.paStream true  awaitForever
-    printfn "Terminating..."
-    PortAudio.Terminate()
-    printfn "Terminated"
-  with
-  | :? PortAudioException as e ->
-      printfn "While creating the stream: %A %A" e.ErrorCode e.Message
-      Environment.Exit(2)
-  
-  gc()
-  printfn "%A" inputStream
+  let inputStream = newInputStream beesConfig inputParameters outputParameters withEcho withLogging
+  // gc()
+  // try
+  //   let work = Trivial
+  //   printfn $"\nDoing {work}\n"
+  //   let f() = churnGc 1_000_000
+  //   match work with
+  //   | Trivial      -> ()
+  //   | GcCreateOnly -> withStartStop inputStream.paStream false f
+  //   | GcGcOnly     -> withStartStop inputStream.paStream true  gc
+  //   | GcNormal     -> withStartStop inputStream.paStream true  f
+  //   | Normal       -> withStartStop inputStream.paStream true  awaitForever
+  //   printfn "Terminating..."
+  //   PortAudio.Terminate()
+  //   printfn "Terminated"
+  // with
+  // | :? PortAudioException as e ->
+  //     printfn "While creating the stream: %A %A" e.ErrorCode e.Message
+  //     Environment.Exit(2)
+  //
+  // gc()
+  printfn "inputStream: %A" inputStream
   0
