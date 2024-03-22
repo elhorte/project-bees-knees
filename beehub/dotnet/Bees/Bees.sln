@@ -26,6 +26,8 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestGcBug", "TestGcBug\Test
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestGcBug2", "TestGcBug2\TestGcBug2.fsproj", "{E29E9357-5A91-4AE9-B171-3B00833FCEE1}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestSysMem", "TestSysMem\TestSysMem.fsproj", "{C43B6DE5-D0EA-4166-A152-F43CC9BBD85F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -84,5 +86,9 @@ Global
 		{E29E9357-5A91-4AE9-B171-3B00833FCEE1}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E29E9357-5A91-4AE9-B171-3B00833FCEE1}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E29E9357-5A91-4AE9-B171-3B00833FCEE1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C43B6DE5-D0EA-4166-A152-F43CC9BBD85F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C43B6DE5-D0EA-4166-A152-F43CC9BBD85F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C43B6DE5-D0EA-4166-A152-F43CC9BBD85F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C43B6DE5-D0EA-4166-A152-F43CC9BBD85F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

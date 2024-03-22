@@ -15,6 +15,7 @@ let tbdDateTime = DateTime.MinValue
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // Seg class, used by InputStream.  The ring buffer can comprise 0, 1, or 2 segs.
 
+[<Struct>]
 type Seg = {
   mutable Tail     : int
   mutable Head     : int
