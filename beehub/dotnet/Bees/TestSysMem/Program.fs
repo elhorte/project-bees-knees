@@ -124,7 +124,7 @@ type Work =
   | Trivial
   | TrivialStartStop
   | GcGcOnly
-  | GcCreateOnly
+  | CreateOnly
   | GcNormal
 
 let withStartStop stream withStart f =
@@ -145,27 +145,28 @@ let main _ =
   let withEcho    = false
   let withLogging = false
   beesConfig <- {
-    LocationId                  = 1
-    HiveId                      = 1
-    PrimaryDir                  = "primary"
-    MonitorDir                  = "monitor"
-    PlotDir                     = "plot"
-    inputStreamBufferedDuration = TimeSpan.FromMinutes 16
-    SampleSize                  = sizeof<SampleType>
-    InChannelCount              = inputParameters.channelCount
-    InSampleRate                = int sampleRate  }
+    LocationId                 = 1
+    HiveId                     = 1
+    PrimaryDir                 = "primary"
+    MonitorDir                 = "monitor"
+    PlotDir                    = "plot"
+    inputStreamBufferDuration  = TimeSpan.FromMinutes 16
+    inputStreamRingGapDuration = TimeSpan.FromSeconds 3
+    SampleSize                 = sizeof<SampleType>
+    InChannelCount             = inputParameters.channelCount
+    InSampleRate               = int sampleRate  }
 //printBeesConfig beesConfig
 //keyboardInputInit()
   use inputStream = InputStream.New beesConfig inputParameters outputParameters withEcho withLogging
   gc()
   try
-    let work = TrivialStartStop
+    let work = Normal
     printfn $"\nDoing {work}\n"
     let f() = churnGc 1_000_000
     match work with
     | Trivial          -> ()
     | TrivialStartStop -> withStartStop inputStream.paStream true (fun () -> ())
-    | GcCreateOnly     -> withStartStop inputStream.paStream false f
+    | CreateOnly       -> withStartStop inputStream.paStream false f
     | GcGcOnly         -> withStartStop inputStream.paStream true  gc
     | GcNormal         -> withStartStop inputStream.paStream true  f
     | Normal           -> withStartStop inputStream.paStream true  awaitForever

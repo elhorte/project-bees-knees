@@ -8,28 +8,30 @@ open System.Text
 // BeesConfig
 
 type BeesConfig = {
-  LocationId                  : int
-  HiveId                      : int
-  PrimaryDir                  : string
-  MonitorDir                  : string
-  PlotDir                     : string
-  inputStreamBufferedDuration : TimeSpan
-  SampleSize                  : int
-  InChannelCount              : int
-  InSampleRate                : int  } with
+  LocationId                 : int
+  HiveId                     : int
+  PrimaryDir                 : string
+  MonitorDir                 : string
+  PlotDir                    : string
+  inputStreamBufferDuration  : TimeSpan
+  inputStreamRingGapDuration : TimeSpan
+  SampleSize                 : int
+  InChannelCount             : int
+  InSampleRate               : int  } with
 
   member this.FrameSize = this.SampleSize * this.InChannelCount
 
 let printBeesConfig bc =
   let sb = StringBuilder()
-  sb.AppendLine "BeesConfig:"                                                     |> ignore
-  sb.AppendLine $"  LocationId                  {bc.LocationId                 }" |> ignore
-  sb.AppendLine $"  HiveId                      {bc.HiveId                     }" |> ignore
-  sb.AppendLine $"  PrimaryDir                  {bc.PrimaryDir                 }" |> ignore
-  sb.AppendLine $"  MonitorDir                  {bc.MonitorDir                 }" |> ignore
-  sb.AppendLine $"  PlotDir                     {bc.PlotDir                    }" |> ignore
-  sb.AppendLine $"  inputStreamBufferedDuration {bc.inputStreamBufferedDuration}" |> ignore
-  sb.AppendLine $"  SampleSize                  {bc.SampleSize                 }" |> ignore
-  sb.AppendLine $"  InChannelCount              {bc.InChannelCount             }" |> ignore
-  sb.AppendLine $"  InSampleRate                {bc.InSampleRate               }" |> ignore
+  sb.AppendLine "BeesConfig:"                                                   |> ignore
+  sb.AppendLine $"  LocationId                 {bc.LocationId                }" |> ignore
+  sb.AppendLine $"  HiveId                     {bc.HiveId                    }" |> ignore
+  sb.AppendLine $"  PrimaryDir                 {bc.PrimaryDir                }" |> ignore
+  sb.AppendLine $"  MonitorDir                 {bc.MonitorDir                }" |> ignore
+  sb.AppendLine $"  PlotDir                    {bc.PlotDir                   }" |> ignore
+  sb.AppendLine $"  inputStreamBufferDuration  {bc.inputStreamBufferDuration }" |> ignore
+  sb.AppendLine $"  inputStreamRingGapDuration {bc.inputStreamRingGapDuration}" |> ignore
+  sb.AppendLine $"  SampleSize                 {bc.SampleSize                }" |> ignore
+  sb.AppendLine $"  InChannelCount             {bc.InChannelCount            }" |> ignore
+  sb.AppendLine $"  InSampleRate               {bc.InSampleRate              }" |> ignore
   System.Console.WriteLine (sb.ToString())
