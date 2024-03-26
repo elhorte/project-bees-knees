@@ -86,6 +86,7 @@ type CbState = {
   mutable nUsableFrames   : int
   mutable nGapFrames      : int
   mutable isInCallback    : bool
+  mutable handoff         : TaskCompletionSource option 
   timeInfoBase            : DateTime // from PortAudioSharp TBD
   frameSize               : int
   ringPtr                 : IntPtr
@@ -165,7 +166,9 @@ let indexToVoidptr cbState index  : voidptr =
 
 let handOff cbState =
   let (cbs: CbState) = cbState
-  () // notify the managed code
+  match cbs.handoff with
+  | Some tcs -> tcs.SetResult ()
+  | None     -> Console.WriteLine("Callback handoff missed!")
   
 let callback input output frameCount timeInfo statusFlags userDataPtr =
   let (input : IntPtr) = input
