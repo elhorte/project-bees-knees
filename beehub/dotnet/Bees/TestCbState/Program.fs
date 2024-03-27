@@ -73,43 +73,6 @@ let prepareArgumentsForStreamCreation verbose =
   sampleRate, inputParameters, outputParameters
 
 
-let pool = ItemPool.New<int> 1000 500 (fun _ -> 17)
-
-let callbackIndirect input output frameCount timeInfo statusflags userDataPtr =
-  Console.Write (".")
-  match pool.Take() with
-  | None ->
-    Console.Write ("#")
-    PortAudioSharp.StreamCallbackResult.Continue
-  | Some item ->
-    pool.ItemUseBegin()
-    pool.ItemUseEnd item
-    PortAudioSharp.StreamCallbackResult.Continue
-  
-
-let enoughForBiggestFrameCount = 20_000
-let samples = Array.zeroCreate<single> (int enoughForBiggestFrameCount)
-
-// Compiler sez:
-//   This function value is being used to construct a delegate type whose signature includes a byref argument.
-//   You must use an explicit lambda expression taking 6 arguments.
-let callback = Stream.Callback(
-  fun input output frameCount timeInfo statusflags userDataPtr ->
-    //  Console.Write "-"
-    Marshal.Copy(input, samples, 0, (int frameCount))
-    callbackIndirect input output frameCount timeInfo statusflags userDataPtr ) 
-printfn "Opening..."
-let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation false
-
-
-// let stream = new Stream(inParams        = inputParameters    ,
-//                         outParams       = outputParameters   ,
-//                         sampleRate      = sampleRate         ,
-//                         framesPerBuffer = uint32 0           ,
-//                         streamFlags     = StreamFlags.ClipOff,
-//                         callback        = callback           ,
-//                         userData        = IntPtr.Zero        )
-
 //–––––––––––––––––––––––––––––––––––––
 // BeesConfig
 
@@ -127,23 +90,32 @@ type Work =
   | CreateOnly
   | GcNormal
 
-let withStartStop stream withStart f =
-    let stream = (stream: Stream)
+let withStartStop iS withStart f =
+    let iS = (iS: InputStream)
     if withStart then
-      stream.Start() 
+      iS.Start() 
       printfn "Reading..."
+    printfn "Begin"
     f()
+    printfn "Done"
     if withStart then
       printfn "Stopping..."
-      stream.Stop() 
+      iS.Stop() 
       printfn "Stopped"
+
+let Quiet   = false
+let Verbose = true
+let StartYes = true
+let StartNo  = false
 
 //–––––––––––––––––––––––––––––––––––––
 // Main
+
 [<EntryPoint>]
 let main _ =
   let withEcho    = false
   let withLogging = false
+  let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation Quiet
   beesConfig <- {
     LocationId                 = 1
     HiveId                     = 1
@@ -165,11 +137,11 @@ let main _ =
     let f() = churnGc 1_000_000
     match work with
     | Trivial          -> ()
-    | TrivialStartStop -> withStartStop inputStream.paStream true (fun () -> ())
-    | CreateOnly       -> withStartStop inputStream.paStream false f
-    | GcGcOnly         -> withStartStop inputStream.paStream true  gc
-    | GcNormal         -> withStartStop inputStream.paStream true  f
-    | Normal           -> withStartStop inputStream.paStream true  awaitForever
+    | TrivialStartStop -> withStartStop inputStream StartYes (fun () -> ())
+    | CreateOnly       -> withStartStop inputStream StartNo  f
+    | GcGcOnly         -> withStartStop inputStream StartYes gc
+    | GcNormal         -> withStartStop inputStream StartYes f
+    | Normal           -> withStartStop inputStream StartYes awaitForever
     printfn "Terminating..."
     PortAudio.Terminate()
     printfn "Terminated"

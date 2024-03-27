@@ -86,7 +86,7 @@ type CbState = {
   mutable nUsableFrames   : int
   mutable nGapFrames      : int
   mutable isInCallback    : bool
-  mutable handoff         : TaskCompletionSource option 
+  mutable callbackHandoff : CallbackHandoff // Using option so it’s a struct, not a reference 
   timeInfoBase            : DateTime // from PortAudioSharp TBD
   frameSize               : int
   ringPtr                 : IntPtr
@@ -122,11 +122,11 @@ let adjustNGapFrames cbState nFrames =
   cbs.nGapFrames    <- nGapNew
   cbs.nUsableFrames <- nUsableNew
 
-let printCurAndOld cbState msg =
-  let (cbs: CbState) = cbState
-  let sCur = cbs.segCur.Print "cur"
-  let sOld = cbs.segOld.Print "old"
-  Console.WriteLine $"%s{sCur} %s{sOld} %s{msg}"
+let printCurAndOld cbState msg = ()
+  // let (cbs: CbState) = cbState
+  // let sCur = cbs.segCur.Print "cur"
+  // let sOld = cbs.segOld.Print "old"
+  // Console.WriteLine $"%s{sCur} %s{sOld} %s{msg}"
   
 
 let prepSegs cbState nFrames =
@@ -166,9 +166,7 @@ let indexToVoidptr cbState index  : voidptr =
 
 let handOff cbState =
   let (cbs: CbState) = cbState
-  match cbs.handoff with
-  | Some tcs -> tcs.SetResult ()
-  | None     -> Console.WriteLine("Callback handoff missed!")
+  cbs.callbackHandoff.HandOff()
   
 let callback input output frameCount timeInfo statusFlags userDataPtr =
   let (input : IntPtr) = input
@@ -187,20 +185,20 @@ let callback input output frameCount timeInfo statusFlags userDataPtr =
   if cbs.withEcho then
     let size = uint64 (frameCount * uint32 cbs.frameSize)
     Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
-  let nFrames = int frameCount
-  adjustNGapFrames cbs nFrames
-  prepSegs         cbs nFrames // may update is.segCur.Head, used by copyToRing()
-//is.Logger.Add is.seqNum is.timeStamp "cb bufs=" is.cbMessagePool.PoolStats
-  do
-    // Copy the data then Submit a FinshCallback job.
-    // Copy from callback data to the head of the ring and return a pointer to the copy.
-    let srcPtr = input.ToPointer()
-    let dstPtr = indexToVoidptr cbs cbs.segCur.Head
-    let size   = int64 (nFrames * cbs.frameSize)
-    Buffer.MemoryCopy(srcPtr, dstPtr, size, size)
-    cbs.inputRingCopy <- IntPtr dstPtr
-    let timeHead = inputBufferAdcTimeOf cbs
-    cbs.segCur.AdvanceHead nFrames timeHead
+//   let nFrames = int frameCount
+//   adjustNGapFrames cbs nFrames
+//   prepSegs         cbs nFrames // may update is.segCur.Head, used by copyToRing()
+// //is.Logger.Add is.seqNum is.timeStamp "cb bufs=" is.cbMessagePool.PoolStats
+//   do
+//     // Copy the data then Submit a FinshCallback job.
+//     // Copy from callback data to the head of the ring and return a pointer to the copy.
+//     let srcPtr = input.ToPointer()
+//     let dstPtr = indexToVoidptr cbs cbs.segCur.Head
+//     let size   = int64 (nFrames * cbs.frameSize)
+//     Buffer.MemoryCopy(srcPtr, dstPtr, size, size)
+//     cbs.inputRingCopy <- IntPtr dstPtr
+//     let timeHead = inputBufferAdcTimeOf cbs
+//     cbs.segCur.AdvanceHead nFrames timeHead
 //Console.Write(".")
   handOff cbs
   Volatile.Write(&cbs.isInCallback, false)
@@ -232,7 +230,6 @@ type InputStream = {
   cbMessageWorkList         : WorkList<CbMessage>
   mutable cbMessageCurrent  : CbMessage
   mutable poolItemCurrent   : PoolItem<CbMessage>
-  mutable callbackHandoff   : CallbackHandoff
   BeesConfig                : BeesConfig
   debugMaxCallbacks         : int32
   mutable debugSubscription : Subscription<CbMessage>
@@ -253,6 +250,11 @@ type InputStream = {
     let nRingBytes        = int nRingFrames * frameSize
     let nGapFrames        = if DebugGlobals.simulatingCallbacks then 2 else durationToNFrames beesConfig.InSampleRate gapDuration 
 
+    // When unmanaged code calls managed code (e.g., a callback from unmanaged to managed),
+    // the CLR ensures that the garbage collector will not move referenced managed objects
+    // in memory during the execution of that managed code.
+    // This happens automatically and does not require manual pinning.
+    
     let cbState = {
       input           = IntPtr.Zero
       output          = IntPtr.Zero
@@ -267,13 +269,12 @@ type InputStream = {
       nRingFrames     = nRingFrames
       nUsableFrames   = nUsableRingFrames
       nGapFrames      = nGapFrames
-      isInCallback = false
-      timeInfoBase = DateTime.Now // probably wrong
+      isInCallback    = false
+      callbackHandoff = dummyInstance<CallbackHandoff>()  // tbd
+      timeInfoBase    = DateTime.Now // probably wrong
       frameSize       = frameSize
       ringPtr         = Marshal.AllocHGlobal(nRingBytes)
-      debugSimulating = false }
-    let cbStateHandle = GCHandle.Alloc(cbState, GCHandleType.Pinned)
-    cbStateHandle.Free()
+      debugSimulating = false  }
 
     let startTime         = DateTime.Now
     let cbMessageWorkList = WorkList<CbMessage>()
@@ -295,14 +296,13 @@ type InputStream = {
       cbMessageWorkList = WorkList<CbMessage>()
       cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
       poolItemCurrent   = poolItemCurrent
-      callbackHandoff   = CallbackHandoff.New (fun () -> ())
       BeesConfig        = beesConfig
       debugMaxCallbacks = Int32.MaxValue
       debugSubscription = dummyInstance<Subscription<CbMessage>>()
       debugData         = ["a"] }
-    let inputStreamHandle = GCHandle.Alloc(cbState, GCHandleType.Pinned)
-    inputStreamHandle.Free()
-    
+
+    cbState.callbackHandoff <- CallbackHandoff.New is.afterCallback
+
     let debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
       Console.Write ","
       // let (cbMessage: CbMessage) = cbMessage
@@ -311,21 +311,19 @@ type InputStream = {
       // printCallback cbMessage
 
     is.debugSubscription <- cbMessageWorkList.Subscribe debuggingSubscriber 
-    is.callbackHandoff   <- CallbackHandoff.New is.afterCallback
 
-    if is.cbState.debugSimulating then is else 
-
-    let callbackStub = PortAudioSharp.Stream.Callback(
-      // The intermediate lambda here is required to avoid a compiler error.
-      fun        input output frameCount timeInfo statusFlags userDataPtr ->
-        callback input output frameCount timeInfo statusFlags userDataPtr )
-    is.paStream <- paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
-                                                                          outParams       = Nullable<_>(outputParameters)        ,
-                                                                          sampleRate      = beesConfig.InSampleRate              ,
-                                                                          framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
-                                                                          streamFlags     = StreamFlags.ClipOff                  ,
-                                                                          callback        = callbackStub                         ,
-                                                                          userData        = cbState                              ) )
+    if not cbState.debugSimulating then
+      let callbackStub = PortAudioSharp.Stream.Callback(
+        // The intermediate lambda here is required to avoid a compiler error.
+        fun        input output frameCount timeInfo statusFlags userDataPtr ->
+          callback input output frameCount timeInfo statusFlags userDataPtr )
+      is.paStream <- paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
+                                                                            outParams       = Nullable<_>(outputParameters)        ,
+                                                                            sampleRate      = beesConfig.InSampleRate              ,
+                                                                            framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
+                                                                            streamFlags     = StreamFlags.ClipOff                  ,
+                                                                            callback        = callbackStub                         ,
+                                                                            userData        = cbState                              ) )
     is
   
   member  is.echoEnabled   () = Volatile.Read &is.cbState.withEcho
@@ -381,21 +379,17 @@ type InputStream = {
   
   member is.afterCallback() =
     Console.Write ","
-    assert (is.cbState.debugSimulating || not is.cbState.isInCallback)
-    is.cbMessagePool.ItemUseBegin()
-    do
-      let cbMessage = Volatile.Read(&is.cbMessageCurrent)
-      is.cbMessageWorkList.Broadcast(cbMessage)
-    is.cbMessagePool.ItemUseEnd is.poolItemCurrent
+//  assert (is.cbState.debugSimulating || not is.cbState.isInCallback)
+//  is.cbMessagePool.ItemUseBegin()
+//  do
+//    let cbMessage = Volatile.Read(&is.cbMessageCurrent)
+//    is.cbMessageWorkList.Broadcast(cbMessage)
+//  is.cbMessagePool.ItemUseEnd is.poolItemCurrent
 //  let cbMessage = callbackAcceptance.CbMessage
 //  let nFrames = int cbMessage.FrameCount
 //  let fromPtr = cbMessage.InputSamples.ToPointer()
 //  let ringHeadPtr = indexToPointer cbMessage.SegCur.Head
 //  copy fromPtr ringHeadPtr nFrames
-
-  member private is.handOff() =
-    // cbMessagePool.ItemUseEnd(cbMessageCurrent)
-    is.callbackHandoff.HandOff()
   
   member is.timeTail() = is.cbMessageCurrent.SegOldest.TimeTail
   member is.timeHead() = is.cbMessageCurrent.SegCur   .TimeHead
@@ -465,7 +459,7 @@ type InputStream = {
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   
   member is.Start() =
-    is.callbackHandoff.Start()
+    is.cbState.callbackHandoff.Start()
     if is.cbState.debugSimulating then ()
     else
     paTryCatchRethrow(fun() -> is.paStream.Start())
@@ -473,7 +467,7 @@ type InputStream = {
     printfn $"InputStream nFrames: {is.cbState.nRingFrames}"
 
   member is.Stop() =
-    is.callbackHandoff.Stop() 
+    is.cbState.callbackHandoff.Stop() 
     if is.cbState.debugSimulating then ()
     is.paStream.Stop()
 
