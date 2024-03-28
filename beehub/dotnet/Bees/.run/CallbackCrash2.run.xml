@@ -1,13 +1,13 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="TestCallback" type="DotNetProject" factoryName=".NET Project">
-    <option name="EXE_PATH" value="$PROJECT_DIR$/TestGcBugOld/bin/Debug/net8.0/TestGcBugOld" />
+  <configuration default="false" name="CallbackCrash2" type="DotNetProject" factoryName=".NET Project" singleton="false">
+    <option name="EXE_PATH" value="$PROJECT_DIR$/CallbackCrash2/bin/Debug/net8.0/CallbackCrash2" />
     <option name="PROGRAM_PARAMETERS" value="" />
-    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/TestGcBugOld/bin/Debug/net8.0" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/CallbackCrash2/bin/Debug/net8.0" />
     <option name="PASS_PARENT_ENVS" value="1" />
     <option name="USE_EXTERNAL_CONSOLE" value="0" />
     <option name="USE_MONO" value="0" />
     <option name="RUNTIME_ARGUMENTS" value="" />
-    <option name="PROJECT_PATH" value="$PROJECT_DIR$/TestGcBugOld/TestGcBugOld.fsproj" />
+    <option name="PROJECT_PATH" value="$PROJECT_DIR$/CallbackCrash2/CallbackCrash2.fsproj" />
     <option name="PROJECT_EXE_PATH_TRACKING" value="1" />
     <option name="PROJECT_ARGUMENTS_TRACKING" value="1" />
     <option name="PROJECT_WORKING_DIRECTORY_TRACKING" value="1" />

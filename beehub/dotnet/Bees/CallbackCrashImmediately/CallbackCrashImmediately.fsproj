@@ -6,13 +6,11 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <Compile Include="GcUtils.fs" />
-      <Compile Include="InputStream.fs" />
       <Compile Include="Program.fs" />
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\..\..\..\PortAudioSharp2\PortAudioSharp\PortAudioSharp.csproj" />
+      <PackageReference Include="PortAudioSharp2" Version="1.0.0" />
     </ItemGroup>
 
 </Project>

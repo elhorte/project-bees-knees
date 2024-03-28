@@ -15,6 +15,13 @@ let awaitForever() = delayMs false Int32.MaxValue
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
+let gcN() = GC.Collect()
+
+let gc() = gcN |> ignore
+
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+
 let paTryCatch f (exit: Exception -> unit) =
   try
     f()
@@ -30,6 +37,12 @@ let paTryCatch f (exit: Exception -> unit) =
 
 let paTryCatchRethrow f = paTryCatch f (fun e -> ()                 )
 
+//–––––––––––––––––––––––––––––––––––––––––––––––––––
+
+let dummyInstance<'T>() =
+  System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof<'T>)
+  |> unbox<'T>
+
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // InputStream
 
@@ -37,7 +50,8 @@ let callback input output frameCount timeInfo statusFlags userDataPtr =
   Console.Write "."
   PortAudioSharp.StreamCallbackResult.Continue
   
-type InputStream = { paStream : PortAudioSharp.Stream } with 
+
+type InputStream = { mutable paStream : PortAudioSharp.Stream } with 
   
   // initPortAudio() must be called before this.
   static member New ( sampleRate       : float            )
@@ -48,14 +62,15 @@ type InputStream = { paStream : PortAudioSharp.Stream } with
       // The intermediate lambda here is required to avoid a compiler error.
       fun        input output frameCount timeInfo statusFlags userDataPtr ->
         callback input output frameCount timeInfo statusFlags userDataPtr )
-    let paStream = paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
+    let is = { paStream = dummyInstance<PortAudioSharp.Stream>() }
+    is.paStream <- paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                                                           outParams       = Nullable<_>(outputParameters)        ,
                                                                           sampleRate      = sampleRate                           ,
                                                                           framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
                                                                           streamFlags     = StreamFlags.ClipOff                  ,
                                                                           callback        = callbackStub                         ,
-                                                                          userData        = ""                                   ) )
-    { paStream = paStream } 
+                                                                          userData        = 17                                   ) )
+    is
   
   member is.Start() = paTryCatchRethrow(fun() -> is.paStream.Start())
   member is.Stop () = paTryCatchRethrow(fun() -> is.paStream.Stop ())
@@ -108,7 +123,7 @@ let Verbose = true
 let main _ =
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation Quiet
   use iS = InputStream.New sampleRate inputParameters outputParameters
-  GC.Collect()
+  GC.Collect() // gc() // if GC.Collect() is here instead of inside two layers of functions, it crashes trying do dispose of iS 
   try
     iS.Start() 
     printfn "Reading..."
@@ -126,6 +141,6 @@ let main _ =
       printfn "While creating the stream: %A %A" e.ErrorCode e.Message
       Environment.Exit(2)
   
-  GC.Collect()
+  gc()
   printfn "inputStream: %A" iS
   0

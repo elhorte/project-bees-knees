@@ -423,7 +423,7 @@ let newInputStream( beesConfig       : BeesConfig       )
     debugSubscription = dummyInstance<Subscription<CbMessage>>()
     debugData         = ["a"] }
 
-  is.callbackHandoff   <- CallbackHandoff.New is afterCallback
+  is.callbackHandoff   <- CallbackHandoff<InputStream>.New is afterCallback
 
   let debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
     Console.Write ","
