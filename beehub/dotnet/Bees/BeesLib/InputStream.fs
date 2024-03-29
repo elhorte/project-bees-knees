@@ -374,6 +374,7 @@ type InputStream = {
 
   member is.callback input output frameCount timeInfo statusFlags userDataPtr =
     Volatile.Write(&is.debugInCallback, true)
+    Console.Write "."
     // is.debugData <- "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"::is.debugData
     // Console.WriteLine $"data length %d{is.debugData.Length}"
     let (input : IntPtr) = input

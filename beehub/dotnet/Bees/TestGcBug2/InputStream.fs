@@ -11,7 +11,7 @@ open BeesUtil.Logger
 open BeesUtil.ItemPool
 open BeesUtil.WorkList
 open BeesUtil.PortAudioUtils
-open TestGcBug.CallbackHandoff
+open BeesUtil.CallbackHandoff
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open BeesLib.DebugGlobals
@@ -91,7 +91,7 @@ type InputStream = {
   mutable cbSegOld          : Seg
   mutable cbMessageCurrent  : CbMessage
   mutable poolItemCurrent   : PoolItem<CbMessage>
-  mutable callbackHandoff   : CallbackHandoff<InputStream>
+  mutable callbackHandoff   : CallbackHandoff
   BeesConfig                : BeesConfig
   debugMaxCallbacks         : int32
   mutable debugSimulating   : bool
@@ -415,7 +415,7 @@ let newInputStream( beesConfig       : BeesConfig       )
     poolItemCurrent   = poolItemCurrent
     cbSegCur          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
     cbSegOld          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
-    callbackHandoff   = dummyInstance<CallbackHandoff<InputStream>>()
+    callbackHandoff   = dummyInstance<CallbackHandoff>()
     BeesConfig        = beesConfig
     debugSimulating   = DebugGlobals.simulatingCallbacks
     debugInCallback   = false
@@ -423,7 +423,7 @@ let newInputStream( beesConfig       : BeesConfig       )
     debugSubscription = dummyInstance<Subscription<CbMessage>>()
     debugData         = ["a"] }
 
-  is.callbackHandoff   <- CallbackHandoff<InputStream>.New is afterCallback
+  is.callbackHandoff   <- CallbackHandoff.New (fun () -> afterCallback is)
 
   let debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
     Console.Write ","

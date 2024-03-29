@@ -9,7 +9,6 @@
     <ItemGroup>
         <Compile Include="GcUtils.fs" />
         <Compile Include="DebugGlobals.fs" />
-        <Compile Include="CallbackHandoff.fs" />
         <Compile Include="InputStream.fs" />
         <Compile Include="Program.fs" />
     </ItemGroup>
