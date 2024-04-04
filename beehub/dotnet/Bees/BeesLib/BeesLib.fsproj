@@ -3,13 +3,14 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <RootNamespace>BeesUtil</RootNamespace>
+    <RootNamespace>BeesLib</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="BeesConfig.fs" />
     <Compile Include="CbMessagePool.fs" />
     <Compile Include="DebugGlobals.fs" />
+    <Compile Include="InputStreamOld.fs" />
     <Compile Include="InputStream.fs" />
     <Compile Include="Recording.fs" />
     <Compile Include="Commands.fs" />

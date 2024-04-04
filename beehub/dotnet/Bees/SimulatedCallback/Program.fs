@@ -2,17 +2,15 @@
 open System
 open System.Runtime.InteropServices
 open System.Threading
-
 open System.Threading.Tasks
-open BeesLib
-open BeesLib.InputStream
 open FSharp.Control
-open Microsoft.Win32.SafeHandles
+
 open PortAudioSharp
 open BeesUtil.PortAudioUtils
+open BeesLib.DebugGlobals
+open BeesLib.InputStream
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
-open BeesLib.Keyboard
 
 // See Theory of Operation comment before main at the end of this file.
 
@@ -24,7 +22,7 @@ let prepareArgumentsForStreamCreation() =
   let defaultInput = PortAudio.DefaultInputDevice         in printfn $"Default input device = %d{defaultInput}"
   let inputInfo    = PortAudio.GetDeviceInfo defaultInput
   let nChannels    = inputInfo.maxInputChannels           in printfn $"Number of channels = %d{nChannels}"
-  let sampleRate   = inputInfo.defaultSampleRate          in printfn $"Sample rate = %f{sampleRate} (default)"
+  let sampleRate   = int inputInfo.defaultSampleRate      in printfn $"Sample rate = %d{sampleRate} (default)"
   let inputParameters = PortAudioSharp.StreamParameters(
     device                    = defaultInput                      ,
     channelCount              = nChannels                         ,
@@ -52,12 +50,11 @@ let getArrayPointer byteCount =
   handle.AddrOfPinnedObject()
 
 let showGC f =
-  System.GC.Collect()
-  let starting = GC.GetTotalMemory(true)
+  // System.GC.Collect()
+  // let starting = GC.GetTotalMemory(true)
   f()
-  let m = GC.GetTotalMemory(true) - starting
-  Console.WriteLine $"gc memory: %i{ m }";
-
+  // let m = GC.GetTotalMemory(true) - starting
+  // Console.WriteLine $"gc memory: %i{ m }";
   
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run beesConfig inputStream = task {
@@ -73,11 +70,11 @@ let run beesConfig inputStream = task {
     let output = getArrayPointer byteCount
     let timeInfo    = PortAudioSharp.StreamCallbackTimeInfo()
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
-    let userDataPtr = IntPtr.Zero
+    let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(inputStream.CbState))
     for i in 1..40 do
       let fc = if i < 20 then  frameCount else  2 * frameCount
       let m = showGC (fun () -> 
-        inputStream.callback input output (uint32 fc) timeInfo statusFlags userDataPtr |> ignore 
+        inputStream.Callback input output (uint32 fc) timeInfo statusFlags userDataPtr |> ignore 
         Console.WriteLine $"{i}" )
       (Task.Delay 1).Wait()
     printfn "\n\ncalling callback done"
@@ -106,7 +103,7 @@ let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 let main _ =
   let withEcho    = false
   let withLogging = false
-  DebugGlobals.simulatingCallbacks <- true
+  simulatingCallbacks <- true
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   let sampleSize = sizeof<SampleType>
@@ -120,16 +117,16 @@ let main _ =
     inputStreamRingGapDuration  = TimeSpan.FromSeconds 1
     SampleSize                  = sampleSize
     InChannelCount              = inputParameters.channelCount
-    InSampleRate                = int sampleRate }
+    InSampleRate                = sampleRate }
   printBeesConfig beesConfig
 //keyboardInputInit()
   try
     paTryCatchRethrow (fun () ->
-      use inputStream = InputStream.New beesConfig inputParameters outputParameters withEcho withLogging
+      use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
       paTryCatchRethrow (fun () ->
         let t = task {
           do! run beesConfig inputStream 
-          inputStream.Logger.Print "Log:" }
+          inputStream.CbState.Logger.Print "Log:" }
         t.Wait() )
       printfn "Task done." )
   finally

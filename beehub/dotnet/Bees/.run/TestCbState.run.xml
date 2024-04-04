@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="TestCbState" type="DotNetProject" factoryName=".NET Project">
+  <configuration default="false" name="TestCbState" type="DotNetProject" factoryName=".NET Project" singleton="false">
     <option name="EXE_PATH" value="$PROJECT_DIR$/TestCbState/bin/Debug/net8.0/TestCbState" />
     <option name="PROGRAM_PARAMETERS" value="" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/TestCbState/bin/Debug/net8.0" />

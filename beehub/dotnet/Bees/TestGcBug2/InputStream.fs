@@ -73,7 +73,7 @@ type InputStream = {
   Logger                    : Logger
   mutable paStream          : PortAudioSharp.Stream
   mutable timeStamp         : DateTime
-  mutable seqNum            : int
+  mutable seqNum            : uint64
   mutable withEcho          : bool
   mutable withLogging       : bool
   mutable beesConfig        : BeesConfig // so it’s visible in the debugger
@@ -93,7 +93,7 @@ type InputStream = {
   mutable poolItemCurrent   : PoolItem<CbMessage>
   mutable callbackHandoff   : CallbackHandoff
   BeesConfig                : BeesConfig
-  debugMaxCallbacks         : int32
+  debugMaxCallbacks         : uint64
   mutable debugSimulating   : bool
   mutable debugInCallback   : bool
   mutable debugSubscription : Subscription<CbMessage>
@@ -278,7 +278,12 @@ let prepSegs (is: InputStream) nFrames =
       // state is Chasing
       // is.cbSegOld is active and ahead of us.
       assert (is.cbSegCur.Head < is.cbSegOld.Tail)
-      is.cbSegOld.TrimTail nFrames  // may result in is.cbSegOld being inactive
+      if is.cbSegOld.NFrames > nFrames then
+        is.cbSegOld.Tail <- is.cbSegOld.Tail + nFrames
+        // state is Chasing
+      else
+        is.cbSegOld.Reset()
+        // state is AtBegin
       // state is AtBegin, Chasing
   else
     // state is Middle
@@ -305,7 +310,7 @@ let callback input output frameCount timeInfo statusFlags userDataPtr =
   let (input : IntPtr) = input
   let (output: IntPtr) = output
   is.timeStamp <- DateTime.Now
-  is.seqNum    <- is.seqNum + 1
+  is.seqNum    <- is.seqNum + 1UL
   if echoEnabled is then
     let size = uint64 (frameCount * uint32 is.frameSize)
     Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
@@ -315,7 +320,7 @@ let callback input output frameCount timeInfo statusFlags userDataPtr =
     Volatile.Write(&is.debugInCallback, false)
     PortAudioSharp.StreamCallbackResult.Continue
   | Some item ->
-  if debugExcessOfCallbacks is > 0 then
+  if debugExcessOfCallbacks is > 0UL then
     Volatile.Write(&is.debugInCallback, false)
     PortAudioSharp.StreamCallbackResult.Complete
   else
@@ -397,7 +402,7 @@ let newInputStream( beesConfig       : BeesConfig       )
     Logger            = Logger(8000, startTime)
     paStream          = dummyInstance<PortAudioSharp.Stream>()
     timeStamp         = DateTime.Now
-    seqNum            = 0
+    seqNum            = 0UL
     withEcho          = withEcho
     withLogging       = withLogging   
     beesConfig        = beesConfig // so it’s visible in the debugger
@@ -419,7 +424,7 @@ let newInputStream( beesConfig       : BeesConfig       )
     BeesConfig        = beesConfig
     debugSimulating   = DebugGlobals.simulatingCallbacks
     debugInCallback   = false
-    debugMaxCallbacks = Int32.MaxValue
+    debugMaxCallbacks = UInt64.MaxValue
     debugSubscription = dummyInstance<Subscription<CbMessage>>()
     debugData         = ["a"] }
 

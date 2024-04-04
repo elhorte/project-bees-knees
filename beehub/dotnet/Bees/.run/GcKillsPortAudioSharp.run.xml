@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="GcKillsPortAudioSharp" type="DotNetProject" factoryName=".NET Project">
+  <configuration default="false" name="GcKillsPortAudioSharp" type="DotNetProject" factoryName=".NET Project" singleton="false">
     <option name="EXE_PATH" value="$PROJECT_DIR$/GcKillsPortAudioSharp/bin/Debug/net8.0/GcKillsPortAudioSharp" />
     <option name="PROGRAM_PARAMETERS" value="" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/GcKillsPortAudioSharp/bin/Debug/net8.0" />

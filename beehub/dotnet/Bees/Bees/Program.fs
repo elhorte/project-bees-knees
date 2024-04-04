@@ -86,11 +86,11 @@ let main _ =
   keyboardInputInit()
   try
     paTryCatchRethrow (fun () ->
-      use inputStream = InputStream.New beesConfig inputParameters outputParameters withEcho withLogging
+      use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
       paTryCatchRethrow (fun () ->
         let t = task {
           do! run inputStream 
-          inputStream.Logger.Print "Log:" }
+          inputStream.CbState.Logger.Print "Log:" }
         t.Wait() )
       printfn "Task done." )
   finally

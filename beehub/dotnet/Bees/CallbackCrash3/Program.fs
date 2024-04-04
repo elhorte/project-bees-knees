@@ -51,7 +51,7 @@ let callback input output frameCount timeInfo statusFlags userDataPtr =
   PortAudioSharp.StreamCallbackResult.Continue
   
 
-type InputStream = { mutable paStream : PortAudioSharp.Stream } with 
+type InputStream = { paStream : PortAudioSharp.Stream } with 
   
   // initPortAudio() must be called before this.
   static member New ( sampleRate       : float            )
@@ -63,14 +63,14 @@ type InputStream = { mutable paStream : PortAudioSharp.Stream } with
       fun        input output frameCount timeInfo statusFlags userDataPtr ->
         callback input output frameCount timeInfo statusFlags userDataPtr )
     let is = { paStream = dummyInstance<PortAudioSharp.Stream>() }
-    is.paStream <- paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
+    let paStream = paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                                                           outParams       = Nullable<_>(outputParameters)        ,
                                                                           sampleRate      = sampleRate                           ,
                                                                           framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
                                                                           streamFlags     = StreamFlags.ClipOff                  ,
                                                                           callback        = callbackStub                         ,
                                                                           userData        = 17                                   ) )
-    is
+    { is with paStream = paStream }
   
   member is.Start() = paTryCatchRethrow(fun() -> is.paStream.Start())
   member is.Stop () = paTryCatchRethrow(fun() -> is.paStream.Stop ())

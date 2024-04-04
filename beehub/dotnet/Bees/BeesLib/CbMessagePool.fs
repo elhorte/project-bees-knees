@@ -15,7 +15,6 @@ let tbdDateTime = DateTime.MinValue
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // Seg class, used by InputStream.  The ring buffer can comprise 0, 1, or 2 segs.
 
-[<Struct>]
 type Seg = {
   mutable Tail     : int
   mutable Head     : int
@@ -30,9 +29,9 @@ type Seg = {
     let seg = {
       Tail         = tail
       Head         = head
+      TimeHead     = tbdDateTime
       NRingFrames  = nRingFrames
-      InSampleRate = inSampleRate
-      TimeHead     = tbdDateTime  }
+      InSampleRate = inSampleRate  }
     seg
 
   static member NewEmpty (nRingFrames: int) (inSampleRate: int) =  Seg.New 0 0 nRingFrames inSampleRate
@@ -56,11 +55,6 @@ type Seg = {
     assert (headNew <= seg.NRingFrames)
     seg.Head     <- headNew
     seg.TimeHead <- timeHead
-
-  /// Trim nFrames from the tail.  May result in an inactive Seg.
-  member seg.TrimTail nFrames  : unit =
-    if seg.NFrames > nFrames then  seg.Tail <- seg.Tail + nFrames
-                             else  seg.Reset()
   
   member seg.Print name = $"{name} {seg.Tail}.{seg.Head}"
 
@@ -84,7 +78,7 @@ type CbMessage = {
   mutable StatusFlags          : StreamCallbackFlags   
   mutable UserDataPtr          : IntPtr                
   // more from the callback
-  mutable SeqNum               : int
+  mutable SeqNum               : uint64
   mutable TimeStamp            : DateTime              
   mutable WithEcho             : bool                  
   mutable InputSamplesRingCopy : IntPtr                
@@ -114,12 +108,12 @@ type CbMessage = {
       StatusFlags          = primingOutputFlag 
       UserDataPtr          = IntPtr.Zero       
       // more from the callback
-      SeqNum               = 0
+      SeqNum               = 0UL
       TimeStamp            = DateTime.MinValue 
       WithEcho             = false             
       InputSamplesRingCopy = IntPtr 0          
       SegCur               = newSeg()          
-      SegOld               = newSeg()           }
+      SegOld               = newSeg()  }
     cbMessage
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

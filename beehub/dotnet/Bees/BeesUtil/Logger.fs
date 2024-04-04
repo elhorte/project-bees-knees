@@ -3,9 +3,9 @@ module BeesUtil.Logger
 open System
 open System.Text
 
-type LogEntry(seqNum: int, timestamp: DateTime, message: string, data: obj) =
-  new() = LogEntry(0, DateTime.MinValue, "", null)
-  member val seqNum    : int      = seqNum      with get, set
+type LogEntry(seqNum: uint64, timestamp: DateTime, message: string, data: obj) =
+  new() = LogEntry(0UL, DateTime.MinValue, "", null)
+  member val seqNum    : uint64   = seqNum      with get, set
   member val Timestamp : DateTime = timestamp   with get, set
   member val Message   : string   = message     with get, set
   member val Data      : obj      = data        with get, set

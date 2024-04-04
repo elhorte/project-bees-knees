@@ -122,7 +122,8 @@ let Verbose = true
 [<EntryPoint>]
 let main _ =
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation Quiet
-  use iS = InputStream.New sampleRate inputParameters outputParameters
+  // Also crashes immediately if use instead of let:
+  let iS = InputStream.New sampleRate inputParameters outputParameters
   GC.Collect() // gc() // if GC.Collect() is here instead of inside two layers of functions, it crashes trying do dispose of iS 
   try
     iS.Start() 
