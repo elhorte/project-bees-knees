@@ -3,12 +3,10 @@ module BeesLib.InputStream
 open System
 open System.Runtime.InteropServices
 open System.Threading
-open System.Threading.Tasks
 
 open PortAudioSharp
 open BeesUtil.Util
 open BeesUtil.Logger
-open BeesUtil.ItemPool
 open BeesUtil.WorkList
 open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
@@ -91,8 +89,8 @@ type CbState = {
   mutable CallbackHandoff : CallbackHandoff
   mutable WithEcho        : bool
   mutable WithLogging     : bool
-  TimeInfoBase            : DateTime // from PortAudioSharp TBD
-  FrameSize               : int // from PortAudioSharp TBD
+  TimeInfoBase            : DateTime // for getting UTC from timeInfo.inputBufferAdcTime
+  FrameSize               : int
   RingPtr                 : IntPtr
   Logger                  : Logger
   DebugSimulating         : bool } with
@@ -103,12 +101,12 @@ type CbState = {
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // Copy data from the audio driver into our ring.
 
-let callback input output frameCount timeInfo statusFlags userDataPtr =
+let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) statusFlags userDataPtr =
   let (input : IntPtr) = input
   let (output: IntPtr) = output
   let handle = GCHandle.FromIntPtr(userDataPtr)
   let cbs = handle.Target :?> CbState
-  if not cbs.DebugSimulating then  Console.Write "."
+  Console.Write "."
   Volatile.Write(&cbs.IsInCallback, true)
   let nFrames = int frameCount
   
@@ -169,8 +167,6 @@ let callback input output frameCount timeInfo statusFlags userDataPtr =
       // Trim away SegOld.Tail to ensure the gap.
       cbs.SegOld.Tail <- nFrames + cbs.NGapFrames
       // state is Chasing
-  let inputBufferAdcTime() =
-    cbs.TimeInfoBase + TimeSpan.FromSeconds cbs.TimeInfo.inputBufferAdcTime
  
   prepSegs() // may update SegCur.Head, used by copyToRing()
   // At this point state cannot be AtEnd.
@@ -188,7 +184,7 @@ let callback input output frameCount timeInfo statusFlags userDataPtr =
     let size   = int64 (nFrames * cbs.FrameSize)
     Buffer.MemoryCopy(srcPtr, dstPtr, size, size)
     cbs.InputRingCopy <- IntPtr dstPtr
-    let timeHead = inputBufferAdcTime()
+    let timeHead = cbs.TimeInfoBase + TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
     cbs.SegCur.AdvanceHead nFrames timeHead
   cbs.CallbackHandoff.HandOff()
   Volatile.Write(&cbs.IsInCallback, false)
@@ -213,15 +209,15 @@ type InputStream(beesConfig       : BeesConfig       ,
                  withEcho         : bool             ,
                  withLogging      : bool             ) =
 
-  let startTime         = DateTime.Now
-  let ringDuration      = TimeSpan.FromMilliseconds(200) // beesConfig.InputStreamBufferDuration
-  let gapDuration       = TimeSpan.FromMilliseconds 10   // beesConfig.InputStreamGapDuration
-  let nRingFrames       = if simulatingCallbacks then 37 else durationToNFrames beesConfig.InSampleRate ringDuration
+  let ringDuration      = TimeSpan.FromMilliseconds 200  // beesConfig.InputStreamBufferDuration
+  let gapDuration       = TimeSpan.FromMilliseconds  10  // beesConfig.InputStreamGapDuration
   let gapPortion        = float32 gapDuration.Milliseconds / float32 ringDuration.Milliseconds 
+  let nRingFrames       = if simulatingCallbacks then 37 else durationToNFrames beesConfig.InSampleRate ringDuration
   let nGapFrames        = if simulatingCallbacks then 4 else int (floor (gapPortion * float32 nRingFrames))
   let frameSize         = beesConfig.FrameSize
   let nRingBytes        = int nRingFrames * frameSize
-  
+  let startTime         = DateTime.UtcNow
+
   // When unmanaged code calls managed code (e.g., a callback from unmanaged to managed),
   // the CLR ensures that the garbage collector will not move referenced managed objects
   // in memory during the execution of that managed code.
@@ -232,8 +228,8 @@ type InputStream(beesConfig       : BeesConfig       ,
     Input           = IntPtr.Zero
     Output          = IntPtr.Zero
     FrameCount      = 0u
-    TimeInfo        = dummyInstance<PortAudioSharp.StreamCallbackTimeInfo>()
-    StatusFlags     = dummyInstance<PortAudioSharp.StreamCallbackFlags>()
+    TimeInfo        = PortAudioSharp.StreamCallbackTimeInfo()
+    StatusFlags     = PortAudioSharp.StreamCallbackFlags()
     // callback result
     SegCur          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
     SegOld          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
@@ -247,7 +243,7 @@ type InputStream(beesConfig       : BeesConfig       ,
     CallbackHandoff = dummyInstance<CallbackHandoff>()  // tbd
     WithEcho        = withEcho
     WithLogging     = withLogging   
-    TimeInfoBase    = DateTime.Now  // timeInfoBase + cbState.timeInfo -> cbState.TimeStamp. should come from PortAudioSharp TBD
+    TimeInfoBase    = startTime  // timeInfoBase + adcInputTime -> cbState.TimeStamp
     FrameSize       = frameSize
     RingPtr         = Marshal.AllocHGlobal(nRingBytes)
     Logger          = Logger(8000, startTime)
@@ -269,16 +265,16 @@ type InputStream(beesConfig       : BeesConfig       ,
     if cbState.DebugSimulating then
       dummyInstance<PortAudioSharp.Stream>()
     else
-      let callbackStub = PortAudioSharp.Stream.Callback(
+      let streamCallback = PortAudioSharp.Stream.Callback(
         // The intermediate lambda here is required to avoid a compiler error.
-        fun        input output frameCount timeInfo statusFlags userDataPtr ->
-          callback input output frameCount timeInfo statusFlags userDataPtr )
+        fun        input output frameCount  timeInfo statusFlags userDataPtr ->
+          callback input output frameCount &timeInfo statusFlags userDataPtr )
       paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                                              outParams       = Nullable<_>(outputParameters)        ,
                                                              sampleRate      = beesConfig.InSampleRate              ,
                                                              framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
                                                              streamFlags     = StreamFlags.ClipOff                  ,
-                                                             callback        = callbackStub                         ,
+                                                             callback        = streamCallback                       ,
                                                              userData        = cbState                              ) )
   // let cbMessagePool     = cbMessagePool
   // let cbMessageWorkList = WorkList<CbMessage>()
@@ -305,8 +301,6 @@ type InputStream(beesConfig       : BeesConfig       ,
   // member this.PoolItemCurrent   = poolItemCurrent  
   member this.DebugMaxCallbacks = debugMaxCallbacks
   member this.DebugSubscription = debugSubscription
-  member this.Callback input output frameCount timeInfo statusFlags userDataPtr =
-              callback input output frameCount timeInfo statusFlags userDataPtr
 
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // CbMessageQueue
@@ -432,7 +426,10 @@ type InputStream(beesConfig       : BeesConfig       ,
     this.CbState.CallbackHandoff.Stop() 
     if this.CbState.DebugSimulating then ()
     else
-    this.PaStream.Stop()
+    paTryCatchRethrow(fun() -> this.PaStream.Stop () )
+
+  member this.Callback(input, output, frameCount, timeInfo: StreamCallbackTimeInfo byref, statusFlags, userDataPtr) =
+              callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
 
   member this.AfterCallback() =
     Console.Write "–"

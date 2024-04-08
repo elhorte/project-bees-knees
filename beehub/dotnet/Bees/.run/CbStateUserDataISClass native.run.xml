@@ -1,0 +1,12 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="CbStateUserDataISClass native" type="RunNativeExe" factoryName="Native Executable" activateToolWindowBeforeRun="false" focusToolWindowBeforeRun="true">
+    <option name="EXE_PATH" value="$PROJECT_DIR$/CbStateUserDataISClass/bin/Release/net8.0/osx-x64/CbStateUserDataISClass" />
+    <option name="PROGRAM_PARAMETERS" value="" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/CbStateUserDataISClass/bin/Release/net8.0/osx-x64" />
+    <option name="PASS_PARENT_ENVS" value="1" />
+    <option name="USE_EXTERNAL_CONSOLE" value="0" />
+    <method v="2">
+      <option name="Build Solution" enabled="true" />
+    </method>
+  </configuration>
+</component>

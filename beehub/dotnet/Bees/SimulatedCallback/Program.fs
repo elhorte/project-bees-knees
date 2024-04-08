@@ -14,6 +14,11 @@ open BeesLib.CbMessagePool
 
 // See Theory of Operation comment before main at the end of this file.
 
+let delayMs print ms =
+  if print then Console.Write $"\nDelay %d{ms}ms. {{"
+  (Task.Delay ms).Wait() |> ignore
+  if print then Console.Write "}"
+
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // App
 
@@ -57,26 +62,27 @@ let showGC f =
   // Console.WriteLine $"gc memory: %i{ m }";
   
 /// Run the stream for a while, then stop it and terminate PortAudio.
-let run beesConfig inputStream = task {
+let run frameSize inputStream = task {
   let inputStream = (inputStream: InputStream)
   inputStream.Start()
   
   let test() =
     printfn "calling callback ...\n"
     let frameCount = 4
-    let frameSize = (beesConfig: BeesConfig).FrameSize
     let byteCount = frameCount * frameSize
     let input  = getArrayPointer byteCount
     let output = getArrayPointer byteCount
-    let timeInfo    = PortAudioSharp.StreamCallbackTimeInfo()
+    let mutable timeInfo    = PortAudioSharp.StreamCallbackTimeInfo()
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(inputStream.CbState))
     for i in 1..40 do
       let fc = if i < 20 then  frameCount else  2 * frameCount
-      let m = showGC (fun () -> 
-        inputStream.Callback input output (uint32 fc) timeInfo statusFlags userDataPtr |> ignore 
+      let m = showGC (fun () ->
+        timeInfo.inputBufferAdcTime <- 0.001 * float i
+        inputStream.Callback(input, output, uint32 fc, &timeInfo, statusFlags, userDataPtr) |> ignore 
+        delayMs false 1
         Console.WriteLine $"{i}" )
-      (Task.Delay 1).Wait()
+      delayMs false 1
     printfn "\n\ncalling callback done"
   
   test()
@@ -125,7 +131,7 @@ let main _ =
       use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
       paTryCatchRethrow (fun () ->
         let t = task {
-          do! run beesConfig inputStream 
+          do! run beesConfig.FrameSize inputStream 
           inputStream.CbState.Logger.Print "Log:" }
         t.Wait() )
       printfn "Task done." )

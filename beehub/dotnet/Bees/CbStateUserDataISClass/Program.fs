@@ -1,12 +1,17 @@
 ﻿
 open System
 open System.Runtime.InteropServices
-open System.Threading
-open System.Threading.Tasks
 
 open PortAudioSharp
 open BeesLib.DebugGlobals
+
+
+open System.Threading
+open System.Threading.Tasks
+
 open BeesLib.CbMessagePool
+
+
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -16,7 +21,7 @@ let dummyInstance<'T>() =
 
 let delayMs print ms =
   if print then Console.Write $"\nDelay %d{ms}ms. {{"
-  (Task.Delay ms).Wait() |> ignore
+  (Task.Delay ms).Wait()
   if print then Console.Write "}"
 
 let awaitForever() = delayMs false Int32.MaxValue
@@ -71,7 +76,7 @@ type CallbackHandoff = {
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // InputStream
 
-
+// Not a struct becuase it persists across calls to callback.
 type CbState = {
   // callback args
   mutable Input           : IntPtr
@@ -79,28 +84,36 @@ type CbState = {
   mutable FrameCount      : uint32
   mutable TimeInfo        : PortAudioSharp.StreamCallbackTimeInfo
   mutable StatusFlags     : PortAudioSharp.StreamCallbackFlags
-  // more stuff
-  mutable WithEcho        : bool
+  // callback result
   mutable SegCur          : Seg
   mutable SegOld          : Seg
   mutable SeqNum          : uint64
-  mutable InputRingCopy   : IntPtr
-//mutable nRingFrames     : int
-//mutable nUsableFrames   : int
-//mutable nGapFrames      : int
+  mutable InputRingCopy   : IntPtr // where input was copied to
+  mutable TimeStamp       : DateTime
+  // more stuff
   mutable IsInCallback    : bool
+  mutable NRingFrames     : int
+  mutable NGapFrames      : int
   mutable CallbackHandoff : CallbackHandoff
-  TimeInfoBase            : DateTime // from PortAudioSharp TBD
+  mutable WithEcho        : bool
+  mutable WithLogging     : bool
+  TimeInfoBase            : DateTime // for getting UTC from timeInfo.inputBufferAdcTime
   FrameSize               : int
-//ringPtr                 : IntPtr
-  DebugSimulating         : bool }
+  RingPtr                 : IntPtr
+  DebugSimulating         : bool } with
+    
+  member this.SegOldest = if this.SegOld.Active then this.SegOld else this.SegCur
 
-let callback input output frameCount timeInfo statusFlags userDataPtr =
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// Copy data from the audio driver into our ring.
+
+let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) statusFlags userDataPtr =
   let (input : IntPtr) = input
   let (output: IntPtr) = output
   let handle = GCHandle.FromIntPtr(userDataPtr)
   let cbs = handle.Target :?> CbState
-  if not cbs.DebugSimulating then  Console.Write "."
+  Console.Write "."
   Volatile.Write(&cbs.IsInCallback, true)
   let nFrames = int frameCount
   
@@ -115,19 +128,71 @@ let callback input output frameCount timeInfo statusFlags userDataPtr =
     let size = uint64 (frameCount * uint32 cbs.FrameSize)
     Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
 
-// //   adjustNGapFrames cbs nFrames
-// //   prepSegs         cbs nFrames // may update is.segCur.Head, used by copyToRing()
-// // //is.Logger.Add is.seqNum is.timeStamp "cb bufs=" is.cbMessagePool.PoolStats
-// //   do
-// //     // Copy the data then Submit a FinshCallback job.
-// //     // Copy from callback data to the head of the ring and return a pointer to the copy.
-// //     let srcPtr = input.ToPointer()
-// //     let dstPtr = indexToVoidptr cbs cbs.segCur.Head
-// //     let size   = int64 (nFrames * cbs.frameSize)
-// //     Buffer.MemoryCopy(srcPtr, dstPtr, size, size)
-// //     cbs.inputRingCopy <- IntPtr dstPtr
-// //     let timeHead = inputBufferAdcTimeOf cbs
-// //     cbs.segCur.AdvanceHead nFrames timeHead
+  let printCurAndOld msg =
+    if not cbs.DebugSimulating then () else 
+    let sCur = cbs.SegCur.Print "cur"
+    let sOld = cbs.SegOld.Print "old"
+    Console.WriteLine $"%s{sCur} %s{sOld} %s{msg}"
+  let prepSegs() =
+    // state is Empty, AtBegin, Moving, AtEnd, Chasing
+    printCurAndOld ""
+    let nextHead = cbs.SegCur.Head + nFrames
+    if nextHead <= cbs.NRingFrames then
+      // state is not AtEnd
+      // state is Empty, AtBegin, Moving, Chasing
+      // The block will fit after SegCur.Head
+      do // maybe trim SegCur.Tail
+        let nUsableFrames = cbs.NRingFrames - cbs.NGapFrames
+        cbs.SegCur.Tail <- max cbs.SegCur.Tail (nextHead - nUsableFrames)
+        // state is unchanged
+      do // maybe trim SegOld.Tail
+        if cbs.SegOld.Active then
+          // state is Chasing
+          // SegOld is active and ahead of SegCur.
+          assert (cbs.SegCur.Head < cbs.SegOld.Tail)
+          // Trim nFrames from the SegOld.Tail or if SegOld is too small, make it inactive.
+          if cbs.SegOld.NFrames > nFrames then
+            cbs.SegOld.Tail <- cbs.SegOld.Tail + nFrames
+            // state is Chasing
+          else
+            cbs.SegOld.Reset()
+            // state is AtBegin
+        // state is AtBegin, Chasing
+    else
+      // state is AtEnd
+      // The block will not fit after SegCur.Head.
+      let exchangeSegs() =
+        assert not cbs.SegOld.Active
+        let tmp = cbs.SegCur  in  cbs.SegCur <- cbs.SegOld  ;  cbs.SegOld <- tmp
+        // if SegCur.Head <> 0 then  Console.WriteLine "head != 0"
+        // assert (SegCur.Head = 0)
+        cbs.SegCur.TimeHead <- tbdDateTime
+      exchangeSegs()
+      printCurAndOld "exchanged"
+      assert (cbs.SegCur.Head = 0)
+      // SegCur starts fresh with head = 0, tail = 0.
+      // Trim away SegOld.Tail to ensure the gap.
+      cbs.SegOld.Tail <- nFrames + cbs.NGapFrames
+      // state is Chasing
+ 
+  prepSegs() // may update SegCur.Head, used by copyToRing()
+  // At this point state cannot be AtEnd.
+  // Below, after the block is appended to SegCur, the state can be AtEnd.
+//cbs.Logger.Add cbs.SeqNum cbs.TimeStamp "cb bufs=" ""
+  do
+    // Copy the block to the ring.
+    // Copy from callback data to the head of the ring and return a pointer to the copy.
+    let indexToVoidptr index  : voidptr =
+      let indexByteOffset = index * cbs.FrameSize
+      let intPtr = cbs.RingPtr + (IntPtr indexByteOffset)
+      intPtr.ToPointer()
+    let srcPtr = input.ToPointer()
+    let dstPtr = indexToVoidptr cbs.SegCur.Head
+    let size   = int64 (nFrames * cbs.FrameSize)
+    Buffer.MemoryCopy(srcPtr, dstPtr, size, size)
+    cbs.InputRingCopy <- IntPtr dstPtr
+    let timeHead = cbs.TimeInfoBase + TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
+    cbs.SegCur.AdvanceHead nFrames timeHead
   cbs.CallbackHandoff.HandOff()
   Volatile.Write(&cbs.IsInCallback, false)
   PortAudioSharp.StreamCallbackResult.Continue
@@ -142,35 +207,41 @@ type InputStream( sampleRate       : int              ,
                   inputParameters  : StreamParameters ,
                   outputParameters : StreamParameters ) =
 
+  let nRingFrames       = 37
+  let nGapFrames        = 4
+  let nRingBytes        = int nRingFrames * frameSize
+  let startTime         = DateTime.UtcNow
+
   let cbState = {
+    // callback args  
     Input           = IntPtr.Zero
     Output          = IntPtr.Zero
     FrameCount      = 0u
-    TimeInfo        = dummyInstance<PortAudioSharp.StreamCallbackTimeInfo>()
-    StatusFlags     = dummyInstance<PortAudioSharp.StreamCallbackFlags>()
+    TimeInfo        = PortAudioSharp.StreamCallbackTimeInfo()
+    StatusFlags     = PortAudioSharp.StreamCallbackFlags()
     // callback result
-    SegCur          = Seg.NewEmpty 36 sampleRate
-    SegOld          = Seg.NewEmpty 36 sampleRate
+    SegCur          = Seg.NewEmpty nRingFrames sampleRate
+    SegOld          = Seg.NewEmpty nRingFrames sampleRate
     SeqNum          = 0UL
     InputRingCopy   = IntPtr.Zero
-//  TimeStamp       = DateTime.MaxValue // placeholder
+    TimeStamp       = DateTime.MaxValue // placeholder
     // more stuff
     IsInCallback    = false
-//  nRingFrames     = nRingFrames
-//  nGapFrames      = nGapFrames
+    NRingFrames     = nRingFrames
+    NGapFrames      = nGapFrames
     CallbackHandoff = dummyInstance<CallbackHandoff>()  // tbd
     WithEcho        = false
-//  WithLogging     = false
-    TimeInfoBase    = DateTime.Now  // timeInfoBase + cbState.timeInfo -> cbState.TimeStamp. should come from PortAudioSharp TBD
+    WithLogging     = false
+    TimeInfoBase    = startTime  // timeInfoBase + adcInputTime -> cbState.TimeStamp
     FrameSize       = frameSize
-//  ringPtr         = Marshal.AllocHGlobal(nRingBytes)
+    RingPtr         = Marshal.AllocHGlobal(nRingBytes)
 //  Logger          = Logger(8000, startTime)
     DebugSimulating = simulatingCallbacks  }
 
   let callbackStub = PortAudioSharp.Stream.Callback(
     // The intermediate lambda here is required to avoid a compiler error.
-    fun        input output frameCount timeInfo statusFlags userDataPtr ->
-      callback input output frameCount timeInfo statusFlags userDataPtr )
+    fun        input output frameCount  timeInfo statusFlags userDataPtr ->
+      callback input output frameCount &timeInfo statusFlags userDataPtr )
   let paStream = paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                                                         outParams       = Nullable<_>(outputParameters)        ,
                                                                         sampleRate      = sampleRate                           ,
@@ -184,20 +255,22 @@ type InputStream( sampleRate       : int              ,
   
   member this.Start() =
     this.CbState.CallbackHandoff <- CallbackHandoff.New this.AfterCallback
+    this.CbState.CallbackHandoff.Start()
     if this.CbState.DebugSimulating then ()
     else
-    paTryCatchRethrow(fun() -> this.CbState.CallbackHandoff.Start() ; this.PaStream.Start() )
+    paTryCatchRethrow(fun() -> this.PaStream.Start() )
   
   member this.Stop () =
+    this.CbState.CallbackHandoff.Stop ()
     if this.CbState.DebugSimulating then ()
     else
-    paTryCatchRethrow(fun() -> this.CbState.CallbackHandoff.Stop () ; this.PaStream.Stop () )
+    paTryCatchRethrow(fun() -> this.PaStream.Stop () )
 
-  member this.Callback input output frameCount timeInfo statusFlags userDataPtr =
-              callback input output frameCount timeInfo statusFlags userDataPtr
+  member this.Callback(input, output, frameCount, timeInfo: StreamCallbackTimeInfo byref, statusFlags, userDataPtr) =
+              callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
 
-  member is.AfterCallback() =
-    Console.Write "–"
+  member this.AfterCallback() =
+    Console.Write ","
 
   
   interface IDisposable with
@@ -205,13 +278,12 @@ type InputStream( sampleRate       : int              ,
       System.Console.WriteLine("Disposing inputStream")
       this.PaStream.Dispose()
 
-
-
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 PortAudio.LoadNativeLibrary()
 PortAudio.Initialize()
 
+/// Creates and returns the sample rate and the input parameters.
 let prepareArgumentsForStreamCreation verbose =
   let log string = if verbose then  printfn string else  ()
   let defaultInput = PortAudio.DefaultInputDevice         in log $"Default input device = %d{defaultInput}"
@@ -241,9 +313,6 @@ let prepareArgumentsForStreamCreation verbose =
   let frameSize = sampleSize * nChannels
   sampleRate, frameSize, inputParameters, outputParameters
 
-//–––––––––––––––––––––––––––––––––––––
-// Main
-
 let showGC f =
   // System.GC.Collect()
   // let starting = GC.GetTotalMemory(true)
@@ -256,6 +325,9 @@ let getArrayPointer byteCount =
   let handle = GCHandle.Alloc(inputArray, GCHandleType.Pinned)
   handle.AddrOfPinnedObject()
 
+//–––––––––––––––––––––––––––––––––––––
+// Main
+
 let test inputStream frameSize =
   let (inputStream: InputStream) = inputStream
   printfn "calling callback ...\n"
@@ -263,15 +335,17 @@ let test inputStream frameSize =
   let byteCount = frameCount * frameSize
   let input  = getArrayPointer byteCount
   let output = getArrayPointer byteCount
-  let timeInfo    = PortAudioSharp.StreamCallbackTimeInfo()
+  let mutable timeInfo    = PortAudioSharp.StreamCallbackTimeInfo()
   let statusFlags = PortAudioSharp.StreamCallbackFlags()
   let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(inputStream.CbState))
   for i in 1..40 do
     let fc = if i < 20 then  frameCount else  2 * frameCount
     let m = showGC (fun () -> 
-      inputStream.Callback input output (uint32 fc) timeInfo statusFlags userDataPtr |> ignore 
+      timeInfo.inputBufferAdcTime <- 0.001 * float i
+      inputStream.Callback(input, output, uint32 fc, &timeInfo, statusFlags, userDataPtr) |> ignore 
+      delayMs false 1
       Console.WriteLine $"{i}" )
-    (Task.Delay 1).Wait()
+    delayMs false 1
   printfn "\n\ncalling callback done"
 
 let Quiet   = false
