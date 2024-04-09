@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net8.0</TargetFramework>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Include="Library.fs"/>
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\..\..\..\..\PortAudioSharp2\PortAudioSharp\PortAudioSharp.csproj" />
+      <ProjectReference Include="..\BeesLib\BeesLib.fsproj" />
+    </ItemGroup>
+
+</Project>
