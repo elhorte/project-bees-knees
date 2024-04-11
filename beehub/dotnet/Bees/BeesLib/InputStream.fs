@@ -32,11 +32,13 @@ type Worker = Buf -> int -> int
 //
 // Repeating lifecycle:  Empty –> AtBegin –> Moving –> AtEnd –> Chasing –> AtBegin ...
 //
-//      || time  –>  R (repeat point)                    X (exchange cur with old)                                           R
+//      || time –>   R                   (R = repeat)                    R                                                   R
+//      ||           |                                                   |                                                   |
 //      || Empty     | AtBegin      | Moving     | AtEnd | Chasing       | AtBegin      | Moving     | AtEnd | Chasing       |
 // seg0 || inactive  | cur growing  | cur moving         | old shrinking | inactive     | inactive           | cur growing   |
 // seg1 || inactive  | inactive     | inactive           | cur growing   | cur growing  | cur moving         | old shrinking |
-//
+//      ||                                               |
+//                                                       X (exchange cur with old)
 // There are two pairs of segments:
 //
 //     callback    afterCallback
@@ -46,9 +48,6 @@ type Worker = Buf -> int -> int
 //    cbs.SegOld  iS.SegOld.Tail is overall tail of data
 // 
 // A background task takes over after each callback
-// Each callback    queues a job to copy cbSegCur/cbSegOld to SegCur/SegOld
-// Each client call queues a job to access data from the ring.
-// Client calls have to be asynchronous because they have to run in the jobQueue task.
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

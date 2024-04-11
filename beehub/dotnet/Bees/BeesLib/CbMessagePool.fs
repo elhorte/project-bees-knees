@@ -36,7 +36,7 @@ type Seg = {
 
   static member NewEmpty (nRingFrames: int) (inSampleRate: int) =  Seg.New 0 0 nRingFrames inSampleRate
 
-  member seg.Copy  = Seg.New seg.Head seg.Tail seg.NRingFrames seg.InSampleRate
+  member seg.Copy() = Seg.New seg.Head seg.Tail seg.NRingFrames seg.InSampleRate
 
     
   member seg.durationOf nFrames = TimeSpan.FromSeconds (float nFrames / float seg.InSampleRate)
