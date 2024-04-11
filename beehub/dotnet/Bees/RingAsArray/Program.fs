@@ -149,7 +149,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   let (output: IntPtr) = output
   let handle = GCHandle.FromIntPtr(userDataPtr)
   let cbs = handle.Target :?> CbState
-  Console.Write "."
+//Console.Write "."
   Volatile.Write(&cbs.IsInCallback, true)
   let nFrames = int frameCount
   let adcStartTime = cbs.TimeInfoBase + TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
@@ -165,18 +165,24 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     let size = uint64 (frameCount * uint32 cbs.FrameSize)
     Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
 
-  let printCurAndOld msg =
-    if not cbs.DebugSimulating then () else 
-    let sCur = cbs.SegCur.Print "cur"
-    let sOld = cbs.SegOld.Print "old"
-    Console.WriteLine $"%s{sCur} %s{sOld} %s{msg}  {cbs.State}"
   do
     // Ensure that SegCur.Head is ready for the new data
     // and adjust the segs except for SegCur.Head,
     // which will be updated after copying the data to the ring.
+    let mutable newHead = cbs.SegCur.Head + nFrames // provisional
+    let mutable newTail = newHead - cbs.NDataFrames // provisional, can be negative
+    let printCurAndOld msg =
+      if not cbs.DebugSimulating then () else
+      let sState = $"  {cbs.State}"
+      let sCur = cbs.SegCur.Print "cur"
+      let sNewTail = sprintf "%3d" newTail
+      let sNew = $"{sNewTail:S3}.{newHead:d2}"
+      let sOld = cbs.SegOld.Print "old"
+      let sTotal =
+        let sum = cbs.SegCur.NFrames + cbs.SegOld.NFrames
+        $"{cbs.SegCur.NFrames:d2}+{cbs.SegOld.NFrames:d2}={sum:d2}"
+      Console.WriteLine $"%s{sCur}  new %s{sNew} %s{sOld} %s{sTotal}%s{sState}  %s{msg}"
     printCurAndOld ""
-    let newHead = cbs.SegCur.Head + nFrames // provisional
-    let newTail = newHead - cbs.NDataFrames // provisional, can be negative
     let trimCurTail() =
       if newTail > 0 then
         cbs.SegCur.Tail <- newTail
@@ -189,15 +195,17 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       // State is AtEnd briefly here because the block will not fit after SegCur.Head.
       assert (cbs.State = Moving)
       assert (not cbs.SegOld.Active)
+      cbs.State <- AtEnd  // for readability only
       do // Exchange Segs
         let tmp = cbs.SegCur  in  cbs.SegCur <- cbs.SegOld  ;  cbs.SegOld <- tmp
-        assert (cbs.SegCur.Head = 0)
-      printCurAndOld "exchanged"
       assert (cbs.SegCur.Head = 0)
       // SegCur starts fresh with head = 0, tail = 0.
       // Trim away SegOld.Tail to ensure the gap.
       cbs.SegOld.Tail <- nFrames + cbs.NGapFrames
+      newHead <- cbs.SegCur.Head + nFrames
+      newTail <- newHead - cbs.NDataFrames
       cbs.State <- Chasing
+      printCurAndOld "exchanged"
     match cbs.State with
     | Empty ->    
       assert (not cbs.SegCur.Active)
@@ -211,9 +219,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       cbs.State <- if trimCurTail() then  Moving else  AtBegin
     | Moving ->
       assert (not cbs.SegOld.Active)
-      if not (trimCurTail())
-      then  cbs.State <- Moving
-      else  cbs.State <- AtEnd
+      trimCurTail() |> ignore
+      cbs.State <- Moving
     | Chasing  ->
       assert (cbs.SegOld.Active)
       assert (newHead <= cbs.NRingFrames)  // The block will fit after SegCur.Head
@@ -229,7 +236,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       else
         // SegOld is too small; make it inactive.
         cbs.SegOld.Reset()
-        cbs.State <- Empty
+        cbs.State <- AtBegin
+        printCurAndOld "poof"
     | AtEnd ->
       failwith "Can’t happen."
   // state is not AtEnd.
@@ -254,9 +262,9 @@ type InputStream( sampleRate       : int              ,
                   inputParameters  : StreamParameters ,
                   outputParameters : StreamParameters ) =
 
-  let nDataFrames = 31
-  let nGapFrames  = 8
-  let nRingFrames = nDataFrames + nGapFrames
+  let nDataFrames = 53
+  let nGapFrames  = 25
+  let nRingFrames = nDataFrames + 2 * nGapFrames
   let startTime   = DateTime.UtcNow
 
   let cbState = {
@@ -319,7 +327,8 @@ type InputStream( sampleRate       : int              ,
               callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
 
   member this.AfterCallback() =
-    Console.Write ","
+    ()
+//  Console.Write ","
 
   
   interface IDisposable with
@@ -380,14 +389,14 @@ let getArrayPointer byteCount =
 let test inputStream frameSize =
   let (inputStream: InputStream) = inputStream
   printfn "calling callback ...\n"
-  let frameCount = 4
+  let frameCount = 10
   let byteCount = frameCount * frameSize
   let input  = getArrayPointer byteCount
   let output = getArrayPointer byteCount
   let mutable timeInfo    = PortAudioSharp.StreamCallbackTimeInfo()
   let statusFlags = PortAudioSharp.StreamCallbackFlags()
   let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(inputStream.CbState))
-  for i in 1..40_000_000 do
+  for i in 1..50 do
     let fc = if i < 20 then  frameCount else  2 * frameCount
     let m = showGC (fun () -> 
       timeInfo.inputBufferAdcTime <- 0.001 * float i

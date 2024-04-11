@@ -56,7 +56,7 @@ type Seg = {
     seg.Head     <- headNew
     seg.TimeHead <- timeHead
   
-  member seg.Print name = $"{name} {seg.Tail}.{seg.Head}"
+  member seg.Print name = $"{name} {seg.Tail:D2}.{seg.Head:D2}"
 
 
 
