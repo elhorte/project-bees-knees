@@ -195,7 +195,6 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
         $"{cbs.SegCur.NFrames:d2}+{cbs.SegOld.NFrames:d2}={sum:d2}"
       let sGap = if cbs.SegOld.Active then sprintf "%2d" (cbs.SegOld.Tail - cbs.SegCur.Head) else  "  "
       Console.WriteLine $"  %s{sCur}  new %s{sNew} %s{sOld} %s{sTotal}  gap {sGap:s2} %s{sState} %s{msg}"
-    printCurAndOld ""
     let trimCurTail() =
       if newTail > 0 then
         cbs.SegCur.Tail <- newTail
@@ -203,6 +202,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       else
         assert (cbs.SegCur.Tail = 0)
         false
+    printCurAndOld ""
     // This test is here instead of below under Moving in case nFrames is bigger than last time.
     if newHead > cbs.NRingFrames then
       // State is AtEnd briefly here because the block will not fit after SegCur.Head.
@@ -242,14 +242,14 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       trimCurTail() |> ignore
       if cbs.SegOld.NFrames > nFrames then
         // Trim nFrames from the SegOld.Tail
+        if newHead + cbs.NGapFrames > cbs.SegOld.Tail + nFrames then  Console.WriteLine "bad"
         cbs.SegOld.Tail <- cbs.SegOld.Tail + nFrames
         assert (newHead + cbs.NGapFrames <= cbs.SegOld.Tail)
         cbs.State <- Chasing
       else
-        // SegOld is too small; make it inactive.
+      // SegOld is too small; make it inactive.
         cbs.SegOld.Reset()
-        cbs.State <- AtBegin
-        printCurAndOld "poof"
+        cbs.State <- Moving
     | AtEnd ->
       failwith "Can’t happen."
   // state is not AtEnd.
@@ -274,7 +274,7 @@ type InputStream( sampleRate       : int              ,
                   inputParameters  : StreamParameters ,
                   outputParameters : StreamParameters ) =
 
-  let nDataFrames = 55
+  let nDataFrames = 51
   let nGapFrames  = 25
   let nRingFrames = nDataFrames + (3 * nGapFrames) / 2
   let startTime   = DateTime.UtcNow
@@ -409,7 +409,7 @@ let test inputStream frameSize =
   let statusFlags = PortAudioSharp.StreamCallbackFlags()
   let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(inputStream.CbState))
   for i in 1..50 do
-    let fc = if i < 40 then  frameCount else  2 * frameCount
+    let fc = if i < 30 then  frameCount else  2 * frameCount
     let m = showGC (fun () -> 
       timeInfo.inputBufferAdcTime <- 0.001 * float i
       inputStream.Callback(input, output, uint32 fc, &timeInfo, statusFlags, userDataPtr) |> ignore 
