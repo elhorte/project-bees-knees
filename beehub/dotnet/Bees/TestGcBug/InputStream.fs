@@ -155,7 +155,8 @@ type InputStream = {
     is.debugSubscription <- cbMessageWorkList.Subscribe debuggingSubscriber 
     is.callbackHandoff   <- CallbackHandoff.New is.afterCallback
 
-    if DebugGlobals.simulatingCallbacks then is else 
+    if DebugGlobals.simulatingCallbacks then is
+    else 
 
     let callbackStub = PortAudioSharp.Stream.Callback(
       // The intermediate lambda here is required to avoid a compiler error.

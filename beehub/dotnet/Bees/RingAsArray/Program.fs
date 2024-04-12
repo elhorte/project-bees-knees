@@ -2,6 +2,7 @@
 open System
 open System.Runtime.InteropServices
 
+open System.Text
 open PortAudioSharp
 open BeesLib.DebugGlobals
 
@@ -83,18 +84,18 @@ type CallbackHandoff = {
 
 type State = // |––––––––––––– ring ––––––––––––––|                                                                               
   | Empty    // |               gap               |                                                                               
-  | AtBegin  // | SegCur |          gap           | First time: sigCur is inactive; gap is initially bigger than needed.
+  | AtBegin  // | SegCur |          gap           | Gap is initially bigger than needed.
   | Moving   // | gapB |  SegCur  |     gapA      | SegCur has grown so much that SegCur.Tail is being trimmed.                  
-  | Chasing  // |      gapB     |  SegCur  | gapA | like Moving but gapA has become too small for more SegCur.Head growth.       
-  | AtEnd    // | SegCur | gapB |  SegOld  | gapA | As SegCur.Head grows, SegOld.Tail is being trimmed.                          
+  | AtEnd    // |      gapB     |  SegCur  | gapA | like Moving but gapA has become too small for more SegCur.Head growth.       
+  | Chasing  // | SegCur | gapB |  SegOld  | gapA | As SegCur.Head grows, SegOld.Tail is being trimmed.                          
 
 // Repeating lifecycle:  Empty –> AtBegin –> Moving –> AtEnd –> Chasing –> AtBegin ...
 //
-//      || time –>   R                   (R = repeat)                    R                                                   R
-//      ||           |                                                   |                                                   |
-//      || Empty     | AtBegin      | Moving     | AtEnd | Chasing       | AtBegin      | Moving     | AtEnd | Chasing       |
-// seg0 || inactive  | cur growing  | cur moving         | old shrinking | inactive     | inactive           | cur growing   |
-// seg1 || inactive  | inactive     | inactive           | cur growing   | cur growing  | cur moving         | old shrinking |
+//      || time –>                  R               (R = repeat)         R                                    R
+//      ||                          |                                    |                                    |
+//      || Empty     | AtBegin      | Moving     | AtEnd | Chasing       | Moving     | AtEnd | Chasing       |
+// seg0 || inactive  | cur growing  | cur moving         | old shrinking | inactive           | cur growing   |
+// seg1 || inactive  | inactive     | inactive           | cur growing   | cur moving         | old shrinking |
 //      ||                                               |
 //                                                       X (exchange cur with old)
 // There are two pairs of segments:
@@ -143,7 +144,7 @@ type CbState = {
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // Copy data from the audio driver into our ring.
-        
+
 let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) statusFlags userDataPtr =
   let (input : IntPtr) = input
   let (output: IntPtr) = output
@@ -172,8 +173,19 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     let mutable newHead = cbs.SegCur.Head + nFrames // provisional
     let mutable newTail = newHead - cbs.NDataFrames // provisional, can be negative
     let printCurAndOld msg =
-      if not cbs.DebugSimulating then () else
-      let sState = $"  {cbs.State}"
+      if not cbs.DebugSimulating then ()
+      else
+      let mutable dots = Array.init cbs.NRingFrames (fun i -> if i % 10 = 0 then char ((i/10%10).ToString()) else '.' )
+      match cbs.State with
+      | Empty   -> ()
+      | AtBegin
+      | Moving
+      | AtEnd ->  for i in (cbs.SegCur.Tail)..(cbs.SegCur.Head-1) do dots[i] <- '◾'
+      | Chasing ->
+        for i in (cbs.SegCur.Tail)..(cbs.SegCur.Head-1) do dots[i] <- '◾'
+        for i in (cbs.SegOld.Tail)..(cbs.SegOld.Head-1) do dots[i] <- '◾'
+      Console.Write dots
+      let sState = $"{cbs.State}"
       let sCur = cbs.SegCur.Print "cur"
       let sNewTail = sprintf "%3d" newTail
       let sNew = $"{sNewTail:S3}.{newHead:d2}"
@@ -181,7 +193,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       let sTotal =
         let sum = cbs.SegCur.NFrames + cbs.SegOld.NFrames
         $"{cbs.SegCur.NFrames:d2}+{cbs.SegOld.NFrames:d2}={sum:d2}"
-      Console.WriteLine $"%s{sCur}  new %s{sNew} %s{sOld} %s{sTotal}%s{sState}  %s{msg}"
+      let sGap = if cbs.SegOld.Active then sprintf "%2d" (cbs.SegOld.Tail - cbs.SegCur.Head) else  "  "
+      Console.WriteLine $"  %s{sCur}  new %s{sNew} %s{sOld} %s{sTotal}  gap {sGap:s2} %s{sState} %s{msg}"
     printCurAndOld ""
     let trimCurTail() =
       if newTail > 0 then
@@ -195,13 +208,12 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       // State is AtEnd briefly here because the block will not fit after SegCur.Head.
       assert (cbs.State = Moving)
       assert (not cbs.SegOld.Active)
-      cbs.State <- AtEnd  // for readability only
+      cbs.State <- AtEnd  // only for readability here
       do // Exchange Segs
         let tmp = cbs.SegCur  in  cbs.SegCur <- cbs.SegOld  ;  cbs.SegOld <- tmp
       assert (cbs.SegCur.Head = 0)
       // SegCur starts fresh with head = 0, tail = 0.
       // Trim away SegOld.Tail to ensure the gap.
-      cbs.SegOld.Tail <- nFrames + cbs.NGapFrames
       newHead <- cbs.SegCur.Head + nFrames
       newTail <- newHead - cbs.NDataFrames
       cbs.State <- Chasing
@@ -262,9 +274,9 @@ type InputStream( sampleRate       : int              ,
                   inputParameters  : StreamParameters ,
                   outputParameters : StreamParameters ) =
 
-  let nDataFrames = 53
+  let nDataFrames = 55
   let nGapFrames  = 25
-  let nRingFrames = nDataFrames + 2 * nGapFrames
+  let nRingFrames = nDataFrames + (3 * nGapFrames) / 2
   let startTime   = DateTime.UtcNow
 
   let cbState = {
@@ -397,7 +409,7 @@ let test inputStream frameSize =
   let statusFlags = PortAudioSharp.StreamCallbackFlags()
   let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(inputStream.CbState))
   for i in 1..50 do
-    let fc = if i < 20 then  frameCount else  2 * frameCount
+    let fc = if i < 40 then  frameCount else  2 * frameCount
     let m = showGC (fun () -> 
       timeInfo.inputBufferAdcTime <- 0.001 * float i
       inputStream.Callback(input, output, uint32 fc, &timeInfo, statusFlags, userDataPtr) |> ignore 

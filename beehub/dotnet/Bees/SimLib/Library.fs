@@ -127,7 +127,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
 
   let printCurAndOld msg =
-    if not cbs.DebugSimulating then () else 
+    if not cbs.DebugSimulating then ()
+    else 
     let sCur = cbs.SegCur.Print "cur"
     let sOld = cbs.SegOld.Print "old"
     Console.WriteLine $"%s{sCur} %s{sOld} %s{msg}"
