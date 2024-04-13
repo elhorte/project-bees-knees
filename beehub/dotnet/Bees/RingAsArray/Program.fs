@@ -1,17 +1,13 @@
 ﻿
 open System
 open System.Runtime.InteropServices
-
-open System.Text
-open PortAudioSharp
-open BeesLib.DebugGlobals
-
-
 open System.Threading
 open System.Threading.Tasks
 
-open BeesLib.CbMessagePool
+open PortAudioSharp
 
+open BeesLib.DebugGlobals
+open BeesLib.CbMessagePool
 open CSharpHelpers
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -236,8 +232,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     | Chasing  ->
       assert (cbs.SegOld.Active)
       assert (newHead <= cbs.NRingFrames)  // The block will fit after SegCur.Head
-      // SegOld is active and ahead of SegCur.
       assert (cbs.SegCur.Tail = 0)
+      // SegOld is active.  SegCur.Head is growing toward the SegOld.Tail, which retreats as SegCur.Head grows.
       assert (cbs.SegCur.Head < cbs.SegOld.Tail)
       trimCurTail() |> ignore
       if cbs.SegOld.NFrames > nFrames then
@@ -259,7 +255,6 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     // Copy from callback data to the head of the ring and return a pointer to the copy.
     UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, cbs.SegCur.Head, nFrames)
     cbs.SegCur.AdvanceHead nFrames adcStartTime
-    // state may now be AtEnd
   cbs.CallbackHandoff.HandOff()
   Volatile.Write(&cbs.IsInCallback, false)
   PortAudioSharp.StreamCallbackResult.Continue
@@ -274,7 +269,7 @@ type InputStream( sampleRate       : int              ,
                   inputParameters  : StreamParameters ,
                   outputParameters : StreamParameters ) =
 
-  let nDataFrames = 51
+  let nDataFrames = 56
   let nGapFrames  = 25
   let nRingFrames = nDataFrames + (3 * nGapFrames) / 2
   let startTime   = DateTime.UtcNow
@@ -307,7 +302,7 @@ type InputStream( sampleRate       : int              ,
 //  Logger          = Logger(8000, startTime)
     DebugSimulating = simulatingCallbacks  }
 
-  let callbackStub = PortAudioSharp.Stream.Callback(
+  let streamCallback = PortAudioSharp.Stream.Callback(
     // The intermediate lambda here is required to avoid a compiler error.
     fun        input output frameCount  timeInfo statusFlags userDataPtr ->
       callback input output frameCount &timeInfo statusFlags userDataPtr )
@@ -316,20 +311,20 @@ type InputStream( sampleRate       : int              ,
                                                                         sampleRate      = sampleRate                           ,
                                                                         framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
                                                                         streamFlags     = StreamFlags.ClipOff                  ,
-                                                                        callback        = callbackStub                         ,
+                                                                        callback        = streamCallback                       ,
                                                                         userData        = cbState                              ) )
   
-  member val CbState  = cbState 
   member val PaStream = paStream
+  member val CbState  = cbState 
   
   member this.Start() =
     this.CbState.CallbackHandoff <- CallbackHandoff.New this.AfterCallback
     this.CbState.CallbackHandoff.Start()
     if this.CbState.DebugSimulating then ()
     else
-    paTryCatchRethrow(fun() -> this.PaStream.Start() )
+    paTryCatchRethrow (fun() -> this.PaStream.Start() )
   
-  member this.Stop () =
+  member this.Stop() =
     this.CbState.CallbackHandoff.Stop ()
     if this.CbState.DebugSimulating then ()
     else
@@ -345,7 +340,7 @@ type InputStream( sampleRate       : int              ,
   
   interface IDisposable with
     member this.Dispose() =
-      System.Console.WriteLine("Disposing inputStream")
+      Console.WriteLine("Disposing inputStream")
       this.PaStream.Dispose()
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -383,6 +378,11 @@ let prepareArgumentsForStreamCreation verbose =
   let frameSize = sampleSize * nChannels
   sampleRate, frameSize, inputParameters, outputParameters
 
+let getArrayPointer byteCount =
+  let inputArray = Array.init byteCount (fun i -> float32 (i + 1000))
+  let handle = GCHandle.Alloc(inputArray, GCHandleType.Pinned)
+  handle.AddrOfPinnedObject()
+
 let showGC f =
   // System.GC.Collect()
   // let starting = GC.GetTotalMemory(true)
@@ -390,29 +390,24 @@ let showGC f =
   // let m = GC.GetTotalMemory(true) - starting
   // Console.WriteLine $"gc memory: %i{ m }";
 
-let getArrayPointer byteCount =
-  let inputArray = Array.init byteCount (fun i -> float32 (i + 1000))
-  let handle = GCHandle.Alloc(inputArray, GCHandleType.Pinned)
-  handle.AddrOfPinnedObject()
-
 //–––––––––––––––––––––––––––––––––––––
 // Main
 
 let test inputStream frameSize =
   let (inputStream: InputStream) = inputStream
   printfn "calling callback ...\n"
-  let frameCount = 10
+  let frameCount = 5
   let byteCount = frameCount * frameSize
   let input  = getArrayPointer byteCount
   let output = getArrayPointer byteCount
-  let mutable timeInfo    = PortAudioSharp.StreamCallbackTimeInfo()
+  let mutable timeInfo = PortAudioSharp.StreamCallbackTimeInfo()
   let statusFlags = PortAudioSharp.StreamCallbackFlags()
   let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(inputStream.CbState))
   for i in 1..50 do
-    let fc = if i < 30 then  frameCount else  2 * frameCount
+    let fc = uint32 (if i < 25 then  frameCount else  2 * frameCount)
     let m = showGC (fun () -> 
       timeInfo.inputBufferAdcTime <- 0.001 * float i
-      inputStream.Callback(input, output, uint32 fc, &timeInfo, statusFlags, userDataPtr) |> ignore 
+      callback input output fc &timeInfo statusFlags userDataPtr |> ignore 
       delayMs false 1
   //  Console.WriteLine $"{i}"
     )

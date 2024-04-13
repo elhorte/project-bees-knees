@@ -13,61 +13,60 @@ open BeesUtil.CallbackHandoff
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open BeesLib.DebugGlobals
-
+open CSharpHelpers
 
 type Worker = Buf -> int -> int
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// The ring buffer comprises two segments, of which 0, 1, or 2 are active.
-//
-// There is a gap between the segments so that locking is not required to prevent a race condition
-// between the interrupt-time callback copying into the ring and a client copying out of the ring.
-//
-//            |––––––––––––– ring ––––––––––––––|
-// Empty    0 |               gap               |
-// AtBegin  1 | SegCur |          gap           |  First time here, sigCur is inactive, and gap is initially bigger than needed.
-// Moving   1 | gapB |  SegCur  |     gapA      |  SegCur has grown so much that SegCur.Tail is being trimmed.
-// AtEnd    1 |      gapB     |  SegCur  | gapA |  like Moving but gapA has become too small for more SegCur.Head growth.
-// Chasing  2 | SegCur | gapB |  SegOld  | gapA |  As SegCur.Head grows, SegOld.Tail is being trimmed.
-//
-// Repeating lifecycle:  Empty –> AtBegin –> Moving –> AtEnd –> Chasing –> AtBegin ...
-//
-//      || time –>   R                   (R = repeat)                    R                                                   R
-//      ||           |                                                   |                                                   |
-//      || Empty     | AtBegin      | Moving     | AtEnd | Chasing       | AtBegin      | Moving     | AtEnd | Chasing       |
-// seg0 || inactive  | cur growing  | cur moving         | old shrinking | inactive     | inactive           | cur growing   |
-// seg1 || inactive  | inactive     | inactive           | cur growing   | cur growing  | cur moving         | old shrinking |
-//      ||                                               |
-//                                                       X (exchange cur with old)
-// There are two pairs of segments:
-//
-//     callback    afterCallback
-//       time          time
-//    ––––––––––  ––––––––––––––––––––––––––
-//    cbs.SegCur  iS.SegCur.Head is overall head of data
-//    cbs.SegOld  iS.SegOld.Tail is overall tail of data
-// 
-// A background task takes over after each callback
-
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-  
-type InputGetResult =
-  | Error   of string
-  | Success of DateTime
-
-
-/// <summary>Make the pool of CbMessages used by the stream callback</summary>
-// let makeCbMessagePool beesConfig nRingFrames =
-//   let startCount = Environment.ProcessorCount * 4    // many more than number of cores
-//   let minCount   = 4
-//   CbMessagePool.makeCbMessagePool startCount minCount beesConfig nRingFrames
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // InputStream
 
-// Not a struct becuase it persists across calls to callback.
+// The callback adds data to a ring buffer.  The duration of the audio capacity of the ring is a parameter.
+// The data in the ring buffer is the concatenation of two segments, Segs.Old and Segs.Cur.  From time to
+// time Segs.Old is empty.  Segs.Cur.Head, where new callback data is added, never overwrites Segs.Old.Tail
+// because they are separated by a gap. The duration of the gap is a parameter.  The gap allows a client
+// to ask for past buffered data and expect it to be there for at least as long as the gap duration without
+// being overwritten by callbacks.  This approach serves as a lock-free way to avoid a race condition.
+// The callback hands off to a background Task for further processing not at interrupt time.
+
+// Internal management of the ring is governed by a state variable.
+
+type State = // |––––––––––– ring ––––––––––––|
+  | AtStart  // |             gap             |
+  | AtBegin  // |  Cur  |         gap         | Gap initially has plenty of room and, besides, isn’t needed.
+  | Moving   // | gapB |  Cur  |     gapA     | Cur has grown so much that Cur.Tail is being trimmed.
+  | AtEnd    // |      gapB    |  Cur  | gapA | like Moving but gapA has become too small for more Cur.Head growth.
+  | Chasing  // |  Cur  | gapB |  Old  | gapA | As Cur.Head grows, Old.Tail is being trimmed.
+
+// Repeating lifecycle:  Empty –> AtBegin –> Moving –> AtEnd –> Chasing –> Moving ...
+//
+//      || time –>                  R               (R = repeat)         R                                    R
+//      ||                          |                                    |                                    |
+//      || Empty     | AtBegin      | Moving     | AtEnd | Chasing       | Moving     | AtEnd | Chasing       |
+// seg0 || inactive  | Cur growing  | Cur moving         | Old shrinking | inactive           | Cur growing   |
+// seg1 || inactive  | inactive     | inactive           | Cur growing   | Cur moving         | Old shrinking |
+//      ||                                               X           (X = exchange)           X
+
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+
+type InputGetResult =
+  | Error   of string
+  | Success of DateTime
+
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// InputStream
+
+[<Struct>]
+type Segs = {
+  mutable Cur : Seg
+  mutable Old : Seg }  with
+
+  member this.Oldest = if this.Old.Active then this.Old else this.Cur
+
+
+// Callback state, updated by each callback.
 type CbState = {
   // callback args
   mutable Input           : IntPtr
@@ -76,25 +75,24 @@ type CbState = {
   mutable TimeInfo        : PortAudioSharp.StreamCallbackTimeInfo
   mutable StatusFlags     : PortAudioSharp.StreamCallbackFlags
   // callback result
-  mutable SegCur          : Seg
-  mutable SegOld          : Seg
+  mutable Segs            : Segs
   mutable SeqNum          : uint64
   mutable InputRingCopy   : IntPtr // where input was copied to
   mutable TimeStamp       : DateTime
   // more stuff
+  mutable State           : State
   mutable IsInCallback    : bool
   mutable NRingFrames     : int
+  mutable NDataFrames     : int
   mutable NGapFrames      : int
   mutable CallbackHandoff : CallbackHandoff
   mutable WithEcho        : bool
   mutable WithLogging     : bool
   TimeInfoBase            : DateTime // for getting UTC from timeInfo.inputBufferAdcTime
   FrameSize               : int
-  RingPtr                 : IntPtr
+  Ring                    : float32 array
   Logger                  : Logger
-  DebugSimulating         : bool } with
-    
-  member this.SegOldest = if this.SegOld.Active then this.SegOld else this.SegCur
+  DebugSimulating         : bool }
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -105,10 +103,12 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   let (output: IntPtr) = output
   let handle = GCHandle.FromIntPtr(userDataPtr)
   let cbs = handle.Target :?> CbState
-  Console.Write "."
+//Console.Write "."
   Volatile.Write(&cbs.IsInCallback, true)
   let nFrames = int frameCount
-  
+  let adcStartTime = cbs.TimeInfoBase + TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
+  if not cbs.DebugSimulating then Console.Write "."
+
   cbs.Input        <- input
   cbs.Output       <- output
   cbs.FrameCount   <- frameCount // in the ”block“ to be copied
@@ -120,87 +120,104 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     let size = uint64 (frameCount * uint32 cbs.FrameSize)
     Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
 
-  let printCurAndOld msg =
-    if not cbs.DebugSimulating then ()
-    else 
-    let sCur = cbs.SegCur.Print "cur"
-    let sOld = cbs.SegOld.Print "old"
-    Console.WriteLine $"%s{sCur} %s{sOld} %s{msg}"
-  let prepSegs() =
-    // state is Empty, AtBegin, Moving, AtEnd, Chasing
+  do
+    // Ensure that Segs.Cur.Head is ready for the new data
+    // and adjust the segs except for Segs.Cur.Head,
+    // which will be updated after copying the data to the ring.
+    let mutable newHead = cbs.Segs.Cur.Head + nFrames // provisional
+    let mutable newTail = newHead - cbs.NDataFrames // provisional, can be negative
+    let printCurAndOld msg =
+      if not cbs.DebugSimulating then ()
+      else
+      let mutable dots = Array.init cbs.NRingFrames (fun i -> if i % 10 = 0 then char ((i/10%10).ToString()) else '.' )
+      let showSegDots seg =  for i in (seg.Tail)..(seg.Head-1) do dots[i] <- '◾'
+      showSegDots cbs.Segs.Cur
+      match cbs.State with
+      | AtStart
+      | AtBegin
+      | Moving
+      | AtEnd   -> ()
+      | Chasing -> showSegDots cbs.Segs.Old
+      Console.Write dots
+      let sState   = $"{cbs.State}"
+      let sCur     = cbs.Segs.Cur.Print "cur"
+      let sNewTail = sprintf "%3d" newTail
+      let sNew     = $"{sNewTail:S3}.{newHead:d2}"
+      let sOld     = cbs.Segs.Old.Print "old"
+      let sTotal   = let sum = cbs.Segs.Cur.NFrames + cbs.Segs.Old.NFrames
+                     $"{cbs.Segs.Cur.NFrames:d2}+{cbs.Segs.Old.NFrames:d2}={sum:d2}"
+      let sGap     = if cbs.Segs.Old.Active then sprintf "%2d" (cbs.Segs.Old.Tail - cbs.Segs.Cur.Head) else  "  "
+      Console.WriteLine $"  %s{sCur}  new %s{sNew} %s{sOld} %s{sTotal}  gap {sGap:s2} %s{sState} %s{msg}"
+    let trimCurTail() =
+      if newTail > 0 then
+        cbs.Segs.Cur.Tail <- newTail
+        true
+      else
+        assert (cbs.Segs.Cur.Tail = 0)
+        false
     printCurAndOld ""
-    let nextHead = cbs.SegCur.Head + nFrames
-    if nextHead <= cbs.NRingFrames then
-      // state is not AtEnd
-      // state is Empty, AtBegin, Moving, Chasing
-      // The block will fit after SegCur.Head
-      do // maybe trim SegCur.Tail
-        let nUsableFrames = cbs.NRingFrames - cbs.NGapFrames
-        cbs.SegCur.Tail <- max cbs.SegCur.Tail (nextHead - nUsableFrames)
-        // state is unchanged
-      do // maybe trim SegOld.Tail
-        if cbs.SegOld.Active then
-          // state is Chasing
-          // SegOld is active and ahead of SegCur.
-          assert (cbs.SegCur.Head < cbs.SegOld.Tail)
-          // Trim nFrames from the SegOld.Tail or if SegOld is too small, make it inactive.
-          if cbs.SegOld.NFrames > nFrames then
-            cbs.SegOld.Tail <- cbs.SegOld.Tail + nFrames
-            // state is Chasing
-          else
-            cbs.SegOld.Reset()
-            // state is AtBegin
-        // state is AtBegin, Chasing
-    else
-      // state is AtEnd
-      // The block will not fit after SegCur.Head.
-      let exchangeSegs() =
-        assert not cbs.SegOld.Active
-        let tmp = cbs.SegCur  in  cbs.SegCur <- cbs.SegOld  ;  cbs.SegOld <- tmp
-        // if SegCur.Head <> 0 then  Console.WriteLine "head != 0"
-        // assert (SegCur.Head = 0)
-        cbs.SegCur.TimeHead <- tbdDateTime
-      exchangeSegs()
+    // This test is here instead of below under Moving in case nFrames is bigger than last time.
+    if newHead > cbs.NRingFrames then
+      // State is AtEnd briefly here because the block will not fit after Segs.Cur.Head.
+      assert (cbs.State = Moving)
+      assert (not cbs.Segs.Old.Active)
+      cbs.State <- AtEnd  // only for readability here
+      do // Exchange Segs
+        let tmp = cbs.Segs.Cur  in  cbs.Segs.Cur <- cbs.Segs.Old  ;  cbs.Segs.Old <- tmp
+      assert (cbs.Segs.Cur.Head = 0)
+      // Segs.Cur starts fresh with head = 0, tail = 0.
+      // Trim away Segs.Old.Tail to ensure the gap.
+      newHead <- cbs.Segs.Cur.Head + nFrames
+      newTail <- newHead - cbs.NDataFrames
+      cbs.State <- Chasing
       printCurAndOld "exchanged"
-      assert (cbs.SegCur.Head = 0)
-      // SegCur starts fresh with head = 0, tail = 0.
-      // Trim away SegOld.Tail to ensure the gap.
-      cbs.SegOld.Tail <- nFrames + cbs.NGapFrames
-      // state is Chasing
- 
-  prepSegs() // may update SegCur.Head, used by copyToRing()
-  // At this point state cannot be AtEnd.
-  // Below, after the block is appended to SegCur, the state can be AtEnd.
-  cbs.Logger.Add cbs.SeqNum cbs.TimeStamp "cb bufs=" ""
+    match cbs.State with
+    | AtStart ->
+      assert (not cbs.Segs.Cur.Active)
+      assert (not cbs.Segs.Old.Active)
+      assert (newHead = nFrames)  // The block will fit at Ring[0]
+      cbs.State <- AtBegin
+    | AtBegin ->
+      assert (not cbs.Segs.Old.Active)
+      assert (cbs.Segs.Cur.Tail = 0)
+      assert (cbs.Segs.Cur.Head + cbs.NGapFrames <= cbs.NRingFrames)  // The block will def fit after Segs.Cur.Head
+      cbs.State <- if trimCurTail() then  Moving else  AtBegin
+    | Moving ->
+      assert (not cbs.Segs.Old.Active)
+      trimCurTail() |> ignore
+      cbs.State <- Moving
+    | Chasing  ->
+      assert (cbs.Segs.Old.Active)
+      assert (newHead <= cbs.NRingFrames)  // The block will fit after Segs.Cur.Head
+      assert (cbs.Segs.Cur.Tail = 0)
+      // Segs.Old is active.  Segs.Cur.Head is growing toward the Segs.Old.Tail, which retreats as Segs.Cur.Head grows.
+      assert (cbs.Segs.Cur.Head < cbs.Segs.Old.Tail)
+      trimCurTail() |> ignore
+      if cbs.Segs.Old.NFrames > nFrames then
+        // Trim nFrames from the Segs.Old.Tail
+        if newHead + cbs.NGapFrames > cbs.Segs.Old.Tail + nFrames then  Console.WriteLine "bad"
+        cbs.Segs.Old.Tail <- cbs.Segs.Old.Tail + nFrames
+        assert (newHead + cbs.NGapFrames <= cbs.Segs.Old.Tail)
+        cbs.State <- Chasing
+      else
+      // Segs.Old is too small; make it inactive.
+        cbs.Segs.Old.Reset()
+        cbs.State <- Moving
+    | AtEnd ->
+      failwith "Can’t happen."
+
+//cbs.Logger.Add cbs.SeqNum cbs.TimeStamp "cb bufs=" ""
   do
     // Copy the block to the ring.
     // Copy from callback data to the head of the ring and return a pointer to the copy.
-    let indexToVoidptr index  : voidptr =
-      let indexByteOffset = index * cbs.FrameSize
-      let intPtr = cbs.RingPtr + (IntPtr indexByteOffset)
-      intPtr.ToPointer()
-    let srcPtr = input.ToPointer()
-    let dstPtr = indexToVoidptr cbs.SegCur.Head
-    let size   = int64 (nFrames * cbs.FrameSize)
-    Buffer.MemoryCopy(srcPtr, dstPtr, size, size)
-    cbs.InputRingCopy <- IntPtr dstPtr
-    let timeHead = cbs.TimeInfoBase + TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
-    cbs.SegCur.AdvanceHead nFrames timeHead
+    UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, cbs.Segs.Cur.Head, nFrames)
+    cbs.Segs.Cur.AdvanceHead nFrames adcStartTime
   cbs.CallbackHandoff.HandOff()
   Volatile.Write(&cbs.IsInCallback, false)
   PortAudioSharp.StreamCallbackResult.Continue
 
-// let cbAtomically cbState f =
-//   let (cbs: CbState) = cbState
-//   let rec spin() =
-//     if Volatile.Read &cbs.isInCallback then spin()
-//     f cbs // Copy out the stuff needed from cbState.
-//     if Volatile.Read &cbs.isInCallback then spin()
-//   spin()
-  
-
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// InputStream
+// The InputStream class
 
 // initPortAudio() must be called before this constructor.
 type InputStream(beesConfig       : BeesConfig       ,
@@ -209,57 +226,51 @@ type InputStream(beesConfig       : BeesConfig       ,
                  withEcho         : bool             ,
                  withLogging      : bool             ) =
 
-  let ringDuration      = TimeSpan.FromMilliseconds 200  // beesConfig.InputStreamBufferDuration
-  let gapDuration       = TimeSpan.FromMilliseconds  10  // beesConfig.InputStreamGapDuration
-  let gapPortion        = float32 gapDuration.Milliseconds / float32 ringDuration.Milliseconds 
-  let nRingFrames       = if simulatingCallbacks then 37 else durationToNFrames beesConfig.InSampleRate ringDuration
-  let nGapFrames        = if simulatingCallbacks then 4 else int (floor (gapPortion * float32 nRingFrames))
-  let frameSize         = beesConfig.FrameSize
-  let nRingBytes        = int nRingFrames * frameSize
-  let startTime         = DateTime.UtcNow
+  let audioDuration = beesConfig.InputStreamAudioDuration
+  let gapDuration   = beesConfig.InputStreamRingGapDuration
+  let gapPortion    = float32 gapDuration.Milliseconds / float32 audioDuration.Milliseconds
+  let nDataFrames   = if simulatingCallbacks then 56 else durationToNFrames beesConfig.InSampleRate audioDuration
+  let nGapFrames    = if simulatingCallbacks then 20 else durationToNFrames beesConfig.InSampleRate gapDuration
+  let nRingFrames   = nDataFrames + (3 * nGapFrames) / 2
+  let frameSize     = beesConfig.FrameSize
+  let nRingBytes    = int nRingFrames * frameSize
+  let startTime     = DateTime.UtcNow
 
   // When unmanaged code calls managed code (e.g., a callback from unmanaged to managed),
   // the CLR ensures that the garbage collector will not move referenced managed objects
   // in memory during the execution of that managed code.
   // This happens automatically and does not require manual pinning.
-  
+
   let cbState = {
-    // callback args  
+    // callback args
     Input           = IntPtr.Zero
     Output          = IntPtr.Zero
     FrameCount      = 0u
     TimeInfo        = PortAudioSharp.StreamCallbackTimeInfo()
     StatusFlags     = PortAudioSharp.StreamCallbackFlags()
     // callback result
-    SegCur          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
-    SegOld          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
+    Segs            = { Cur = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
+                        Old = Seg.NewEmpty nRingFrames beesConfig.InSampleRate }
     SeqNum          = 0UL
     InputRingCopy   = IntPtr.Zero
     TimeStamp       = DateTime.MaxValue // placeholder
-    // more stuff     
+    // more stuff
+    State           = AtStart
     IsInCallback    = false
     NRingFrames     = nRingFrames
+    NDataFrames     = nDataFrames
     NGapFrames      = nGapFrames
     CallbackHandoff = dummyInstance<CallbackHandoff>()  // tbd
     WithEcho        = withEcho
-    WithLogging     = withLogging   
+    WithLogging     = withLogging
     TimeInfoBase    = startTime  // timeInfoBase + adcInputTime -> cbState.TimeStamp
     FrameSize       = frameSize
-    RingPtr         = Marshal.AllocHGlobal(nRingBytes)
+    Ring            = Array.init<float32> nRingFrames (fun _ -> 0.0f)
     Logger          = Logger(8000, startTime)
     DebugSimulating = simulatingCallbacks  }
 
-  // let cbMessageWorkList = WorkList<CbMessage>()
-  // let cbMessagePool     = makeCbMessagePool beesConfig nRingFrames
-  // let cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
-  // let poolItemCurrent   = PoolItem.New cbMessagePool cbMessageCurrent
-
   let debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
-    Console.Write ","
-    // let (cbMessage: CbMessage) = cbMessage
-    // Console.WriteLine $"%4d{cbMessage.SegCur.Head}  %d{cbMessage.SeqNum}"
-    // if debugExcessOfCallbacks cbMessage.SeqNum >= 0 then  Console.WriteLine $"No more callbacks – debugging"
-    // printCallback cbMessage
+    if not cbState.DebugSimulating then Console.Write ","
 
   let paStream =
     if cbState.DebugSimulating then
@@ -276,99 +287,71 @@ type InputStream(beesConfig       : BeesConfig       ,
                                                              streamFlags     = StreamFlags.ClipOff                  ,
                                                              callback        = streamCallback                       ,
                                                              userData        = cbState                              ) )
-  // let cbMessagePool     = cbMessagePool
-  // let cbMessageWorkList = WorkList<CbMessage>()
-  // let cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
-  // let poolItemCurrent   = poolItemCurrent
-  let debugMaxCallbacks = Int32.MaxValue
+
   let debugSubscription = dummyInstance<Subscription<CbMessage>>()
-  
-  
+
   member  this.echoEnabled   () = Volatile.Read &cbState.WithEcho
   member  this.loggingEnabled() = Volatile.Read &cbState.WithEcho
 
-  member val PaStream          = paStream
-  member val CbState           = cbState
-  member val CbStateLatest     = cbState       with get, set
-  member val StartTime         = startTime
-  member val BeesConfig        = beesConfig       
-  member val RingDuration      = ringDuration     
-  member val NRingBytes        = nRingBytes       
-  member val GapDuration       = gapDuration      
-  // member this.CbMessagePool     = cbMessagePool    
-  // member this.CbMessageWorkList = cbMessageWorkList
-//member this.CbMessageCurrent  = cbMessageCurrent 
-  // member this.PoolItemCurrent   = poolItemCurrent  
-  member this.DebugMaxCallbacks = debugMaxCallbacks
+  member val  PaStream          = paStream
+  member val  CbState           = cbState
+  member val  CbStateLatest     = cbState       with get, set
+  member val  StartTime         = startTime
+  member val  BeesConfig        = beesConfig
+  member val  RingDuration      = audioDuration
+  member val  NRingBytes        = nRingBytes
+  member val  GapDuration       = gapDuration
   member this.DebugSubscription = debugSubscription
 
-  //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-  // CbMessageQueue
+  //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
-  // /// <summary>
-  // ///   Creates and starts a CbMessageQueue that will process CbMessages inserted by callbacks.
-  // /// </summary>
-  // /// <param name="workPerCallback">A function that processes a CbMessageQueueMessage</param>
-  // /// <returns>Returns a started CbMessageQueue</returns>
-  // let makeAndStartCbMessageQueue workPerCallback  : CbMessageQueue =
-  //   let cbMessageQueueHandler workPerCallback (cbMessageQueue: CbMessageQueue) =
-  //   //let mutable callbackMessage = Unchecked.defaultof<CbMessage>
-  //     let doOne (m: CbMessage) =
-  //       cbMessagePool.ItemUseBegin()
-  //       workPerCallback m
-  //       cbMessagePool.ItemUseEnd   m
-  //     cbMessageQueue.iter doOne
-  //   let cbMessageQueue = CbMessageQueue()
-  //   let handler() = cbMessageQueueHandler workPerCallback cbMessageQueue
-  //   Task.Run handler |> ignore
-  //   cbMessageQueue
-  //
-  // let cbMessageQueue = makeAndStartCbMessageQueue cbMessageWorkList.HandleEvent
+  member this.Start() =
+    this.CbState.CallbackHandoff <- CallbackHandoff.New this.AfterCallback
+    this.CbState.CallbackHandoff.Start()
+    if this.CbState.DebugSimulating then ()
+    else
+    paTryCatchRethrow (fun() -> this.PaStream.Start() )
+    printfn $"InputStream size: {this.NRingBytes / 1_000_000} MB for {this.RingDuration}"
+    printfn $"InputStream nFrames: {this.CbState.NRingFrames}"
 
-  // for debug
-  // member this.printCallback (m: CbMessage) =
-  //   let microseconds = floatToMicrosecondsFractionOnly m.TimeInfo.currentTime
-  //   let percentCPU   = this.PaStream.CpuLoad * 100.0
-  //   let sDebug = sprintf "%3d: %A %s" this.CbState.seqNum this.CbState.timeStamp.TimeOfDay (this.cbMessagePool.PoolStats)
-  //   let sWork  = sprintf $"microsec: %6d{microseconds} frameCount=%A{m.FrameCount} cpuLoad=%5.1f{percentCPU}%%"
-  //   Console.WriteLine($"{sDebug}   ––   {sWork}")
+  member this.Stop() =
+    this.CbState.CallbackHandoff.Stop ()
+    if this.CbState.DebugSimulating then ()
+    else
+    paTryCatchRethrow(fun() -> this.PaStream.Stop () )
 
-  //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-  // Subscribing to notifications of data added to the ring
-  
-  // returns = 0 on the last callback, > 0 after the last callback
-  member private is.debugExcessOfCallbacks() = is.CbState.SeqNum - uint64 is.DebugMaxCallbacks
+  member this.Callback(input, output, frameCount, timeInfo: StreamCallbackTimeInfo byref, statusFlags, userDataPtr) =
+              callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
+
+  member this.AfterCallback() =
+    if not cbState.DebugSimulating then Console.Write ","
 
   member private is.debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
     Console.Write ","
-    // let (cbMessage: CbMessage) = cbMessage
-    // Console.WriteLine $"%4d{cbMessage.SegCur.Head}  %d{cbMessage.SeqNum}"
-    // if debugExcessOfCallbacks cbMessage.SeqNum >= 0 then  Console.WriteLine $"No more callbacks – debugging"
-    // printCallback cbMessage
-  
-  member is.timeTail() = is.CbStateLatest.SegOldest.TimeTail
-  member is.timeHead() = is.CbStateLatest.SegCur   .TimeHead
- 
 
-  
-  // let (|TooEarly|SegCur|SegOld|)  (dateTime: DateTime) (duration: TimeSpan) =
-    
-    
-  
+  member is.timeTail() = is.CbStateLatest.Segs.Oldest.TimeTail
+  member is.timeHead() = is.CbStateLatest.Segs.Cur   .TimeHead
+
+
+
+  // let (|TooEarly|Segs.Cur|Segs.Old|)  (dateTime: DateTime) (duration: TimeSpan) =
+
+
+
   // let getSome timeStart count  : (int * int) seq = seq {
-  //   if cbMessage.SegOld.Active then
+  //   if cbMessage.Segs.Old.Active then
   //     if timeStart >= segHead then
   //       // return empty sequence
-  //     let timeOffset = timeStart - cbMessage.SegOld.TimeTail
+  //     let timeOffset = timeStart - cbMessage.Segs.Old.TimeTail
   //     assert (timeOffset >= 0)
-  //     let nFrames = cbMessage.SegOld.NFramesOf timeOffset
-  //     let indexStart = cbMessage.SegOld.Tail + nFrames
-  //     if indexStart < cbMessage.SegOld.Head then
+  //     let nFrames = cbMessage.Segs.Old.NFramesOf timeOffset
+  //     let indexStart = cbMessage.Segs.Old.Tail + nFrames
+  //     if indexStart < cbMessage.Segs.Old.Head then
   //       yield (indexStart, nFrames)
-  //   if cbMessage.SegCur.Active then yield (cbMessage.SegCur.Tail, cbMessage.SegCur.NFrames)
+  //   if cbMessage.Segs.Cur.Active then yield (cbMessage.Segs.Cur.Tail, cbMessage.Segs.Cur.NFrames)
   // }
-    
-  //   
+
+  //
   // let x = timeTail
   // let get (dateTime: DateTime) (duration: TimeSpan) (worker: Worker) =
   //   let now = DateTime.Now
@@ -379,60 +362,31 @@ type InputStream(beesConfig       : BeesConfig       ,
   //     let nSamples = nFrames / frameSize
   //     let r = worker fromPtr nSamples
   //   let nextIndex = ringIndex timeStart
-  //   let count = 
+  //   let count =
   //   deliver next timeStart
   //   Success timeStart
-    
+
 
   // let keep (duration: TimeSpan) =
     // assert (duration > TimeSpan.Zero)
     // let now = DateTime.Now
     // let dateTime = now - duration
-    // timeTail <- 
+    // timeTail <-
     //   if dateTime < timeTail then  timeTail
     //                          else  dateTime
     // timeTail
-    
+
   member private is.offsetOfDateTime (dateTime: DateTime)  : Option<Seg * int> =
-    if not (is.timeTail() <= dateTime && dateTime <= is.timeHead()) then Some (is.CbStateLatest.SegCur, 1)
+    if not (is.timeTail() <= dateTime && dateTime <= is.timeHead()) then Some (is.CbStateLatest.Segs.Cur, 1)
     else None
 
- 
+
   // member private is.take inputTake =
   //   let from = match inputTake.FromRef with BufRef arrRef -> !arrRef
-  //   let size = frameCountToByteCount inputTake.FrameCount 
+  //   let size = frameCountToByteCount inputTake.FrameCount
   //   System.Buffer.BlockCopy(from, 0, buffer, index, size)
   //   advanceIndex inputTake.FrameCount
   //   inputTake.CompletionSource.SetResult()
-  
-  // Called from the PortAudio Callback method
-  // Must not allocate memory because this is a system-level callback
-  member private is.callbackOther input output frameCount timeInfo statusFlags userDataPtr =
-    Console.Write(".")
-    PortAudioSharp.StreamCallbackResult.Continue
-
-  //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-  
-  member this.Start() =
-    this.CbState.CallbackHandoff <- CallbackHandoff.New this.AfterCallback
-    this.CbState.CallbackHandoff.Start()
-    if this.CbState.DebugSimulating then ()
-    else
-    paTryCatchRethrow(fun() -> this.PaStream.Start())
-    printfn $"InputStream size: {this.NRingBytes / 1_000_000} MB for {this.RingDuration}"
-    printfn $"InputStream nFrames: {this.CbState.NRingFrames}"
-
-  member this.Stop() =
-    this.CbState.CallbackHandoff.Stop() 
-    if this.CbState.DebugSimulating then ()
-    else
-    paTryCatchRethrow(fun() -> this.PaStream.Stop () )
-
-  member this.Callback(input, output, frameCount, timeInfo: StreamCallbackTimeInfo byref, statusFlags, userDataPtr) =
-              callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
-
-  member this.AfterCallback() =
-    Console.Write "–"
 
 
   /// Create a stream of samples starting at a past DateTime.
@@ -443,20 +397,28 @@ type InputStream(beesConfig       : BeesConfig       ,
   //    match seg with
   //    | None: return! None
   //    | Some seg :
-  //    if isInSegOld dateTime then
+  //    if isInSegs.Old dateTime then
   //    WIP
-  //      
+  //
   // }
 
   interface IDisposable with
     member this.Dispose() =
-      System.Console.WriteLine("Disposing inputStream")
-      this.Stop()
-      // Explicitly release any other managed resources here if needed
+      Console.WriteLine("Disposing inputStream")
+      this.PaStream.Dispose()
 
 
 
 // See Theory of Operation comment before main at the end of this file.
+
+
+// let cbAtomically cbState f =
+//   let (cbs: CbState) = cbState
+//   let rec spin() =
+//     if Volatile.Read &cbs.isInCallback then spin()
+//     f cbs // Copy out the stuff needed from cbState.
+//     if Volatile.Read &cbs.isInCallback then spin()
+//   spin()
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

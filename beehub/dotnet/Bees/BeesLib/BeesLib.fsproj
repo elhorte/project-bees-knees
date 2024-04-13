@@ -25,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\BeesUtil\BeesUtil.fsproj" />
     <ProjectReference Include="..\ConsoleReadAsync\ConsoleReadAsync.fsproj" />
+    <ProjectReference Include="..\CsharpHelpers\CsharpHelpers.csproj" />
   </ItemGroup>
 
 </Project>

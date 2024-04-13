@@ -50,7 +50,7 @@ let prepareArgumentsForStreamCreation() =
 
 
 let getArrayPointer byteCount =
-  let inputArray = Array.create byteCount (float 0.0)
+  let inputArray = Array.init byteCount (fun i -> float32 (i + 1000))
   let handle = GCHandle.Alloc(inputArray, GCHandleType.Pinned)
   handle.AddrOfPinnedObject()
 
@@ -68,20 +68,21 @@ let run frameSize inputStream = task {
   
   let test() =
     printfn "calling callback ...\n"
-    let frameCount = 4
+    let frameCount = 5
     let byteCount = frameCount * frameSize
     let input  = getArrayPointer byteCount
     let output = getArrayPointer byteCount
-    let mutable timeInfo    = PortAudioSharp.StreamCallbackTimeInfo()
+    let mutable timeInfo = PortAudioSharp.StreamCallbackTimeInfo()
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(inputStream.CbState))
-    for i in 1..40 do
-      let fc = if i < 20 then  frameCount else  2 * frameCount
+    for i in 1..50 do
+      let fc = uint32 (if i < 25 then  frameCount else  2 * frameCount)
       let m = showGC (fun () ->
         timeInfo.inputBufferAdcTime <- 0.001 * float i
-        inputStream.Callback(input, output, uint32 fc, &timeInfo, statusFlags, userDataPtr) |> ignore 
+        callback input output fc &timeInfo statusFlags userDataPtr |> ignore 
         delayMs false 1
-        Console.WriteLine $"{i}" )
+    //  Console.WriteLine $"{i}"
+      )
       delayMs false 1
     printfn "\n\ncalling callback done"
   
@@ -97,7 +98,7 @@ let run frameSize inputStream = task {
 //–––––––––––––––––––––––––––––––––––––
 // BeesConfig
 
-// pro forma.  Actually set in main.
+// Reserve a global for this.  It is actually set in main.
 let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 
 //–––––––––––––––––––––––––––––––––––––
@@ -119,8 +120,8 @@ let main _ =
     PrimaryDir                  = "primary"
     MonitorDir                  = "monitor"
     PlotDir                     = "plot"
-    inputStreamBufferDuration   = TimeSpan.FromMinutes 16
-    inputStreamRingGapDuration  = TimeSpan.FromSeconds 1
+    InputStreamAudioDuration    = TimeSpan.FromMinutes 16
+    InputStreamRingGapDuration  = TimeSpan.FromSeconds 1
     SampleSize                  = sampleSize
     InChannelCount              = inputParameters.channelCount
     InSampleRate                = sampleRate }

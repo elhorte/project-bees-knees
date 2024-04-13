@@ -13,8 +13,8 @@ type BeesConfig = {
   PrimaryDir                 : string
   MonitorDir                 : string
   PlotDir                    : string
-  inputStreamBufferDuration  : TimeSpan
-  inputStreamRingGapDuration : TimeSpan
+  InputStreamAudioDuration   : TimeSpan
+  InputStreamRingGapDuration : TimeSpan
   SampleSize                 : int
   InChannelCount             : int
   InSampleRate               : int  } with
@@ -29,8 +29,8 @@ let printBeesConfig bc =
   sb.AppendLine $"  PrimaryDir                 {bc.PrimaryDir                }" |> ignore
   sb.AppendLine $"  MonitorDir                 {bc.MonitorDir                }" |> ignore
   sb.AppendLine $"  PlotDir                    {bc.PlotDir                   }" |> ignore
-  sb.AppendLine $"  inputStreamBufferDuration  {bc.inputStreamBufferDuration }" |> ignore
-  sb.AppendLine $"  inputStreamRingGapDuration {bc.inputStreamRingGapDuration}" |> ignore
+  sb.AppendLine $"  inputStreamAudioDuration   {bc.InputStreamAudioDuration  }" |> ignore
+  sb.AppendLine $"  inputStreamRingGapDuration {bc.InputStreamRingGapDuration}" |> ignore
   sb.AppendLine $"  SampleSize                 {bc.SampleSize                }" |> ignore
   sb.AppendLine $"  InChannelCount             {bc.InChannelCount            }" |> ignore
   sb.AppendLine $"  InSampleRate               {bc.InSampleRate              }" |> ignore
