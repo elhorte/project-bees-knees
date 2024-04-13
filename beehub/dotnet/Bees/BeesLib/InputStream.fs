@@ -60,11 +60,11 @@ type InputGetResult =
 
 [<Struct>]
 type Segs = {
-  mutable Cur : Seg
-  mutable Old : Seg }  with
+  mutable Cur   : Seg
+  mutable Old   : Seg
+  mutable State : State }  with
 
   member this.Oldest = if this.Old.Active then this.Old else this.Cur
-
 
 // Callback state, updated by each callback.
 type CbState = {
@@ -75,22 +75,21 @@ type CbState = {
   mutable TimeInfo        : PortAudioSharp.StreamCallbackTimeInfo
   mutable StatusFlags     : PortAudioSharp.StreamCallbackFlags
   // callback result
+  Ring                    : float32 array
   mutable Segs            : Segs
-  mutable SeqNum          : uint64
-  mutable InputRingCopy   : IntPtr // where input was copied to
-  mutable TimeStamp       : DateTime
-  // more stuff
-  mutable State           : State
-  mutable IsInCallback    : bool
   mutable NRingFrames     : int
   mutable NDataFrames     : int
   mutable NGapFrames      : int
+  mutable AdcStartTime    : DateTime
+  mutable SeqNum          : uint64
+  mutable LatestBlock     : int // ring index where latest input block was copied
+  // more stuff
+  mutable IsInCallback    : bool
   mutable CallbackHandoff : CallbackHandoff
   mutable WithEcho        : bool
   mutable WithLogging     : bool
   TimeInfoBase            : DateTime // for getting UTC from timeInfo.inputBufferAdcTime
   FrameSize               : int
-  Ring                    : float32 array
   Logger                  : Logger
   DebugSimulating         : bool }
 
@@ -106,7 +105,6 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
 //Console.Write "."
   Volatile.Write(&cbs.IsInCallback, true)
   let nFrames = int frameCount
-  let adcStartTime = cbs.TimeInfoBase + TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
   if not cbs.DebugSimulating then Console.Write "."
 
   cbs.Input        <- input
@@ -114,6 +112,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   cbs.FrameCount   <- frameCount // in the ”block“ to be copied
   cbs.TimeInfo     <- timeInfo
   cbs.StatusFlags  <- statusFlags
+  cbs.AdcStartTime <- cbs.TimeInfoBase + TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
   cbs.SeqNum       <- cbs.SeqNum + 1UL
 
   if cbs.WithEcho then
@@ -132,14 +131,14 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       let mutable dots = Array.init cbs.NRingFrames (fun i -> if i % 10 = 0 then char ((i/10%10).ToString()) else '.' )
       let showSegDots seg =  for i in (seg.Tail)..(seg.Head-1) do dots[i] <- '◾'
       showSegDots cbs.Segs.Cur
-      match cbs.State with
+      match cbs.Segs.State with
       | AtStart
       | AtBegin
       | Moving
       | AtEnd   -> ()
       | Chasing -> showSegDots cbs.Segs.Old
       Console.Write dots
-      let sState   = $"{cbs.State}"
+      let sState   = $"{cbs.Segs.State}"
       let sCur     = cbs.Segs.Cur.Print "cur"
       let sNewTail = sprintf "%3d" newTail
       let sNew     = $"{sNewTail:S3}.{newHead:d2}"
@@ -159,9 +158,9 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     // This test is here instead of below under Moving in case nFrames is bigger than last time.
     if newHead > cbs.NRingFrames then
       // State is AtEnd briefly here because the block will not fit after Segs.Cur.Head.
-      assert (cbs.State = Moving)
+      assert (cbs.Segs.State = Moving)
       assert (not cbs.Segs.Old.Active)
-      cbs.State <- AtEnd  // only for readability here
+      cbs.Segs.State <- AtEnd  // only for readability here
       do // Exchange Segs
         let tmp = cbs.Segs.Cur  in  cbs.Segs.Cur <- cbs.Segs.Old  ;  cbs.Segs.Old <- tmp
       assert (cbs.Segs.Cur.Head = 0)
@@ -169,23 +168,23 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       // Trim away Segs.Old.Tail to ensure the gap.
       newHead <- cbs.Segs.Cur.Head + nFrames
       newTail <- newHead - cbs.NDataFrames
-      cbs.State <- Chasing
+      cbs.Segs.State <- Chasing
       printCurAndOld "exchanged"
-    match cbs.State with
+    match cbs.Segs.State with
     | AtStart ->
       assert (not cbs.Segs.Cur.Active)
       assert (not cbs.Segs.Old.Active)
       assert (newHead = nFrames)  // The block will fit at Ring[0]
-      cbs.State <- AtBegin
+      cbs.Segs.State <- AtBegin
     | AtBegin ->
       assert (not cbs.Segs.Old.Active)
       assert (cbs.Segs.Cur.Tail = 0)
       assert (cbs.Segs.Cur.Head + cbs.NGapFrames <= cbs.NRingFrames)  // The block will def fit after Segs.Cur.Head
-      cbs.State <- if trimCurTail() then  Moving else  AtBegin
+      cbs.Segs.State <- if trimCurTail() then  Moving else  AtBegin
     | Moving ->
       assert (not cbs.Segs.Old.Active)
       trimCurTail() |> ignore
-      cbs.State <- Moving
+      cbs.Segs.State <- Moving
     | Chasing  ->
       assert (cbs.Segs.Old.Active)
       assert (newHead <= cbs.NRingFrames)  // The block will fit after Segs.Cur.Head
@@ -198,20 +197,21 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
         if newHead + cbs.NGapFrames > cbs.Segs.Old.Tail + nFrames then  Console.WriteLine "bad"
         cbs.Segs.Old.Tail <- cbs.Segs.Old.Tail + nFrames
         assert (newHead + cbs.NGapFrames <= cbs.Segs.Old.Tail)
-        cbs.State <- Chasing
+        cbs.Segs.State <- Chasing
       else
       // Segs.Old is too small; make it inactive.
         cbs.Segs.Old.Reset()
-        cbs.State <- Moving
+        cbs.Segs.State <- Moving
     | AtEnd ->
       failwith "Can’t happen."
 
+  cbs.LatestBlock <- cbs.Segs.Cur.Head
 //cbs.Logger.Add cbs.SeqNum cbs.TimeStamp "cb bufs=" ""
   do
     // Copy the block to the ring.
     // Copy from callback data to the head of the ring and return a pointer to the copy.
-    UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, cbs.Segs.Cur.Head, nFrames)
-    cbs.Segs.Cur.AdvanceHead nFrames adcStartTime
+    UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, cbs.LatestBlock, nFrames)
+    cbs.Segs.Cur.AdvanceHead nFrames cbs.AdcStartTime
   cbs.CallbackHandoff.HandOff()
   Volatile.Write(&cbs.IsInCallback, false)
   PortAudioSharp.StreamCallbackResult.Continue
@@ -249,23 +249,23 @@ type InputStream(beesConfig       : BeesConfig       ,
     TimeInfo        = PortAudioSharp.StreamCallbackTimeInfo()
     StatusFlags     = PortAudioSharp.StreamCallbackFlags()
     // callback result
-    Segs            = { Cur = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
-                        Old = Seg.NewEmpty nRingFrames beesConfig.InSampleRate }
-    SeqNum          = 0UL
-    InputRingCopy   = IntPtr.Zero
-    TimeStamp       = DateTime.MaxValue // placeholder
-    // more stuff
-    State           = AtStart
-    IsInCallback    = false
+    Ring            = Array.init<float32> nRingFrames (fun _ -> 0.0f)
+    Segs            = { Cur   = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
+                        Old   = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
+                        State = AtStart }
     NRingFrames     = nRingFrames
     NDataFrames     = nDataFrames
     NGapFrames      = nGapFrames
+    AdcStartTime    = DateTime.MaxValue // placeholder
+    SeqNum          = 0UL
+    LatestBlock     = 0
+    // more stuff
+    IsInCallback    = false
     CallbackHandoff = dummyInstance<CallbackHandoff>()  // tbd
     WithEcho        = withEcho
     WithLogging     = withLogging
     TimeInfoBase    = startTime  // timeInfoBase + adcInputTime -> cbState.TimeStamp
     FrameSize       = frameSize
-    Ring            = Array.init<float32> nRingFrames (fun _ -> 0.0f)
     Logger          = Logger(8000, startTime)
     DebugSimulating = simulatingCallbacks  }
 
