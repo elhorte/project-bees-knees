@@ -61,8 +61,7 @@ type InputGetResult =
 [<Struct>]
 type Segs = {
   mutable Cur   : Seg
-  mutable Old   : Seg
-  mutable State : State }  with
+  mutable Old   : Seg }  with
 
   member this.Oldest = if this.Old.Active then this.Old else this.Cur
 
@@ -76,12 +75,14 @@ type CbState = {
   mutable StatusFlags     : PortAudioSharp.StreamCallbackFlags
   // callback result
   Ring                    : float32 array
+  mutable State           : State
   mutable Segs            : Segs
+  mutable SegsLatest      : Segs
+  mutable SeqNum          : uint64
   mutable NRingFrames     : int
   mutable NDataFrames     : int
   mutable NGapFrames      : int
   mutable AdcStartTime    : DateTime
-  mutable SeqNum          : uint64
   mutable LatestBlock     : int // ring index where latest input block was copied
   // more stuff
   mutable IsInCallback    : bool
@@ -91,11 +92,11 @@ type CbState = {
   TimeInfoBase            : DateTime // for getting UTC from timeInfo.inputBufferAdcTime
   FrameSize               : int
   Logger                  : Logger
-  DebugSimulating         : bool }
+  Simulating              : bool }
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// Copy data from the audio driver into our ring.
+// The callback – Copy data from the audio driver into our ring.
 
 let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) statusFlags userDataPtr =
   let (input : IntPtr) = input
@@ -105,7 +106,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
 //Console.Write "."
   Volatile.Write(&cbs.IsInCallback, true)
   let nFrames = int frameCount
-  if not cbs.DebugSimulating then Console.Write "."
+  if not cbs.Simulating then Console.Write "."
 
   cbs.Input        <- input
   cbs.Output       <- output
@@ -113,7 +114,6 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   cbs.TimeInfo     <- timeInfo
   cbs.StatusFlags  <- statusFlags
   cbs.AdcStartTime <- cbs.TimeInfoBase + TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
-  cbs.SeqNum       <- cbs.SeqNum + 1UL
 
   if cbs.WithEcho then
     let size = uint64 (frameCount * uint32 cbs.FrameSize)
@@ -125,28 +125,45 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     // which will be updated after copying the data to the ring.
     let mutable newHead = cbs.Segs.Cur.Head + nFrames // provisional
     let mutable newTail = newHead - cbs.NDataFrames // provisional, can be negative
-    let printCurAndOld msg =
-      if not cbs.DebugSimulating then ()
+    let printRing msg =
+      if not cbs.Simulating then ()
       else
-      let mutable dots = Array.init cbs.NRingFrames (fun i -> if i % 10 = 0 then char ((i/10%10).ToString()) else '.' )
-      let showSegDots seg =  for i in (seg.Tail)..(seg.Head-1) do dots[i] <- '◾'
-      showSegDots cbs.Segs.Cur
-      match cbs.Segs.State with
-      | AtStart
-      | AtBegin
-      | Moving
-      | AtEnd   -> ()
-      | Chasing -> showSegDots cbs.Segs.Old
-      Console.Write dots
-      let sState   = $"{cbs.Segs.State}"
-      let sCur     = cbs.Segs.Cur.Print "cur"
-      let sNewTail = sprintf "%3d" newTail
-      let sNew     = $"{sNewTail:S3}.{newHead:d2}"
-      let sOld     = cbs.Segs.Old.Print "old"
-      let sTotal   = let sum = cbs.Segs.Cur.NFrames + cbs.Segs.Old.NFrames
-                     $"{cbs.Segs.Cur.NFrames:d2}+{cbs.Segs.Old.NFrames:d2}={sum:d2}"
-      let sGap     = if cbs.Segs.Old.Active then sprintf "%2d" (cbs.Segs.Old.Tail - cbs.Segs.Cur.Head) else  "  "
-      Console.WriteLine $"  %s{sCur}  new %s{sNew} %s{sOld} %s{sTotal}  gap {sGap:s2} %s{sState} %s{msg}"
+      let sRing =
+        let empty =  '.'
+        let data  =  '◾'
+        let getsNum i =  i % 10 = 0
+        let num i =  char ((i / 10 % 10).ToString())
+        let mutable ring =
+          let numberedEmpties i =  if getsNum i then  num i else  empty
+          // "..........1.........2.........3.........4.........5.........6.........7.........8....."
+          Array.init cbs.NRingFrames numberedEmpties
+        do // Overwrite empties with seg data.
+          let showDataFor seg =
+            let first = seg.Tail
+            let last  = seg.Head - 1
+            let charFor i =  if i > first  &&  i < last  &&  getsNum i then  num i else  data     
+            for i in first..last do  ring[i] <- charFor i
+          match cbs.State with
+          | AtStart
+          | AtBegin
+          | Moving
+          | AtEnd   -> ()
+          | Chasing -> showDataFor cbs.Segs.Old
+          showDataFor cbs.Segs.Cur
+        // "◾◾◾◾◾◾◾◾◾◾1◾◾◾◾◾◾◾◾◾2◾◾◾◾◾◾◾◾◾3◾◾◾◾.....4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
+        String ring
+      let sText =
+        let sCur     = cbs.Segs.Cur.Print "cur"
+        let sNewTail = sprintf "%3d" newTail
+        let sNew     = $"{sNewTail:S3}.{newHead:d2}"
+        let sOld     = cbs.Segs.Old.Print "old"
+        let sTotal   = let sum = cbs.Segs.Cur.NFrames + cbs.Segs.Old.NFrames
+                       $"{cbs.Segs.Cur.NFrames:d2}+{cbs.Segs.Old.NFrames:d2}={sum:d2}"
+        let sGap     = if cbs.Segs.Old.Active then sprintf "%2d" (cbs.Segs.Old.Tail - cbs.Segs.Cur.Head) else  "  "
+        let sState   = $"{cbs.State}"
+        // "cur 00.35  new -11.45 old 64.85 35+21=56  gap 29 Chasing "
+        $"%s{sCur}  new %s{sNew} %s{sOld} %s{sTotal}  gap {sGap:s2} %s{sState} %s{msg}"
+      Console.WriteLine $"%s{sRing}  %s{sText}"
     let trimCurTail() =
       if newTail > 0 then
         cbs.Segs.Cur.Tail <- newTail
@@ -154,37 +171,34 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       else
         assert (cbs.Segs.Cur.Tail = 0)
         false
-    printCurAndOld ""
-    // This test is here instead of below under Moving in case nFrames is bigger than last time.
+    printRing ""
     if newHead > cbs.NRingFrames then
-      // State is AtEnd briefly here because the block will not fit after Segs.Cur.Head.
-      assert (cbs.Segs.State = Moving)
+      assert (cbs.State = Moving)
       assert (not cbs.Segs.Old.Active)
-      cbs.Segs.State <- AtEnd  // only for readability here
-      do // Exchange Segs
+      // State is AtEnd briefly here and quickly changes to Chasing.
+      cbs.State <- AtEnd
+      do // Exchange Cur and Old
         let tmp = cbs.Segs.Cur  in  cbs.Segs.Cur <- cbs.Segs.Old  ;  cbs.Segs.Old <- tmp
-      assert (cbs.Segs.Cur.Head = 0)
-      // Segs.Cur starts fresh with head = 0, tail = 0.
-      // Trim away Segs.Old.Tail to ensure the gap.
+      assert (cbs.Segs.Cur.Head = 0  &&  cbs.Segs.Cur.Tail = 0)
       newHead <- cbs.Segs.Cur.Head + nFrames
       newTail <- newHead - cbs.NDataFrames
-      cbs.Segs.State <- Chasing
-      printCurAndOld "exchanged"
-    match cbs.Segs.State with
+      cbs.State <- Chasing
+      printRing "exchanged"
+    match cbs.State with
     | AtStart ->
       assert (not cbs.Segs.Cur.Active)
       assert (not cbs.Segs.Old.Active)
       assert (newHead = nFrames)  // The block will fit at Ring[0]
-      cbs.Segs.State <- AtBegin
+      cbs.State <- AtBegin
     | AtBegin ->
       assert (not cbs.Segs.Old.Active)
       assert (cbs.Segs.Cur.Tail = 0)
       assert (cbs.Segs.Cur.Head + cbs.NGapFrames <= cbs.NRingFrames)  // The block will def fit after Segs.Cur.Head
-      cbs.Segs.State <- if trimCurTail() then  Moving else  AtBegin
+      cbs.State <- if trimCurTail() then  Moving else  AtBegin
     | Moving ->
       assert (not cbs.Segs.Old.Active)
       trimCurTail() |> ignore
-      cbs.Segs.State <- Moving
+      cbs.State <- Moving
     | Chasing  ->
       assert (cbs.Segs.Old.Active)
       assert (newHead <= cbs.NRingFrames)  // The block will fit after Segs.Cur.Head
@@ -197,11 +211,11 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
         if newHead + cbs.NGapFrames > cbs.Segs.Old.Tail + nFrames then  Console.WriteLine "bad"
         cbs.Segs.Old.Tail <- cbs.Segs.Old.Tail + nFrames
         assert (newHead + cbs.NGapFrames <= cbs.Segs.Old.Tail)
-        cbs.Segs.State <- Chasing
+        cbs.State <- Chasing
       else
       // Segs.Old is too small; make it inactive.
         cbs.Segs.Old.Reset()
-        cbs.Segs.State <- Moving
+        cbs.State <- Moving
     | AtEnd ->
       failwith "Can’t happen."
 
@@ -212,6 +226,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     // Copy from callback data to the head of the ring and return a pointer to the copy.
     UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, cbs.LatestBlock, nFrames)
     cbs.Segs.Cur.AdvanceHead nFrames cbs.AdcStartTime
+  cbs.SegsLatest <- cbs.Segs
+  Volatile.Write(&cbs.SeqNum, cbs.SeqNum + 1UL)
   cbs.CallbackHandoff.HandOff()
   Volatile.Write(&cbs.IsInCallback, false)
   PortAudioSharp.StreamCallbackResult.Continue
@@ -235,7 +251,9 @@ type InputStream(beesConfig       : BeesConfig       ,
   let frameSize     = beesConfig.FrameSize
   let nRingBytes    = int nRingFrames * frameSize
   let startTime     = DateTime.UtcNow
-
+  let segs          = { Cur = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
+                        Old = Seg.NewEmpty nRingFrames beesConfig.InSampleRate }
+  
   // When unmanaged code calls managed code (e.g., a callback from unmanaged to managed),
   // the CLR ensures that the garbage collector will not move referenced managed objects
   // in memory during the execution of that managed code.
@@ -250,14 +268,14 @@ type InputStream(beesConfig       : BeesConfig       ,
     StatusFlags     = PortAudioSharp.StreamCallbackFlags()
     // callback result
     Ring            = Array.init<float32> nRingFrames (fun _ -> 0.0f)
-    Segs            = { Cur   = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
-                        Old   = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
-                        State = AtStart }
+    State           = AtStart
+    Segs            = segs
+    SegsLatest      = segs
+    SeqNum          = 0UL
     NRingFrames     = nRingFrames
     NDataFrames     = nDataFrames
     NGapFrames      = nGapFrames
     AdcStartTime    = DateTime.MaxValue // placeholder
-    SeqNum          = 0UL
     LatestBlock     = 0
     // more stuff
     IsInCallback    = false
@@ -267,13 +285,13 @@ type InputStream(beesConfig       : BeesConfig       ,
     TimeInfoBase    = startTime  // timeInfoBase + adcInputTime -> cbState.TimeStamp
     FrameSize       = frameSize
     Logger          = Logger(8000, startTime)
-    DebugSimulating = simulatingCallbacks  }
+    Simulating      = simulatingCallbacks  }
 
   let debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
-    if not cbState.DebugSimulating then Console.Write ","
+    if not cbState.Simulating then Console.Write ","
 
   let paStream =
-    if cbState.DebugSimulating then
+    if cbState.Simulating then
       dummyInstance<PortAudioSharp.Stream>()
     else
       let streamCallback = PortAudioSharp.Stream.Callback(
@@ -308,7 +326,7 @@ type InputStream(beesConfig       : BeesConfig       ,
   member this.Start() =
     this.CbState.CallbackHandoff <- CallbackHandoff.New this.AfterCallback
     this.CbState.CallbackHandoff.Start()
-    if this.CbState.DebugSimulating then ()
+    if this.CbState.Simulating then ()
     else
     paTryCatchRethrow (fun() -> this.PaStream.Start() )
     printfn $"InputStream size: {this.NRingBytes / 1_000_000} MB for {this.RingDuration}"
@@ -316,7 +334,7 @@ type InputStream(beesConfig       : BeesConfig       ,
 
   member this.Stop() =
     this.CbState.CallbackHandoff.Stop ()
-    if this.CbState.DebugSimulating then ()
+    if this.CbState.Simulating then ()
     else
     paTryCatchRethrow(fun() -> this.PaStream.Stop () )
 
@@ -324,7 +342,7 @@ type InputStream(beesConfig       : BeesConfig       ,
               callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
 
   member this.AfterCallback() =
-    if not cbState.DebugSimulating then Console.Write ","
+    if not cbState.Simulating then Console.Write ","
 
   member private is.debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
     Console.Write ","
