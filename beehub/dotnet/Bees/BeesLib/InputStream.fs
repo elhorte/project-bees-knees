@@ -129,20 +129,21 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       if not cbs.Simulating then ()
       else
       let sRing =
-        let empty =  '.'
-        let data  =  '◾'
-        let getsNum i =  i % 10 = 0
-        let num i =  char ((i / 10 % 10).ToString())
+        let empty = '.'
+        let data  = '◾'
+        let getsNum i = i % 10 = 0
+        let num i = char ((i / 10 % 10).ToString())
         let mutable ring =
-          let numberedEmpties i =  if getsNum i then  num i else  empty
+          let numberedEmpties i = if getsNum i then  num i else  empty
           // "..........1.........2.........3.........4.........5.........6.........7.........8....."
           Array.init cbs.NRingFrames numberedEmpties
         do // Overwrite empties with seg data.
           let showDataFor seg =
             let first = seg.Tail
             let last  = seg.Head - 1
-            let charFor i =  if i > first  &&  i < last  &&  getsNum i then  num i else  data     
-            for i in first..last do  ring[i] <- charFor i
+            let getsNum i = first < i  &&  i < last  &&  getsNum i  // show only interior numbers
+            let setDataFor i = if not (getsNum i) then  ring[i] <- data     
+            for i in first..last do  setDataFor i
           if cbs.Segs.Old.Active then
             assert (cbs.State = Chasing)
             showDataFor cbs.Segs.Old
