@@ -143,12 +143,9 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
             let last  = seg.Head - 1
             let charFor i =  if i > first  &&  i < last  &&  getsNum i then  num i else  data     
             for i in first..last do  ring[i] <- charFor i
-          match cbs.State with
-          | AtStart
-          | AtBegin
-          | Moving
-          | AtEnd   -> ()
-          | Chasing -> showDataFor cbs.Segs.Old
+          if cbs.Segs.Old.Active then
+            assert (cbs.State = Chasing)
+            showDataFor cbs.Segs.Old
           showDataFor cbs.Segs.Cur
         // "◾◾◾◾◾◾◾◾◾◾1◾◾◾◾◾◾◾◾◾2◾◾◾◾◾◾◾◾◾3◾◾◾◾.....4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
         String ring
@@ -173,13 +170,13 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
         false
     printRing ""
     if newHead > cbs.NRingFrames then
+      cbs.State <- AtEnd // State is AtEnd briefly here and quickly changes to Chasing.
       assert (cbs.State = Moving)
       assert (not cbs.Segs.Old.Active)
-      // State is AtEnd briefly here and quickly changes to Chasing.
-      cbs.State <- AtEnd
       do // Exchange Cur and Old
         let tmp = cbs.Segs.Cur  in  cbs.Segs.Cur <- cbs.Segs.Old  ;  cbs.Segs.Old <- tmp
       assert (cbs.Segs.Cur.Head = 0  &&  cbs.Segs.Cur.Tail = 0)
+      // Gotta do these again after the exchange.
       newHead <- cbs.Segs.Cur.Head + nFrames
       newTail <- newHead - cbs.NDataFrames
       cbs.State <- Chasing
@@ -203,19 +200,17 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       assert (cbs.Segs.Old.Active)
       assert (newHead <= cbs.NRingFrames)  // The block will fit after Segs.Cur.Head
       assert (cbs.Segs.Cur.Tail = 0)
-      // Segs.Old is active.  Segs.Cur.Head is growing toward the Segs.Old.Tail, which retreats as Segs.Cur.Head grows.
+      // Segs.Old.Active.  Segs.Cur.Head is growing toward the Segs.Old.Tail, which retreats as Segs.Cur.Head grows.
       assert (cbs.Segs.Cur.Head < cbs.Segs.Old.Tail)
       trimCurTail() |> ignore
-      if cbs.Segs.Old.NFrames > nFrames then
-        // Trim nFrames from the Segs.Old.Tail
-        if newHead + cbs.NGapFrames > cbs.Segs.Old.Tail + nFrames then  Console.WriteLine "bad"
+      if cbs.Segs.Old.NFrames <= nFrames then
+        // Segs.Old is so small that it vanishes.
+        cbs.Segs.Old.Reset()
+        cbs.State <- Moving
+      else
         cbs.Segs.Old.Tail <- cbs.Segs.Old.Tail + nFrames
         assert (newHead + cbs.NGapFrames <= cbs.Segs.Old.Tail)
         cbs.State <- Chasing
-      else
-      // Segs.Old is too small; make it inactive.
-        cbs.Segs.Old.Reset()
-        cbs.State <- Moving
     | AtEnd ->
       failwith "Can’t happen."
 
