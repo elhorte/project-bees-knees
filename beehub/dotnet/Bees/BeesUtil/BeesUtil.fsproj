@@ -15,7 +15,7 @@
         <Compile Include="Logger.fs"               />
         <Compile Include="AsyncConcurrentQueue.fs" />
         <Compile Include="ItemPool.fs"             />
-        <Compile Include="WorkList.fs"             />
+        <Compile Include="SubscriberList.fs" />
         <Compile Include="PortAudioUtils.fs"       />
         <Compile Include="Mp3.fs"                  />
     </ItemGroup>

@@ -9,7 +9,7 @@ open PortAudioSharp
 open BeesUtil.Util
 open BeesUtil.Logger
 open BeesUtil.ItemPool
-open BeesUtil.WorkList
+open BeesUtil.SubscriberList
 open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
 open BeesLib.BeesConfig
@@ -86,7 +86,7 @@ type InputStream = {
   gapDuration               : TimeSpan
   mutable nGapFrames        : int
   cbMessagePool             : CbMessagePool
-  cbMessageWorkList         : WorkList<CbMessage>
+  cbMessageWorkList         : SubscriberList<CbMessage>
   mutable cbSegCur          : Seg
   mutable cbSegOld          : Seg
   mutable cbMessageCurrent  : CbMessage
@@ -391,7 +391,7 @@ let newInputStream( beesConfig       : BeesConfig       )
   let frameSize         = beesConfig.FrameSize
   let nRingBytes        = int nRingFrames * frameSize
   let gapDuration       = TimeSpan.FromMilliseconds 10
-  let cbMessageWorkList = WorkList<CbMessage>()
+  let cbMessageWorkList = SubscriberList<CbMessage>()
   let nGapFrames        = if DebugGlobals.simulatingCallbacks then 2 else durationToNFrames beesConfig.InSampleRate gapDuration 
   let cbMessagePool     = makeCbMessagePool beesConfig nRingFrames
   let cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
@@ -415,7 +415,7 @@ let newInputStream( beesConfig       : BeesConfig       )
     gapDuration       = TimeSpan.FromMilliseconds 10
     nGapFrames        = nGapFrames
     cbMessagePool     = cbMessagePool
-    cbMessageWorkList = WorkList<CbMessage>()
+    cbMessageWorkList = SubscriberList<CbMessage>()
     cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
     poolItemCurrent   = poolItemCurrent
     cbSegCur          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate

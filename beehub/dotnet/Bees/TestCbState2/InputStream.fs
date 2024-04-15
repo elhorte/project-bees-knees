@@ -9,7 +9,7 @@ open PortAudioSharp
 open BeesUtil.Util
 open BeesUtil.Logger
 open BeesUtil.ItemPool
-open BeesUtil.WorkList
+open BeesUtil.SubscriberList
 open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
 open BeesLib.BeesConfig
@@ -276,7 +276,7 @@ type InputStream(beesConfig       : BeesConfig       ,
     Logger          = Logger(8000, startTime)
     DebugSimulating = false  }
 
-  // let cbMessageWorkList = WorkList<CbMessage>()
+  // let cbMessageWorkList = SubscriberList<CbMessage>()
   // let cbMessagePool     = makeCbMessagePool beesConfig nRingFrames
   // let cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
   // let poolItemCurrent   = PoolItem.New cbMessagePool cbMessageCurrent
@@ -311,7 +311,7 @@ type InputStream(beesConfig       : BeesConfig       ,
   let cbState           = cbState
   let timeStamp         = DateTime.Now
   // let cbMessagePool     = cbMessagePool
-  // let cbMessageWorkList = WorkList<CbMessage>()
+  // let cbMessageWorkList = SubscriberList<CbMessage>()
   // let cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
   // let poolItemCurrent   = poolItemCurrent
   let debugMaxCallbacks = Int32.MaxValue

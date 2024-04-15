@@ -9,7 +9,7 @@ open PortAudioSharp
 open BeesUtil.Util
 open BeesUtil.Logger
 open BeesUtil.ItemPool
-open BeesUtil.WorkList
+open BeesUtil.SubscriberList
 open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
 open BeesLib.BeesConfig
@@ -235,7 +235,7 @@ type InputStream = {
   nRingBytes                : int
   gapDuration               : TimeSpan
   cbMessagePool             : CbMessagePool
-  cbMessageWorkList         : WorkList<CbMessage>
+  cbMessageWorkList         : SubscriberList<CbMessage>
   mutable cbMessageCurrent  : CbMessage
   mutable poolItemCurrent   : PoolItem<CbMessage>
   BeesConfig                : BeesConfig
@@ -287,7 +287,7 @@ type InputStream = {
       ringPtr         = Marshal.AllocHGlobal(nRingBytes)
       debugSimulating = false  }
 
-    let cbMessageWorkList = WorkList<CbMessage>()
+    let cbMessageWorkList = SubscriberList<CbMessage>()
     let cbMessagePool     = makeCbMessagePool beesConfig nRingFrames
     let cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
     let poolItemCurrent   = PoolItem.New cbMessagePool cbMessageCurrent
@@ -309,7 +309,7 @@ type InputStream = {
         nRingBytes        = nRingBytes
         gapDuration       = TimeSpan.FromMilliseconds 10
         cbMessagePool     = cbMessagePool
-        cbMessageWorkList = WorkList<CbMessage>()
+        cbMessageWorkList = SubscriberList<CbMessage>()
         cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
         poolItemCurrent   = poolItemCurrent
         BeesConfig        = beesConfig
@@ -342,7 +342,7 @@ type InputStream = {
         nRingBytes        = nRingBytes
         gapDuration       = TimeSpan.FromMilliseconds 10
         cbMessagePool     = cbMessagePool
-        cbMessageWorkList = WorkList<CbMessage>()
+        cbMessageWorkList = SubscriberList<CbMessage>()
         cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
         poolItemCurrent   = poolItemCurrent
         BeesConfig        = beesConfig

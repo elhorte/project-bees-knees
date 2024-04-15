@@ -1,4 +1,4 @@
-module BeesUtil.WorkList
+module BeesUtil.SubscriberList
 
 /// A subscription service for a generic event
 
@@ -9,7 +9,7 @@ type SubscriberHandler<'Event> = 'Event -> SubscriptionId -> Unsubscriber -> uni
 and  Subscription<'Event>      = Subscription of (SubscriptionId * SubscriberHandler<'Event>)
 
 
-type WorkList<'Event>() =
+type SubscriberList<'Event>() =
   
   let         subscriptions = ResizeArray<Subscription<'Event>>()
   let mutable idCurrent     = 0

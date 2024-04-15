@@ -8,7 +8,7 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "BeesUtil", "BeesUtil\BeesUt
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestItemPool", "TestItemPool\TestItemPool.fsproj", "{87CF251D-482B-4AEE-8F95-472A52468DBE}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestWorkList", "TestWorkList\TestWorkList.fsproj", "{025A7A07-35F8-4B12-8F4A-9B60D3E0762D}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestSubscriberList", "TestSubscriberList\TestSubscriberList.fsproj", "{025A7A07-35F8-4B12-8F4A-9B60D3E0762D}"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "BeesLib", "BeesLib\BeesLib.fsproj", "{A198276E-177B-4298-9FC8-2D3CEC689FF7}"
 EndProject

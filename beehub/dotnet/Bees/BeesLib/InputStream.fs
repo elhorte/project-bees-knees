@@ -7,7 +7,7 @@ open System.Threading
 open PortAudioSharp
 open BeesUtil.Util
 open BeesUtil.Logger
-open BeesUtil.WorkList
+open BeesUtil.SubscriberList
 open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
 open BeesLib.BeesConfig
@@ -77,8 +77,8 @@ type CbState = {
   Ring                    : float32 array
   mutable State           : State
   mutable Segs            : Segs
-  mutable SegsLatest      : Segs
-  mutable SeqNum          : uint64
+  mutable SeqNum1         : uint
+  mutable SeqNum2         : uint
   mutable NRingFrames     : int
   mutable NDataFrames     : int
   mutable NGapFrames      : int
@@ -101,13 +101,17 @@ type CbState = {
 let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) statusFlags userDataPtr =
   let (input : IntPtr) = input
   let (output: IntPtr) = output
-  let handle = GCHandle.FromIntPtr(userDataPtr)
-  let cbs = handle.Target :?> CbState
-//Console.Write "."
-  Volatile.Write(&cbs.IsInCallback, true)
+  let handle  = GCHandle.FromIntPtr(userDataPtr)
+  let cbs     = handle.Target :?> CbState
   let nFrames = int frameCount
-  if not cbs.Simulating then Console.Write "."
+  Volatile.Write(&cbs.IsInCallback, true)
+  if not cbs.Simulating then  Console.Write "."
 
+  if cbs.WithEcho then
+    let size = uint64 (frameCount * uint32 cbs.FrameSize)
+    Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
+
+  Volatile.Write(&cbs.SeqNum1, cbs.SeqNum1 + 1u)
   cbs.Input        <- input
   cbs.Output       <- output
   cbs.FrameCount   <- frameCount // in the ”block“ to be copied
@@ -115,14 +119,9 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   cbs.StatusFlags  <- statusFlags
   cbs.AdcStartTime <- cbs.TimeInfoBase + TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
 
-  if cbs.WithEcho then
-    let size = uint64 (frameCount * uint32 cbs.FrameSize)
-    Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
-
   do
-    // Ensure that Segs.Cur.Head is ready for the new data
-    // and adjust the segs except for Segs.Cur.Head,
-    // which will be updated after copying the data to the ring.
+    // Modify the segs so that Segs.Cur.Head points to where the data will go in the ring.
+    // Later, after the copy is done, Segs.Cur.Head will point after the new data.
     let mutable newHead = cbs.Segs.Cur.Head + nFrames // provisional
     let mutable newTail = newHead - cbs.NDataFrames // provisional, can be negative
     let printRing msg =
@@ -132,8 +131,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
         let empty = '.'
         let data  = '◾'
         let getsNum i = i % 10 = 0
-        let num i = char ((i / 10 % 10).ToString())
         let mutable ring =
+          let num i = char ((i / 10 % 10).ToString())
           let numberedEmpties i = if getsNum i then  num i else  empty
           // "..........1.........2.........3.........4.........5.........6.........7.........8....."
           Array.init cbs.NRingFrames numberedEmpties
@@ -162,22 +161,17 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
         // "cur 00.35  new -11.45 old 64.85 35+21=56  gap 29 Chasing "
         $"%s{sCur}  new %s{sNew} %s{sOld} %s{sTotal}  gap {sGap:s2} %s{sState} %s{msg}"
       Console.WriteLine $"%s{sRing}  %s{sText}"
-    let trimCurTail() =
-      if newTail > 0 then
-        cbs.Segs.Cur.Tail <- newTail
-        true
-      else
-        assert (cbs.Segs.Cur.Tail = 0)
-        false
+    let trimCurTail() = if newTail > 0 then         cbs.Segs.Cur.Tail <- newTail ; true
+                                       else assert (cbs.Segs.Cur.Tail = 0)       ; false
     printRing ""
     if newHead > cbs.NRingFrames then
-      cbs.State <- AtEnd // State is AtEnd briefly here and quickly changes to Chasing.
       assert (cbs.State = Moving)
       assert (not cbs.Segs.Old.Active)
-      do // Exchange Cur and Old
+      cbs.State <- AtEnd // Briefly; quickly changes to Chasing.
+      do // Exchange Segs.Cur and Segs.Old
         let tmp = cbs.Segs.Cur  in  cbs.Segs.Cur <- cbs.Segs.Old  ;  cbs.Segs.Old <- tmp
       assert (cbs.Segs.Cur.Head = 0  &&  cbs.Segs.Cur.Tail = 0)
-      // Gotta do these again after the exchange.
+      // Must set these again after the exchange.
       newHead <- cbs.Segs.Cur.Head + nFrames
       newTail <- newHead - cbs.NDataFrames
       cbs.State <- Chasing
@@ -216,14 +210,12 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       failwith "Can’t happen."
 
   cbs.LatestBlock <- cbs.Segs.Cur.Head
-//cbs.Logger.Add cbs.SeqNum cbs.TimeStamp "cb bufs=" ""
-  do
-    // Copy the block to the ring.
-    // Copy from callback data to the head of the ring and return a pointer to the copy.
+  do // Copy the block to the ring.
     UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, cbs.LatestBlock, nFrames)
-    cbs.Segs.Cur.AdvanceHead nFrames cbs.AdcStartTime
-  cbs.SegsLatest <- cbs.Segs
-  Volatile.Write(&cbs.SeqNum, cbs.SeqNum + 1UL)
+  cbs.Segs.Cur.AdvanceHead nFrames cbs.AdcStartTime
+
+//cbs.Logger.Add cbs.SeqNum2 cbs.TimeStamp "cb bufs=" ""
+  Volatile.Write(&cbs.SeqNum2, cbs.SeqNum1 + 1u)
   cbs.CallbackHandoff.HandOff()
   Volatile.Write(&cbs.IsInCallback, false)
   PortAudioSharp.StreamCallbackResult.Continue
@@ -266,8 +258,8 @@ type InputStream(beesConfig       : BeesConfig       ,
     Ring            = Array.init<float32> nRingFrames (fun _ -> 0.0f)
     State           = AtStart
     Segs            = segs
-    SegsLatest      = segs
-    SeqNum          = 0UL
+    SeqNum1         = 0u
+    SeqNum2         = 0u
     NRingFrames     = nRingFrames
     NDataFrames     = nDataFrames
     NGapFrames      = nGapFrames
@@ -333,6 +325,15 @@ type InputStream(beesConfig       : BeesConfig       ,
     if this.CbState.Simulating then ()
     else
     paTryCatchRethrow(fun() -> this.PaStream.Stop () )
+  
+  member this.CbStateSnapshot =
+    let rec get() : CbState =
+      let seqNum1 = Volatile.Read(&this.CbState.SeqNum1)
+      let cbState = this.CbState
+      let seqNum2 = Volatile.Read(&this.CbState.SeqNum2)
+      if seqNum1 <> seqNum2 then  get()
+                            else  cbState
+    get()
 
   member this.Callback(input, output, frameCount, timeInfo: StreamCallbackTimeInfo byref, statusFlags, userDataPtr) =
               callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
@@ -343,9 +344,8 @@ type InputStream(beesConfig       : BeesConfig       ,
   member private is.debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
     Console.Write ","
 
-  member is.timeTail() = is.CbStateLatest.Segs.Oldest.TimeTail
-  member is.timeHead() = is.CbStateLatest.Segs.Cur   .TimeHead
-
+  member this.timeTail = this.CbStateLatest.Segs.Oldest.TimeTail
+  member this.timeHead = this.CbStateLatest.Segs.Cur   .TimeHead
 
 
   // let (|TooEarly|Segs.Cur|Segs.Old|)  (dateTime: DateTime) (duration: TimeSpan) =
@@ -391,7 +391,7 @@ type InputStream(beesConfig       : BeesConfig       ,
     // timeTail
 
   member private is.offsetOfDateTime (dateTime: DateTime)  : Option<Seg * int> =
-    if not (is.timeTail() <= dateTime && dateTime <= is.timeHead()) then Some (is.CbStateLatest.Segs.Cur, 1)
+    if not (is.timeTail <= dateTime && dateTime <= is.timeHead) then Some (is.CbStateLatest.Segs.Cur, 1)
     else None
 
 

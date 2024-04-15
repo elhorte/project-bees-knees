@@ -1,18 +1,18 @@
 ﻿
 open BeesLib.CbMessagePool
-open BeesUtil.WorkList
+open BeesUtil.SubscriberList
 open BeesUtil.Util
 
 
-let workList = WorkList<CbMessage>()
+let subscriberList = SubscriberList<CbMessage>()
 
 // Exercising
 
 let handleCbMessage() =
-  dummyInstance<CbMessage>() |> workList.Broadcast
+  dummyInstance<CbMessage>() |> subscriberList.Broadcast
 
 let printHowManySubscribedHandlers expected =
-  printActualVsExpected workList.SubscriberCount expected "workList.Count"
+  printActualVsExpected subscriberList.SubscriberCount expected "subscriberList.Count"
 
 // A demo func to be registered
 
@@ -26,7 +26,7 @@ printHowManySubscribedHandlers 0
 handleCbMessage() // workFunc is not called bc it is not registered yet
 printHowManySubscribedHandlers 0
 
-let subscription = workList.Subscribe workFunc
+let subscription = subscriberList.Subscribe workFunc
 printHowManySubscribedHandlers 1
 
 handleCbMessage() // workFunc is called and unregisters itself
