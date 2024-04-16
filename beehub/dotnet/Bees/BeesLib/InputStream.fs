@@ -213,12 +213,11 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       failwith "Can’t happen."
 
   cbs.LatestBlock <- cbs.Segs.Cur.Head
-  do // Copy the block to the ring.
-    UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, cbs.LatestBlock, nFrames)
+  UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, cbs.LatestBlock, nFrames)
   cbs.Segs.Cur.AdvanceHead nFrames cbs.AdcStartTime
+  Volatile.Write(&cbs.SeqNum2, cbs.SeqNum2 + 1u)
 
 //cbs.Logger.Add cbs.SeqNum2 cbs.TimeStamp "cb bufs=" ""
-  Volatile.Write(&cbs.SeqNum2, cbs.SeqNum2 + 1u)
   cbs.CallbackHandoff.HandOff()
   Volatile.Write(&cbs.IsInCallback, false)
   PortAudioSharp.StreamCallbackResult.Continue
