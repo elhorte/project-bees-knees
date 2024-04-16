@@ -31,3 +31,5 @@ obj/
 /packages/
 riderModule.iml
 /_ReSharper.Caches/
+/beehub/dotnet/Bees/Bees/.idea/.idea.Bees.dir/.idea/encodings.xml
+/beehub/dotnet/Bees/Bees/.idea/.idea.Bees.dir/.idea/workspace.xml

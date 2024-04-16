@@ -64,7 +64,8 @@ type Segs = {
   mutable Cur   : Seg
   mutable Old   : Seg }  with
 
-  member this.Oldest = if this.Old.Active then this.Old else this.Cur
+  member this.Oldest     = if this.Old.Active then this.Old else this.Cur
+  member this.Exchange() = let tmp = this.Cur  in  this.Cur <- this.Old  ;  this.Old <- tmp
 
 // Callback state, updated by each callback.
 type CbState = {
@@ -173,8 +174,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       assert (cbs.State = Moving)
       assert (not cbs.Segs.Old.Active)
       cbs.State <- AtEnd // Briefly; quickly changes to Chasing.
-      do // Exchange Segs.Cur and Segs.Old
-        let tmp = cbs.Segs.Cur  in  cbs.Segs.Cur <- cbs.Segs.Old  ;  cbs.Segs.Old <- tmp
+      cbs.Segs.Exchange()
       assert (cbs.Segs.Cur.Head = 0  &&  cbs.Segs.Cur.Tail = 0)
       (newHead, newTail) <- nextValues() // Must set these again after the exchange.
       cbs.State <- Chasing
