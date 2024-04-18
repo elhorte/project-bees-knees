@@ -79,7 +79,9 @@ let run frameSize inputStream = task {
       let fc = uint32 (if i < 25 then  frameCount else  2 * frameCount)
       let m = showGC (fun () ->
         timeInfo.inputBufferAdcTime <- 0.001 * float i
-        callback input output fc &timeInfo statusFlags userDataPtr |> ignore 
+        callback input output fc &timeInfo statusFlags userDataPtr |> ignore
+        let x = inputStream.CbStateSnapshot
+        printfn "%A" x.Segs
         delayMs false 1
     //  Console.WriteLine $"{i}"
       )

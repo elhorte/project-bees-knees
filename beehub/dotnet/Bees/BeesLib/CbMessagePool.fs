@@ -15,6 +15,12 @@ let tbdDateTime = DateTime.MinValue
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // Seg class, used by InputStream.  The ring buffer can comprise 0, 1, or 2 segs.
 
+type Portion = {
+  index    : int
+  nFrames  : int
+  time     : DateTime
+  duration : TimeSpan  }
+
 type Seg = {
   mutable Tail     : int
   mutable Head     : int
@@ -36,7 +42,7 @@ type Seg = {
 
   static member NewEmpty (nRingFrames: int) (inSampleRate: int) =  Seg.New 0 0 nRingFrames inSampleRate
 
-  member seg.Copy() = Seg.New seg.Head seg.Tail seg.NRingFrames seg.InSampleRate
+  member seg.Copy() = { seg with Tail = seg.Tail }
 
     
   member seg.durationOf nFrames = TimeSpan.FromSeconds (float nFrames / float seg.InSampleRate)
@@ -50,6 +56,22 @@ type Seg = {
 
   member seg.NFramesOf duration = seg.nFramesOf duration
   
+  /// identify the portion of seg that overlaps with the given time and duration
+  member seg.getPortion (from: DateTime) (duration: TimeSpan)  : Portion =
+    let time = max seg.TimeTail from
+    let tailTimeOffsetOfPortion = time - seg.TimeTail
+    assert (tailTimeOffsetOfPortion >= TimeSpan.Zero)
+    let headTime = from + duration
+    let headOfPortion = min headTime seg.TimeHead
+    let duration = headOfPortion - time
+    let index = seg.Tail + seg.nFramesOf tailTimeOffsetOfPortion
+    let indexHead = index + seg.nFramesOf duration
+    let nFrames = indexHead - index
+    { index    = index
+      nFrames  = nFrames
+      time     = time
+      duration = duration }
+
   member seg.AdvanceHead nFrames timeHead =
     let headNew = seg.Head + nFrames
     assert (headNew <= seg.NRingFrames)
