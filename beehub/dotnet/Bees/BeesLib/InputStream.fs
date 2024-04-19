@@ -62,6 +62,7 @@ type Segs = {
   member this.Oldest     = if this.Old.Active then this.Old else this.Cur
   member this.TimeTail   = this.Oldest.TimeTail
   member this.TimeHead   = this.Cur   .TimeHead
+  member this.Duration   = this.TimeHead - this.TimeTail
 
 // Callback state, updated by each callback.
 type CbState = {
@@ -90,7 +91,7 @@ type CbState = {
   TimeInfoBase            : DateTime // for getting UTC from timeInfo.inputBufferAdcTime
   FrameSize               : int
   Logger                  : Logger
-  Simulating              : bool } with
+  Simulating              : SimulatingCallbacks } with
 
   member this.Copy() = { this with Segs = this.Segs.Copy() }
 
@@ -105,7 +106,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   let cbs     = handle.Target :?> CbState
   let nFrames = int frameCount
   Volatile.Write(&cbs.IsInCallback, true)
-  if not cbs.Simulating then  Console.Write "."
+  if cbs.Simulating = NotSimulating then  Console.Write "."
 
   if cbs.WithEcho then
     let size = uint64 (frameCount * uint32 cbs.FrameSize)
@@ -128,7 +129,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       (newHead, newTail)
     let mutable newHead, newTail = nextValues()
     let printRing msg =
-      if not cbs.Simulating then ()
+      if cbs.Simulating = NotSimulating then ()
       else
       let sRing =
         let empty = '.'
@@ -168,6 +169,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     let trimCurTail() = if newTail > 0 then         cbs.Segs.Cur.Tail <- newTail ; true
                                        else assert (cbs.Segs.Cur.Tail = 0)       ; false
     printRing ""
+    let sTimeTail = cbs.Segs.TimeTail.ToString "yyyy-MM-dd HH:mm:ss.fff"
+    let sTimeHead = cbs.Segs.TimeHead.ToString "yyyy-MM-dd HH:mm:ss.fff"
     if newHead > cbs.NRingFrames then
       assert (cbs.State = Moving)
       assert (not cbs.Segs.Old.Active)
@@ -250,21 +253,21 @@ type InputStreamGetResult =
   | ResultOK            = 5
 
 // initPortAudio() must be called before this constructor.
-type InputStream(beesConfig       : BeesConfig       ,
-                 inputParameters  : StreamParameters ,
-                 outputParameters : StreamParameters ,
-                 withEcho         : bool             ,
-                 withLogging      : bool             ) =
+type InputStream(beesConfig       : BeesConfig          ,
+                 inputParameters  : StreamParameters    ,
+                 outputParameters : StreamParameters    ,
+                 withEcho         : bool                ,
+                 withLogging      : bool                ,
+                 sim              : SimulatingCallbacks ) =
 
-  let audioDuration = beesConfig.InputStreamAudioDuration
-  let gapDuration   = beesConfig.InputStreamRingGapDuration
-  let gapPortion    = float32 gapDuration.Milliseconds / float32 audioDuration.Milliseconds
-  let nDataFrames   = if simulatingCallbacks then 56 else durationToNFrames beesConfig.InSampleRate audioDuration
-  let nGapFrames    = if simulatingCallbacks then 20 else durationToNFrames beesConfig.InSampleRate gapDuration
+  let audioDuration = cbSimAudioDuration sim (fun () -> beesConfig.InputStreamAudioDuration                     )
+  let gapDuration   = cbSimGapDuration   sim (fun () -> beesConfig.InputStreamRingGapDuration                   )
+  let nDataFrames   = cbSimNDataFrames   sim (fun () -> durationToNFrames beesConfig.InSampleRate audioDuration )
+  let nGapFrames    = cbSimNGapFrames    sim (fun () -> durationToNFrames beesConfig.InSampleRate gapDuration   )
   let nRingFrames   = nDataFrames + (3 * nGapFrames) / 2
   let frameSize     = beesConfig.FrameSize
   let nRingBytes    = int nRingFrames * frameSize
-  let startTime     = DateTime.UtcNow
+  let startTime     = if sim <> NotSimulating then  DateTime.MinValue else  DateTime.UtcNow
   let segs          = { Cur = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
                         Old = Seg.NewEmpty nRingFrames beesConfig.InSampleRate }
   
@@ -299,13 +302,13 @@ type InputStream(beesConfig       : BeesConfig       ,
     TimeInfoBase    = startTime  // timeInfoBase + adcInputTime -> cbState.TimeStamp
     FrameSize       = frameSize
     Logger          = Logger(8000, startTime)
-    Simulating      = simulatingCallbacks  }
+    Simulating      = sim  }
 
   let debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
-    if not cbState.Simulating then Console.Write ","
+    if cbState.Simulating = NotSimulating then Console.Write ","
 
   let paStream =
-    if cbState.Simulating then
+    if cbState.Simulating <> NotSimulating then
       dummyInstance<PortAudioSharp.Stream>()
     else
       let streamCallback = PortAudioSharp.Stream.Callback(
@@ -340,7 +343,7 @@ type InputStream(beesConfig       : BeesConfig       ,
   member this.Start() =
     this.CbState.CallbackHandoff <- CallbackHandoff.New this.AfterCallback
     this.CbState.CallbackHandoff.Start()
-    if this.CbState.Simulating then ()
+    if this.CbState.Simulating <> NotSimulating then ()
     else
     paTryCatchRethrow (fun() -> this.PaStream.Start() )
     printfn $"InputStream size: {this.NRingBytes / 1_000_000} MB for {this.RingDuration}"
@@ -348,7 +351,7 @@ type InputStream(beesConfig       : BeesConfig       ,
 
   member this.Stop() =
     this.CbState.CallbackHandoff.Stop ()
-    if this.CbState.Simulating then ()
+    if this.CbState.Simulating <> NotSimulating then ()
     else
     paTryCatchRethrow(fun() -> this.PaStream.Stop () )
   
@@ -365,10 +368,13 @@ type InputStream(beesConfig       : BeesConfig       ,
               callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
 
   member this.AfterCallback() =
-    if not cbState.Simulating then Console.Write ","
+    if cbState.Simulating = NotSimulating then Console.Write ","
 
   member private is.debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
     Console.Write ","
+
+  member this.timeTail = this.CbStateLatest.Segs.Oldest.TimeTail
+  member this.timeHead = this.CbStateLatest.Segs.Cur   .TimeHead
 
   //      Segs.Old         Segs.Cur
   // [.........◾◾◾◾◾◾◾] [◾◾◾◾◾◾◾.....]
@@ -376,7 +382,7 @@ type InputStream(beesConfig       : BeesConfig       ,
   //           t                h
   member this.get (time: DateTime) (duration: TimeSpan) (f: float32[] * int * int * DateTime * TimeSpan -> unit)  : InputStreamGetResult =
     let cbs = this.CbStateSnapshot
-    let deliver tailTime duration =
+    let deliver (tailTime: DateTime) duration =
       let deliverSegPortion (seg: Seg) =
         let p = seg.getPortion time duration
         f (cbs.Ring, p.index, p.nFrames, p.time, p.duration)
@@ -384,7 +390,11 @@ type InputStream(beesConfig       : BeesConfig       ,
       if cbs.Segs.Old.Active  &&  tailTime < cbs.Segs.Old.TimeHead then  deliverSegPortion cbs.Segs.Old
       if                          cbs.Segs.Cur.TimeTail < headTime then  deliverSegPortion cbs.Segs.Cur
       
-    match (time, duration, cbs.Segs.TimeTail, cbs.Segs.TimeHead) with
+    let haveTime     = cbs.Segs.TimeTail
+    let haveDuration = cbs.Segs.Duration
+    let timeD     = time     - DateTime.MinValue
+    let haveTimeD = haveTime - DateTime.MinValue
+    match (time, duration, haveTime, haveDuration) with
     | BeforeData             ->               InputStreamGetResult.ErrorBeforeData
     | AfterData              ->               InputStreamGetResult.ErrorAfterData
     | ClippedBothEnds (t, d) -> deliver t d ; InputStreamGetResult.WarnClippedBothEnds

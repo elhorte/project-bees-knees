@@ -12,6 +12,7 @@ open System.Threading.Tasks
 open BeesLib.CbMessagePool
 
 
+let mutable simulatingCallbacks = false
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––
 

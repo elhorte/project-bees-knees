@@ -62,8 +62,8 @@ let showGC f =
   // Console.WriteLine $"gc memory: %i{ m }";
   
 /// Run the stream for a while, then stop it and terminate PortAudio.
-let run frameSize inputStream = task {
-  let inputStream = (inputStream: InputStream)
+let run frameSize iS = task {
+  let inputStream = (iS: InputStream)
   inputStream.Start()
   
   let test() =
@@ -75,18 +75,22 @@ let run frameSize inputStream = task {
     let mutable timeInfo = PortAudioSharp.StreamCallbackTimeInfo()
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(inputStream.CbState))
-    for i in 1..50 do
+    for i in 1..33 do
       let fc = uint32 (if i < 25 then  frameCount else  2 * frameCount)
       let m = showGC (fun () ->
-        timeInfo.inputBufferAdcTime <- 0.001 * float i
+        timeInfo.inputBufferAdcTime <- 0.01 * float i
         callback input output fc &timeInfo statusFlags userDataPtr |> ignore
-        let x = inputStream.CbStateSnapshot
-        printfn "%A" x.Segs
         delayMs false 1
     //  Console.WriteLine $"{i}"
       )
       delayMs false 1
     printfn "\n\ncalling callback done"
+    let printRange (array, index, length, time, duration) =
+      ()
+    let time     = DateTime.MinValue + (TimeSpan.FromMilliseconds 27)
+    let duration = TimeSpan.FromMilliseconds 36
+    let result = inputStream.get time duration printRange
+    printfn "%A" result
   
   test()
   use cts = new CancellationTokenSource()
@@ -112,7 +116,8 @@ let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 let main _ =
   let withEcho    = false
   let withLogging = false
-  simulatingCallbacks <- true
+//let sim = SimInts  { NData = 56 ; NGap = 20 }
+  let sim = SimTimes { AudioDuration = TimeSpan.FromMilliseconds  56 ; GapDuration = TimeSpan.FromMilliseconds 20 }
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   let sampleSize = sizeof<SampleType>
@@ -122,16 +127,16 @@ let main _ =
     PrimaryDir                  = "primary"
     MonitorDir                  = "monitor"
     PlotDir                     = "plot"
-    InputStreamAudioDuration    = TimeSpan.FromMinutes 16
-    InputStreamRingGapDuration  = TimeSpan.FromSeconds 1
+    InputStreamAudioDuration    = TimeSpan.FromMilliseconds 1000
+    InputStreamRingGapDuration  = TimeSpan.FromMilliseconds   20
     SampleSize                  = sampleSize
     InChannelCount              = inputParameters.channelCount
-    InSampleRate                = sampleRate }
+    InSampleRate                = 1000 }
   printBeesConfig beesConfig
 //keyboardInputInit()
   try
     paTryCatchRethrow (fun () ->
-      use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
+      use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging, sim)
       paTryCatchRethrow (fun () ->
         let t = task {
           do! run beesConfig.FrameSize inputStream 

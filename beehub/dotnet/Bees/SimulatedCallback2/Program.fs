@@ -99,7 +99,7 @@ let main _ =
   let sampleSize = sizeof<SampleType>
   let withEcho    = false
   let withLogging = false
-  simulatingCallbacks <- true
+  let sim = SimInts { NData = 56 ; NGap = 20 }
   beesConfig <- {
     LocationId                  = 1
     HiveId                      = 1
@@ -111,11 +111,11 @@ let main _ =
     SampleSize                  = sampleSize
     InChannelCount              = inputParameters.channelCount
     InSampleRate                = sampleRate }
-  use iS = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
+  use iS = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging, sim)
   GC.Collect()
   try
     iS.Start()
-    if simulatingCallbacks then
+    if sim <> NotSimulating then
       test iS frameSize
     else
       printfn "Reading..."

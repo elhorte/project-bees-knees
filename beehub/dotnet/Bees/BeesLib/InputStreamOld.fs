@@ -94,27 +94,28 @@ type InputStreamOld = {
   mutable callbackHandoff   : CallbackHandoff
   BeesConfig                : BeesConfig
   debugMaxCallbacks         : uint64
-  mutable debugSimulating   : bool
+  mutable debugSimulating   : SimulatingCallbacks
   mutable debugInCallback   : bool
   mutable debugSubscription : Subscription<CbMessage>
   mutable debugData         : string list  } with
   
   // initPortAudio() must be called before this.
-  static member New( beesConfig       : BeesConfig       )
-                   ( inputParameters  : StreamParameters )
-                   ( outputParameters : StreamParameters )
-                   ( withEcho         : bool             )
-                   ( withLogging      : bool             ) =
+  static member New( beesConfig       : BeesConfig          )
+                   ( inputParameters  : StreamParameters    )
+                   ( outputParameters : StreamParameters    )
+                   ( withEcho         : bool                )
+                   ( withLogging      : bool                )
+                   (sim               : SimulatingCallbacks ) =
 
     let startTime         = DateTime.Now
     let ringDuration      = TimeSpan.FromMilliseconds(200) // beesConfig.RingBufferDuration
-    let nRingFrames       = if DebugGlobals.simulatingCallbacks then 37 else durationToNFrames beesConfig.InSampleRate ringDuration
+    let nRingFrames       = 37 // if DebugGlobals.simulatingCallbacks then 37 else durationToNFrames beesConfig.InSampleRate ringDuration
     let nUsableRingFrames = 0 // calculated later
     let frameSize         = beesConfig.FrameSize
     let nRingBytes        = int nRingFrames * frameSize
     let gapDuration       = TimeSpan.FromMilliseconds 10
     let cbMessageWorkList = SubscriberList<CbMessage>()
-    let nGapFrames        = if DebugGlobals.simulatingCallbacks then 2 else durationToNFrames beesConfig.InSampleRate gapDuration 
+    let nGapFrames        = 2 // if DebugGlobals.simulatingCallbacks then 2 else durationToNFrames beesConfig.InSampleRate gapDuration 
     let cbMessagePool     = makeCbMessagePool beesConfig nRingFrames
     let cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
     let poolItemCurrent   = PoolItem.New cbMessagePool cbMessageCurrent
@@ -144,7 +145,7 @@ type InputStreamOld = {
       cbSegOld          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
       callbackHandoff   = CallbackHandoff.New (fun () -> ())
       BeesConfig        = beesConfig
-      debugSimulating   = DebugGlobals.simulatingCallbacks
+      debugSimulating   = sim
       debugInCallback   = false
       debugMaxCallbacks = UInt64.MaxValue
       debugSubscription = dummyInstance<Subscription<CbMessage>>()
@@ -160,7 +161,7 @@ type InputStreamOld = {
     is.debugSubscription <- cbMessageWorkList.Subscribe debuggingSubscriber 
     is.callbackHandoff   <- CallbackHandoff.New is.afterCallback
 
-    if is.debugSimulating then is
+    if is.debugSimulating <> NotSimulating then is
     else 
 
     let callbackStub = PortAudioSharp.Stream.Callback(
@@ -234,7 +235,7 @@ type InputStreamOld = {
   
   member is.afterCallback() =
     Console.Write ","
-    assert (is.debugSimulating || not is.debugInCallback)
+    assert (is.debugSimulating <> NotSimulating || not is.debugInCallback)
     is.cbMessagePool.ItemUseBegin()
     do
       let cbMessage = Volatile.Read(&is.cbMessageCurrent)
@@ -327,10 +328,10 @@ type InputStreamOld = {
   // The goal is plenty of room, i.e. time, between cbSegCur.Head and cbSegOld.Tail.
   // Code assumes that nRingFrames > 2 * nGapFrames
   member private is.adjustNGapFrames nFrames =
-    let gapCandidate = if simulatingCallbacks then nFrames else nFrames * 4
+    let gapCandidate = if is.debugSimulating <> NotSimulating then nFrames else nFrames * 4
     let nGapNew    = max is.nGapFrames gapCandidate
     let nUsableNew = nFrames * (is.nRingFrames / nFrames)
-    if (is.nUsableRingFrames < nUsableNew  ||  is.nGapFrames < nGapNew)  &&  is.debugSimulating then
+    if (is.nUsableRingFrames < nUsableNew  ||  is.nGapFrames < nGapNew)  &&  is.debugSimulating <> NotSimulating then
       Console.WriteLine $"adjusted %d{is.nUsableRingFrames} to %d{nUsableNew}  gap %d{is.nGapFrames}"
     if nUsableNew < nGapNew then
       failwith $"nRingFrames is too small. nFrames: {nFrames}  nGapFrames: {is.nGapFrames}  nRingFrames: {is.nRingFrames}"
@@ -442,7 +443,7 @@ type InputStreamOld = {
   
   member is.Start() =
     is.callbackHandoff.Start()
-    if is.debugSimulating then ()
+    if is.debugSimulating <> NotSimulating then ()
     else
     paTryCatchRethrow(fun() -> is.paStream.Start())
     printfn $"InputStream size: {is.nRingBytes / 1_000_000} MB for {is.ringDuration}"
@@ -450,7 +451,7 @@ type InputStreamOld = {
 
   member is.Stop() =
     is.callbackHandoff.Stop() 
-    if is.debugSimulating then ()
+    if is.debugSimulating <> NotSimulating then ()
     is.paStream.Stop()
 
 

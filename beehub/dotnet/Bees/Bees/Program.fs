@@ -5,6 +5,7 @@ open FSharp.Control
 
 open PortAudioSharp
 open BeesUtil.PortAudioUtils
+open BeesLib.DebugGlobals
 open BeesLib.InputStream
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
@@ -86,7 +87,7 @@ let main _ =
   keyboardInputInit()
   try
     paTryCatchRethrow (fun () ->
-      use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
+      use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging, NotSimulating)
       paTryCatchRethrow (fun () ->
         let t = task {
           do! run inputStream 

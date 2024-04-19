@@ -10,6 +10,8 @@ open BeesLib.DebugGlobals
 open BeesLib.CbMessagePool
 open CSharpHelpers
 
+let mutable simulatingCallbacks = false
+
 //–––––––––––––––––––––––––––––––––––––––––––––––––––
 
 let dummyInstance<'T>() =

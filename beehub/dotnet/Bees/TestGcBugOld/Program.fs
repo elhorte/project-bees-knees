@@ -91,7 +91,7 @@ let run stream = task {
     printfn "\n\ncalling callback done"
   
   delayMs 300
-  DebugGlobals.simulatingCallbacks <- true
+//DebugGlobals.simulatingCallbacks <- true
   
   Console.WriteLine "Main task start."
   Task.Run(churn).Wait()

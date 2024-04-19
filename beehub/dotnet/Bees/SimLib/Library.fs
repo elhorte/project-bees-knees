@@ -235,7 +235,7 @@ type InputStream( sampleRate       : int              ,
     FrameSize       = frameSize
     RingPtr         = Marshal.AllocHGlobal(nRingBytes)
 //  Logger          = Logger(8000, startTime)
-    DebugSimulating = simulatingCallbacks  }
+    DebugSimulating = true  }
 
   let callbackStub = PortAudioSharp.Stream.Callback(
     // The intermediate lambda here is required to avoid a compiler error.
