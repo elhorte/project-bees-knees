@@ -273,6 +273,8 @@ let (|BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK|) (wantTim
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The InputStream class
 
+type GetCallback = float32[] * int * int * int * _DateTime * _TimeSpan -> unit
+
 type InputStreamGetResult =
   | ErrorBeforeData     = 0
   | ErrorAfterData      = 1
@@ -412,15 +414,16 @@ type InputStream(beesConfig       : BeesConfig          ,
   // [.........◾◾◾◾◾◾◾] [◾◾◾◾◾◾◾.....]
   //           a      b  a      b
   //           tail             head
-  member this.get (time: _DateTime) (duration: _TimeSpan) (f: float32[] * int * int * _DateTime * _TimeSpan -> unit)
+  member this.get (time: _DateTime) (duration: _TimeSpan) (f: GetCallback)
                   : (InputStreamGetResult * _DateTime * _TimeSpan) =
     let cbs = this.CbStateSnapshot
     let deliver (timeTail: _DateTime) duration =
+      let size = nFramesOf beesConfig.InSampleRate duration
       let timeHead = timeTail + duration
       assert (cbs.Segs.TimeTail <= timeTail) ; assert (timeHead <= cbs.Segs.TimeHead)
       let deliverSegPortion (seg: Seg) =
         let p = seg.getPortion timeTail duration
-        f (cbs.Ring, p.index, p.nFrames, p.time, p.duration)
+        f (cbs.Ring, size, p.index, p.nFrames, p.time, p.duration)
       if cbs.Segs.Old.Active  &&  timeTail < cbs.Segs.Old.HeadTime then  deliverSegPortion cbs.Segs.Old
       if                          cbs.Segs.Cur.TailTime < timeHead then  deliverSegPortion cbs.Segs.Cur
     let haveTime     = cbs.Segs.TimeTail
@@ -434,7 +437,7 @@ type InputStream(beesConfig       : BeesConfig          ,
     | ClippedHead     (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedHead    , t  , d  )
     | OK              (t, d) -> deliver t d ; (InputStreamGetResult.ResultOK           , t  , d  )  
 
-  member this.Get (from: _DateTime, duration: _TimeSpan, (f: float32[] * int * int * _DateTime * _TimeSpan -> unit)) =
+  member this.Get (from: _DateTime, duration: _TimeSpan, f: GetCallback) =
     this.get from duration f
     
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

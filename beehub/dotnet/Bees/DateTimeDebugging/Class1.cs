@@ -9,8 +9,8 @@ public struct _DateTime : IComparable {
 
   public static _DateTime MinValue => new _DateTime(0);
   public static _DateTime MaxValue => new _DateTime(int.MaxValue);
-  public static _DateTime Now      => new _DateTime(1000);
-  public static _DateTime UtcNow   => new _DateTime(1000);
+  public static _DateTime Now      => new _DateTime(100);
+  public static _DateTime UtcNow   => new _DateTime(100);
   public static _DateTime Today    => new _DateTime(0);
   
   public static _DateTime operator +(_DateTime dt , _TimeSpan ts ) => new(dt .TotalMilliseconds + ts .TotalMilliseconds);
