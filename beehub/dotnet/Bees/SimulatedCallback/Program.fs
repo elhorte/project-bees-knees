@@ -72,10 +72,12 @@ let runTests inputStream =
   let testOne time (duration:_TimeSpan) =
     let count = duration.Milliseconds
     let result = Array.zeroCreate<float32> count
-    let mutable dest = 0
+    let mutable destIndex = 0
+    let mutable startTime = 0
     let saveResult (array, index, length, time, duration) =
-      Array.Copy(array, index, result, dest, length)
-      dest <- dest + length
+      if destIndex = 0 then  startTime <- time
+      Array.Copy(array, index, result, destIndex, length)
+      destIndex <- destIndex + length
     printfn "%A" (inputStream.get time duration saveResult)
   let sCurAndOld = if cbs.Segs.Old.Active then  "Cur and Old" else  "Cur only" 
   inputStream.CbState.PrintRing $"running get() tests with %s{sCurAndOld}"
