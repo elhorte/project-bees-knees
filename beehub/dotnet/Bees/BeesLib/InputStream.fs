@@ -5,6 +5,11 @@ open System.Runtime.InteropServices
 open System.Threading
 
 open PortAudioSharp
+
+open DateTimeDebugging
+open BeesUtil.DateTimeShim
+
+open BeesUtil.DebugGlobals
 open BeesUtil.Util
 open BeesUtil.Logger
 open BeesUtil.SubscriberList
@@ -12,7 +17,6 @@ open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
-open BeesLib.DebugGlobals
 open CSharpHelpers
 
 type Worker = Buf -> int -> int
@@ -58,11 +62,14 @@ type Segs = {
 
   member this.Copy()     = { Cur = this.Cur.Copy()
                              Old = this.Old.Copy() }
-  member this.Exchange() = let tmp = this.Cur  in  this.Cur <- this.Old  ;  this.Old <- tmp
   member this.Oldest     = if this.Old.Active then this.Old else this.Cur
-  member this.TimeTail   = this.Oldest.TimeTail
-  member this.TimeHead   = this.Cur   .TimeHead
+  member this.TimeTail   = this.Oldest.TailTime
+  member this.TimeHead   = this.Cur   .HeadTime
   member this.Duration   = this.TimeHead - this.TimeTail
+
+  member this.Exchange() =
+    let tmp = this.Cur  in  this.Cur <- this.Old  ;  this.Old <- tmp
+    this.Cur.TailTime <- tbdDateTime // Cur is now empty.
 
 // Callback state, updated by each callback.
 type CbState = {
@@ -76,10 +83,10 @@ type CbState = {
   Ring                    : float32 array
   mutable State           : State
   mutable Segs            : Segs
-  mutable AdcStartTime    : DateTime
+  mutable AdcStartTime    : _DateTime
   mutable LatestBlock     : int // ring index where latest input block was copied
-  mutable SeqNum1         : uint
-  mutable SeqNum2         : uint
+  mutable SeqNum1         : int
+  mutable SeqNum2         : int
   mutable NRingFrames     : int
   mutable NDataFrames     : int
   mutable NGapFrames      : int
@@ -88,13 +95,60 @@ type CbState = {
   mutable WithEcho        : bool
   mutable WithLogging     : bool
   mutable CallbackHandoff : CallbackHandoff // modified only once
-  TimeInfoBase            : DateTime // for getting UTC from timeInfo.inputBufferAdcTime
+  TimeInfoBase            : _DateTime // for getting UTC from timeInfo.inputBufferAdcTime
   FrameSize               : int
   Logger                  : Logger
   Simulating              : SimulatingCallbacks } with
 
   member this.Copy() = { this with Segs = this.Segs.Copy() }
 
+  member cbs.Print newTail newHead msg =
+    let sRing =
+      let empty = '.'
+      let data  = '◾'
+      let getsNum i = i % 10 = 0
+      let mutable ring =
+        let num i = char ((i / 10 % 10).ToString())
+        let numberedEmpties i = if getsNum i then  num i else  empty
+        // "..........1.........2.........3.........4.........5.........6.........7.........8....."
+        Array.init cbs.NRingFrames numberedEmpties
+      do // Overwrite empties with seg data.
+        let showDataFor seg =
+          let first = seg.Tail
+          let last  = seg.Head - 1
+          let getsNum i = first < i  &&  i < last  &&  getsNum i  // show only interior numbers
+          let setDataFor i = if not (getsNum i) then  ring[i] <- data     
+          for i in first..last do  setDataFor i
+        if cbs.Segs.Old.Active then
+          assert (cbs.State = Chasing)
+          // "..........1.........2.........3.........4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
+          showDataFor cbs.Segs.Old
+        // "◾◾◾◾◾◾◾◾◾◾1◾◾◾◾◾◾◾◾◾2◾◾◾◾◾◾◾◾◾3◾◾◾◾.....4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
+        showDataFor cbs.Segs.Cur
+      String ring
+    let sText =
+      let sSeqNum  = sprintf "%2d" cbs.SeqNum1
+      let sX       = if String.length msg > 0 then  "*" else  " "
+      let sTime    = sprintf "%4d.%4d %4d.%4d"
+                       cbs.Segs.Cur.TailTime.Milliseconds
+                       cbs.Segs.Cur.HeadTime.Milliseconds
+                       cbs.Segs.Old.TailTime.Milliseconds
+                       cbs.Segs.Old.HeadTime.Milliseconds
+      let sDur     = let sum = cbs.Segs.Cur.Duration.Milliseconds + cbs.Segs.Old.Duration.Milliseconds
+                     $"{cbs.Segs.Cur.Duration.Milliseconds:d2}+{cbs.Segs.Old.Duration.Milliseconds:d2}={sum:d2}"
+      let sCur     = cbs.Segs.Cur.ToString "cur"
+      let sNewTail = sprintf "%3d" newTail
+      let sNew     = if newHead < 0 then  "      "  else  $"{sNewTail:S3}.{newHead:d2}"
+      let sOld     = cbs.Segs.Old.ToString "old"
+      let sTotal   = let sum = cbs.Segs.Cur.NFrames + cbs.Segs.Old.NFrames
+                     $"{cbs.Segs.Cur.NFrames:d2}+{cbs.Segs.Old.NFrames:d2}={sum:d2}"
+      let sGap     = if cbs.Segs.Old.Active then sprintf "%2d" (cbs.Segs.Old.Tail - cbs.Segs.Cur.Head) else  "  "
+      let sState   = $"{cbs.State}"
+      // "cur 00.35  new -11.45 old 64.85 35+21=56  gap 29 Chasing "
+      $"%s{sSeqNum}%s{sX} %s{sTime} %s{sDur}  %s{sCur}  new %s{sNew} %s{sOld} %s{sTotal}  gap {sGap:s2} %s{sState} %s{msg}"
+    Console.WriteLine $"%s{sRing}  %s{sText}"
+
+  member cbs.PrintRing msg =  cbs.Print 0 -1 msg
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The callback – Copy data from the audio driver into our ring.
@@ -112,13 +166,13 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     let size = uint64 (frameCount * uint32 cbs.FrameSize)
     Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
 
-  Volatile.Write(&cbs.SeqNum1, cbs.SeqNum1 + 1u)
+  Volatile.Write(&cbs.SeqNum1, cbs.SeqNum1 + 1)
   cbs.Input        <- input
   cbs.Output       <- output
   cbs.FrameCount   <- frameCount // in the ”block“ to be copied
   cbs.TimeInfo     <- timeInfo
   cbs.StatusFlags  <- statusFlags
-  cbs.AdcStartTime <- cbs.TimeInfoBase + TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
+  cbs.AdcStartTime <- cbs.TimeInfoBase + _TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
 
   do
     // Modify the segs so that Segs.Cur.Head points to where the data will go in the ring.
@@ -128,55 +182,24 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       let newTail = newHead - cbs.NDataFrames
       (newHead, newTail)
     let mutable newHead, newTail = nextValues()
-    let printRing msg =
-      if cbs.Simulating = NotSimulating then ()
+    let printRing msg = cbs.Print newTail newHead msg
+    let trimCurTail() =
+      if newTail > 0 then
+        cbs.Segs.Cur.AdvanceTail (newTail - cbs.Segs.Cur.Tail)
+        true
       else
-      let sRing =
-        let empty = '.'
-        let data  = '◾'
-        let getsNum i = i % 10 = 0
-        let mutable ring =
-          let num i = char ((i / 10 % 10).ToString())
-          let numberedEmpties i = if getsNum i then  num i else  empty
-          // "..........1.........2.........3.........4.........5.........6.........7.........8....."
-          Array.init cbs.NRingFrames numberedEmpties
-        do // Overwrite empties with seg data.
-          let showDataFor seg =
-            let first = seg.Tail
-            let last  = seg.Head - 1
-            let getsNum i = first < i  &&  i < last  &&  getsNum i  // show only interior numbers
-            let setDataFor i = if not (getsNum i) then  ring[i] <- data     
-            for i in first..last do  setDataFor i
-          if cbs.Segs.Old.Active then
-            assert (cbs.State = Chasing)
-            // "..........1.........2.........3.........4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
-            showDataFor cbs.Segs.Old
-          // "◾◾◾◾◾◾◾◾◾◾1◾◾◾◾◾◾◾◾◾2◾◾◾◾◾◾◾◾◾3◾◾◾◾.....4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
-          showDataFor cbs.Segs.Cur
-        String ring
-      let sText =
-        let sCur     = cbs.Segs.Cur.Print "cur"
-        let sNewTail = sprintf "%3d" newTail
-        let sNew     = $"{sNewTail:S3}.{newHead:d2}"
-        let sOld     = cbs.Segs.Old.Print "old"
-        let sTotal   = let sum = cbs.Segs.Cur.NFrames + cbs.Segs.Old.NFrames
-                       $"{cbs.Segs.Cur.NFrames:d2}+{cbs.Segs.Old.NFrames:d2}={sum:d2}"
-        let sGap     = if cbs.Segs.Old.Active then sprintf "%2d" (cbs.Segs.Old.Tail - cbs.Segs.Cur.Head) else  "  "
-        let sState   = $"{cbs.State}"
-        // "cur 00.35  new -11.45 old 64.85 35+21=56  gap 29 Chasing "
-        $"%s{sCur}  new %s{sNew} %s{sOld} %s{sTotal}  gap {sGap:s2} %s{sState} %s{msg}"
-      Console.WriteLine $"%s{sRing}  %s{sText}"
-    let trimCurTail() = if newTail > 0 then         cbs.Segs.Cur.Tail <- newTail ; true
-                                       else assert (cbs.Segs.Cur.Tail = 0)       ; false
+        assert (cbs.Segs.Cur.Tail = 0)
+        false
     printRing ""
-    let sTimeTail = cbs.Segs.TimeTail.ToString "yyyy-MM-dd HH:mm:ss.fff"
-    let sTimeHead = cbs.Segs.TimeHead.ToString "yyyy-MM-dd HH:mm:ss.fff"
     if newHead > cbs.NRingFrames then
       assert (cbs.State = Moving)
       assert (not cbs.Segs.Old.Active)
       cbs.State <- AtEnd // Briefly; quickly changes to Chasing.
       cbs.Segs.Exchange() ; assert (cbs.Segs.Cur.Head = 0  &&  cbs.Segs.Cur.Tail = 0)
+      cbs.Segs.Cur.TailTime <- cbs.AdcStartTime
+      cbs.Segs.Cur.HeadTime <- cbs.AdcStartTime
       let h, t = nextValues() in newHead <- h ; newTail <- t
+      if cbs.Simulating <> NotSimulating then  Array.Fill(cbs.Ring, 0f, cbs.Segs.Old.Head, cbs.Ring.Length - cbs.Segs.Old.Head)
       cbs.State <- Chasing
       printRing "exchanged"
     match cbs.State with
@@ -185,6 +208,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       assert (not cbs.Segs.Old.Active)
       assert (newHead = nFrames)  // The block will fit at Ring[0]
       cbs.State <- AtBegin
+      cbs.Segs.Cur.TailTime <- cbs.AdcStartTime
     | AtBegin ->
       assert (not cbs.Segs.Old.Active)
       assert (cbs.Segs.Cur.Tail = 0)
@@ -206,16 +230,17 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
         cbs.Segs.Old.Reset()
         cbs.State <- Moving
       else
-        cbs.Segs.Old.Tail <- cbs.Segs.Old.Tail + nFrames
+        cbs.Segs.Old.AdvanceTail nFrames
         assert (newHead + cbs.NGapFrames <= cbs.Segs.Old.Tail)
         cbs.State <- Chasing
     | AtEnd ->
       failwith "Can’t happen."
 
+  UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, cbs.Segs.Cur.Head, nFrames)
   cbs.LatestBlock <- cbs.Segs.Cur.Head
-  UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, cbs.LatestBlock, nFrames)
-  cbs.Segs.Cur.AdvanceHead nFrames cbs.AdcStartTime
-  Volatile.Write(&cbs.SeqNum2, cbs.SeqNum2 + 1u)
+  cbs.Segs.Cur.HeadTime <- cbs.AdcStartTime
+  cbs.Segs.Cur.AdvanceHead nFrames
+  Volatile.Write(&cbs.SeqNum2, cbs.SeqNum2 + 1)
 
 //cbs.Logger.Add cbs.SeqNum2 cbs.TimeStamp "cb bufs=" ""
   cbs.CallbackHandoff.HandOff()
@@ -226,9 +251,13 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
 // Support for the get() member.
 
 
-let (|BeforeData|AfterData|ClippedBothEnds|ClippedTail|ClippedHead|OK|) (wantTime, wantDuration, haveTime, haveDuration) =
-  let wantEnd: DateTime = wantTime + wantDuration
-  let haveEnd: DateTime = haveTime + haveDuration
+  //      Segs.Old         Segs.Cur
+  // [.........◾◾◾◾◾◾◾] [◾◾◾◾◾◾◾.....]
+  //           a      b  a      b
+  //           t                h
+let (|BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK|) (wantTime, wantDuration, haveTime, haveDuration) =
+  let wantEnd: _DateTime = wantTime + wantDuration
+  let haveEnd: _DateTime = haveTime + haveDuration
   let timeAndDuration tail head = tail, head - tail
   match () with
   | _ when wantEnd  <= haveTime                          ->  BeforeData
@@ -267,7 +296,7 @@ type InputStream(beesConfig       : BeesConfig          ,
   let nRingFrames   = nDataFrames + (3 * nGapFrames) / 2
   let frameSize     = beesConfig.FrameSize
   let nRingBytes    = int nRingFrames * frameSize
-  let startTime     = if sim <> NotSimulating then  DateTime.MinValue else  DateTime.UtcNow
+  let startTime     = _DateTime.UtcNow
   let segs          = { Cur = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
                         Old = Seg.NewEmpty nRingFrames beesConfig.InSampleRate }
   
@@ -287,10 +316,10 @@ type InputStream(beesConfig       : BeesConfig          ,
     Ring            = Array.init<float32> nRingFrames (fun _ -> 0.0f)
     State           = AtStart
     Segs            = segs
-    AdcStartTime    = DateTime.MaxValue // placeholder
+    AdcStartTime    = _DateTime.MaxValue // placeholder
     LatestBlock     = 0
-    SeqNum1         = 0u
-    SeqNum2         = 0u
+    SeqNum1         = -1
+    SeqNum2         = -1
     NRingFrames     = nRingFrames
     NDataFrames     = nDataFrames
     NGapFrames      = nGapFrames
@@ -372,37 +401,40 @@ type InputStream(beesConfig       : BeesConfig          ,
 
   member private is.debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
     Console.Write ","
+    
+  member this.durationOf nFrames = durationOf beesConfig.InSampleRate nFrames
+  member this.nFramesOf duration = nFramesOf  beesConfig.InSampleRate duration
 
-  member this.timeTail = this.CbStateLatest.Segs.Oldest.TimeTail
-  member this.timeHead = this.CbStateLatest.Segs.Cur   .TimeHead
+  member this.timeTail = this.CbStateLatest.Segs.Oldest.TailTime
+  member this.timeHead = this.CbStateLatest.Segs.Cur   .HeadTime
 
   //      Segs.Old         Segs.Cur
   // [.........◾◾◾◾◾◾◾] [◾◾◾◾◾◾◾.....]
   //           a      b  a      b
-  //           t                h
-  member this.get (time: DateTime) (duration: TimeSpan) (f: float32[] * int * int * DateTime * TimeSpan -> unit)  : InputStreamGetResult =
+  //           tail             head
+  member this.get (time: _DateTime) (duration: _TimeSpan) (f: float32[] * int * int * _DateTime * _TimeSpan -> unit)
+                  : (InputStreamGetResult * _DateTime * _TimeSpan) =
     let cbs = this.CbStateSnapshot
-    let deliver (tailTime: DateTime) duration =
+    let deliver (timeTail: _DateTime) duration =
+      let timeHead = timeTail + duration
+      assert (cbs.Segs.TimeTail <= timeTail) ; assert (timeHead <= cbs.Segs.TimeHead)
       let deliverSegPortion (seg: Seg) =
-        let p = seg.getPortion time duration
+        let p = seg.getPortion timeTail duration
         f (cbs.Ring, p.index, p.nFrames, p.time, p.duration)
-      let headTime = tailTime + duration
-      if cbs.Segs.Old.Active  &&  tailTime < cbs.Segs.Old.TimeHead then  deliverSegPortion cbs.Segs.Old
-      if                          cbs.Segs.Cur.TimeTail < headTime then  deliverSegPortion cbs.Segs.Cur
-      
+      if cbs.Segs.Old.Active  &&  timeTail < cbs.Segs.Old.HeadTime then  deliverSegPortion cbs.Segs.Old
+      if                          cbs.Segs.Cur.TailTime < timeHead then  deliverSegPortion cbs.Segs.Cur
     let haveTime     = cbs.Segs.TimeTail
     let haveDuration = cbs.Segs.Duration
-    let timeD     = time     - DateTime.MinValue
-    let haveTimeD = haveTime - DateTime.MinValue
+    let ndt = _DateTime.MinValue in let nts = _TimeSpan.Zero
     match (time, duration, haveTime, haveDuration) with
-    | BeforeData             ->               InputStreamGetResult.ErrorBeforeData
-    | AfterData              ->               InputStreamGetResult.ErrorAfterData
-    | ClippedBothEnds (t, d) -> deliver t d ; InputStreamGetResult.WarnClippedBothEnds
-    | ClippedTail     (t, d) -> deliver t d ; InputStreamGetResult.WarnClippedTail    
-    | ClippedHead     (t, d) -> deliver t d ; InputStreamGetResult.WarnClippedHead    
-    | OK              (t, d) -> deliver t d ; InputStreamGetResult.ResultOK             
+    | BeforeData             ->               (InputStreamGetResult.ErrorBeforeData    , ndt, nts)
+    | AfterData              ->               (InputStreamGetResult.ErrorAfterData     , ndt, nts)
+    | ClippedBothEnds (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedBothEnds, t  , d  )
+    | ClippedTail     (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedTail    , t  , d  )
+    | ClippedHead     (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedHead    , t  , d  )
+    | OK              (t, d) -> deliver t d ; (InputStreamGetResult.ResultOK           , t  , d  )  
 
-  member this.Get (from: DateTime, duration: TimeSpan, (f: float32[] * int * int * DateTime * TimeSpan -> unit)) =
+  member this.Get (from: _DateTime, duration: _TimeSpan, (f: float32[] * int * int * _DateTime * _TimeSpan -> unit)) =
     this.get from duration f
     
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -424,8 +456,8 @@ type InputStream(beesConfig       : BeesConfig          ,
 
   //
   // let x = timeTail
-  // let get (dateTime: DateTime) (duration: TimeSpan) (worker: Worker) =
-  //   let now = DateTime.Now
+  // let get (dateTime: _DateTime) (duration: _TimeSpan) (worker: Worker) =
+  //   let now = _DateTime.Now
   //   let timeStart = max dateTime timeTail
   //   if timeStart + duration > now then  Error "insufficient buffered data"
   //   else
@@ -438,16 +470,16 @@ type InputStream(beesConfig       : BeesConfig          ,
   //   Success timeStart
 
 
-  // let keep (duration: TimeSpan) =
-    // assert (duration > TimeSpan.Zero)
-    // let now = DateTime.Now
+  // let keep (duration: _TimeSpan) =
+    // assert (duration > _TimeSpan.Zero)
+    // let now = _DateTime.Now
     // let dateTime = now - duration
     // timeTail <-
     //   if dateTime < timeTail then  timeTail
     //                          else  dateTime
     // timeTail
 
-  member private is.offsetOfDateTime (dateTime: DateTime)  : Option<Seg * int> =
+  member private is.offsetOfDateTime (dateTime: _DateTime)  : Option<Seg * int> =
     if not (is.timeTail <= dateTime && dateTime <= is.timeHead) then Some (is.CbStateLatest.Segs.Cur, 1)
     else None
 
@@ -460,10 +492,10 @@ type InputStream(beesConfig       : BeesConfig          ,
   //   inputTake.CompletionSource.SetResult()
 
 
-  /// Create a stream of samples starting at a past DateTime.
+  /// Create a stream of samples starting at a past _DateTime.
   /// The stream is exhausted when it gets to the end of buffered data.
   /// The recipient is responsible for separating out channels from the sequence.
-  // member this.Get(dateTime: DateTime, worker: Worker)  : SampleType seq option = seq {
+  // member this.Get(dateTime: _DateTime, worker: Worker)  : SampleType seq option = seq {
   //    let segIndex = segOfDateTime dateTime
   //    match seg with
   //    | None: return! None

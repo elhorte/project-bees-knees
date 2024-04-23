@@ -7,6 +7,8 @@
     </PropertyGroup>
     
     <ItemGroup>
+        <Compile Include="DateTimeShim.fs" />
+        <Compile Include="DebugGlobals.fs" />
         <Compile Include="Util.fs"                 />
         <Compile Include="CallbackHandoff.fs"      />
         <Compile Include="Parallel.fs"             />
@@ -22,6 +24,7 @@
 
     <ItemGroup>
         <ProjectReference Include="../../../../../PortAudioSharp2\PortAudioSharp\PortAudioSharp.csproj" />
+        <ProjectReference Include="..\DateTimeDebugging\DateTimeDebugging.csproj" />
     </ItemGroup>
 
     <ItemGroup>

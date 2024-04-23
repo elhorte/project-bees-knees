@@ -6,8 +6,12 @@ open System.Threading.Tasks
 open FSharp.Control
 
 open PortAudioSharp
+
+open DateTimeDebugging
+open BeesUtil.DateTimeShim
+
+open BeesUtil.DebugGlobals
 open BeesUtil.PortAudioUtils
-open BeesLib.DebugGlobals
 open BeesLib.InputStream
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
@@ -49,8 +53,8 @@ let prepareArgumentsForStreamCreation() =
   sampleRate, inputParameters, outputParameters
 
 
-let getArrayPointer byteCount =
-  let inputArray = Array.init byteCount (fun i -> float32 (i + 1000))
+let getArrayPointer byteCount n ms =
+  let inputArray = Array.init byteCount (fun i -> float32 (n * 1_0000_00  +  (ms + i) * 100  +  i))
   let handle = GCHandle.Alloc(inputArray, GCHandleType.Pinned)
   handle.AddrOfPinnedObject()
 
@@ -60,6 +64,49 @@ let showGC f =
   f()
   // let m = GC.GetTotalMemory(true) - starting
   // Console.WriteLine $"gc memory: %i{ m }";
+
+let runTests inputStream =
+  let cbs = (inputStream: InputStream).CbState
+  let printRange (array, index, length, time, duration) =
+    printfn $"index %d{index}  length %d{length}  time %A{time}  duration %A{duration}"
+  let testOne time (duration:_TimeSpan) =
+    let count = duration.Milliseconds
+    let result = Array.zeroCreate<float32> count
+    let mutable dest = 0
+    let saveResult (array, index, length, time, duration) =
+      Array.Copy(array, index, result, dest, length)
+      dest <- dest + length
+    printfn "%A" (inputStream.get time duration saveResult)
+  let sCurAndOld = if cbs.Segs.Old.Active then  "Cur and Old" else  "Cur only" 
+  inputStream.CbState.PrintRing $"running get() tests with %s{sCurAndOld}"
+  // BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK
+  do // BeforeData
+    let time     = inputStream.CbState.Segs.TimeTail - _TimeSpan.FromMilliseconds 30
+    let duration = _TimeSpan.FromMilliseconds 30
+    testOne time duration
+  do // AfterData
+    let time     = inputStream.CbState.Segs.TimeTail // just beyond
+    let duration = _TimeSpan.FromMilliseconds 30
+    testOne time duration
+  do // ClippedTail – only part of Segs.Old
+    let time     = inputStream.CbState.Segs.TimeTail - _TimeSpan.FromMilliseconds 40
+    let theEnd   = inputStream.CbState.Segs.TimeTail + _TimeSpan.FromMilliseconds 30
+    let duration = theEnd - time
+    testOne time duration
+  do // ClippedHead – only part of Segs.Cur
+    let time     = inputStream.CbState.Segs.TimeHead - _TimeSpan.FromMilliseconds 40
+    let theEnd   = inputStream.CbState.Segs.TimeHead + _TimeSpan.FromMilliseconds 30
+    let duration = theEnd - time
+    testOne time duration
+  do // ClippedBothEnds – only part of Segs.Old
+    let time     = inputStream.CbState.Segs.TimeTail - _TimeSpan.FromMilliseconds 40
+    let theEnd   = inputStream.CbState.Segs.TimeHead + _TimeSpan.FromMilliseconds 30
+    let duration = theEnd - time
+    testOne time duration
+  do // OK - exactly all of both segs
+    let time     = inputStream.CbState.Segs.TimeTail
+    let duration = inputStream.CbState.Segs.Duration
+    testOne time duration
   
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run frameSize iS = task {
@@ -69,28 +116,24 @@ let run frameSize iS = task {
   let test() =
     printfn "calling callback ...\n"
     let frameCount = 5
-    let byteCount = frameCount * frameSize
-    let input  = getArrayPointer byteCount
-    let output = getArrayPointer byteCount
     let mutable timeInfo = PortAudioSharp.StreamCallbackTimeInfo()
+    assert (timeInfo.inputBufferAdcTime = 0.0)
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(inputStream.CbState))
-    for i in 1..33 do
-      let fc = uint32 (if i < 25 then  frameCount else  2 * frameCount)
+    for i in 0..31 do
+      let nFrames = uint32 (if i < 25 then  frameCount else  2 * frameCount)
+      let durationSec = float nFrames / float iS.BeesConfig.InSampleRate
+      let byteCount = frameCount * frameSize
+      let adcTimeMs = int (timeInfo.inputBufferAdcTime * 1000.0)
+      let input  = getArrayPointer byteCount i adcTimeMs
+      let output = getArrayPointer byteCount i adcTimeMs
       let m = showGC (fun () ->
-        timeInfo.inputBufferAdcTime <- 0.01 * float i
-        callback input output fc &timeInfo statusFlags userDataPtr |> ignore
-        delayMs false 1
-    //  Console.WriteLine $"{i}"
+        callback input output nFrames &timeInfo statusFlags userDataPtr |> ignore
+        timeInfo.inputBufferAdcTime <- timeInfo.inputBufferAdcTime + durationSec
+        if i = 15 then runTests inputStream
       )
-      delayMs false 1
-    printfn "\n\ncalling callback done"
-    let printRange (array, index, length, time, duration) =
-      ()
-    let time     = DateTime.MinValue + (TimeSpan.FromMilliseconds 27)
-    let duration = TimeSpan.FromMilliseconds 36
-    let result = inputStream.get time duration printRange
-    printfn "%A" result
+      m |> ignore
+    runTests inputStream
   
   test()
   use cts = new CancellationTokenSource()
@@ -117,7 +160,7 @@ let main _ =
   let withEcho    = false
   let withLogging = false
 //let sim = SimInts  { NData = 56 ; NGap = 20 }
-  let sim = SimTimes { AudioDuration = TimeSpan.FromMilliseconds  56 ; GapDuration = TimeSpan.FromMilliseconds 20 }
+  let sim = SimTimes { AudioDuration = _TimeSpan.FromMilliseconds  56 ; GapDuration = _TimeSpan.FromMilliseconds 20 }
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   let sampleSize = sizeof<SampleType>
@@ -127,8 +170,8 @@ let main _ =
     PrimaryDir                  = "primary"
     MonitorDir                  = "monitor"
     PlotDir                     = "plot"
-    InputStreamAudioDuration    = TimeSpan.FromMilliseconds 1000
-    InputStreamRingGapDuration  = TimeSpan.FromMilliseconds   20
+    InputStreamAudioDuration    = _TimeSpan.FromMilliseconds 1000
+    InputStreamRingGapDuration  = _TimeSpan.FromMilliseconds   20
     SampleSize                  = sampleSize
     InChannelCount              = inputParameters.channelCount
     InSampleRate                = 1000 }

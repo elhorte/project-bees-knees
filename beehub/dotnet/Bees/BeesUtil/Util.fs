@@ -3,6 +3,14 @@ module BeesUtil.Util
 open System
 open System.Threading.Tasks
 
+open DateTimeDebugging
+open DateTimeShim
+
+//–––––––––––––––––––––––––––––––––––––––––––––––––––
+
+// for debugging simulating callbacks
+let tsMs timeSpan = (timeSpan:_TimeSpan).TotalMilliseconds
+let dtMs dateTime = (dateTime:_DateTime) - _DateTime.MinValue |> tsMs
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––
 

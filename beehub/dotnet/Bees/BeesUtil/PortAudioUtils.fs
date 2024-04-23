@@ -3,6 +3,10 @@ module BeesUtil.PortAudioUtils
 open System
 open PortAudioSharp
 
+open DateTimeDebugging
+open DateTimeShim
+
+
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // PortAudio Utils
 
@@ -39,6 +43,6 @@ let terminatePortAudio() =
 let floatToMicrosecondsFractionOnly (time: float) : int =
   int (1_000_000.0 * (time % 1.0))
 
-let durationToNFrames sampleRate (duration: TimeSpan) =
+let durationToNFrames sampleRate (duration: _TimeSpan) =
   let nFramesApprox = duration.TotalSeconds * float sampleRate
   int (Math.Ceiling nFramesApprox)

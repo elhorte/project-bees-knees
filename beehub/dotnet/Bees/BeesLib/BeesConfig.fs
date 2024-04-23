@@ -1,7 +1,9 @@
 module BeesLib.BeesConfig
 
-open System
 open System.Text
+
+open DateTimeDebugging
+open BeesUtil.DateTimeShim
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -13,8 +15,8 @@ type BeesConfig = {
   PrimaryDir                 : string
   MonitorDir                 : string
   PlotDir                    : string
-  InputStreamAudioDuration   : TimeSpan
-  InputStreamRingGapDuration : TimeSpan
+  InputStreamAudioDuration   : _TimeSpan
+  InputStreamRingGapDuration : _TimeSpan
   SampleSize                 : int
   InChannelCount             : int
   InSampleRate               : int  } with

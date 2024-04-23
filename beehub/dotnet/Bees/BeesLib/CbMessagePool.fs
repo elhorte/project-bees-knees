@@ -3,14 +3,23 @@ module BeesLib.CbMessagePool
 open System
 
 open PortAudioSharp
+
+open DateTimeDebugging
+open BeesUtil.DateTimeShim
+
 open BeesLib.BeesConfig
 open BeesUtil.AsyncConcurrentQueue
 open BeesUtil.ItemPool
-open BeesUtil.Util
+
+open BeesUtil.DebugGlobals
 
 
 
-let tbdDateTime = DateTime.MinValue
+let tbdDateTime = _DateTime.MinValue
+
+    
+let durationOf inSampleRate nFrames  = _TimeSpan.FromSeconds (float nFrames / float inSampleRate)
+let nFramesOf  inSampleRate duration = int ((duration: _TimeSpan).TotalMicroseconds / 1_000_000.0 * float inSampleRate)
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // Seg class, used by InputStream.  The ring buffer can comprise 0, 1, or 2 segs.
@@ -18,13 +27,14 @@ let tbdDateTime = DateTime.MinValue
 type Portion = {
   index    : int
   nFrames  : int
-  time     : DateTime
-  duration : TimeSpan  }
+  time     : _DateTime
+  duration : _TimeSpan  }
 
 type Seg = {
   mutable Tail     : int
   mutable Head     : int
-  mutable TimeHead : DateTime
+  mutable TailTime : _DateTime
+  mutable HeadTime : _DateTime
   NRingFrames      : int
   InSampleRate     : int  }
   
@@ -35,7 +45,8 @@ type Seg = {
     let seg = {
       Tail         = tail
       Head         = head
-      TimeHead     = tbdDateTime
+      TailTime     = tbdDateTime
+      HeadTime     = tbdDateTime
       NRingFrames  = nRingFrames
       InSampleRate = inSampleRate  }
     seg
@@ -43,42 +54,41 @@ type Seg = {
   static member NewEmpty (nRingFrames: int) (inSampleRate: int) =  Seg.New 0 0 nRingFrames inSampleRate
 
   member seg.Copy() = { seg with Tail = seg.Tail }
-
     
-  member seg.durationOf nFrames = TimeSpan.FromSeconds (float nFrames / float seg.InSampleRate)
-  member seg.nFramesOf duration = int ((duration: TimeSpan).TotalMicroseconds / 1_000_000.0 * float seg.InSampleRate)
+  member seg.durationOf nFrames = durationOf seg.InSampleRate nFrames
+  member seg.nFramesOf duration = nFramesOf  seg.InSampleRate duration
   
   member seg.NFrames  = seg.Head - seg.Tail
   member seg.Duration = seg.durationOf seg.NFrames
-  member seg.TimeTail = seg.TimeHead - seg.Duration
   member seg.Active   = seg.NFrames <> 0
   member seg.Reset()  = seg.Head <- 0 ; seg.Tail <- 0 ; assert (not seg.Active)
-
-  member seg.NFramesOf duration = seg.nFramesOf duration
   
   /// identify the portion of seg that overlaps with the given time and duration
-  member seg.getPortion (from: DateTime) (duration: TimeSpan)  : Portion =
-    let time = max seg.TimeTail from
-    let tailTimeOffsetOfPortion = time - seg.TimeTail
-    assert (tailTimeOffsetOfPortion >= TimeSpan.Zero)
-    let headTime = from + duration
-    let headOfPortion = min headTime seg.TimeHead
-    let duration = headOfPortion - time
-    let index = seg.Tail + seg.nFramesOf tailTimeOffsetOfPortion
-    let indexHead = index + seg.nFramesOf duration
-    let nFrames = indexHead - index
+  member seg.getPortion (from: _DateTime) (duration: _TimeSpan)  : Portion =
+    let portionTailTime = max  from             seg.TailTime
+    let portionHeadTime = min (from + duration) seg.HeadTime
+    let portionTailTimeOffset = portionTailTime - seg.TailTime
+    let portionDuration = portionHeadTime - portionTailTime
+    let index   = seg.Tail + seg.nFramesOf portionTailTimeOffset
+    let nFrames =            seg.nFramesOf portionDuration
+    assert (seg.Tail <= index) ; assert (index + nFrames <= seg.Head)
     { index    = index
       nFrames  = nFrames
-      time     = time
-      duration = duration }
+      time     = portionTailTime
+      duration = portionDuration }
 
-  member seg.AdvanceHead nFrames timeHead =
-    let headNew = seg.Head + nFrames
-    assert (headNew <= seg.NRingFrames)
-    seg.Head     <- headNew
-    seg.TimeHead <- timeHead
+  member seg.SetTail index dateTime =  seg.Tail <- index ; seg.TailTime <- dateTime
+                                       assert (seg.Tail     <= seg.Head)
+                                       assert (seg.TailTime <= seg.HeadTime)
+  member seg.SetHead index dateTime =  seg.Head <- index ; seg.HeadTime <- dateTime
+                                       assert (seg.Tail     <= seg.Head)
+                                       assert (seg.TailTime <= seg.HeadTime)
+                                       assert (seg.Head <= seg.NRingFrames)
+
+  member seg.AdvanceTail nFrames =  seg.SetTail (seg.Tail + nFrames) (seg.TailTime + seg.durationOf nFrames)
+  member seg.AdvanceHead nFrames =  seg.SetHead (seg.Head + nFrames) (seg.HeadTime + seg.durationOf nFrames)
   
-  member seg.Print name = $"{name} {seg.Tail:D2}.{seg.Head:D2}"
+  member seg.ToString name = $"{name} {seg.Tail:D2}.{seg.Head:D2}"
 
 
 
@@ -101,7 +111,7 @@ type CbMessage = {
   mutable UserDataPtr          : IntPtr                
   // more from the callback
   mutable SeqNum               : uint64
-  mutable TimeStamp            : DateTime              
+  mutable TimeStamp            : _DateTime              
   mutable WithEcho             : bool                  
   mutable InputSamplesRingCopy : IntPtr                
   mutable SegCur               : Seg                   
@@ -131,7 +141,7 @@ type CbMessage = {
       UserDataPtr          = IntPtr.Zero       
       // more from the callback
       SeqNum               = 0UL
-      TimeStamp            = DateTime.MinValue 
+      TimeStamp            = _DateTime.MinValue 
       WithEcho             = false             
       InputSamplesRingCopy = IntPtr 0          
       SegCur               = newSeg()          
@@ -160,7 +170,7 @@ type CbMessageQueue = AsyncConcurrentQueue<PoolItem<CbMessage>>
   //   let startCount = 3
   //   let minCount   = 2
   //   let stream     = null 
-  //   let startTime  = DateTime.Now
+  //   let startTime  = _DateTime.Now
   //   let logger     = Logger(8000, startTime)
   //   let pool = CbMessagePool(1, startCount, minCount, stream, CbMessageQueue(), logger)
   //   pool.Test()

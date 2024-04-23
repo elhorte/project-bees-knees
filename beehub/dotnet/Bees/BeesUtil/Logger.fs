@@ -3,10 +3,13 @@ module BeesUtil.Logger
 open System
 open System.Text
 
-type LogEntry(seqNum: uint64, timestamp: DateTime, message: string, data: obj) =
-  new() = LogEntry(0UL, DateTime.MinValue, "", null)
+open DateTimeDebugging
+open BeesUtil.DateTimeShim
+
+type LogEntry(seqNum: uint64, timestamp: _DateTime, message: string, data: obj) =
+  new() = LogEntry(0UL, _DateTime.MinValue, "", null)
   member val seqNum    : uint64   = seqNum      with get, set
-  member val Timestamp : DateTime = timestamp   with get, set
+  member val Timestamp : _DateTime = timestamp   with get, set
   member val Message   : string   = message     with get, set
   member val Data      : obj      = data        with get, set
 
@@ -14,14 +17,14 @@ type LogEntry(seqNum: uint64, timestamp: DateTime, message: string, data: obj) =
 /// Has a start time and a preallocated number of entries,
 /// which are modified in place.
 /// 
-type Logger (capacity: int, startTime: DateTime) =
+type Logger (capacity: int, startTime: _DateTime) =
   let entryBuf = Array.init<LogEntry> capacity (fun _ -> LogEntry())
   let mutable count = 0
   let mutable entries = ArraySegment<LogEntry>(entryBuf, 0, 0)
 
   member this.Entries  with get() = entries
 
-  member this.Add seqNum (timestamp: DateTime) (message: string) (data: obj) =
+  member this.Add seqNum (timestamp: _DateTime) (message: string) (data: obj) =
     if count >= capacity then ()
     else
     let entry = entryBuf[count]
@@ -52,7 +55,7 @@ type Logger (capacity: int, startTime: DateTime) =
     if entries.Count > 0 then
       printfn "\nLog:"
       entries
-      |> Seq.fold print TimeSpan.Zero |> ignore
+      |> Seq.fold print _TimeSpan.Zero |> ignore
     printfn ""
     sb.AppendFormat("Log entries: {0}\n", count) |> ignore
     sb.ToString()

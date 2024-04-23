@@ -3,8 +3,12 @@ open System
 open System.Runtime.InteropServices
 
 open PortAudioSharp
+
+open DateTimeDebugging
+open BeesUtil.DateTimeShim
+
+open BeesUtil.DebugGlobals
 open BeesUtil.ItemPool
-open TestGcBug.GcUtils
 open BeesUtil.PortAudioUtils
 open BeesLib.InputStream
 open BeesLib.BeesConfig
@@ -147,8 +151,8 @@ let main _ =
     PrimaryDir                  = "primary"
     MonitorDir                  = "monitor"
     PlotDir                     = "plot"
-    InputStreamAudioDuration   = TimeSpan.FromMinutes 16
-    InputStreamRingGapDuration  = TimeSpan.FromSeconds 1
+    InputStreamAudioDuration    = _TimeSpan.FromMinutes 16
+    InputStreamRingGapDuration  = _TimeSpan.FromSeconds 1
     SampleSize                  = sizeof<SampleType>
     InChannelCount              = inputParameters.channelCount
     InSampleRate                = int sampleRate  }

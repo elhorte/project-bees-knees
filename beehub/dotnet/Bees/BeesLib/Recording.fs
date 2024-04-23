@@ -1,8 +1,11 @@
 module BeesLib.Recording
 
-open System
 open System.Threading
 
+open DateTimeDebugging
+open BeesUtil.DateTimeShim
+
+open BeesUtil.DebugGlobals
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open BeesLib.InputStream
@@ -18,8 +21,8 @@ open BeesLib.InputStream
 //   end_tod             the time of day to stop  recording, if start_tod == None, ignore & record continuously
 
 type TodRange = {
-  Begin : TimeSpan
-  End   : TimeSpan }
+  Begin : _TimeSpan
+  End   : _TimeSpan }
 
 type ActivityType =
   | Continuous
@@ -28,11 +31,11 @@ type ActivityType =
 type State =
   | ReadyToRecord
   | RecordingUntil of int
-  | WaitingUntil   of DateTime
+  | WaitingUntil   of _DateTime
 
 type Recording = {
-  recordingPeriod   : TimeSpan     // 0 <= x <= 24h
-  interval          : TimeSpan     // x >= 0
+  recordingPeriod   : _TimeSpan     // 0 <= x <= 24h
+  interval          : _TimeSpan     // x >= 0
   label             : string       // thread_id
   filenameExtension : string       // file_format       
   targetSampleRate  : int          // target_sample_rate               
@@ -55,12 +58,12 @@ let osPathJoin dir name = $"{dir}/{name}"
 
 type RangePosition =
   | During
-  | Before of DateTime // of next During today
-  | After  of DateTime // of next During tomorrow
+  | Before of _DateTime // of next During today
+  | After  of _DateTime // of next During tomorrow
 
 let rangePosition todRange now =
-  let today    = DateTime.Today
-  let tomorrow = DateTime.Today + (TimeSpan.FromDays 1)
+  let today    = _DateTime.Today
+  let tomorrow = _DateTime.Today + (_TimeSpan.FromDays 1)
   let todayBegin    = today    + todRange.Begin
   let tomorrowBegin = tomorrow + todRange.Begin
   let todayEnd      = today    + todRange.End
@@ -80,10 +83,10 @@ let rangePosition todRange now =
 //       let dt = max recEnd dt2
 //       WaitingUntil   dt
 //     if   count > 0                  then  RecordingUntil  count
-//     elif r.interval = TimeSpan.Zero then  RecordingUntil (recEnd + r.recordingPeriod) // start again
+//     elif r.interval = _TimeSpan.Zero then  RecordingUntil (recEnd + r.recordingPeriod) // start again
 //                                     else  xxxx           (recEnd + r.interval)
 //   let waitingUntil dt =
-//     let recordingFileSize (duration: TimeSpan) = duration.Seconds * r.targetSampleRate * r.targetChannels 
+//     let recordingFileSize (duration: _TimeSpan) = duration.Seconds * r.targetSampleRate * r.targetChannels 
 //     if now < dt then  WaitingUntil    dt
 //                 else  RecordingUntil  (recordingFileSize r.recordingPeriod)
 //   r.state <-
@@ -113,7 +116,7 @@ let rangePosition todRange now =
 let doRecording r (inputStream: InputStream) =
   let makeFilename beesConfig r =
     let beesConfig = (beesConfig: BeesConfig)
-    let timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+    let timestamp = _DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
     let name = $"%s{timestamp}_%s{r.label}_%A{r.recordingPeriod}_%A{r.interval}_{beesConfig.LocationId}_{beesConfig.HiveId}"
     $"%s{name}.{r.filenameExtension.ToLower()}"
   let downSampleIfNeeded r buf =
@@ -126,7 +129,7 @@ let doRecording r (inputStream: InputStream) =
   //                         yield! record()
   //     | None -> ()
   //     
-  // //   let now = DateTime.Now
+  // //   let now = _DateTime.Now
   //   // let writeFile() =
   //   //   let audioData = downSampleIfNeeded r cbMessage.InputSamplesCopy
   //   //   let outputFilename = makeFilename config r

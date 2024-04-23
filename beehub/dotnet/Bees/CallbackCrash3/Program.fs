@@ -8,7 +8,7 @@ open PortAudioSharp
 
 let delayMs print ms =
   if print then Console.Write $"\nDelay %d{ms}ms. {{"
-  (Task.Delay ms).Wait() |> ignore
+  (Task.Delay ms).Wait()
   if print then Console.Write "}"
 
 let awaitForever() = delayMs false Int32.MaxValue
@@ -35,7 +35,7 @@ let paTryCatch f (exit: Exception -> unit) =
     exit  ex
     raise ex
 
-let paTryCatchRethrow f = paTryCatch f (fun e -> ()                 )
+let paTryCatchRethrow f = paTryCatch f (fun _ -> ()                 )
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––
 

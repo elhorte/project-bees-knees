@@ -2,19 +2,21 @@
 open System
 open System.Runtime.InteropServices
 open System.Threading
-
 open System.Threading.Tasks
-open BeesLib
 open FSharp.Control
+
 open PortAudioSharp
+
+open DateTimeDebugging
+open BeesUtil.DateTimeShim
+
+open BeesUtil.DebugGlobals
 open BeesUtil.Util
 open BeesUtil.PortAudioUtils
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open BeesLib.Keyboard
 
-
-open System
 
 // A function to consume a lot of memory quickly
 let consumeMemory() =
@@ -131,8 +133,8 @@ let main _ =
     PrimaryDir                  = "primary"
     MonitorDir                  = "monitor"
     PlotDir                     = "plot"
-    InputStreamAudioDuration   = TimeSpan.FromMinutes 16
-    InputStreamRingGapDuration  = TimeSpan.FromSeconds 1
+    InputStreamAudioDuration    = _TimeSpan.FromMinutes 16
+    InputStreamRingGapDuration  = _TimeSpan.FromSeconds 1
     SampleSize                  = sizeof<SampleType>
     InChannelCount              = inputParameters.channelCount
     InSampleRate                = int sampleRate  }

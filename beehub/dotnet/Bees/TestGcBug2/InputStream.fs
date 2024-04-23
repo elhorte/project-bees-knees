@@ -6,6 +6,11 @@ open System.Threading
 open System.Threading.Tasks
 
 open PortAudioSharp
+
+open DateTimeDebugging
+open BeesUtil.DateTimeShim
+
+open BeesUtil.DebugGlobals
 open BeesUtil.Util
 open BeesUtil.Logger
 open BeesUtil.ItemPool
@@ -14,7 +19,6 @@ open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
-open BeesLib.DebugGlobals
 
 
 type Worker = Buf -> int -> int
@@ -55,7 +59,7 @@ type Worker = Buf -> int -> int
   
 type InputGetResult =
   | Error   of string
-  | Success of DateTime
+  | Success of _DateTime
 
 
 /// <summary>Make the pool of CbMessages used by the stream callback</summary>
@@ -69,21 +73,21 @@ let makeCbMessagePool beesConfig nRingFrames =
 // InputStream
 
 type InputStream = {
-  startTime                 : DateTime
+  startTime                 : _DateTime
   Logger                    : Logger
   mutable paStream          : PortAudioSharp.Stream
-  mutable timeStamp         : DateTime
+  mutable timeStamp         : _DateTime
   mutable seqNum            : uint64
   mutable withEcho          : bool
   mutable withLogging       : bool
   mutable beesConfig        : BeesConfig // so it’s visible in the debugger
   frameSize                 : int
-  ringDuration              : TimeSpan
+  ringDuration              : _TimeSpan
   nRingFrames               : int
   mutable nUsableRingFrames : int
   nRingBytes                : int
   ringPtr                   : IntPtr
-  gapDuration               : TimeSpan
+  gapDuration               : _TimeSpan
   mutable nGapFrames        : int
   cbMessagePool             : CbMessagePool
   cbMessageWorkList         : SubscriberList<CbMessage>
@@ -173,12 +177,12 @@ let handOff (is: InputStream) =
   // cbMessagePool.ItemUseEnd(cbMessageCurrent)
   is.callbackHandoff.HandOff()
 
-let timeTail (is: InputStream) = is.cbMessageCurrent.SegOldest.TimeTail
-let timeHead (is: InputStream) = is.cbMessageCurrent.SegCur   .TimeHead
+let timeTail (is: InputStream) = is.cbMessageCurrent.SegOldest.TailTime
+let timeHead (is: InputStream) = is.cbMessageCurrent.SegCur   .HeadTime
 
 
 
-// let (|TooEarly|SegCur|SegOld|)  (dateTime: DateTime) (duration: TimeSpan) =
+// let (|TooEarly|SegCur|SegOld|)  (dateTime: _DateTime) (duration: _TimeSpan) =
   
   
 
@@ -197,8 +201,8 @@ let timeHead (is: InputStream) = is.cbMessageCurrent.SegCur   .TimeHead
   
 //   
 // let x = timeTail
-// let get (dateTime: DateTime) (duration: TimeSpan) (worker: Worker) =
-//   let now = DateTime.Now
+// let get (dateTime: _DateTime) (duration: _TimeSpan) (worker: Worker) =
+//   let now = _DateTime.Now
 //   let timeStart = max dateTime timeTail
 //   if timeStart + duration > now then  Error "insufficient buffered data"
 //   else
@@ -211,16 +215,16 @@ let timeHead (is: InputStream) = is.cbMessageCurrent.SegCur   .TimeHead
 //   Success timeStart
   
 
-// let keep (duration: TimeSpan) =
-  // assert (duration > TimeSpan.Zero)
-  // let now = DateTime.Now
+// let keep (duration: _TimeSpan) =
+  // assert (duration > _TimeSpan.Zero)
+  // let now = _DateTime.Now
   // let dateTime = now - duration
   // timeTail <- 
   //   if dateTime < timeTail then  timeTail
   //                          else  dateTime
   // timeTail
   
-let locationOfDateTime (is: InputStream) (dateTime: DateTime)  : Option<Seg * int> =
+let locationOfDateTime (is: InputStream) (dateTime: _DateTime)  : Option<Seg * int> =
   if not (timeTail is <= dateTime && dateTime <= timeHead is) then Some (is.cbMessageCurrent.SegCur, 1)
   else None
 
@@ -243,14 +247,14 @@ let exchangeSegs (is:InputStream) nFrames =
   let tmp = is.cbSegCur  in  is.cbSegCur <- is.cbSegOld  ;  is.cbSegOld <- tmp
   // if is.cbSegCur.Head <> 0 then  Console.WriteLine "head != 0"
   // assert (is.cbSegCur.Head = 0)
-  is.cbSegCur.TimeHead <- tbdDateTime
+  is.cbSegCur.HeadTime <- tbdDateTime
 
 // In case the callback’s nFrames arg varies from one callback to the next,
 // adjust nGapFrames for the maximum nFrames arg seen.
 // The goal is plenty of room, i.e. time, between cbSegCur.Head and cbSegOld.Tail.
 // Code assumes that nRingFrames > 2 * nGapFrames
 let adjustNGapFrames (is: InputStream) nFrames =
-  let gapCandidate = if simulatingCallbacks then nFrames else nFrames * 4
+  let gapCandidate = nFrames * 4 // if simulatingCallbacks then nFrames else nFrames * 4
   let nGapNew    = max is.nGapFrames gapCandidate
   let nUsableNew = nFrames * (is.nRingFrames / nFrames)
   if (is.nUsableRingFrames < nUsableNew  ||  is.nGapFrames < nGapNew)  &&  is.debugSimulating then
@@ -261,8 +265,8 @@ let adjustNGapFrames (is: InputStream) nFrames =
   is.nUsableRingFrames <- nUsableNew
 
 let printCurAndOld (is: InputStream) msg =
-  let sCur = is.cbSegCur.Print "cur"
-  let sOld = is.cbSegOld.Print "old"
+  let sCur = is.cbSegCur.ToString "cur"
+  let sOld = is.cbSegOld.ToString "old"
   Console.WriteLine $"%s{sCur} %s{sOld} %s{msg}"
   
 
@@ -309,7 +313,7 @@ let callback input output frameCount timeInfo statusFlags userDataPtr =
   // Console.WriteLine $"data length %d{is.debugData.Length}"
   let (input : IntPtr) = input
   let (output: IntPtr) = output
-  is.timeStamp <- DateTime.Now
+  is.timeStamp <- _DateTime.Now
   is.seqNum    <- is.seqNum + 1UL
   if echoEnabled is then
     let size = uint64 (frameCount * uint32 is.frameSize)
@@ -349,7 +353,7 @@ let callback input output frameCount timeInfo statusFlags userDataPtr =
     let size   = int64 (nFrames * is.frameSize)
     Buffer.MemoryCopy(srcPtr, dstPtr, size, size)
     cbMessage.InputSamplesRingCopy <- IntPtr dstPtr
-    is.cbSegCur.AdvanceHead nFrames is.timeStamp
+    is.cbSegCur.AdvanceHead nFrames
   do
     cbMessage.SegCur.Head <- is.cbSegCur.Head
     cbMessage.SegCur.Tail <- is.cbSegCur.Tail
@@ -384,13 +388,13 @@ let newInputStream( beesConfig       : BeesConfig       )
                   ( withEcho         : bool             )
                   ( withLogging      : bool             ) =
 
-  let startTime         = DateTime.Now
-  let ringDuration      = TimeSpan.FromMilliseconds(200) // beesConfig.RingBufferDuration
+  let startTime         = _DateTime.Now
+  let ringDuration      = _TimeSpan.FromMilliseconds(200) // beesConfig.RingBufferDuration
   let nRingFrames       = if DebugGlobals.simulatingCallbacks then 37 else durationToNFrames beesConfig.InSampleRate ringDuration
   let nUsableRingFrames = 0 // calculated later
   let frameSize         = beesConfig.FrameSize
   let nRingBytes        = int nRingFrames * frameSize
-  let gapDuration       = TimeSpan.FromMilliseconds 10
+  let gapDuration       = _TimeSpan.FromMilliseconds 10
   let cbMessageWorkList = SubscriberList<CbMessage>()
   let nGapFrames        = if DebugGlobals.simulatingCallbacks then 2 else durationToNFrames beesConfig.InSampleRate gapDuration 
   let cbMessagePool     = makeCbMessagePool beesConfig nRingFrames
@@ -401,7 +405,7 @@ let newInputStream( beesConfig       : BeesConfig       )
     startTime         = startTime
     Logger            = Logger(8000, startTime)
     paStream          = dummyInstance<PortAudioSharp.Stream>()
-    timeStamp         = DateTime.Now
+    timeStamp         = _DateTime.Now
     seqNum            = 0UL
     withEcho          = withEcho
     withLogging       = withLogging   
@@ -412,7 +416,7 @@ let newInputStream( beesConfig       : BeesConfig       )
     nUsableRingFrames = nUsableRingFrames
     nRingBytes        = nRingBytes
     ringPtr           = Marshal.AllocHGlobal(nRingBytes)
-    gapDuration       = TimeSpan.FromMilliseconds 10
+    gapDuration       = _TimeSpan.FromMilliseconds 10
     nGapFrames        = nGapFrames
     cbMessagePool     = cbMessagePool
     cbMessageWorkList = SubscriberList<CbMessage>()
@@ -453,10 +457,10 @@ let newInputStream( beesConfig       : BeesConfig       )
                                                                           userData        = is                                   ) )
     is
 
-/// Create a stream of samples starting at a past DateTime.
+/// Create a stream of samples starting at a past _DateTime.
 /// The stream is exhausted when it gets to the end of buffered data.
 /// The recipient is responsible for separating out channels from the sequence.
-// member this.Get(dateTime: DateTime, worker: Worker)  : SampleType seq option = seq {
+// member this.Get(dateTime: _DateTime, worker: Worker)  : SampleType seq option = seq {
 //    let segIndex = segOfDateTime dateTime
 //    match seg with
 //    | None: return! None

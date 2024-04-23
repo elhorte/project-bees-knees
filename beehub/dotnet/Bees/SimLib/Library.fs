@@ -6,7 +6,11 @@ open System.Threading
 open System.Threading.Tasks
 
 open PortAudioSharp
-open BeesLib.DebugGlobals
+
+open DateTimeDebugging
+open BeesUtil.DateTimeShim
+
+open BeesUtil.DebugGlobals
 open BeesLib.CbMessagePool
 
 
@@ -87,7 +91,7 @@ type CbState = {
   mutable SegOld          : Seg
   mutable SeqNum          : uint64
   mutable InputRingCopy   : IntPtr // where input was copied to
-  mutable TimeStamp       : DateTime
+  mutable TimeStamp       : _DateTime
   // more stuff
   mutable IsInCallback    : bool
   mutable NRingFrames     : int
@@ -95,7 +99,7 @@ type CbState = {
   mutable CallbackHandoff : CallbackHandoff
   mutable WithEcho        : bool
   mutable WithLogging     : bool
-  TimeInfoBase            : DateTime // for getting UTC from timeInfo.inputBufferAdcTime
+  TimeInfoBase            : _DateTime // for getting UTC from timeInfo.inputBufferAdcTime
   FrameSize               : int
   RingPtr                 : IntPtr
   DebugSimulating         : bool } with
@@ -129,8 +133,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   let printCurAndOld msg =
     if not cbs.DebugSimulating then ()
     else 
-    let sCur = cbs.SegCur.Print "cur"
-    let sOld = cbs.SegOld.Print "old"
+    let sCur = cbs.SegCur.ToString "cur"
+    let sOld = cbs.SegOld.ToString "old"
     Console.WriteLine $"%s{sCur} %s{sOld} %s{msg}"
   let prepSegs() =
     // state is Empty, AtBegin, Moving, AtEnd, Chasing
@@ -165,7 +169,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
         let tmp = cbs.SegCur  in  cbs.SegCur <- cbs.SegOld  ;  cbs.SegOld <- tmp
         // if SegCur.Head <> 0 then  Console.WriteLine "head != 0"
         // assert (SegCur.Head = 0)
-        cbs.SegCur.TimeHead <- tbdDateTime
+        cbs.SegCur.HeadTime <- tbdDateTime
       exchangeSegs()
       printCurAndOld "exchanged"
       assert (cbs.SegCur.Head = 0)
@@ -190,8 +194,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     let size   = int64 (nFrames * cbs.FrameSize)
     Buffer.MemoryCopy(srcPtr, dstPtr, size, size)
     cbs.InputRingCopy <- IntPtr dstPtr
-    let timeHead = cbs.TimeInfoBase + TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
-    cbs.SegCur.AdvanceHead nFrames timeHead
+    let timeHead = cbs.TimeInfoBase + _TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
+    cbs.SegCur.AdvanceHead nFrames
   cbs.CallbackHandoff.HandOff()
   Volatile.Write(&cbs.IsInCallback, false)
   PortAudioSharp.StreamCallbackResult.Continue
@@ -209,7 +213,7 @@ type InputStream( sampleRate       : int              ,
   let nRingFrames       = 37
   let nGapFrames        = 4
   let nRingBytes        = int nRingFrames * frameSize
-  let startTime         = DateTime.UtcNow
+  let startTime         = _DateTime.UtcNow
 
   let cbState = {
     // callback args  
@@ -223,7 +227,7 @@ type InputStream( sampleRate       : int              ,
     SegOld          = Seg.NewEmpty nRingFrames sampleRate
     SeqNum          = 0UL
     InputRingCopy   = IntPtr.Zero
-    TimeStamp       = DateTime.MaxValue // placeholder
+    TimeStamp       = _DateTime.MaxValue // placeholder
     // more stuff
     IsInCallback    = false
     NRingFrames     = nRingFrames

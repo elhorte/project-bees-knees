@@ -3,18 +3,20 @@ module TestCbState.InputStream
 open System
 open System.Runtime.InteropServices
 open System.Threading
-open System.Threading.Tasks
 
 open PortAudioSharp
+
+open DateTimeDebugging
+open BeesUtil.DateTimeShim
+
+open BeesUtil.DebugGlobals
 open BeesUtil.Util
 open BeesUtil.Logger
-open BeesUtil.ItemPool
 open BeesUtil.SubscriberList
 open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
-open BeesLib.DebugGlobals
 
 
 type Worker = Buf -> int -> int
@@ -55,7 +57,7 @@ type Worker = Buf -> int -> int
   
 type InputGetResult =
   | Error   of string
-  | Success of DateTime
+  | Success of _DateTime
 
 
 /// <summary>Make the pool of CbMessages used by the stream callback</summary>
@@ -81,7 +83,7 @@ type CbState = {
   mutable SegOld          : Seg
   mutable SeqNum          : uint64
   mutable InputRingCopy   : IntPtr // where input was copied to
-  mutable TimeStamp       : DateTime
+  mutable TimeStamp       : _DateTime
   // more stuff
   mutable IsInCallback    : bool
   mutable NRingFrames     : int
@@ -90,7 +92,7 @@ type CbState = {
   mutable CallbackHandoff : CallbackHandoff
   mutable WithEcho        : bool
   mutable WithLogging     : bool
-  TimeInfoBase            : DateTime
+  TimeInfoBase            : _DateTime
   FrameSize               : int // from PortAudioSharp TBD
   RingPtr                 : IntPtr
   Logger                  : Logger
@@ -111,7 +113,7 @@ let exchangeSegs cbState nFrames =
   let tmp = cbs.SegCur  in  cbs.SegCur <- cbs.SegOld  ;  cbs.SegOld <- tmp
   // if this.segCur.Head <> 0 then  Console.WriteLine "head != 0"
   // assert (this.segCur.Head = 0)
-  cbs.SegCur.TimeHead <- tbdDateTime
+  cbs.SegCur.HeadTime <- tbdDateTime
 
 // In case the callback’s nFrames arg varies from one callback to the next,
 // adjust nGapFrames for the maximum nFrames arg seen.
@@ -119,7 +121,7 @@ let exchangeSegs cbState nFrames =
 // Code assumes that nRingFrames > 2 * nGapFrames
 let adjustNGapFrames cbState nFrames =
   let (cbs: CbState) = cbState
-  let gapCandidate = if simulatingCallbacks then nFrames else nFrames * 4
+  let gapCandidate = nFrames * 4 // if simulatingCallbacks then nFrames else nFrames * 4
   let nGapNew    = max cbs.NGapFrames gapCandidate
   let nUsableNew = nFrames * (cbs.NRingFrames / nFrames)
   if (cbs.NUsableFrames < nUsableNew  ||  cbs.NGapFrames < nGapNew)  &&  cbs.DebugSimulating then
@@ -168,7 +170,7 @@ let prepSegs cbState nFrames =
 
 let inputBufferAdcTimeOf cbState =
   let (cbs: CbState) = cbState
-  cbs.TimeInfoBase + TimeSpan.FromSeconds cbs.TimeInfo.inputBufferAdcTime
+  cbs.TimeInfoBase + _TimeSpan.FromSeconds cbs.TimeInfo.inputBufferAdcTime
   
 let indexToVoidptr cbState index  : voidptr =
   let (cbs: CbState) = cbState
@@ -238,9 +240,9 @@ type InputStream(beesConfig       : BeesConfig       ,
                  withEcho         : bool             ,
                  withLogging      : bool             ) =
 
-  let startTime         = DateTime.Now
-  let ringDuration      = TimeSpan.FromMilliseconds(200) // beesConfig.InputStreamBufferDuration
-  let gapDuration       = TimeSpan.FromMilliseconds 10   // beesConfig.InputStreamGapDuration
+  let startTime         = _DateTime.Now
+  let ringDuration      = _TimeSpan.FromMilliseconds(200) // beesConfig.InputStreamBufferDuration
+  let gapDuration       = _TimeSpan.FromMilliseconds 10   // beesConfig.InputStreamGapDuration
   let nRingFrames       = if BeesLib.DebugGlobals.simulatingCallbacks then 37 else durationToNFrames beesConfig.InSampleRate ringDuration
   let nUsableRingFrames = 0 // calculated later
   let frameSize         = beesConfig.FrameSize
@@ -262,7 +264,7 @@ type InputStream(beesConfig       : BeesConfig       ,
     SegOld          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
     SeqNum          = 0UL
     InputRingCopy   = IntPtr.Zero
-    TimeStamp       = DateTime.MaxValue // placeholder
+    TimeStamp       = _DateTime.MaxValue // placeholder
     IsInCallback    = false
     NRingFrames     = nRingFrames
     NUsableFrames   = nUsableRingFrames
@@ -270,7 +272,7 @@ type InputStream(beesConfig       : BeesConfig       ,
     CallbackHandoff = dummyInstance<CallbackHandoff>()  // tbd
     WithEcho        = withEcho
     WithLogging     = withLogging   
-    TimeInfoBase    = DateTime.Now  // timeInfoBase + cbState.timeInfo -> cbState.TimeStamp. should come from PortAudioSharp TBD
+    TimeInfoBase    = _DateTime.Now  // timeInfoBase + cbState.timeInfo -> cbState.TimeStamp. should come from PortAudioSharp TBD
     FrameSize       = frameSize
     RingPtr         = Marshal.AllocHGlobal(nRingBytes)
     Logger          = Logger(8000, startTime)
@@ -309,7 +311,7 @@ type InputStream(beesConfig       : BeesConfig       ,
     | None   -> dummyInstance<PortAudioSharp.Stream>()
     | Some p -> p
   let cbState           = cbState
-  let timeStamp         = DateTime.Now
+  let timeStamp         = _DateTime.Now
   // let cbMessagePool     = cbMessagePool
   // let cbMessageWorkList = SubscriberList<CbMessage>()
   // let cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
@@ -380,12 +382,12 @@ type InputStream(beesConfig       : BeesConfig       ,
     // if debugExcessOfCallbacks cbMessage.SeqNum >= 0 then  Console.WriteLine $"No more callbacks – debugging"
     // printCallback cbMessage
   
-  member is.timeTail() = is.CbStateLatest.SegOldest.TimeTail
-  member is.timeHead() = is.CbStateLatest.SegCur   .TimeHead
+  member is.timeTail() = is.CbStateLatest.SegOldest.TailTime
+  member is.timeHead() = is.CbStateLatest.SegCur   .HeadTime
  
 
   
-  // let (|TooEarly|SegCur|SegOld|)  (dateTime: DateTime) (duration: TimeSpan) =
+  // let (|TooEarly|SegCur|SegOld|)  (dateTime: _DateTime) (duration: _TimeSpan) =
     
     
   
@@ -404,8 +406,8 @@ type InputStream(beesConfig       : BeesConfig       ,
     
   //   
   // let x = timeTail
-  // let get (dateTime: DateTime) (duration: TimeSpan) (worker: Worker) =
-  //   let now = DateTime.Now
+  // let get (dateTime: _DateTime) (duration: _TimeSpan) (worker: Worker) =
+  //   let now = _DateTime.Now
   //   let timeStart = max dateTime timeTail
   //   if timeStart + duration > now then  Error "insufficient buffered data"
   //   else
@@ -418,16 +420,16 @@ type InputStream(beesConfig       : BeesConfig       ,
   //   Success timeStart
     
 
-  // let keep (duration: TimeSpan) =
-    // assert (duration > TimeSpan.Zero)
-    // let now = DateTime.Now
+  // let keep (duration: _TimeSpan) =
+    // assert (duration > _TimeSpan.Zero)
+    // let now = _DateTime.Now
     // let dateTime = now - duration
     // timeTail <- 
     //   if dateTime < timeTail then  timeTail
     //                          else  dateTime
     // timeTail
     
-  member private is.offsetOfDateTime (dateTime: DateTime)  : Option<Seg * int> =
+  member private is.offsetOfDateTime (dateTime: _DateTime)  : Option<Seg * int> =
     if not (is.timeTail() <= dateTime && dateTime <= is.timeHead()) then Some (is.CbStateLatest.SegCur, 1)
     else None
 
@@ -465,10 +467,10 @@ type InputStream(beesConfig       : BeesConfig       ,
     Console.Write "–"
     
 
-  /// Create a stream of samples starting at a past DateTime.
+  /// Create a stream of samples starting at a past _DateTime.
   /// The stream is exhausted when it gets to the end of buffered data.
   /// The recipient is responsible for separating out channels from the sequence.
-  // member this.Get(dateTime: DateTime, worker: Worker)  : SampleType seq option = seq {
+  // member this.Get(dateTime: _DateTime, worker: Worker)  : SampleType seq option = seq {
   //    let segIndex = segOfDateTime dateTime
   //    match seg with
   //    | None: return! None

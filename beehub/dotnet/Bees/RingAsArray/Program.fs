@@ -6,7 +6,10 @@ open System.Threading.Tasks
 
 open PortAudioSharp
 
-open BeesLib.DebugGlobals
+open DateTimeDebugging
+open BeesUtil.DateTimeShim
+
+open BeesUtil.DebugGlobals
 open BeesLib.CbMessagePool
 open CSharpHelpers
 
@@ -122,7 +125,7 @@ type CbState = {
   mutable SegOld          : Seg
   mutable SeqNum          : uint64
   mutable InputRingCopy   : IntPtr // where input was copied to
-  mutable TimeStamp       : DateTime
+  mutable TimeStamp       : _DateTime
   // more stuff
   mutable State           : State
   mutable IsInCallback    : bool
@@ -132,7 +135,7 @@ type CbState = {
   mutable CallbackHandoff : CallbackHandoff
   mutable WithEcho        : bool
   mutable WithLogging     : bool
-  TimeInfoBase            : DateTime // for getting UTC from timeInfo.inputBufferAdcTime
+  TimeInfoBase            : _DateTime // for getting UTC from timeInfo.inputBufferAdcTime
   FrameSize               : int
   Ring                    : float32 array
   DebugSimulating         : bool } with
@@ -151,7 +154,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
 //Console.Write "."
   Volatile.Write(&cbs.IsInCallback, true)
   let nFrames = int frameCount
-  let adcStartTime = cbs.TimeInfoBase + TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
+  let adcStartTime = cbs.TimeInfoBase + _TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
   
   cbs.Input        <- input
   cbs.Output       <- output
@@ -184,10 +187,10 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
         for i in (cbs.SegOld.Tail)..(cbs.SegOld.Head-1) do dots[i] <- '◾'
       Console.Write dots
       let sState = $"{cbs.State}"
-      let sCur = cbs.SegCur.Print "cur"
+      let sCur = cbs.SegCur.ToString "cur"
       let sNewTail = sprintf "%3d" newTail
       let sNew = $"{sNewTail:S3}.{newHead:d2}"
-      let sOld = cbs.SegOld.Print "old"
+      let sOld = cbs.SegOld.ToString "old"
       let sTotal =
         let sum = cbs.SegCur.NFrames + cbs.SegOld.NFrames
         $"{cbs.SegCur.NFrames:d2}+{cbs.SegOld.NFrames:d2}={sum:d2}"
@@ -256,7 +259,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     // Copy the block to the ring.
     // Copy from callback data to the head of the ring and return a pointer to the copy.
     UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, cbs.SegCur.Head, nFrames)
-    cbs.SegCur.AdvanceHead nFrames adcStartTime
+    cbs.SegCur.AdvanceHead nFrames
   cbs.CallbackHandoff.HandOff()
   Volatile.Write(&cbs.IsInCallback, false)
   PortAudioSharp.StreamCallbackResult.Continue
@@ -274,7 +277,7 @@ type InputStream( sampleRate       : int              ,
   let nDataFrames = 56
   let nGapFrames  = 25
   let nRingFrames = nDataFrames + (3 * nGapFrames) / 2
-  let startTime   = DateTime.UtcNow
+  let startTime   = _DateTime.UtcNow
 
   let cbState = {
     // callback args  
@@ -288,7 +291,7 @@ type InputStream( sampleRate       : int              ,
     SegOld          = Seg.NewEmpty nRingFrames sampleRate
     SeqNum          = 0UL
     InputRingCopy   = IntPtr.Zero
-    TimeStamp       = DateTime.MaxValue // placeholder
+    TimeStamp       = _DateTime.MaxValue // placeholder
     // more stuff
     State           = Empty
     IsInCallback    = false
