@@ -88,43 +88,43 @@ let runTests inputStream =
     let mutable resultData: float32[] = [||]
     let mutable startTime = _DateTime.MinValue
     let mutable destIndex = 0
-    let mutable passes = 0
+    let mutable nPasses = 0
     let saveResult (array, size, index, length, time, duration) =
       if destIndex = 0 then
         resultData <- Array.zeroCreate<float32> size
         startTime <- time
       Array.Copy(array, index, resultData, destIndex, length)
       destIndex <- destIndex + length
-      passes <- passes + 1
+      nPasses <- nPasses + 1
     let name, time, duration as result = inputStream.get time duration saveResult
     let sPassFail = if checkResultData resultData time duration then  "pass" else  "fail"
-    printfn $"%s{sPassFail} %d{passes} %A{result} %s{msg}"
+    printfn $"%s{sPassFail} %d{nPasses} %A{result} %s{msg}"
   let sCurAndOld = if cbs.Segs.Old.Active then  "Cur and Old" else  "Cur only" 
   cbs.PrintRing $"running get() tests with %s{sCurAndOld}"
   // BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK
   do
     let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 30
     let duration = _TimeSpan.FromMilliseconds 30
-    testOne time duration "BeforeData"
+    testOne time duration "ErrorBeforeData"
   do
     let time     = cbs.Segs.TimeHead // just beyond
     let duration = _TimeSpan.FromMilliseconds 30
-    testOne time duration "AfterData"
+    testOne time duration "ErrorAfterData"
   do
     let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 40
-    let theEnd   = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 30
+    let theEnd   = cbs.Segs.TimeHead - _TimeSpan.FromMilliseconds 10
     let duration = theEnd - time
-    testOne time duration "ClippedTail – only part of Segs.Old"
+    testOne time duration "WarnClippedTail"
   do 
     let time     = cbs.Segs.TimeHead - _TimeSpan.FromMilliseconds 40
     let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 30
     let duration = theEnd - time
-    testOne time duration "ClippedHead – only part of Segs.Cur"
+    testOne time duration "WarnClippedHead"
   do 
     let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 40
     let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 30
     let duration = theEnd - time
-    testOne time duration "ClippedBothEnds – only part of Segs.Old"
+    testOne time duration "WarnClippedBothEnds"
   do 
     let time     = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 10
     let duration = cbs.Segs.Duration - _TimeSpan.FromMilliseconds 10
@@ -148,7 +148,7 @@ let run frameSize iS = task {
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(cbs))
     for i in 0..33 do
-      let nFrames = uint32 (if i < 25 then  frameCount else  2 * frameCount) // monkey wrench
+      let nFrames = uint32 (if i < 25 then  frameCount else  2 * frameCount)
       let durationSec = float nFrames / float iS.BeesConfig.InSampleRate
       let byteCount = frameCount * frameSize
       let adcTimeMs = int (cbs.TimeInfoBase.TotalMilliseconds + (timeInfo.inputBufferAdcTime * 1000.0))
@@ -159,12 +159,9 @@ let run frameSize iS = task {
       let m = showGC (fun () ->
         callback input output nFrames &timeInfo statusFlags userDataPtr |> ignore
         timeInfo.inputBufferAdcTime <- timeInfo.inputBufferAdcTime + durationSec
-        if i = 17 then  ()
         if i = 15 then runTests inputStream
-        if i = 30 then runTests inputStream
-      )
+        if i = 31 then runTests inputStream )
       m |> ignore
-    runTests inputStream
   
   test()
   use cts = new CancellationTokenSource()
