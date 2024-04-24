@@ -65,8 +65,9 @@ type Seg = {
   
   /// identify the portion of seg that overlaps with the given time and duration
   member seg.getPortion (time: _DateTime) (duration: _TimeSpan)  : Portion =
-    let tailTimeClipped = max  time             seg.TailTime
-    let headTimeClipped = min (time + duration) seg.HeadTime
+    let headTime        = time + duration
+    let tailTimeClipped = max time     seg.TailTime
+    let headTimeClipped = min headTime seg.HeadTime
     let tailTimeOffset  = tailTimeClipped - seg.TailTime
     let portionDuration = headTimeClipped - tailTimeClipped
     let portionIndex    = seg.nFramesOf tailTimeOffset

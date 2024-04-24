@@ -70,7 +70,7 @@ let runTests inputStream =
   let cbs = (inputStream: InputStream).CbState
   let printRange (array, index, length, time, duration) =
     printfn $"index %d{index}  length %d{length}  time %A{time}  duration %A{duration}"
-  let testOne time (duration:_TimeSpan) =
+  let testOne time (duration:_TimeSpan) msg =
     let checkResultData (resultData: float32[]) (time: _DateTime) duration =
       let trim d = (int d / 100) % 1000
       // resultData
@@ -88,45 +88,51 @@ let runTests inputStream =
     let mutable resultData: float32[] = [||]
     let mutable startTime = _DateTime.MinValue
     let mutable destIndex = 0
+    let mutable passes = 0
     let saveResult (array, size, index, length, time, duration) =
       if destIndex = 0 then
         resultData <- Array.zeroCreate<float32> size
         startTime <- time
       Array.Copy(array, index, resultData, destIndex, length)
       destIndex <- destIndex + length
+      passes <- passes + 1
     let name, time, duration as result = inputStream.get time duration saveResult
     let sPassFail = if checkResultData resultData time duration then  "pass" else  "fail"
-    printfn $"%A{result}  %s{sPassFail}"
+    printfn $"%s{sPassFail} %d{passes} %A{result} %s{msg}"
   let sCurAndOld = if cbs.Segs.Old.Active then  "Cur and Old" else  "Cur only" 
   cbs.PrintRing $"running get() tests with %s{sCurAndOld}"
   // BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK
-  // do // BeforeData
-  //   let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 30
-  //   let duration = _TimeSpan.FromMilliseconds 30
-  //   testOne time duration
-  // do // AfterData
-  //   let time     = cbs.Segs.TimeHead // just beyond
-  //   let duration = _TimeSpan.FromMilliseconds 30
-  //   testOne time duration
-  do // ClippedTail – only part of Segs.Old
+  do
+    let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 30
+    let duration = _TimeSpan.FromMilliseconds 30
+    testOne time duration "BeforeData"
+  do
+    let time     = cbs.Segs.TimeHead // just beyond
+    let duration = _TimeSpan.FromMilliseconds 30
+    testOne time duration "AfterData"
+  do
     let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 40
     let theEnd   = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 30
     let duration = theEnd - time
-    testOne time duration
-  do // ClippedHead – only part of Segs.Cur
+    testOne time duration "ClippedTail – only part of Segs.Old"
+  do 
     let time     = cbs.Segs.TimeHead - _TimeSpan.FromMilliseconds 40
     let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 30
     let duration = theEnd - time
-    testOne time duration
-  do // ClippedBothEnds – only part of Segs.Old
+    testOne time duration "ClippedHead – only part of Segs.Cur"
+  do 
     let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 40
     let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 30
     let duration = theEnd - time
-    testOne time duration
-  do // OK - exactly all of both segs
+    testOne time duration "ClippedBothEnds – only part of Segs.Old"
+  do 
+    let time     = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 10
+    let duration = cbs.Segs.Duration - _TimeSpan.FromMilliseconds 10
+    testOne time duration "OK - part of each seg"
+  do 
     let time     = cbs.Segs.TimeTail
     let duration = cbs.Segs.Duration
-    testOne time duration
+    testOne time duration "OK - exactly all of both segs"
   
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run frameSize iS = task {
@@ -142,7 +148,7 @@ let run frameSize iS = task {
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(cbs))
     for i in 0..33 do
-      let nFrames = uint32 (if i < 25 then  frameCount else  2 * frameCount)
+      let nFrames = uint32 (if i < 25 then  frameCount else  2 * frameCount) // monkey wrench
       let durationSec = float nFrames / float iS.BeesConfig.InSampleRate
       let byteCount = frameCount * frameSize
       let adcTimeMs = int (cbs.TimeInfoBase.TotalMilliseconds + (timeInfo.inputBufferAdcTime * 1000.0))
@@ -152,7 +158,7 @@ let run frameSize iS = task {
       let output = getHandle oArray
       let m = showGC (fun () ->
         callback input output nFrames &timeInfo statusFlags userDataPtr |> ignore
-        timeInfo.inputBufferAdcTime <- float i * durationSec
+        timeInfo.inputBufferAdcTime <- timeInfo.inputBufferAdcTime + durationSec
         if i = 17 then  ()
         if i = 15 then runTests inputStream
         if i = 30 then runTests inputStream
