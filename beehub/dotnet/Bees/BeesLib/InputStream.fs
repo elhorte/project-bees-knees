@@ -129,11 +129,11 @@ type CbState = {
     let sText =
       let sSeqNum  = sprintf "%2d" cbs.SeqNum1
       let sX       = if String.length msg > 0 then  "*" else  " "
-      let sTime    = sprintf "%4d.%4d %4d.%4d"
-                       cbs.Segs.Cur.TailTime.Milliseconds
-                       cbs.Segs.Cur.HeadTime.Milliseconds
+      let sTime    = sprintf "%3d.%3d %3d.%3d"
                        cbs.Segs.Old.TailTime.Milliseconds
                        cbs.Segs.Old.HeadTime.Milliseconds
+                       cbs.Segs.Cur.TailTime.Milliseconds
+                       cbs.Segs.Cur.HeadTime.Milliseconds
       let sDur     = let sum = cbs.Segs.Cur.Duration.Milliseconds + cbs.Segs.Old.Duration.Milliseconds
                      $"{cbs.Segs.Cur.Duration.Milliseconds:d2}+{cbs.Segs.Old.Duration.Milliseconds:d2}={sum:d2}"
       let sCur     = cbs.Segs.Cur.ToString "cur"

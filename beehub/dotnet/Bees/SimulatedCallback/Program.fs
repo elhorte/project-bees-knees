@@ -98,10 +98,10 @@ let runTests inputStream =
     let sPassFail = if checkResultData resultData time duration then  "pass" else  "fail"
     printfn $"%A{result}  %s{sPassFail}"
   let sCurAndOld = if cbs.Segs.Old.Active then  "Cur and Old" else  "Cur only" 
-  inputStream.CbState.PrintRing $"running get() tests with %s{sCurAndOld}"
+  cbs.PrintRing $"running get() tests with %s{sCurAndOld}"
   // BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK
   // do // BeforeData
-  //   let time     = inputStream.CbState.Segs.TimeTail - _TimeSpan.FromMilliseconds 30
+  //   let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 30
   //   let duration = _TimeSpan.FromMilliseconds 30
   //   testOne time duration
   // do // AfterData
@@ -141,7 +141,7 @@ let run frameSize iS = task {
     assert (timeInfo.inputBufferAdcTime = 0.0)
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(cbs))
-    for i in 0..31 do
+    for i in 0..33 do
       let nFrames = uint32 (if i < 25 then  frameCount else  2 * frameCount)
       let durationSec = float nFrames / float iS.BeesConfig.InSampleRate
       let byteCount = frameCount * frameSize
@@ -154,7 +154,8 @@ let run frameSize iS = task {
         callback input output nFrames &timeInfo statusFlags userDataPtr |> ignore
         timeInfo.inputBufferAdcTime <- float i * durationSec
         if i = 17 then  ()
-    //  if i = 15 then runTests inputStream
+        if i = 15 then runTests inputStream
+        if i = 30 then runTests inputStream
       )
       m |> ignore
     runTests inputStream

@@ -64,17 +64,19 @@ type Seg = {
   member seg.Reset()  = seg.Head <- 0 ; seg.Tail <- 0 ; assert (not seg.Active)
   
   /// identify the portion of seg that overlaps with the given time and duration
-  member seg.getPortion (from: _DateTime) (duration: _TimeSpan)  : Portion =
-    let portionTailTime = max  from             seg.TailTime
-    let portionHeadTime = min (from + duration) seg.HeadTime
-    let portionTailTimeOffset = portionTailTime - seg.TailTime
-    let portionDuration = portionHeadTime - portionTailTime
-    let index   = seg.Tail + seg.nFramesOf portionTailTimeOffset
-    let nFrames =            seg.nFramesOf portionDuration
+  member seg.getPortion (time: _DateTime) (duration: _TimeSpan)  : Portion =
+    let tailTimeClipped = max  time             seg.TailTime
+    let headTimeClipped = min (time + duration) seg.HeadTime
+    let tailTimeOffset  = tailTimeClipped - seg.TailTime
+    let portionDuration = headTimeClipped - tailTimeClipped
+    let portionIndex    = seg.nFramesOf tailTimeOffset
+    let index           = seg.Tail + portionIndex
+    let portionNFrames  = seg.nFramesOf portionDuration
+    let nFrames         = portionNFrames 
     assert (seg.Tail <= index) ; assert (index + nFrames <= seg.Head)
     { index    = index
       nFrames  = nFrames
-      time     = portionTailTime
+      time     = tailTimeClipped
       duration = portionDuration }
 
   member seg.SetTail index dateTime =  seg.Tail <- index ; seg.TailTime <- dateTime
