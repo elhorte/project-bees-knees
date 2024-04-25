@@ -91,7 +91,7 @@ type Seg = {
   member seg.AdvanceTail nFrames =  seg.SetTail (seg.Tail + nFrames) (seg.TailTime + seg.durationOf nFrames)
   member seg.AdvanceHead nFrames =  seg.SetHead (seg.Head + nFrames) (seg.HeadTime + seg.durationOf nFrames)
   
-  member seg.ToString name = $"{name} {seg.Tail:D2}.{seg.Head:D2}"
+  override seg.ToString() = $"{seg.Tail:D2}.{seg.Head:D2}"
 
 
 

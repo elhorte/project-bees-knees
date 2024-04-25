@@ -79,7 +79,7 @@ let runTests inputStream =
       for i = 0 to resultData.Length - 1 do
         let d = resultData[i]
         let td = trim d
-        let ms = time.Milliseconds + i
+        let ms = time.Millisecond + i
         let r =  td = ms
         if i = 20 then ()
         ()
@@ -99,40 +99,42 @@ let runTests inputStream =
     let name, time, duration as result = inputStream.get time duration saveResult
     let sPassFail = if checkResultData resultData time duration then  "pass" else  "fail"
     printfn $"%s{sPassFail} %d{passes} %A{result} %s{msg}"
-  let sCurAndOld = if cbs.Segs.Old.Active then  "Cur and Old" else  "Cur only" 
-  cbs.PrintRing $"running get() tests with %s{sCurAndOld}"
+  let sNSegments = if cbs.Segs.Old.Active then  "two segments." else  "one segment."
+  cbs.PrintRing $"running get() tests with %s{sNSegments}"
+  printfn $"Ring has %s{sNSegments}"
   // BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK
   do
     let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 30
     let duration = _TimeSpan.FromMilliseconds 30
-    testOne time duration "BeforeData"
+    testOne time duration "ErrorBeforeData"
   do
     let time     = cbs.Segs.TimeHead // just beyond
     let duration = _TimeSpan.FromMilliseconds 30
-    testOne time duration "AfterData"
+    testOne time duration "ErrorAfterData"
   do
     let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 40
-    let theEnd   = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 30
+    let theEnd   = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 10
     let duration = theEnd - time
-    testOne time duration "ClippedTail – only part of Segs.Old"
+    testOne time duration "WarnClippedTail – only the first 10"
   do 
-    let time     = cbs.Segs.TimeHead - _TimeSpan.FromMilliseconds 40
+    let time     = cbs.Segs.TimeHead - _TimeSpan.FromMilliseconds 10
     let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 30
     let duration = theEnd - time
-    testOne time duration "ClippedHead – only part of Segs.Cur"
+    testOne time duration "WarnClippedHead – only the last 10"
   do 
     let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 40
     let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 30
     let duration = theEnd - time
-    testOne time duration "ClippedBothEnds – only part of Segs.Old"
-  do 
-    let time     = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 10
-    let duration = cbs.Segs.Duration - _TimeSpan.FromMilliseconds 10
-    testOne time duration "OK - part of each seg"
+    testOne time duration "WarnClippedBothEnds – all of the data"
   do 
     let time     = cbs.Segs.TimeTail
     let duration = cbs.Segs.Duration
-    testOne time duration "OK - exactly all of both segs"
+    testOne time duration "OK - all of the data"
+  do 
+    let time     = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 10
+    let duration = cbs.Segs.Duration - _TimeSpan.FromMilliseconds 10
+    testOne time duration "OK -  all but the first and last 10"
+  cbs.PrintTitle()
   
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run frameSize iS = task {
@@ -141,17 +143,18 @@ let run frameSize iS = task {
   inputStream.Start()
   
   let test() =
-    printfn "calling callback ...\n"
+    printfn "Simulating callbacks ...\n"
     let frameCount = 5
     let mutable timeInfo = PortAudioSharp.StreamCallbackTimeInfo()
     assert (timeInfo.inputBufferAdcTime = 0.0)
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(cbs))
+    cbs.PrintTitle()
     for i in 0..33 do
       let nFrames = uint32 (if i < 25 then  frameCount else  2 * frameCount) // monkey wrench
       let durationSec = float nFrames / float iS.BeesConfig.InSampleRate
       let byteCount = frameCount * frameSize
-      let adcTimeMs = int (cbs.TimeInfoBase.TotalMilliseconds + (timeInfo.inputBufferAdcTime * 1000.0))
+      let adcTimeMs = cbs.TimeInfoBase.Millisecond + int (timeInfo.inputBufferAdcTime * 1000.0)
       let iArray = makeArray byteCount i adcTimeMs
       let oArray = makeArray byteCount i adcTimeMs
       let input  = getHandle iArray
@@ -159,12 +162,9 @@ let run frameSize iS = task {
       let m = showGC (fun () ->
         callback input output nFrames &timeInfo statusFlags userDataPtr |> ignore
         timeInfo.inputBufferAdcTime <- timeInfo.inputBufferAdcTime + durationSec
-        if i = 17 then  ()
         if i = 15 then runTests inputStream
-        if i = 30 then runTests inputStream
-      )
+        if i = 31 then runTests inputStream )
       m |> ignore
-    runTests inputStream
   
   test()
   use cts = new CancellationTokenSource()
@@ -188,10 +188,15 @@ let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 
 [<EntryPoint>]
 let main _ =
+  if _DateTime.Now.ToString() <> "100" then
+    printfn "This program must be run with the fake _DateTime and _TimeSpan classes.  See DateTimeShim.fs"
+    2
+  else
+  printfn "Running with the fake _DateTime and _TimeSpan classes, as required."
   let withEcho    = false
   let withLogging = false
 //let sim = SimInts  { NData = 56 ; NGap = 20 }
-  let sim = SimTimes { AudioDuration = _TimeSpan.FromMilliseconds  56 ; GapDuration = _TimeSpan.FromMilliseconds 20 }
+  let sim = SimTimes { AudioDuration = _TimeSpan.FromMilliseconds  56 ; GapDuration = _TimeSpan.FromMilliseconds 10 }
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   let sampleSize = sizeof<SampleType>
@@ -201,8 +206,8 @@ let main _ =
     PrimaryDir                  = "primary"
     MonitorDir                  = "monitor"
     PlotDir                     = "plot"
-    InputStreamAudioDuration    = _TimeSpan.FromMilliseconds 1000
-    InputStreamRingGapDuration  = _TimeSpan.FromMilliseconds   20
+    InputStreamAudioDuration    = _TimeSpan.FromMilliseconds 1000 // These are ignored when the SimTimes struct is used, as above
+    InputStreamRingGapDuration  = _TimeSpan.FromMilliseconds   20 // These are ignored when the SimTimes struct is used, as above
     SampleSize                  = sampleSize
     InChannelCount              = inputParameters.channelCount
     InSampleRate                = 1000 }

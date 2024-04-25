@@ -110,7 +110,7 @@ type CbState = {
       let mutable ring =
         let num i = char ((i / 10 % 10).ToString())
         let numberedEmpties i = if getsNum i then  num i else  empty
-        // "..........1.........2.........3.........4.........5.........6.........7.........8....."
+        // "0.........1.........2.........3.........4.........5.........6.........7.........8....."
         Array.init cbs.NRingFrames numberedEmpties
       do // Overwrite empties with seg data.
         let showDataFor seg =
@@ -121,7 +121,7 @@ type CbState = {
           for i in first..last do  setDataFor i
         if cbs.Segs.Old.Active then
           assert (cbs.State = Chasing)
-          // "..........1.........2.........3.........4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
+          // "0.........1.........2.........3.........4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
           showDataFor cbs.Segs.Old
         // "◾◾◾◾◾◾◾◾◾◾1◾◾◾◾◾◾◾◾◾2◾◾◾◾◾◾◾◾◾3◾◾◾◾.....4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
         showDataFor cbs.Segs.Cur
@@ -130,25 +130,34 @@ type CbState = {
       let sSeqNum  = sprintf "%2d" cbs.SeqNum1
       let sX       = if String.length msg > 0 then  "*" else  " "
       let sTime    = sprintf "%3d.%3d %3d.%3d"
-                       cbs.Segs.Old.TailTime.Milliseconds
-                       cbs.Segs.Old.HeadTime.Milliseconds
-                       cbs.Segs.Cur.TailTime.Milliseconds
-                       cbs.Segs.Cur.HeadTime.Milliseconds
+                       cbs.Segs.Old.TailTime.Millisecond
+                       cbs.Segs.Old.HeadTime.Millisecond
+                       cbs.Segs.Cur.TailTime.Millisecond
+                       cbs.Segs.Cur.HeadTime.Millisecond
       let sDur     = let sum = cbs.Segs.Cur.Duration.Milliseconds + cbs.Segs.Old.Duration.Milliseconds
                      $"{cbs.Segs.Cur.Duration.Milliseconds:d2}+{cbs.Segs.Old.Duration.Milliseconds:d2}={sum:d2}"
-      let sCur     = cbs.Segs.Cur.ToString "cur"
+      let sCur     = cbs.Segs.Cur.ToString()
       let sNewTail = sprintf "%3d" newTail
       let sNew     = if newHead < 0 then  "      "  else  $"{sNewTail:S3}.{newHead:d2}"
-      let sOld     = cbs.Segs.Old.ToString "old"
+      let sOld     = cbs.Segs.Old.ToString()
       let sTotal   = let sum = cbs.Segs.Cur.NFrames + cbs.Segs.Old.NFrames
                      $"{cbs.Segs.Cur.NFrames:d2}+{cbs.Segs.Old.NFrames:d2}={sum:d2}"
+      let sNFrames = cbs.FrameCount
       let sGap     = if cbs.Segs.Old.Active then sprintf "%2d" (cbs.Segs.Old.Tail - cbs.Segs.Cur.Head) else  "  "
       let sState   = $"{cbs.State}"
-      // "cur 00.35  new -11.45 old 64.85 35+21=56  gap 29 Chasing "
-      $"%s{sSeqNum}%s{sX} %s{sTime} %s{sDur}  %s{sCur}  new %s{sNew} %s{sOld} %s{sTotal}  gap {sGap:s2} %s{sState} %s{msg}"
+      // "24    5    164.185 185.220 35+21=56  00.35 -16.40 64.85 35+21=56  29  Chasing "
+      $"%s{sSeqNum}%s{sX}%4d{sNFrames}    %s{sTime} %s{sDur}  %s{sCur} %s{sNew} %s{sOld} %s{sTotal}  {sGap:s2}  %s{sState}  %s{msg}"
     Console.WriteLine $"%s{sRing}  %s{sText}"
 
   member cbs.PrintRing msg =  cbs.Print 0 -1 msg
+
+  member cbs.PrintTitle() =
+    let s0 = String.init cbs.Ring.Length (fun _ -> " ")
+    let s1 = " seq nFrames timeOld timeCur duration   Cur    new   Old    size   gap  state"
+    let s2 = " ––– ––––––– ––––––– ––––––– ––––––––  ––––– –––––– ––––– –––––––– –––  –––––––"
+           //   24    5    164.185 185.220 35+21=56  00.35 -16.40 64.85 35+21=56  29  Chasing 
+    Console.WriteLine $"%s{s0}%s{s1}"
+    Console.WriteLine $"%s{s0}%s{s2}"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The callback – Copy data from the audio driver into our ring.
@@ -182,7 +191,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       let newTail = newHead - cbs.NDataFrames
       (newHead, newTail)
     let mutable newHead, newTail = nextValues()
-    let printRing msg = cbs.Print newTail newHead msg
+    let printRing msg = if cbs.Simulating <> NotSimulating then  cbs.Print newTail newHead msg
     let trimCurTail() =
       if newTail > 0 then
         cbs.Segs.Cur.AdvanceTail (newTail - cbs.Segs.Cur.Tail)
@@ -248,29 +257,6 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   PortAudioSharp.StreamCallbackResult.Continue
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// Support for the get() member.
-
-
-  //      Segs.Old         Segs.Cur
-  // [.........◾◾◾◾◾◾◾] [◾◾◾◾◾◾◾.....]
-  //           a      b  a      b
-  //           t                h
-let (|BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK|) (wantTime, wantDuration, haveTime, haveDuration) =
-  let wantEnd: _DateTime = wantTime + wantDuration
-  let haveEnd: _DateTime = haveTime + haveDuration
-  let timeAndDuration tail head = tail, head - tail
-  match () with
-  | _ when wantEnd  <= haveTime                          ->  BeforeData
-  | _ when                           haveEnd <= wantTime ->  AfterData
-  | _ when wantTime <  haveTime  &&  haveEnd <  wantEnd  ->  ClippedBothEnds (timeAndDuration haveTime haveEnd)
-  | _ when wantTime <  haveTime                          ->  ClippedTail     (timeAndDuration haveTime wantEnd)
-  | _ when                           haveEnd <  wantEnd  ->  ClippedHead     (timeAndDuration wantTime haveEnd)
-  | _                                                    ->  assert (haveTime <= wantTime)
-                                                             assert (wantEnd  <= haveEnd )
-                                                             OK              (timeAndDuration wantTime wantEnd)
-  
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The InputStream class
 
 type GetCallback = float32[] * int * int * int * _DateTime * _TimeSpan -> unit
@@ -281,7 +267,7 @@ type InputStreamGetResult =
   | WarnClippedBothEnds = 2
   | WarnClippedTail     = 3
   | WarnClippedHead     = 4
-  | ResultOK            = 5
+  | AsRequested            = 5
 
 // initPortAudio() must be called before this constructor.
 type InputStream(beesConfig       : BeesConfig          ,
@@ -410,32 +396,54 @@ type InputStream(beesConfig       : BeesConfig          ,
   member this.timeTail = this.CbStateLatest.Segs.Oldest.TailTime
   member this.timeHead = this.CbStateLatest.Segs.Cur   .HeadTime
 
-  //      Segs.Old         Segs.Cur
-  // [.........◾◾◾◾◾◾◾] [◾◾◾◾◾◾◾.....]
-  //           a      b  a      b
-  //           tail             head
-  member this.get (time: _DateTime) (duration: _TimeSpan) (f: GetCallback)
+  // Get a range of data from the input recent history.
+  // The caller requests a range expressed as a DateTime and duration TimeSpan.
+  // The delivered range may be clipped to a subrange, depending on availability.
+  // The data is delivered via 0 1 or 2 calls to the provided callback, to which
+  // the data is passed by reference, via an index into the internal buffer array;
+  // the data is guaranteed to be valid only for the duration of the callback.
+  // The result is a tuple of an InputStreamGetResult enum and the 
+  // time and duration of the range of the delivered data.
+  // No locking is needed to synchronize the audio subsystem with the caller.
+  member this.get (time: _DateTime) (duration: _TimeSpan) (deliver: GetCallback)
                   : (InputStreamGetResult * _DateTime * _TimeSpan) =
     let cbs = this.CbStateSnapshot
+    let (|BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK|) (wantTime, wantDuration, haveTime, haveDuration) =
+      //      Segs.Old         Segs.Cur
+      // [.........◾◾◾◾◾◾◾] [◾◾◾◾◾◾◾.....]
+      //           a      b  a      b
+      //           tail             head
+      let wantEnd: _DateTime = wantTime + wantDuration
+      let haveEnd: _DateTime = haveTime + haveDuration
+      let timeAndDuration tail head = tail, head - tail
+      match () with
+      | _ when wantEnd  <= haveTime                          ->  BeforeData
+      | _ when                           haveEnd <= wantTime ->  AfterData
+      | _ when wantTime <  haveTime  &&  haveEnd <  wantEnd  ->  ClippedBothEnds (timeAndDuration haveTime haveEnd)
+      | _ when wantTime <  haveTime                          ->  ClippedTail     (timeAndDuration haveTime wantEnd)
+      | _ when                           haveEnd <  wantEnd  ->  ClippedHead     (timeAndDuration wantTime haveEnd)
+      | _                                                    ->  assert (haveTime <= wantTime)
+                                                                 assert (wantEnd  <= haveEnd )
+                                                                 OK              (timeAndDuration wantTime wantEnd)
     let deliver (timeTail: _DateTime) duration =
       let size = nFramesOf beesConfig.InSampleRate duration
       let timeHead = timeTail + duration
       assert (cbs.Segs.TimeTail <= timeTail) ; assert (timeHead <= cbs.Segs.TimeHead)
       let deliverSegPortion (seg: Seg) =
         let p = seg.getPortion timeTail duration
-        f (cbs.Ring, size, p.index, p.nFrames, p.time, p.duration)
+        deliver (cbs.Ring, size, p.index, p.nFrames, p.time, p.duration)
       if cbs.Segs.Old.Active  &&  timeTail < cbs.Segs.Old.HeadTime then  deliverSegPortion cbs.Segs.Old
       if                          cbs.Segs.Cur.TailTime < timeHead then  deliverSegPortion cbs.Segs.Cur
     let haveTime     = cbs.Segs.TimeTail
     let haveDuration = cbs.Segs.Duration
-    let ndt = _DateTime.MinValue in let nts = _TimeSpan.Zero
+    let tNg = _DateTime.MinValue in let dNg = _TimeSpan.Zero
     match (time, duration, haveTime, haveDuration) with
-    | BeforeData             ->               (InputStreamGetResult.ErrorBeforeData    , ndt, nts)
-    | AfterData              ->               (InputStreamGetResult.ErrorAfterData     , ndt, nts)
-    | ClippedBothEnds (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedBothEnds, t  , d  )
+    | BeforeData             ->               (InputStreamGetResult.ErrorBeforeData    , tNg, dNg)
+    | AfterData              ->               (InputStreamGetResult.ErrorAfterData     , tNg, dNg)
     | ClippedTail     (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedTail    , t  , d  )
     | ClippedHead     (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedHead    , t  , d  )
-    | OK              (t, d) -> deliver t d ; (InputStreamGetResult.ResultOK           , t  , d  )  
+    | ClippedBothEnds (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedBothEnds, t  , d  )
+    | OK              (t, d) -> deliver t d ; (InputStreamGetResult.AsRequested        , t  , d  )  
 
   member this.Get (from: _DateTime, duration: _TimeSpan, f: GetCallback) =
     this.get from duration f

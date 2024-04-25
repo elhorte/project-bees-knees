@@ -1,11 +1,10 @@
 ﻿namespace DateTimeDebugging;
 
 public struct _DateTime : IComparable {
-  public double TotalMilliseconds { get; }
-  public int    Milliseconds => (int)TotalMilliseconds;
-  public int    TimeOfDay    => (int)TotalMilliseconds;
+  public int    Millisecond { get; }
+  public int    TimeOfDay    => Millisecond;
   
-  public _DateTime(double totalMilliseconds) => TotalMilliseconds = totalMilliseconds;
+  private _DateTime(int ms) => Millisecond = ms;
 
   public static _DateTime MinValue => new _DateTime(0);
   public static _DateTime MaxValue => new _DateTime(int.MaxValue);
@@ -13,20 +12,20 @@ public struct _DateTime : IComparable {
   public static _DateTime UtcNow   => new _DateTime(100);
   public static _DateTime Today    => new _DateTime(0);
   
-  public static _DateTime operator +(_DateTime dt , _TimeSpan ts ) => new(dt .TotalMilliseconds + ts .TotalMilliseconds);
-  public static _DateTime operator -(_DateTime dt , _TimeSpan ts ) => new(dt .TotalMilliseconds - ts .TotalMilliseconds);
-  public static _TimeSpan operator -(_DateTime dt1, _DateTime dt2) => new(dt1.TotalMilliseconds - dt2.TotalMilliseconds);
+  public static _DateTime operator +(_DateTime dt , _TimeSpan ts ) => new(dt .Millisecond + ts .Milliseconds);
+  public static _DateTime operator -(_DateTime dt , _TimeSpan ts ) => new(dt .Millisecond - ts .Milliseconds);
+  public static _TimeSpan operator -(_DateTime dt1, _DateTime dt2) => new(dt1.Millisecond - dt2.Millisecond);
 
-  public int CompareTo(object? obj) => TotalMilliseconds.CompareTo(((_DateTime?) obj)?.TotalMilliseconds);
+  public int CompareTo(object? obj) => Millisecond.CompareTo(((_DateTime?) obj)?.Millisecond);
 
-  public override String ToString() => "" + (int)TotalMilliseconds;
+  public override String ToString() => "" + (int)Millisecond;
   public String ToString(string s) => ToString();
 }
 
 public struct _TimeSpan  : IComparable {
   public double TotalMilliseconds { get; }
-  public int    Milliseconds => (int)TotalMilliseconds;
-  public double TotalSeconds => TotalMilliseconds / 1000.0;
+  public int    Milliseconds      => (int)TotalMilliseconds;
+  public double TotalSeconds      => TotalMilliseconds / 1000.0;
   public double TotalMicroseconds => TotalMilliseconds * 1000;
 
   public _TimeSpan(double totalMilliseconds) => TotalMilliseconds = totalMilliseconds;
