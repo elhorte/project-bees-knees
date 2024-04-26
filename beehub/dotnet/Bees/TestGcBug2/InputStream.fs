@@ -265,9 +265,9 @@ let adjustNGapFrames (is: InputStream) nFrames =
   is.nUsableRingFrames <- nUsableNew
 
 let printCurAndOld (is: InputStream) msg =
-  let sCur = is.cbSegCur.ToString "cur"
-  let sOld = is.cbSegOld.ToString "old"
-  Console.WriteLine $"%s{sCur} %s{sOld} %s{msg}"
+  let sCur = is.cbSegCur.ToString()
+  let sOld = is.cbSegOld.ToString()
+  Console.WriteLine $"cur %s{sCur}  old %s{sOld} %s{msg}"
   
 
 let prepSegs (is: InputStream) nFrames =

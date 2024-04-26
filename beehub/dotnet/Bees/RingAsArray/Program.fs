@@ -187,15 +187,15 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
         for i in (cbs.SegOld.Tail)..(cbs.SegOld.Head-1) do dots[i] <- '◾'
       Console.Write dots
       let sState = $"{cbs.State}"
-      let sCur = cbs.SegCur.ToString "cur"
+      let sCur = cbs.SegCur.ToString()
       let sNewTail = sprintf "%3d" newTail
       let sNew = $"{sNewTail:S3}.{newHead:d2}"
-      let sOld = cbs.SegOld.ToString "old"
+      let sOld = cbs.SegOld.ToString()
       let sTotal =
         let sum = cbs.SegCur.NFrames + cbs.SegOld.NFrames
         $"{cbs.SegCur.NFrames:d2}+{cbs.SegOld.NFrames:d2}={sum:d2}"
       let sGap = if cbs.SegOld.Active then sprintf "%2d" (cbs.SegOld.Tail - cbs.SegCur.Head) else  "  "
-      Console.WriteLine $"  %s{sCur}  new %s{sNew} %s{sOld} %s{sTotal}  gap {sGap:s2} %s{sState} %s{msg}"
+      Console.WriteLine $"  cur %s{sCur}  new %s{sNew} old %s{sOld} %s{sTotal}  gap {sGap:s2} %s{sState} %s{msg}"
     let trimCurTail() =
       if newTail > 0 then
         cbs.SegCur.Tail <- newTail

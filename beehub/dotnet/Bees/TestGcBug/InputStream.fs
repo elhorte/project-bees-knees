@@ -338,9 +338,9 @@ type InputStream = {
     is.nUsableRingFrames <- nUsableNew
 
   member private is.printCurAndOld msg =
-    let sCur = is.cbSegCur.ToString "cur"
-    let sOld = is.cbSegOld.ToString "old"
-    Console.WriteLine $"%s{sCur} %s{sOld} %s{msg}"
+    let sCur = is.cbSegCur.ToString()
+    let sOld = is.cbSegOld.ToString()
+    Console.WriteLine $"cur %s{sCur}  old %s{sOld} %s{msg}"
     
 
   member private is.prepSegs nFrames =

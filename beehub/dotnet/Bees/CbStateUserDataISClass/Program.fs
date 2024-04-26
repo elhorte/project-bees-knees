@@ -133,9 +133,9 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   let printCurAndOld msg =
     if not cbs.DebugSimulating then ()
     else 
-    let sCur = cbs.SegCur.ToString "cur"
-    let sOld = cbs.SegOld.ToString "old"
-    Console.WriteLine $"%s{sCur} %s{sOld} %s{msg}"
+    let sCur = cbs.SegCur.ToString()
+    let sOld = cbs.SegOld.ToString()
+    Console.WriteLine $"cur %s{sCur}  old %s{sOld} %s{msg}"
   let prepSegs() =
     // state is Empty, AtBegin, Moving, AtEnd, Chasing
     printCurAndOld ""
