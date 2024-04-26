@@ -116,21 +116,21 @@ let runTests inputStream =
     let theEnd   = cbs.Segs.TimeHead - _TimeSpan.FromMilliseconds 10
     let duration = theEnd - time
     testOne time duration "WarnClippedTail"
-  do 
+  do
     let time     = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 10
     let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 10
     let duration = theEnd - time
     testOne time duration "WarnClippedHead"
-  do 
+  do
     let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 10
     let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 10
     let duration = theEnd - time
     testOne time duration "WarnClippedBothEnds"
-  do 
+  do
     let time     = cbs.Segs.TimeTail
     let duration = cbs.Segs.Duration
     testOne time duration "OK - all of the data"
-  do 
+  do
     let time     = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 10
     let duration = cbs.Segs.Duration - _TimeSpan.FromMilliseconds 10
     testOne time duration "OK -  all but the first and last 10"
