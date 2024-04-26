@@ -18,13 +18,13 @@ public struct _DateTime : IComparable {
 
   public int CompareTo(object? obj) => Millisecond.CompareTo(((_DateTime?) obj)?.Millisecond);
 
-  public override String ToString() => "" + (int)Millisecond;
+  public override String ToString() => "" + Millisecond;
   public String ToString(string s) => ToString();
 }
 
 public struct _TimeSpan  : IComparable {
   public double TotalMilliseconds { get; }
-  public int    Milliseconds      => (int)TotalMilliseconds;
+  public int    Milliseconds      => (int) Math.Round(TotalMilliseconds);
   public double TotalSeconds      => TotalMilliseconds / 1000.0;
   public double TotalMicroseconds => TotalMilliseconds * 1000;
 
@@ -39,9 +39,10 @@ public struct _TimeSpan  : IComparable {
 
   public static _TimeSpan operator +(_TimeSpan ts1, _TimeSpan ts2) => new(ts1.TotalMilliseconds + ts2.TotalMilliseconds);
   public static _TimeSpan operator -(_TimeSpan ts1, _TimeSpan ts2) => new(ts1.TotalMilliseconds - ts2.TotalMilliseconds);
+  public static _TimeSpan operator *(_TimeSpan ts1, int       x  ) => new(ts1.TotalMilliseconds * x                    );
 
   public int CompareTo(object? obj) => TotalMilliseconds.CompareTo(((_TimeSpan?) obj)?.TotalMilliseconds);
 
-  public override String ToString() => "" + (int)TotalMilliseconds;
+  public override String ToString() => "" + (int) Math.Round(TotalMilliseconds);
   public String ToString(string s) => ToString();
 }

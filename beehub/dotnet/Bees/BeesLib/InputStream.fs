@@ -25,15 +25,18 @@ type Worker = Buf -> int -> int
 // InputStream – callback state
 
 // The callback adds data to the ring buffer.  The duration of the audio capacity of the ring is a parameter.
-// The data in the ring buffer is the concatenation of two segments, Segs.Old and Segs.Cur.  From time to
-// time Segs.Old is empty.  Segs.Cur.Head, where new callback data is added, never overwrites Segs.Old.Tail
-// because they are separated by a gap. The duration of the gap is a parameter.  The gap allows a client
+// The data in the ring buffer is the concatenation of two segments, Segs.Old and Segs.Cur.  Segs.Old is Active
+// most of the time but not all.  Segs.Cur.Head, where new callback data is added, never overwrites Segs.Old.Tail
+// because they are separated by a gap.  The duration of the gap is a parameter.  The gap allows a client
 // to ask for past buffered data and expect it to be there for at least as long as the gap duration without
 // being overwritten by callbacks.  The gap is part of a lock-free way to avoid a race between callbacks 
-// writing to the ring and a client reading from the ring.
+// writing to the ring and a client reading from the ring, which works as follows:
+// There are two sequence numbers SeqNum1 and SeqNum2.  THe callback increments SeqNum1, then updates its persistent state,
+// then increments SeqNum2.  Client code that wants to read the ring buffer data, first notes the value of
+// SeqNum1, then makes a copy of the segments, then checks that SeqNum2 = SeqNum1, repeating if they are not equal.
 // The callback (at interrupt time) hands off to a background Task for further processing (not at interrupt time).
 
-// Internal management of the ring is governed by a state variable.
+// Internal management of the ring is governed by a State variable.
 
 type State = // |––––––––––– ring ––––––––––––|
   | AtStart  // |             gap             |
@@ -57,21 +60,22 @@ type State = // |––––––––––– ring ––––––––
 
 [<Struct>]
 type Segs = {
-  mutable Cur   : Seg
-  mutable Old   : Seg }  with
+  mutable Cur : Seg
+  mutable Old : Seg }  with
 
-  member this.Copy()     = { Cur = this.Cur.Copy()
-                             Old = this.Old.Copy() }
-  member this.Oldest     = if this.Old.Active then this.Old else this.Cur
-  member this.TimeTail   = this.Oldest.TailTime
-  member this.TimeHead   = this.Cur   .HeadTime
-  member this.Duration   = this.TimeHead - this.TimeTail
+  member this.Copy()   = { Cur = this.Cur.Copy()
+                           Old = this.Old.Copy() }
+  member this.Oldest   = if this.Old.Active then this.Old else this.Cur
+  member this.TimeTail = this.Oldest.TailTime
+  member this.TimeHead = this.Cur   .HeadTime
+  member this.Duration = this.TimeHead - this.TimeTail
 
   member this.Exchange() =
     let tmp = this.Cur  in  this.Cur <- this.Old  ;  this.Old <- tmp
-    this.Cur.TailTime <- tbdDateTime // Cur is now empty.
+    // Cur is now empty.
+    this.Cur.TailTime <- tbdDateTime
 
-// Callback state, updated by each callback.
+// Callback state, shared across callbacks, updated by each callback.
 type CbState = {
   // callback args
   mutable Input           : IntPtr
@@ -91,7 +95,6 @@ type CbState = {
   mutable NDataFrames     : int
   mutable NGapFrames      : int
   // more stuff
-  mutable IsInCallback    : bool
   mutable WithEcho        : bool
   mutable WithLogging     : bool
   mutable CallbackHandoff : CallbackHandoff // modified only once
@@ -101,7 +104,7 @@ type CbState = {
   Simulating              : SimulatingCallbacks } with
 
   member this.Copy() = { this with Segs = this.Segs.Copy() }
-
+  
   member cbs.Print newTail newHead msg =
     let sRing =
       let empty = '.'
@@ -153,7 +156,7 @@ type CbState = {
 
   member cbs.PrintTitle() =
     let s0 = String.init cbs.Ring.Length (fun _ -> " ")
-    let s1 = " seq nFrames timeOld timeCur duration   Cur    new   Old    size   gap  state"
+    let s1 = " seq nFrames timeOld timeCur duration   Cur    new   Old    size   gap   state"
     let s2 = " ––– ––––––– ––––––– ––––––– ––––––––  ––––– –––––– ––––– –––––––– –––  –––––––"
            //   24    5    164.185 185.220 35+21=56  00.35 -16.40 64.85 35+21=56  29  Chasing 
     Console.WriteLine $"%s{s0}%s{s1}"
@@ -168,14 +171,13 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   let handle  = GCHandle.FromIntPtr(userDataPtr)
   let cbs     = handle.Target :?> CbState
   let nFrames = int frameCount
-  Volatile.Write(&cbs.IsInCallback, true)
+  Volatile.Write(&cbs.SeqNum1, cbs.SeqNum1 + 1)
   if cbs.Simulating = NotSimulating then  Console.Write "."
 
   if cbs.WithEcho then
     let size = uint64 (frameCount * uint32 cbs.FrameSize)
     Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
 
-  Volatile.Write(&cbs.SeqNum1, cbs.SeqNum1 + 1)
   cbs.Input        <- input
   cbs.Output       <- output
   cbs.FrameCount   <- frameCount // in the ”block“ to be copied
@@ -240,7 +242,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
         cbs.State <- Moving
       else
         cbs.Segs.Old.AdvanceTail nFrames
-        assert (newHead + cbs.NGapFrames <= cbs.Segs.Old.Tail)
+        let halfGap = cbs.NGapFrames / 2  // in case nFrames has just been adjusted upwards
+        assert (newHead + halfGap <= cbs.Segs.Old.Tail)
         cbs.State <- Chasing
     | AtEnd ->
       failwith "Can’t happen."
@@ -253,13 +256,12 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
 
 //cbs.Logger.Add cbs.SeqNum2 cbs.TimeStamp "cb bufs=" ""
   cbs.CallbackHandoff.HandOff()
-  Volatile.Write(&cbs.IsInCallback, false)
   PortAudioSharp.StreamCallbackResult.Continue
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The InputStream class
 
-type GetCallback = float32[] * int * int * int * _DateTime * _TimeSpan -> unit
+type ReadDelivery = float32[] * int * int * int * _DateTime * _TimeSpan -> unit
 
 type InputStreamGetResult =
   | ErrorBeforeData     = 0
@@ -267,7 +269,7 @@ type InputStreamGetResult =
   | WarnClippedBothEnds = 2
   | WarnClippedTail     = 3
   | WarnClippedHead     = 4
-  | AsRequested            = 5
+  | AsRequested         = 5
 
 // initPortAudio() must be called before this constructor.
 type InputStream(beesConfig       : BeesConfig          ,
@@ -278,7 +280,7 @@ type InputStream(beesConfig       : BeesConfig          ,
                  sim              : SimulatingCallbacks ) =
 
   let audioDuration = cbSimAudioDuration sim (fun () -> beesConfig.InputStreamAudioDuration                     )
-  let gapDuration   = cbSimGapDuration   sim (fun () -> beesConfig.InputStreamRingGapDuration                   )
+  let gapDuration   = cbSimGapDuration   sim (fun () -> beesConfig.InputStreamRingGapDuration * 2               )
   let nDataFrames   = cbSimNDataFrames   sim (fun () -> durationToNFrames beesConfig.InSampleRate audioDuration )
   let nGapFrames    = cbSimNGapFrames    sim (fun () -> durationToNFrames beesConfig.InSampleRate gapDuration   )
   let nRingFrames   = nDataFrames + (3 * nGapFrames) / 2
@@ -312,7 +314,6 @@ type InputStream(beesConfig       : BeesConfig          ,
     NDataFrames     = nDataFrames
     NGapFrames      = nGapFrames
     // more stuff
-    IsInCallback    = false
     WithEcho        = withEcho
     WithLogging     = withLogging
     CallbackHandoff = dummyInstance<CallbackHandoff>()  // tbd
@@ -371,15 +372,6 @@ type InputStream(beesConfig       : BeesConfig          ,
     if this.CbState.Simulating <> NotSimulating then ()
     else
     paTryCatchRethrow(fun() -> this.PaStream.Stop () )
-  
-  member this.CbStateSnapshot =
-    let rec get()  : CbState =
-      let seqNum1 = Volatile.Read(&this.CbState.SeqNum1)
-      let cbState = this.CbState.Copy()
-      let seqNum2 = Volatile.Read(&this.CbState.SeqNum2)
-      if seqNum1 <> seqNum2 then  get()
-                            else  cbState
-    get()
 
   member this.Callback(input, output, frameCount, timeInfo: StreamCallbackTimeInfo byref, statusFlags, userDataPtr) =
               callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
@@ -395,17 +387,33 @@ type InputStream(beesConfig       : BeesConfig          ,
 
   member this.timeTail = this.CbStateLatest.Segs.Oldest.TailTime
   member this.timeHead = this.CbStateLatest.Segs.Cur   .HeadTime
+  
+  member this.IsInCallback  : bool * int =
+    let n1 = Volatile.Read(&this.CbState.SeqNum1)
+    if n1 <> Volatile.Read(&this.CbState.SeqNum2) then true , n1
+                                                  else false, n1
+  member this.CbStateSnapshot =
+    let rec get()  : CbState =
+      match this.IsInCallback with
+      | true , _       ->  get()
+      | false, seqNum1 ->
+      let cbState = this.CbState.Copy()
+      match Volatile.Read(&this.CbState.SeqNum1) with
+      | seqNum1Again when seqNum1 <> seqNum1Again ->  get()
+      | _ ->
+      cbState
+    get()
 
-  // Get a range of data from the input recent history.
-  // The caller requests a range expressed as a DateTime and duration TimeSpan.
-  // The delivered range may be clipped to a subrange, depending on availability.
+  // Read a range of data from the input recent history.
+  // The caller requests a range expressed as a DateTime time and TimeSpan duration.
+  // The delivered range may be clipped to the available subrange, depending on availability.
   // The data is delivered via 0 1 or 2 calls to the provided callback, to which
-  // the data is passed by reference, via an index into the internal buffer array;
+  // the data is passed with a reference to the internal buffer array and an index;
   // the data is guaranteed to be valid only for the duration of the callback.
   // The result is a tuple of an InputStreamGetResult enum and the 
   // time and duration of the range of the delivered data.
-  // No locking is needed to synchronize the audio subsystem with the caller.
-  member this.get (time: _DateTime) (duration: _TimeSpan) (deliver: GetCallback)
+  // Synchronizatrion with the callback is handled by the CbStateSnapshot property without locking.
+  member this.read (time: _DateTime) (duration: _TimeSpan) (deliver: ReadDelivery)
                   : (InputStreamGetResult * _DateTime * _TimeSpan) =
     let cbs = this.CbStateSnapshot
     let (|BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK|) (wantTime, wantDuration, haveTime, haveDuration) =
@@ -445,8 +453,8 @@ type InputStream(beesConfig       : BeesConfig          ,
     | ClippedBothEnds (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedBothEnds, t  , d  )
     | OK              (t, d) -> deliver t d ; (InputStreamGetResult.AsRequested        , t  , d  )  
 
-  member this.Get (from: _DateTime, duration: _TimeSpan, f: GetCallback) =
-    this.get from duration f
+  member this.Read (from: _DateTime, duration: _TimeSpan, f: ReadDelivery) =
+    this.read from duration f
     
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -525,14 +533,6 @@ type InputStream(beesConfig       : BeesConfig          ,
 
 // See Theory of Operation comment before main at the end of this file.
 
-
-// let cbAtomically cbState f =
-//   let (cbs: CbState) = cbState
-//   let rec spin() =
-//     if Volatile.Read &cbs.isInCallback then spin()
-//     f cbs // Copy out the stuff needed from cbState.
-//     if Volatile.Read &cbs.isInCallback then spin()
-//   spin()
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

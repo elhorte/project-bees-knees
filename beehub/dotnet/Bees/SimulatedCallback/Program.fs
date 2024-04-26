@@ -96,7 +96,7 @@ let runTests inputStream =
       Array.Copy(array, index, resultData, destIndex, length)
       destIndex <- destIndex + length
       nPasses <- nPasses + 1
-    let name, time, duration as result = inputStream.get time duration saveResult
+    let name, time, duration as result = inputStream.read time duration saveResult
     let sPassFail = if checkResultData resultData time duration then  "pass" else  "fail"
     printfn $"%s{sPassFail} %d{nPasses} %A{result} %s{msg}"
   let sNSegments = if cbs.Segs.Old.Active then  "two segments." else  "one segment."
@@ -196,7 +196,8 @@ let main _ =
   let withEcho    = false
   let withLogging = false
 //let sim = SimInts  { NData = 56 ; NGap = 20 }
-  let sim = SimTimes { AudioDuration = _TimeSpan.FromMilliseconds  56 ; GapDuration = _TimeSpan.FromMilliseconds 10 }
+  // with AudioDuration 56, nFrames 5 increased to 10, GapDuration must be at least 13 so there’s room for at least one callback.
+  let sim = SimTimes { AudioDuration = _TimeSpan.FromMilliseconds  56 ; GapDuration = _TimeSpan.FromMilliseconds 15 }
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
   let sampleSize = sizeof<SampleType>
