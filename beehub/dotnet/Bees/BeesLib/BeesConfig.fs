@@ -16,7 +16,7 @@ type BeesConfig = {
   MonitorDir                 : string
   PlotDir                    : string
   InputStreamAudioDuration   : _TimeSpan
-  InputStreamRingGapDuration : _TimeSpan
+  InputStreamRingGapDuration : _TimeSpan // long enough for the largest automatically adjusted frameCount arg to callback
   SampleSize                 : int
   InChannelCount             : int
   InSampleRate               : int  } with

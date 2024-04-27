@@ -104,39 +104,40 @@ let runTests inputStream =
   printfn $"Ring has %s{sNSegments}"
   // BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK
   do
-    let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 30
+    let time     = cbs.Segs.TailTime - _TimeSpan.FromMilliseconds 30
     let duration = _TimeSpan.FromMilliseconds 30
     testOne time duration $"{time} {duration}  ErrorBeforeData"
   do
-    let time     = cbs.Segs.TimeHead // just beyond
+    let time     = cbs.Segs.HeadTime // just beyond
     let duration = _TimeSpan.FromMilliseconds 30
     testOne time duration $"{time} {duration}  ErrorAfterData"
   do
-    let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 1
-    let theEnd   = cbs.Segs.TimeHead - _TimeSpan.FromMilliseconds 1
+    let time     = cbs.Segs.TailTime - _TimeSpan.FromMilliseconds 1
+    let theEnd   = cbs.Segs.HeadTime - _TimeSpan.FromMilliseconds 1
     let duration = theEnd - time
     testOne time duration $"{time} {duration}  WarnClippedTail"
   do
-    let time     = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 1
-    let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 1
+    let time     = cbs.Segs.TailTime + _TimeSpan.FromMilliseconds 1
+    let theEnd   = cbs.Segs.HeadTime + _TimeSpan.FromMilliseconds 1
     let duration = theEnd - time
     testOne time duration $"{time} {duration}  WarnClippedHead"
   do
-    let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 1
-    let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 1
+    let time     = cbs.Segs.TailTime - _TimeSpan.FromMilliseconds 1
+    let theEnd   = cbs.Segs.HeadTime + _TimeSpan.FromMilliseconds 1
     let duration = theEnd - time
     testOne time duration $"{time} {duration}  WarnClippedBothEnds"
   do
-    let time     = cbs.Segs.TimeTail
+    let time     = cbs.Segs.TailTime
     let duration = cbs.Segs.Duration
     testOne time duration "OK - all of the data"
   do
-    let time     = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 1
+    let time     = cbs.Segs.TailTime + _TimeSpan.FromMilliseconds 1
     let duration = cbs.Segs.Duration - _TimeSpan.FromMilliseconds 1
     testOne time duration "OK -  all but the first and last 1"
   cbs.PrintTitle()
 
 let makeArray nFrames n ms =
+  let nFrames = int nFrames
   let compose i =
     let iVal = 100_000 * n  +  100 * (ms + i)  +  i
     assert (iVal < 16_777_216)
@@ -151,15 +152,15 @@ let run frameSize iS = task {
   
   let test() =
     printfn "Simulating callbacks ...\n"
-    let frameCount = 5
+    let initialFrameCount = 5
     let mutable timeInfo = PortAudioSharp.StreamCallbackTimeInfo()
     assert (timeInfo.inputBufferAdcTime = 0.0)
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(cbs))
     cbs.PrintTitle()
-    for i in 0..33 do
-      let nFrames     = uint32 (if i < 25 then  frameCount else  2 * frameCount)
-      let durationMs  = 1000 * int nFrames / iS.BeesConfig.InSampleRate
+    for i in 0..32 do
+      let frameCount  = uint32 (if i < 25 then  initialFrameCount else  2 * initialFrameCount)
+      let durationMs  = 1000 * int frameCount / iS.BeesConfig.InSampleRate
       let durationSec = float durationMs / 1000.0
       let adcTimeMsF  = timeInfo.inputBufferAdcTime * 1000.0
       let adcTimeMs   = cbs.TimeInfoBase.Millisecond + int (round adcTimeMsF)
@@ -167,12 +168,12 @@ let run frameSize iS = task {
       let oArray = makeArray frameCount i adcTimeMs
       let input  = getHandle iArray
       let output = getHandle oArray
-      let m = showGC (fun () -> callback input output nFrames &timeInfo statusFlags userDataPtr |> ignore )
+      let m = showGC (fun () -> callback input output frameCount &timeInfo statusFlags userDataPtr |> ignore )
       m |> ignore
       if i = 15 then runTests inputStream
+      if i = 26 then runTests inputStream
       if i = 31 then runTests inputStream
       timeInfo.inputBufferAdcTime <- timeInfo.inputBufferAdcTime + durationSec
-      printfn $"%d{adcTimeMs}"
   
   test()
   use cts = new CancellationTokenSource()

@@ -22,18 +22,23 @@ open CSharpHelpers
 type Worker = Buf -> int -> int
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// InputStream – callback state
+// InputStream – the callback
 
-// The callback adds data to the ring buffer.  The duration of the audio capacity of the ring is a parameter.
-// The data in the ring buffer is the concatenation of two segments, Segs.Old and Segs.Cur.  Segs.Old is Active
-// most of the time but not all.  Segs.Cur.Head, where new callback data is added, never overwrites Segs.Old.Tail
-// because they are separated by a gap.  The duration of the gap is a parameter.  The gap allows a client
-// to ask for past buffered data and expect it to be there for at least as long as the gap duration without
-// being overwritten by callbacks.  The gap is part of a lock-free way to avoid a race between callbacks 
+// The callback appends data to the ring buffer.  The duration of the audio capacity of the ring is a parameter.
+// The data buffered in the ring is managed as one or two segments, Segs.Old and Segs.Cur, with a gap between
+// Segs.Cur.Head and Segs.old.Tail.
+// Segs.Cur is always Active;
+// Segs.Old is Active most of the time but not all.  Segs.Cur.Head, where new callback data is added, never overwrites
+// Segs.Old.Tail because when both segs are active, they are separated by a gap.  The duration of the gap is a parameter.
+//
+// The gap allows a client
+// to ask for buffered data and expect it to be there for at least as long as the gap duration without
+// being overwritten by callbacks.  The gap is part of a lock-free strategy that avoids a race between a callback 
 // writing to the ring and a client reading from the ring, which works as follows:
 // There are two sequence numbers SeqNum1 and SeqNum2.  THe callback increments SeqNum1, then updates its persistent state,
 // then increments SeqNum2.  Client code that wants to read the ring buffer data, first notes the value of
 // SeqNum1, then makes a copy of the segments, then checks that SeqNum2 = SeqNum1, repeating if they are not equal.
+//
 // The callback (at interrupt time) hands off to a background Task for further processing (not at interrupt time).
 
 // Internal management of the ring is governed by a State variable.
@@ -66,9 +71,9 @@ type Segs = {
   member this.Copy()   = { Cur = this.Cur.Copy()
                            Old = this.Old.Copy() }
   member this.Oldest   = if this.Old.Active then this.Old else this.Cur
-  member this.TimeTail = this.Oldest.TailTime
-  member this.TimeHead = this.Cur   .HeadTime
-  member this.Duration = this.TimeHead - this.TimeTail
+  member this.TailTime = this.Oldest.TailTime
+  member this.HeadTime = this.Cur   .HeadTime
+  member this.Duration = this.HeadTime - this.TailTime
 
   member this.Exchange() =
     let tmp = this.Cur  in  this.Cur <- this.Old  ;  this.Old <- tmp
@@ -385,8 +390,8 @@ type InputStream(beesConfig       : BeesConfig          ,
   member this.durationOf nFrames = durationOf beesConfig.InSampleRate nFrames
   member this.nFramesOf duration = nFramesOf  beesConfig.InSampleRate duration
 
-  member this.timeTail = this.CbStateLatest.Segs.Oldest.TailTime
-  member this.timeHead = this.CbStateLatest.Segs.Cur   .HeadTime
+  member this.tailTime = this.CbStateLatest.Segs.Oldest.TailTime
+  member this.headTime = this.CbStateLatest.Segs.Cur   .HeadTime
   
   member this.IsInCallback  : bool * int =
     let n1 = Volatile.Read(&this.CbState.SeqNum1)
@@ -433,16 +438,16 @@ type InputStream(beesConfig       : BeesConfig          ,
       | _                                                    ->  assert (haveTime <= wantTime)
                                                                  assert (wantEnd  <= haveEnd )
                                                                  OK              (timeAndDuration wantTime wantEnd)
-    let deliver (timeTail: _DateTime) duration =
+    let deliver (tailTime: _DateTime) duration =
       let size = nFramesOf beesConfig.InSampleRate duration
-      let timeHead = timeTail + duration
-      assert (cbs.Segs.TimeTail <= timeTail) ; assert (timeHead <= cbs.Segs.TimeHead)
+      let headTime = tailTime + duration
+      assert (cbs.Segs.TailTime <= tailTime) ; assert (headTime <= cbs.Segs.HeadTime)
       let deliverSegPortion (seg: Seg) =
-        let p = seg.getPortion timeTail duration
+        let p = seg.getPortion tailTime duration
         deliver (cbs.Ring, size, p.index, p.nFrames, p.time, p.duration)
-      if cbs.Segs.Old.Active  &&  timeTail < cbs.Segs.Old.HeadTime then  deliverSegPortion cbs.Segs.Old
-      if                          cbs.Segs.Cur.TailTime < timeHead then  deliverSegPortion cbs.Segs.Cur
-    let haveTime     = cbs.Segs.TimeTail
+      if cbs.Segs.Old.Active  &&  tailTime < cbs.Segs.Old.HeadTime then  deliverSegPortion cbs.Segs.Old
+      if                          cbs.Segs.Cur.TailTime < headTime then  deliverSegPortion cbs.Segs.Cur
+    let haveTime     = cbs.Segs.TailTime
     let haveDuration = cbs.Segs.Duration
     let tNg = _DateTime.MinValue in let dNg = _TimeSpan.Zero
     match (time, duration, haveTime, haveDuration) with
@@ -464,7 +469,7 @@ type InputStream(beesConfig       : BeesConfig          ,
   //   if cbMessage.Segs.Old.Active then
   //     if timeStart >= segHead then
   //       // return empty sequence
-  //     let timeOffset = timeStart - cbMessage.Segs.Old.TimeTail
+  //     let timeOffset = timeStart - cbMessage.Segs.Old.TailTime
   //     assert (timeOffset >= 0)
   //     let nFrames = cbMessage.Segs.Old.NFramesOf timeOffset
   //     let indexStart = cbMessage.Segs.Old.Tail + nFrames
@@ -474,10 +479,10 @@ type InputStream(beesConfig       : BeesConfig          ,
   // }
 
   //
-  // let x = timeTail
+  // let x = tailTime
   // let get (dateTime: _DateTime) (duration: _TimeSpan) (worker: Worker) =
   //   let now = _DateTime.Now
-  //   let timeStart = max dateTime timeTail
+  //   let timeStart = max dateTime tailTime
   //   if timeStart + duration > now then  Error "insufficient buffered data"
   //   else
   //   let rec deliver timeStart nFrames =
@@ -493,13 +498,13 @@ type InputStream(beesConfig       : BeesConfig          ,
     // assert (duration > _TimeSpan.Zero)
     // let now = _DateTime.Now
     // let dateTime = now - duration
-    // timeTail <-
-    //   if dateTime < timeTail then  timeTail
+    // tailTime <-
+    //   if dateTime < tailTime then  tailTime
     //                          else  dateTime
-    // timeTail
+    // tailTime
 
   member private is.offsetOfDateTime (dateTime: _DateTime)  : Option<Seg * int> =
-    if not (is.timeTail <= dateTime && dateTime <= is.timeHead) then Some (is.CbStateLatest.Segs.Cur, 1)
+    if not (is.tailTime <= dateTime && dateTime <= is.headTime) then Some (is.CbStateLatest.Segs.Cur, 1)
     else None
 
 
