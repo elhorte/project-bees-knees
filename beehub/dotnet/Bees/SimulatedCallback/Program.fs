@@ -57,8 +57,6 @@ let getHandle a =
   let handle = GCHandle.Alloc(a, GCHandleType.Pinned)
   handle.AddrOfPinnedObject()
 
-let makeArray byteCount n ms =  Array.init byteCount (fun i -> float32 (1_0000_000 * n +  1000 * (ms + i)  +  i))
-
 let showGC f =
   // System.GC.Collect()
   // let starting = GC.GetTotalMemory(true)
@@ -71,34 +69,36 @@ let runTests inputStream =
   let printRange (array, index, length, time, duration) =
     printfn $"index %d{index}  length %d{length}  time %A{time}  duration %A{duration}"
   let testOne time (duration:_TimeSpan) msg =
-    let checkResultData (resultData: float32[]) (time: _DateTime) duration =
-      let trim d = (int d / 100) % 1000
+    let checkDeliveredAray (deliveredArray: float32[]) (deliveredTime: _DateTime) deliveredDuration =
+      let extract d = (int d / 100) % 1000
       // resultData
       // |> Seq.mapi (fun i d -> trim d = (time.Milliseconds + i))
       // |> Seq.forall id
-      for i = 0 to resultData.Length - 1 do
-        let d = resultData[i]
-        let td = trim d
-        let ms = time.Millisecond + i
-        let r =  td = ms
-        if i = 20 then ()
-        ()
-      true           
+      let rec check i  : bool =
+        if i < deliveredArray.Length then
+          let data = deliveredArray[i]
+          let msDelivered = extract data
+          let msExpected  = deliveredTime.Millisecond + i
+          if msDelivered = msExpected then  check (i + 1)
+                                      else  false
+        else
+          true
+      check 0
     let count = duration.Milliseconds
-    let mutable resultData: float32[] = [||]
+    let mutable deliveredArray: float32[] = [||]
     let mutable startTime = _DateTime.MinValue
     let mutable destIndex = 0
-    let mutable nPasses = 0
-    let saveResult (array, size, index, length, time, duration) =
+    let mutable nDeliveries = 0
+    let acceptOneDelivery (array, size, index, length, time, duration) =
       if destIndex = 0 then
-        resultData <- Array.zeroCreate<float32> size
-        startTime <- time
-      Array.Copy(array, index, resultData, destIndex, length)
-      destIndex <- destIndex + length
-      nPasses <- nPasses + 1
-    let name, time, duration as result = inputStream.read time duration saveResult
-    let sPassFail = if checkResultData resultData time duration then  "pass" else  "fail"
-    printfn $"%s{sPassFail} %d{nPasses} %A{result} %s{msg}"
+        deliveredArray <- Array.zeroCreate<float32> size
+        startTime      <- time
+      Array.Copy(array, index, deliveredArray, destIndex, length)
+      destIndex   <- destIndex + length
+      nDeliveries <- nDeliveries + 1
+    let name, deliveredTime, deliveredDuration as result = inputStream.read time duration acceptOneDelivery
+    let sPassFail = if checkDeliveredAray deliveredArray deliveredTime deliveredDuration then  "pass" else  "fail"
+    printfn $"%s{sPassFail} %d{nDeliveries} %A{result} %s{msg}"
   let sNSegments = if cbs.Segs.Old.Active then  "two segments." else  "one segment."
   cbs.PrintRing $"running get() tests with %s{sNSegments}"
   printfn $"Ring has %s{sNSegments}"
@@ -106,36 +106,43 @@ let runTests inputStream =
   do
     let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 30
     let duration = _TimeSpan.FromMilliseconds 30
-    testOne time duration "ErrorBeforeData"
+    testOne time duration $"{time} {duration}  ErrorBeforeData"
   do
     let time     = cbs.Segs.TimeHead // just beyond
     let duration = _TimeSpan.FromMilliseconds 30
-    testOne time duration "ErrorAfterData"
+    testOne time duration $"{time} {duration}  ErrorAfterData"
   do
-    let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 10
-    let theEnd   = cbs.Segs.TimeHead - _TimeSpan.FromMilliseconds 10
+    let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 1
+    let theEnd   = cbs.Segs.TimeHead - _TimeSpan.FromMilliseconds 1
     let duration = theEnd - time
-    testOne time duration "WarnClippedTail"
+    testOne time duration $"{time} {duration}  WarnClippedTail"
   do
-    let time     = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 10
-    let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 10
+    let time     = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 1
+    let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 1
     let duration = theEnd - time
-    testOne time duration "WarnClippedHead"
+    testOne time duration $"{time} {duration}  WarnClippedHead"
   do
-    let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 10
-    let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 10
+    let time     = cbs.Segs.TimeTail - _TimeSpan.FromMilliseconds 1
+    let theEnd   = cbs.Segs.TimeHead + _TimeSpan.FromMilliseconds 1
     let duration = theEnd - time
-    testOne time duration "WarnClippedBothEnds"
+    testOne time duration $"{time} {duration}  WarnClippedBothEnds"
   do
     let time     = cbs.Segs.TimeTail
     let duration = cbs.Segs.Duration
     testOne time duration "OK - all of the data"
   do
-    let time     = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 10
-    let duration = cbs.Segs.Duration - _TimeSpan.FromMilliseconds 10
-    testOne time duration "OK -  all but the first and last 10"
+    let time     = cbs.Segs.TimeTail + _TimeSpan.FromMilliseconds 1
+    let duration = cbs.Segs.Duration - _TimeSpan.FromMilliseconds 1
+    testOne time duration "OK -  all but the first and last 1"
   cbs.PrintTitle()
-  
+
+let makeArray nFrames n ms =
+  let compose i =
+    let iVal = 100_000 * n  +  100 * (ms + i)  +  i
+    assert (iVal < 16_777_216)
+    float32 iVal
+  Array.init nFrames compose
+
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run frameSize iS = task {
   let cbs = (iS: InputStream).CbState
@@ -151,20 +158,21 @@ let run frameSize iS = task {
     let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(cbs))
     cbs.PrintTitle()
     for i in 0..33 do
-      let nFrames = uint32 (if i < 25 then  frameCount else  2 * frameCount)
-      let durationSec = float nFrames / float iS.BeesConfig.InSampleRate
-      let byteCount = frameCount * frameSize
-      let adcTimeMs = cbs.TimeInfoBase.Millisecond + int (timeInfo.inputBufferAdcTime * 1000.0)
-      let iArray = makeArray byteCount i adcTimeMs
-      let oArray = makeArray byteCount i adcTimeMs
+      let nFrames     = uint32 (if i < 25 then  frameCount else  2 * frameCount)
+      let durationMs  = 1000 * int nFrames / iS.BeesConfig.InSampleRate
+      let durationSec = float durationMs / 1000.0
+      let adcTimeMsF  = timeInfo.inputBufferAdcTime * 1000.0
+      let adcTimeMs   = cbs.TimeInfoBase.Millisecond + int (round adcTimeMsF)
+      let iArray = makeArray frameCount i adcTimeMs
+      let oArray = makeArray frameCount i adcTimeMs
       let input  = getHandle iArray
       let output = getHandle oArray
-      let m = showGC (fun () ->
-        callback input output nFrames &timeInfo statusFlags userDataPtr |> ignore
-        timeInfo.inputBufferAdcTime <- timeInfo.inputBufferAdcTime + durationSec
-        if i = 15 then runTests inputStream
-        if i = 31 then runTests inputStream )
+      let m = showGC (fun () -> callback input output nFrames &timeInfo statusFlags userDataPtr |> ignore )
       m |> ignore
+      if i = 15 then runTests inputStream
+      if i = 31 then runTests inputStream
+      timeInfo.inputBufferAdcTime <- timeInfo.inputBufferAdcTime + durationSec
+      printfn $"%d{adcTimeMs}"
   
   test()
   use cts = new CancellationTokenSource()
