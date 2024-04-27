@@ -24,7 +24,22 @@ type Worker = Buf -> int -> int
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // InputStream – the callback
 
-// The callback appends data to the ring buffer.  The duration of the audio capacity of the ring is a parameter.
+// An InputStream object makes recent input data available to clients via a buffer.
+// The duration of the audio capacity of the buffer is a parameter.
+// A client Task can call the Read method to get buffered data recorded within a given
+// TimeSpan starting at a given DateTime.
+// A client Task can also subscribe to events issued immediately following each callback
+// if low-latency delivery of input audio data is desired.
+//
+// The interface to the operating system’s audio I/O is provided by the PortAudio library,
+// which is written in C and made available on .NET via the PortAudioSharp library, written in C#.
+// PortAudio appends data to the InputStream buffer via a callback called at interrupt time.
+//
+// Synchronization between the interrupt-time acquisition of data and a managed-code Task
+// is handled in a lock-free manner transparent to the client.
+//
+// #######
+// The buffer is a ring buffer, which is 
 // The data buffered in the ring is managed as one or two segments, Segs.Old and Segs.Cur, with a gap between
 // Segs.Cur.Head and Segs.old.Tail.
 // Segs.Cur is always Active;

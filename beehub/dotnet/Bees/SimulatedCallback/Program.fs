@@ -52,10 +52,25 @@ let prepareArgumentsForStreamCreation() =
   printfn $"outputParameters=%A{outputParameters}"
   sampleRate, inputParameters, outputParameters
 
+// n=15 ms=175 i=1 -> 1517601
+let compose n ms i =
+  let intVal = 1_000_00 * n  +  100 * (ms + i)  +  i
+  assert (intVal <= 16_777_216) // max of range of contiguously representable ints in float32
+  float32 intVal
+
+// 1517601 -> ms=176
+let decomposeMs x = (int x / 100) % 1000
+
+
+let makeArray nFrames n ms =
+  let compose i = compose n ms i
+  let nFrames = int nFrames
+  Array.init nFrames compose
 
 let getHandle a =
   let handle = GCHandle.Alloc(a, GCHandleType.Pinned)
   handle.AddrOfPinnedObject()
+
 
 let showGC f =
   // System.GC.Collect()
@@ -70,14 +85,13 @@ let runTests inputStream =
     printfn $"index %d{index}  length %d{length}  time %A{time}  duration %A{duration}"
   let testOne time (duration:_TimeSpan) msg =
     let checkDeliveredAray (deliveredArray: float32[]) (deliveredTime: _DateTime) deliveredDuration =
-      let extract d = (int d / 100) % 1000
       // resultData
       // |> Seq.mapi (fun i d -> trim d = (time.Milliseconds + i))
       // |> Seq.forall id
       let rec check i  : bool =
         if i < deliveredArray.Length then
           let data = deliveredArray[i]
-          let msDelivered = extract data
+          let msDelivered = decomposeMs data
           let msExpected  = deliveredTime.Millisecond + i
           if msDelivered = msExpected then  check (i + 1)
                                       else  false
@@ -136,18 +150,10 @@ let runTests inputStream =
     testOne time duration "OK -  all but the first and last 1"
   cbs.PrintTitle()
 
-let makeArray nFrames n ms =
-  let nFrames = int nFrames
-  let compose i =
-    let iVal = 100_000 * n  +  100 * (ms + i)  +  i
-    assert (iVal < 16_777_216)
-    float32 iVal
-  Array.init nFrames compose
-
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run frameSize iS = task {
-  let cbs = (iS: InputStream).CbState
   let inputStream = (iS: InputStream)
+  let cbs         = inputStream.CbState
   inputStream.Start()
   
   let test() =
@@ -168,14 +174,13 @@ let run frameSize iS = task {
       let oArray = makeArray frameCount i adcTimeMs
       let input  = getHandle iArray
       let output = getHandle oArray
-      let m = showGC (fun () -> callback input output frameCount &timeInfo statusFlags userDataPtr |> ignore )
-      m |> ignore
+      let _ = showGC (fun () -> callback input output frameCount &timeInfo statusFlags userDataPtr |> ignore )
       if i = 15 then runTests inputStream
       if i = 26 then runTests inputStream
       if i = 31 then runTests inputStream
       timeInfo.inputBufferAdcTime <- timeInfo.inputBufferAdcTime + durationSec
-  
   test()
+
   use cts = new CancellationTokenSource()
 //printfn "Reading..."
 //do! keyboardKeyInput "" cts
