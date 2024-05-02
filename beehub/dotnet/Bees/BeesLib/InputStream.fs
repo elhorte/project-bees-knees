@@ -15,6 +15,7 @@ open BeesUtil.Logger
 open BeesUtil.SubscriberList
 open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
+open BeesUtil.SeqNums
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open CSharpHelpers
@@ -22,33 +23,45 @@ open CSharpHelpers
 type Worker = Buf -> int -> int
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// InputStream – the callback
+// InputStream
 
 // An InputStream object makes recent input data available to clients via a buffer.
-// The duration of the audio capacity of the buffer is a parameter.
-// A client Task can call the Read method to get buffered data recorded within a given
-// TimeSpan starting at a given DateTime.
-// A client Task can also subscribe to events issued immediately following each callback
-// if low-latency delivery of input audio data is desired.
+// The storage capacity of the buffer is specified as a TimeSpan.
+// A client Task can call the Read method with a desired DateTime and a TimeSpan, and
+// the Read method responds with data from as much of the specified range as it has on hand.
+// A client Task can also subscribe to events fired immediately following each callback.
+// The InputStream class is callable from C# or F# and is written in F#.
 //
 // The interface to the operating system’s audio I/O is provided by the PortAudio library,
-// which is written in C and made available on .NET via the PortAudioSharp library, written in C#.
-// PortAudio appends data to the InputStream buffer via a callback called at interrupt time.
+// which is written in C and made available on .NET via the PortAudioSharp library, written
+// in C#.  An InputStream object is a wrapper for a PortAudioSharp Stream object.  The
+// InputStream constructor sets up a callback function that is called from a system interrupt
+// but runs in managed code.  The callback function is written to be quick and not to do any
+// allocations.
 //
-// Synchronization between the interrupt-time acquisition of data and a managed-code Task
-// is handled in a lock-free manner transparent to the client.
+// Synchronization between the interrupt-time addition of input data to the buffer and client
+// managed code that reads the buffered data is handled in a lock-free manner transparent to
+// the client.
+
+//–––––––––––––––––––––––––––––––––
+// InputStream internals – the buffer
 //
-// #######
-// The buffer is a ring buffer, which is 
-// The data buffered in the ring is managed as one or two segments, Segs.Old and Segs.Cur, with a gap between
-// Segs.Cur.Head and Segs.old.Tail.
-// Segs.Cur is always Active;
-// Segs.Old is Active most of the time but not all.  Segs.Cur.Head, where new callback data is added, never overwrites
-// Segs.Old.Tail because when both segs are active, they are separated by a gap.  The duration of the gap is a parameter.
-//
-// The gap allows a client
-// to ask for buffered data and expect it to be there for at least as long as the gap duration without
-// being overwritten by callbacks.  The gap is part of a lock-free strategy that avoids a race between a callback 
+// The buffer is a ring buffer.  Another way to describe a ring buffer is as a queue of two
+// segments sharing space in a fixed array: Segs.Cur grows as data is appended to its head,
+// and Segs.Old shrinks as data is trimmed from its tail.  This implementation ensures a gap
+// of a given TimeSpan in the space between Segs.Cur.Head and Segs.Old.Tail.  This gap gives
+// a client reading data from the buffer a grace period in which to access the data to which
+// it has been given access, without worry that the data could be overwritten with new data.
+// The gap thus avoids a read–write race condition without locking.  The gap is a parameter
+// for InputStream creation.
+// 
+// To synchronize reading by a client with writing by a callback, there are two atomic
+// 32-bit integers, SeqNum1 and SeqNum2.  The callback increments SeqNum1, does its work,
+// then increments SeqNum2.  The Read method takes a snapshot of Segs.Cur and Segs.Old
+// before delivering the data to the client.  The snapshot saves SeqNum1 in a temp, then
+// if SeqNum2 ≠ temp, it starts over; otherwise it takes a copy of the segment info, then
+// if SeqNum1 ≠ temp, it starts over; otherwise it returns the snapshot.
+ 
 // writing to the ring and a client reading from the ring, which works as follows:
 // There are two sequence numbers SeqNum1 and SeqNum2.  THe callback increments SeqNum1, then updates its persistent state,
 // then increments SeqNum2.  Client code that wants to read the ring buffer data, first notes the value of
@@ -104,26 +117,32 @@ type CbState = {
   mutable TimeInfo        : PortAudioSharp.StreamCallbackTimeInfo
   mutable StatusFlags     : PortAudioSharp.StreamCallbackFlags
   // callback result
-  Ring                    : float32 array
+  Ring                    : float32 array // samples not frames
   mutable State           : State
   mutable Segs            : Segs
   mutable AdcStartTime    : _DateTime
   mutable LatestBlock     : int // ring index where latest input block was copied
-  mutable SeqNum1         : int
-  mutable SeqNum2         : int
+  mutable SeqNums         : SeqNums
   mutable NRingFrames     : int
-  mutable NDataFrames     : int
+  mutable NRingDataFrames : int
   mutable NGapFrames      : int
   // more stuff
   mutable WithEcho        : bool
   mutable WithLogging     : bool
   mutable CallbackHandoff : CallbackHandoff // modified only once
-  TimeInfoBase            : _DateTime // for getting UTC from timeInfo.inputBufferAdcTime
-  FrameSize               : int
+  mutable StartTime       : _DateTime  // for getting DateTime from timeInfo.inputBufferAdcTime
+  mutable TimeInfoBase    : float  // for getting DateTime from timeInfo.inputBufferAdcTime
+  InChannelCount          : int
+  FrameSize               : int  // bytes
   Logger                  : Logger
   Simulating              : SimulatingCallbacks } with
 
-  member this.Copy() = { this with Segs = this.Segs.Copy() }
+  member cbs.Copy() = { cbs with Segs = cbs.Segs.Copy() }
+
+  member cbs.zeroFillRingSpan srcFrameIndex nFrames =
+    let srcFrameIndexNS = srcFrameIndex * cbs.InChannelCount
+    let nSamples        = nFrames       * cbs.InChannelCount
+    Array.Fill(cbs.Ring, 0f, srcFrameIndexNS, nSamples)
   
   member cbs.Print newTail newHead msg =
     let sRing =
@@ -132,9 +151,9 @@ type CbState = {
       let getsNum i = i % 10 = 0
       let mutable ring =
         let num i = char ((i / 10 % 10).ToString())
-        let numberedEmpties i = if getsNum i then  num i else  empty
+        let sNumberedEmptyFrames i = if getsNum i then  num i else  empty
         // "0.........1.........2.........3.........4.........5.........6.........7.........8....."
-        Array.init cbs.NRingFrames numberedEmpties
+        Array.init cbs.NRingFrames sNumberedEmptyFrames
       do // Overwrite empties with seg data.
         let showDataFor seg =
           let first = seg.Tail
@@ -150,7 +169,7 @@ type CbState = {
         showDataFor cbs.Segs.Cur
       String ring
     let sText =
-      let sSeqNum  = sprintf "%2d" cbs.SeqNum1
+      let sSeqNum  = sprintf "%2d" cbs.SeqNums.N1
       let sX       = if String.length msg > 0 then  "*" else  " "
       let sTime    = sprintf "%3d.%3d %3d.%3d"
                        cbs.Segs.Old.TailTime.Millisecond
@@ -175,7 +194,7 @@ type CbState = {
   member cbs.PrintRing msg =  cbs.Print 0 -1 msg
 
   member cbs.PrintTitle() =
-    let s0 = String.init cbs.Ring.Length (fun _ -> " ")
+    let s0 = String.init cbs.NRingFrames (fun _ -> " ")
     let s1 = " seq nFrames timeOld timeCur duration   Cur    new   Old    size   gap   state"
     let s2 = " ––– ––––––– ––––––– ––––––– ––––––––  ––––– –––––– ––––– –––––––– –––  –––––––"
            //   24    5    164.185 185.220 35+21=56  00.35 -16.40 64.85 35+21=56  29  Chasing 
@@ -185,14 +204,15 @@ type CbState = {
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The callback – Copy data from the audio driver into our ring.
 
+let mutable thresh = 44100
+
 let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) statusFlags userDataPtr =
   let (input : IntPtr) = input
   let (output: IntPtr) = output
   let handle  = GCHandle.FromIntPtr(userDataPtr)
   let cbs     = handle.Target :?> CbState
   let nFrames = int frameCount
-  Volatile.Write(&cbs.SeqNum1, cbs.SeqNum1 + 1)
-  if cbs.Simulating = NotSimulating then  Console.Write "."
+  cbs.SeqNums.UnstableEnter()
 
   if cbs.WithEcho then
     let size = uint64 (frameCount * uint32 cbs.FrameSize)
@@ -203,14 +223,14 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   cbs.FrameCount   <- frameCount // in the ”block“ to be copied
   cbs.TimeInfo     <- timeInfo
   cbs.StatusFlags  <- statusFlags
-  cbs.AdcStartTime <- cbs.TimeInfoBase + _TimeSpan.FromSeconds timeInfo.inputBufferAdcTime
-
+  cbs.AdcStartTime <- cbs.StartTime + _TimeSpan.FromSeconds (timeInfo.inputBufferAdcTime - cbs.TimeInfoBase)
+  
   do
     // Modify the segs so that Segs.Cur.Head points to where the data will go in the ring.
     // Later, after the copy is done, Segs.Cur.Head will point after the new data.
     let nextValues() =
       let newHead = cbs.Segs.Cur.Head + nFrames
-      let newTail = newHead - cbs.NDataFrames
+      let newTail = newHead - cbs.NRingDataFrames
       (newHead, newTail)
     let mutable newHead, newTail = nextValues()
     let printRing msg = if cbs.Simulating <> NotSimulating then  cbs.Print newTail newHead msg
@@ -230,7 +250,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       cbs.Segs.Cur.TailTime <- cbs.AdcStartTime
       cbs.Segs.Cur.HeadTime <- cbs.AdcStartTime
       let h, t = nextValues() in newHead <- h ; newTail <- t
-      if cbs.Simulating <> NotSimulating then  Array.Fill(cbs.Ring, 0f, cbs.Segs.Old.Head, cbs.Ring.Length - cbs.Segs.Old.Head)
+      if cbs.Simulating <> NotSimulating then  cbs.zeroFillRingSpan cbs.Segs.Old.Head (cbs.NRingFrames - cbs.Segs.Old.Head) 
       cbs.State <- Chasing
       printRing "exchanged"
     match cbs.State with
@@ -268,11 +288,18 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     | AtEnd ->
       failwith "Can’t happen."
 
-  UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, cbs.Segs.Cur.Head, nFrames)
+  let curHeadNS = cbs.Segs.Cur.Head * cbs.InChannelCount
+  let nSamples  = nFrames           * cbs.InChannelCount
+  UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, curHeadNS, nSamples)
   cbs.LatestBlock <- cbs.Segs.Cur.Head
   cbs.Segs.Cur.HeadTime <- cbs.AdcStartTime
   cbs.Segs.Cur.AdvanceHead nFrames
-  Volatile.Write(&cbs.SeqNum2, cbs.SeqNum2 + 1)
+//Console.Write(".")
+//if cbs.SeqNums.N1 % 20us = 0us then  Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / nFrames} %10f{timeInfo.inputBufferAdcTime - cbs.TimeInfoBase}"
+  if cbs.Segs.Cur.Head > thresh then
+    thresh <- thresh + 44100
+    Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / nFrames} %10f{timeInfo.inputBufferAdcTime - cbs.TimeInfoBase}"
+  cbs.SeqNums.UnstableLeave()
 
 //cbs.Logger.Add cbs.SeqNum2 cbs.TimeStamp "cb bufs=" ""
   cbs.CallbackHandoff.HandOff()
@@ -281,15 +308,16 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The InputStream class
 
-type ReadDelivery = float32[] * int * int * int * _DateTime * _TimeSpan -> unit
+type ReadDelivery = float32[] * int * int * int * int * _DateTime * _TimeSpan -> unit
 
 type InputStreamGetResult =
-  | ErrorBeforeData     = 0
-  | ErrorAfterData      = 1
-  | WarnClippedBothEnds = 2
-  | WarnClippedTail     = 3
-  | WarnClippedHead     = 4
-  | AsRequested         = 5
+  | ErrorTimeout        = 0
+  | ErrorBeforeData     = 1
+  | ErrorAfterData      = 2
+  | WarnClippedBothEnds = 3
+  | WarnClippedTail     = 4
+  | WarnClippedHead     = 5
+  | AsRequested         = 6
 
 // initPortAudio() must be called before this constructor.
 type InputStream(beesConfig       : BeesConfig          ,
@@ -299,16 +327,17 @@ type InputStream(beesConfig       : BeesConfig          ,
                  withLogging      : bool                ,
                  sim              : SimulatingCallbacks ) =
 
-  let audioDuration = cbSimAudioDuration sim (fun () -> beesConfig.InputStreamAudioDuration                     )
-  let gapDuration   = cbSimGapDuration   sim (fun () -> beesConfig.InputStreamRingGapDuration * 2               )
-  let nDataFrames   = cbSimNDataFrames   sim (fun () -> durationToNFrames beesConfig.InSampleRate audioDuration )
-  let nGapFrames    = cbSimNGapFrames    sim (fun () -> durationToNFrames beesConfig.InSampleRate gapDuration   )
-  let nRingFrames   = nDataFrames + (3 * nGapFrames) / 2
-  let frameSize     = beesConfig.FrameSize
-  let nRingBytes    = int nRingFrames * frameSize
-  let startTime     = _DateTime.UtcNow
-  let segs          = { Cur = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
-                        Old = Seg.NewEmpty nRingFrames beesConfig.InSampleRate }
+  let audioDuration   = cbSimAudioDuration sim (fun () -> beesConfig.InputStreamAudioDuration                     )
+  let gapDuration     = cbSimGapDuration   sim (fun () -> beesConfig.InputStreamRingGapDuration * 2.0             )
+  let nRingDataFrames = cbSimNDataFrames   sim (fun () -> durationToNFrames beesConfig.InSampleRate audioDuration )
+  let nGapFrames      = cbSimNGapFrames    sim (fun () -> durationToNFrames beesConfig.InSampleRate gapDuration   )
+  let nRingFrames     = nRingDataFrames + (3 * nGapFrames) / 2
+  let nRingSamples    = nRingFrames * beesConfig.InChannelCount
+  let frameSize       = beesConfig.FrameSize
+  let nRingBytes      = int nRingFrames * frameSize
+  let startTime       = _DateTime.Now
+  let segs            = { Cur = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
+                          Old = Seg.NewEmpty nRingFrames beesConfig.InSampleRate }
   
   // When unmanaged code calls managed code (e.g., a callback from unmanaged to managed),
   // the CLR ensures that the garbage collector will not move referenced managed objects
@@ -323,27 +352,25 @@ type InputStream(beesConfig       : BeesConfig          ,
     TimeInfo        = PortAudioSharp.StreamCallbackTimeInfo()
     StatusFlags     = PortAudioSharp.StreamCallbackFlags()
     // callback result
-    Ring            = Array.init<float32> nRingFrames (fun _ -> 0.0f)
+    Ring            = Array.init<float32> nRingSamples (fun _ -> 0.0f)
     State           = AtStart
     Segs            = segs
     AdcStartTime    = _DateTime.MaxValue // placeholder
     LatestBlock     = 0
-    SeqNum1         = -1
-    SeqNum2         = -1
+    SeqNums         = SeqNums.New()
     NRingFrames     = nRingFrames
-    NDataFrames     = nDataFrames
+    NRingDataFrames = nRingDataFrames
     NGapFrames      = nGapFrames
     // more stuff
     WithEcho        = withEcho
     WithLogging     = withLogging
     CallbackHandoff = dummyInstance<CallbackHandoff>()  // tbd
-    TimeInfoBase    = startTime  // timeInfoBase + adcInputTime -> cbState.TimeStamp
+    StartTime       = tbdDateTime
+    TimeInfoBase    = 0.0  // timeInfoBase + adcInputTime -> cbState.TimeStamp
+    InChannelCount  = beesConfig.InChannelCount
     FrameSize       = frameSize
     Logger          = Logger(8000, startTime)
     Simulating      = sim  }
-
-  let debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
-    if cbState.Simulating = NotSimulating then Console.Write ","
 
   let paStream =
     if cbState.Simulating <> NotSimulating then
@@ -360,21 +387,20 @@ type InputStream(beesConfig       : BeesConfig          ,
                                                              streamFlags     = StreamFlags.ClipOff                  ,
                                                              callback        = streamCallback                       ,
                                                              userData        = cbState                              ) )
-
-  let debugSubscription = dummyInstance<Subscription<CbMessage>>()
+  do
+    printfn $"{beesConfig.InSampleRate}"
 
   member  this.echoEnabled   () = Volatile.Read &cbState.WithEcho
   member  this.loggingEnabled() = Volatile.Read &cbState.WithEcho
 
   member val  PaStream          = paStream
   member val  CbState           = cbState
-  member val  CbStateLatest     = cbState       with get, set
-  member val  StartTime         = startTime
+  member val  CbStateLatest     = cbState             with get, set
+  member val  StartTime         = cbState.StartTime
   member val  BeesConfig        = beesConfig
   member val  RingDuration      = audioDuration
-  member val  NRingBytes        = nRingBytes
   member val  GapDuration       = gapDuration
-  member this.DebugSubscription = debugSubscription
+  member val  NRingBytes        = nRingBytes
 
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -384,6 +410,8 @@ type InputStream(beesConfig       : BeesConfig          ,
     if this.CbState.Simulating <> NotSimulating then ()
     else
     paTryCatchRethrow (fun() -> this.PaStream.Start() )
+    this.CbState.StartTime    <- _DateTime.Now
+    this.CbState.TimeInfoBase <- this.PaStream.Time
     printfn $"InputStream size: {this.NRingBytes / 1_000_000} MB for {this.RingDuration}"
     printfn $"InputStream nFrames: {this.CbState.NRingFrames}"
 
@@ -397,7 +425,7 @@ type InputStream(beesConfig       : BeesConfig          ,
               callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
 
   member this.AfterCallback() =
-    if cbState.Simulating = NotSimulating then Console.Write ","
+    () // if cbState.Simulating = NotSimulating then Console.Write ","
 
   member private is.debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
     Console.Write ","
@@ -405,25 +433,18 @@ type InputStream(beesConfig       : BeesConfig          ,
   member this.durationOf nFrames = durationOf beesConfig.InSampleRate nFrames
   member this.nFramesOf duration = nFramesOf  beesConfig.InSampleRate duration
 
-  member this.tailTime = this.CbStateLatest.Segs.Oldest.TailTime
-  member this.headTime = this.CbStateLatest.Segs.Cur   .HeadTime
+  member this.tailTime = this.CbStateLatest.Segs.TailTime
+  member this.headTime = this.CbStateLatest.Segs.HeadTime
   
-  member this.IsInCallback  : bool * int =
-    let n1 = Volatile.Read(&this.CbState.SeqNum1)
-    if n1 <> Volatile.Read(&this.CbState.SeqNum2) then true , n1
-                                                  else false, n1
-  member this.CbStateSnapshot =
-    let rec get()  : CbState =
-      match this.IsInCallback with
-      | true , _       ->  get()
-      | false, seqNum1 ->
-      let cbState = this.CbState.Copy()
-      match Volatile.Read(&this.CbState.SeqNum1) with
-      | seqNum1Again when seqNum1 <> seqNum1Again ->  get()
-      | _ ->
-      cbState
-    get()
+  member this.CbStateSnapshot() : CbState =
+    let copyCbState() = this.CbState.Copy()
+    let timeout = TimeSpan.FromMicroseconds 1
+    match this.CbState.SeqNums.WhenStable copyCbState timeout with
+    | OK cbState -> cbState
+    | TimedOut s -> failwith "Timed out taking a snapshot of CbState" 
 
+  member this.range() = this.CbState.Segs.TailTime, this.CbState.Segs.HeadTime
+    
   // Read a range of data from the input recent history.
   // The caller requests a range expressed as a DateTime time and TimeSpan duration.
   // The delivered range may be clipped to the available subrange, depending on availability.
@@ -435,43 +456,45 @@ type InputStream(beesConfig       : BeesConfig          ,
   // Synchronizatrion with the callback is handled by the CbStateSnapshot property without locking.
   member this.read (time: _DateTime) (duration: _TimeSpan) (deliver: ReadDelivery)
                   : (InputStreamGetResult * _DateTime * _TimeSpan) =
-    let cbs = this.CbStateSnapshot
+    let cbs = this.CbStateSnapshot()
     let (|BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK|) (wantTime, wantDuration, haveTime, haveDuration) =
+      // Return the situation along with time and duration clipped to fit within Segs.
       //      Segs.Old         Segs.Cur
       // [.........◾◾◾◾◾◾◾] [◾◾◾◾◾◾◾.....]
       //           a      b  a      b
       //           tail             head
       let wantEnd: _DateTime = wantTime + wantDuration
       let haveEnd: _DateTime = haveTime + haveDuration
-      let timeAndDuration tail head = tail, head - tail
+      let timeAndDuration tail head =
+        let duration = head - tail
+        assert (cbs.Segs.Oldest.TailTime <= tail) ; assert (head <= cbs.Segs.Cur.HeadTime)
+        tail, duration
       match () with
-      | _ when wantEnd  <= haveTime                          ->  BeforeData
-      | _ when                           haveEnd <= wantTime ->  AfterData
-      | _ when wantTime <  haveTime  &&  haveEnd <  wantEnd  ->  ClippedBothEnds (timeAndDuration haveTime haveEnd)
-      | _ when wantTime <  haveTime                          ->  ClippedTail     (timeAndDuration haveTime wantEnd)
-      | _ when                           haveEnd <  wantEnd  ->  ClippedHead     (timeAndDuration wantTime haveEnd)
+      | _ when wantEnd  <= haveTime                          ->  BeforeData      (timeAndDuration haveTime haveTime)
+      | _ when                           haveEnd <= wantTime ->  AfterData       (timeAndDuration haveEnd  haveEnd )
+      | _ when wantTime <  haveTime  &&  haveEnd <  wantEnd  ->  ClippedBothEnds (timeAndDuration haveTime haveEnd )
+      | _ when wantTime <  haveTime                          ->  ClippedTail     (timeAndDuration haveTime wantEnd )
+      | _ when                           haveEnd <  wantEnd  ->  ClippedHead     (timeAndDuration wantTime haveEnd )
       | _                                                    ->  assert (haveTime <= wantTime)
                                                                  assert (wantEnd  <= haveEnd )
-                                                                 OK              (timeAndDuration wantTime wantEnd)
+                                                                 OK              (timeAndDuration wantTime wantEnd )
     let deliver (tailTime: _DateTime) duration =
-      let size = nFramesOf beesConfig.InSampleRate duration
+      let nFrames  = nFramesOf beesConfig.InSampleRate duration
       let headTime = tailTime + duration
       assert (cbs.Segs.TailTime <= tailTime) ; assert (headTime <= cbs.Segs.HeadTime)
       let deliverSegPortion (seg: Seg) =
-        let p = seg.getPortion tailTime duration
-        deliver (cbs.Ring, size, p.index, p.nFrames, p.time, p.duration)
+        let p = seg.clipToFit tailTime duration
+        deliver (cbs.Ring, nFrames, p.indexBegin, p.nFrames, cbs.InChannelCount, p.timeBegin, p.duration)
       if cbs.Segs.Old.Active  &&  tailTime < cbs.Segs.Old.HeadTime then  deliverSegPortion cbs.Segs.Old
       if                          cbs.Segs.Cur.TailTime < headTime then  deliverSegPortion cbs.Segs.Cur
-    let haveTime     = cbs.Segs.TailTime
-    let haveDuration = cbs.Segs.Duration
-    let tNg = _DateTime.MinValue in let dNg = _TimeSpan.Zero
-    match (time, duration, haveTime, haveDuration) with
-    | BeforeData             ->               (InputStreamGetResult.ErrorBeforeData    , tNg, dNg)
-    | AfterData              ->               (InputStreamGetResult.ErrorAfterData     , tNg, dNg)
-    | ClippedTail     (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedTail    , t  , d  )
-    | ClippedHead     (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedHead    , t  , d  )
-    | ClippedBothEnds (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedBothEnds, t  , d  )
-    | OK              (t, d) -> deliver t d ; (InputStreamGetResult.AsRequested        , t  , d  )  
+    if cbs.Simulating <> NotSimulating then Console.Write "R"
+    match (time, duration, cbs.Segs.TailTime, cbs.Segs.Duration) with
+    | BeforeData      (t, d) ->               (InputStreamGetResult.ErrorBeforeData    , t, d)
+    | AfterData       (t, d) ->               (InputStreamGetResult.ErrorAfterData     , t, d)
+    | ClippedTail     (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedTail    , t, d)
+    | ClippedHead     (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedHead    , t, d)
+    | ClippedBothEnds (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedBothEnds, t, d)
+    | OK              (t, d) -> deliver t d ; (InputStreamGetResult.AsRequested        , t, d)  
 
   member this.Read (from: _DateTime, duration: _TimeSpan, f: ReadDelivery) =
     this.read from duration f

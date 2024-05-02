@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net8.0</TargetFramework>
+        <RootNamespace>Mp3SaveTest</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Include="Program.fs"/>
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\BeesUtil\BeesUtil.fsproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="org.k2fsa.portaudio.runtime.osx-x64" Version="1.0.0" />
+      <PackageReference Include="PortAudioSharp2" Version="1.0.0" />
+    </ItemGroup>
+
+</Project>

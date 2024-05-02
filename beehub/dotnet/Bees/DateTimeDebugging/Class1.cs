@@ -39,7 +39,9 @@ public struct _TimeSpan  : IComparable {
 
   public static _TimeSpan operator +(_TimeSpan ts1, _TimeSpan ts2) => new(ts1.TotalMilliseconds + ts2.TotalMilliseconds);
   public static _TimeSpan operator -(_TimeSpan ts1, _TimeSpan ts2) => new(ts1.TotalMilliseconds - ts2.TotalMilliseconds);
-  public static _TimeSpan operator *(_TimeSpan ts1, int       x  ) => new(ts1.TotalMilliseconds * x                    );
+  public static _TimeSpan operator *(_TimeSpan ts1, double x     ) => new(ts1.TotalMilliseconds * x                    );
+  public static _TimeSpan operator /(_TimeSpan ts1, double x     ) => new(ts1.TotalMilliseconds / x                    );
+  public static double    operator /(_TimeSpan ts1, _TimeSpan ts2) =>     ts1.TotalMilliseconds / ts2.TotalMilliseconds ;
 
   public int CompareTo(object? obj) => TotalMilliseconds.CompareTo(((_TimeSpan?) obj)?.TotalMilliseconds);
 

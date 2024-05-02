@@ -99,7 +99,7 @@ type CbState = {
   mutable CallbackHandoff : CallbackHandoff
   mutable WithEcho        : bool
   mutable WithLogging     : bool
-  TimeInfoBase            : _DateTime // for getting UTC from timeInfo.inputBufferAdcTime
+  TimeInfoBase            : _DateTime // for getting `DateTime from timeInfo.inputBufferAdcTime
   FrameSize               : int
   RingPtr                 : IntPtr
   DebugSimulating         : bool } with

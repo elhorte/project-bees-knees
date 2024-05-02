@@ -1,6 +1,7 @@
 ﻿
 open System
 open System.Threading
+open System.Threading.Tasks
 open FSharp.Control
 
 open PortAudioSharp
@@ -10,6 +11,7 @@ open BeesUtil.DateTimeShim
 
 open BeesUtil.DebugGlobals
 open BeesUtil.PortAudioUtils
+open BeesUtil.DateTimeCalculations
 open BeesLib.InputStream
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
@@ -47,12 +49,45 @@ let prepareArgumentsForStreamCreation verbose =
   log $"outputParameters=%A{outputParameters}"
   sampleRate, inputParameters, outputParameters
 
+
+let saveMp3 (inputStream: InputStream) =
+  let mutable deliveredArray: float32[] = [||] // samples
+  let mutable destIndexNS = 0
+  let mutable nDeliveries = 0
+  let acceptOneDelivery (array, sizeNF, indexNF, nFrames, nChannels, time, duration) =
+    let printRange() = printfn $"index %d{indexNF}  length %d{nFrames}  time %A{time}  duration %A{duration}"
+    printRange()
+    // let sizeNS   = sizeNF  * nChannels
+    // let indexNS  = indexNF * nChannels
+    // let nSamples = nFrames * nChannels
+    // if destIndexNS = 0 then  deliveredArray <- Array.zeroCreate<float32> sizeNS
+    // Array.Copy(array, indexNS, deliveredArray, destIndexNS, nSamples)
+    // destIndexNS <- destIndexNS + nSamples
+    // nDeliveries <- nDeliveries + 1
+  let interval = 5.0
+  let startTime = getNextSecondBoundary(interval).AddSeconds(interval)
+  Task.Run(fun () -> waitUntil startTime).Wait()
+  let rec repeat dt =
+    let time = (dt: DateTime).AddSeconds(-interval)
+    let duration = TimeSpan.FromSeconds interval
+    let resultEnum, deliveredTime, deliveredDuration as result = inputStream.read time duration acceptOneDelivery
+    match resultEnum with
+    | InputStreamGetResult.ErrorTimeout       
+    | InputStreamGetResult.ErrorBeforeData    
+    | InputStreamGetResult.ErrorAfterData     
+    | InputStreamGetResult.WarnClippedBothEnds
+    | InputStreamGetResult.WarnClippedTail    
+    | InputStreamGetResult.WarnClippedHead    
+    | InputStreamGetResult.AsRequested         -> printfn $"%A{deliveredTime}  %A{deliveredDuration}" 
+  repeat startTime    
+
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run inputStream = task {
   let inputStream = (inputStream: InputStream)
   inputStream.Start()
   use cts = new CancellationTokenSource()
   printfn "Reading..."
+  saveMp3 inputStream
   do! keyboardKeyInput "" cts
   printfn "Stopping..."    ; inputStream.Stop()
   printfn "Stopped"
@@ -90,14 +125,12 @@ let main _ =
   printBeesConfig beesConfig
   keyboardInputInit()
   try
-    paTryCatchRethrow (fun () ->
-      use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging, NotSimulating)
-      paTryCatchRethrow (fun () ->
-        let t = task {
-          do! run inputStream 
-          inputStream.CbState.Logger.Print "Log:" }
-        t.Wait() )
-      printfn "Task done." )
+      let inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging, NotSimulating)
+      let t = task {
+        do! run inputStream 
+        inputStream.CbState.Logger.Print "Log:" }
+      t.Wait() 
+      printfn "Task done." 
   finally
     printfn "Exiting with 0."
   0

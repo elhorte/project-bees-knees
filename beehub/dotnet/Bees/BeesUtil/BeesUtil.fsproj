@@ -20,6 +20,8 @@
         <Compile Include="SubscriberList.fs" />
         <Compile Include="PortAudioUtils.fs"       />
         <Compile Include="Mp3.fs"                  />
+        <Compile Include="SeqNums.fs" />
+        <Compile Include="DateTimeCalculations.fs" />
     </ItemGroup>
 
     <ItemGroup>
