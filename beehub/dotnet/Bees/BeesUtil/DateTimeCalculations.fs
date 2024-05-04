@@ -5,14 +5,14 @@ open System.Threading.Tasks
 
 let getMostRecentSecondBoundary (sec: double) =
   let now = System.DateTime.Now
-  now.AddSeconds(-double(now.Second % int sec)).AddMilliseconds(-double(now.Millisecond))
+  now.AddSeconds(-double(now.Second % int sec))
 
 let getNextSecondBoundary (sec: double) =
   let dt = getMostRecentSecondBoundary sec
   dt.AddSeconds(double sec)
     
 let getMostRecentStartOfMinute (dt: DateTime) =
-  dt.AddSeconds(-dt.Second).AddMilliseconds(-dt.Millisecond)
+  dt.AddSeconds(-dt.Second)
 
 let getMostRecentStartOfHour (dt: DateTime) =
   let dt = getMostRecentStartOfMinute dt

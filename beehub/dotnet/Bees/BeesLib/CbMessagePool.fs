@@ -87,7 +87,8 @@ type FrameRange = {
     let frameDuration = _TimeSpan.FromSeconds(1.0 / float fr.FrameRate)
     assert (fr.NFrames    =              fr.IndexEnd  - fr.IndexBegin)
     assert (fr.Duration   =              fr.TimeEnd   - fr.TimeBegin )
-    assert (fr.NFrames    = int (round ( fr.Duration                   / frameDuration)))
+    let nFrames = int (round ( fr.Duration                 / frameDuration))
+    assert (fr.NFrames    = nFrames)
     assert (fr.IndexBegin = int (round ((fr.TimeBegin - fr.TimeBase) / frameDuration)))
     assert (fr.IndexEnd   = int (round ((fr.TimeEnd   - fr.TimeBase) / frameDuration)))
     

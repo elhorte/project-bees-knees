@@ -487,14 +487,14 @@ type InputStream(beesConfig       : BeesConfig          ,
       | _                                                    ->  assert (haveTime <= wantTime)
                                                                  assert (wantEnd  <= haveEnd )
                                                                  OK              (timeAndDuration wantTime wantEnd )
-    let deliver (tailTime: _DateTime) duration =
+    let deliver (time: _DateTime) duration =
       let nFrames  = nFramesOf beesConfig.InSampleRate duration
-      let headTime = tailTime + duration
-      assert (cbs.Segs.TailTime <= tailTime) ; assert (headTime <= cbs.Segs.HeadTime)
+      let headTime = time + duration
+      assert (cbs.Segs.TailTime <= time) ; assert (headTime <= cbs.Segs.HeadTime)
       let deliverSegPortion (seg: Seg) =
-        let p = seg.clipToFit tailTime duration
+        let p = seg.clipToFit time duration
         deliver (cbs.Ring, nFrames, p.IndexBegin, p.NFrames, cbs.InChannelCount, p.TimeBegin, p.Duration)
-      if cbs.Segs.Old.Active  &&  tailTime < cbs.Segs.Old.HeadTime then  deliverSegPortion cbs.Segs.Old
+      if cbs.Segs.Old.Active  &&  time < cbs.Segs.Old.HeadTime     then  deliverSegPortion cbs.Segs.Old
       if                          cbs.Segs.Cur.TailTime < headTime then  deliverSegPortion cbs.Segs.Cur
     if cbs.Simulating <> NotSimulating then Console.Write "R"
     match (time, duration, cbs.Segs.TailTime, cbs.Segs.Duration) with
