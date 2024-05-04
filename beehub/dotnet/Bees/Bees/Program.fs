@@ -49,7 +49,7 @@ let prepareArgumentsForStreamCreation verbose =
   log $"outputParameters=%A{outputParameters}"
   sampleRate, inputParameters, outputParameters
 
-
+/// save a 5-second mp3 file every 10 seconds
 let saveMp3 (inputStream: InputStream) =
   let mutable deliveredArray: float32[] = [||] // samples
   let mutable destIndexNS = 0
@@ -67,7 +67,8 @@ let saveMp3 (inputStream: InputStream) =
   let interval = 5.0
   let startTime = getNextSecondBoundary(interval).AddSeconds(interval)
   Task.Run(fun () -> waitUntil startTime).Wait()
-  let rec repeat dt =
+  let rec repeat dt =\
+    xxx
     let time = (dt: DateTime).AddSeconds(-interval)
     let duration = TimeSpan.FromSeconds interval
     let resultEnum, deliveredTime, deliveredDuration as result = inputStream.read time duration acceptOneDelivery
@@ -78,8 +79,9 @@ let saveMp3 (inputStream: InputStream) =
     | InputStreamGetResult.WarnClippedBothEnds
     | InputStreamGetResult.WarnClippedTail    
     | InputStreamGetResult.WarnClippedHead    
-    | InputStreamGetResult.AsRequested         -> printfn $"%A{deliveredTime}  %A{deliveredDuration}" 
-  repeat startTime    
+    | InputStreamGetResult.AsRequested         -> printfn $"%A{deliveredTime}  %A{deliveredDuration}"
+    waitUntil (time.AddSeconds interval)
+  repeat startTime
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run inputStream = task {
@@ -87,7 +89,7 @@ let run inputStream = task {
   inputStream.Start()
   use cts = new CancellationTokenSource()
   printfn "Reading..."
-  saveMp3 inputStream
+  (saveMp3 inputStream).Wait()
   do! keyboardKeyInput "" cts
   printfn "Stopping..."    ; inputStream.Stop()
   printfn "Stopped"
