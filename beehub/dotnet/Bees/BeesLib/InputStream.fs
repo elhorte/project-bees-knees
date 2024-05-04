@@ -247,6 +247,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       assert (not cbs.Segs.Old.Active)
       cbs.State <- AtEnd // Briefly; quickly changes to Chasing.
       cbs.Segs.Exchange() ; assert (cbs.Segs.Cur.Head = 0  &&  cbs.Segs.Cur.Tail = 0)
+      cbs.Segs.Cur.TimeBase <- cbs.AdcStartTime
       cbs.Segs.Cur.TailTime <- cbs.AdcStartTime
       cbs.Segs.Cur.HeadTime <- cbs.AdcStartTime
       let h, t = nextValues() in newHead <- h ; newTail <- t
@@ -259,6 +260,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       assert (not cbs.Segs.Old.Active)
       assert (newHead = nFrames)  // The block will fit at Ring[0]
       cbs.State <- AtBegin
+      cbs.Segs.Cur.TimeBase <- cbs.AdcStartTime
       cbs.Segs.Cur.TailTime <- cbs.AdcStartTime
     | AtBegin ->
       assert (not cbs.Segs.Old.Active)
@@ -308,7 +310,14 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The InputStream class
 
-type ReadDelivery = float32[] * int * int * int * int * _DateTime * _TimeSpan -> unit
+type ReadDelivery = float32[]   // source array
+                  * int         // sizeNF
+                  * int         // indexNF
+                  * int         // nFrames 
+                  * int         // nChannels
+                  * _DateTime   // time
+                  * _TimeSpan   // duration
+                   -> unit
 
 type InputStreamGetResult =
   | ErrorTimeout        = 0
@@ -484,7 +493,7 @@ type InputStream(beesConfig       : BeesConfig          ,
       assert (cbs.Segs.TailTime <= tailTime) ; assert (headTime <= cbs.Segs.HeadTime)
       let deliverSegPortion (seg: Seg) =
         let p = seg.clipToFit tailTime duration
-        deliver (cbs.Ring, nFrames, p.indexBegin, p.nFrames, cbs.InChannelCount, p.timeBegin, p.duration)
+        deliver (cbs.Ring, nFrames, p.IndexBegin, p.NFrames, cbs.InChannelCount, p.TimeBegin, p.Duration)
       if cbs.Segs.Old.Active  &&  tailTime < cbs.Segs.Old.HeadTime then  deliverSegPortion cbs.Segs.Old
       if                          cbs.Segs.Cur.TailTime < headTime then  deliverSegPortion cbs.Segs.Cur
     if cbs.Simulating <> NotSimulating then Console.Write "R"

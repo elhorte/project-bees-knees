@@ -52,7 +52,7 @@ type FrameRange = {
   TimeBegin  : _DateTime
   TimeEnd    : _DateTime
   Duration   : _TimeSpan
-  TimeOrigin : _DateTime
+  TimeBase   : _DateTime
   FrameRate  : int        } with
 
   static member NewByBeginEnd indexBegin indexEnd  timeBegin timeEnd  timeOrigin frameRate =
@@ -65,7 +65,7 @@ type FrameRange = {
       TimeBegin  = timeBegin
       TimeEnd    = timeBegin + duration
       Duration   = duration
-      TimeOrigin = timeOrigin
+      TimeBase   = timeOrigin
       FrameRate  = frameRate   }
     fr.Check()
     fr
@@ -78,7 +78,7 @@ type FrameRange = {
       TimeBegin  = timeBegin
       TimeEnd    = timeBegin + duration
       Duration   = duration
-      TimeOrigin = timeOrigin
+      TimeBase   = timeOrigin
       FrameRate  = frameRate   }
     fr.Check()
     fr
@@ -88,31 +88,31 @@ type FrameRange = {
     assert (fr.NFrames    =              fr.IndexEnd  - fr.IndexBegin)
     assert (fr.Duration   =              fr.TimeEnd   - fr.TimeBegin )
     assert (fr.NFrames    = int (round ( fr.Duration                   / frameDuration)))
-    assert (fr.IndexBegin = int (round ((fr.TimeBegin - fr.TimeOrigin) / frameDuration)))
-    assert (fr.IndexEnd   = int (round ((fr.TimeEnd   - fr.TimeOrigin) / frameDuration)))
+    assert (fr.IndexBegin = int (round ((fr.TimeBegin - fr.TimeBase) / frameDuration)))
+    assert (fr.IndexEnd   = int (round ((fr.TimeEnd   - fr.TimeBase) / frameDuration)))
     
 
 type Seg = {
-  mutable Tail       : int  // frames not samples
-  mutable Head       : int  // frames not samples
-  mutable TailTime   : _DateTime
-  mutable HeadTime   : _DateTime
-  mutable TimeOrigin : _DateTime
-  NRingFrames        : int
-  FrameRate          : int  }
+  mutable Tail     : int  // frames not samples
+  mutable Head     : int  // frames not samples
+  mutable TailTime : _DateTime
+  mutable HeadTime : _DateTime
+  mutable TimeBase : _DateTime
+  NRingFrames      : int
+  FrameRate        : int  }
   
   with
 
   static member New (head: int) (tail: int) (nRingFrames: int) (inSampleRate: int) =
     assert (head >= tail)
     let seg = {
-      Tail         = tail
-      Head         = head
-      TailTime     = tbdDateTime
-      HeadTime     = tbdDateTime
-      TimeOrigin   = tbdDateTime
-      NRingFrames  = nRingFrames
-      FrameRate = inSampleRate  }
+      Tail        = tail
+      Head        = head
+      TailTime    = tbdDateTime
+      HeadTime    = tbdDateTime
+      TimeBase    = tbdDateTime
+      NRingFrames = nRingFrames
+      FrameRate   = inSampleRate  }
     seg
 
   static member NewEmpty (nRingFrames: int) (inSampleRate: int) =  Seg.New 0 0 nRingFrames inSampleRate
@@ -125,7 +125,7 @@ type Seg = {
       TimeBegin  = seg.TailTime
       TimeEnd    = seg.HeadTime 
       Duration   = seg.HeadTime - seg.TailTime
-      TimeOrigin = seg.TimeOrigin
+      TimeBase   = seg.TimeBase
       FrameRate  = seg.FrameRate   }
     fr.Check()
     fr
@@ -144,52 +144,94 @@ type Seg = {
   
   /// identify the portion of seg that overlaps with the given time and duration
   member seg.clipToFit (time: _DateTime) (duration: _TimeSpan)  : FrameRange =
-    let tr    = TimeRange.NewByBeginDuration time duration
-    let segFr = seg.ToFrameRange()
-    let timeBegin        = time
-    let timeEnd          = time + duration
-    let timeBeginClipped = max tr.TimeBegin segFr.TimeBegin
-    let timeEndClipped   = min tr.TimeEnd   segFr.TimeEnd
-    let trClipped = TimeRange.NewByBeginEnd timeBeginClipped timeEndClipped
+    let segTailTime      = seg.TailTime
+    let segHeadTime      = seg.HeadTime
+    let segDuration      = segHeadTime - segTailTime
+    let segTail          = seg.Tail
+    let segHead          = seg.Head
+    let segLength        = seg.NFrames
+    let tailTime         = time
+    let headTime         = time + duration
+    let tailTimeClipped  = max tailTime segTailTime
+    let headTimeClipped  = min headTime segHeadTime
+    let portionTime      = tailTimeClipped
+    let portionDuration  = _TimeSpan.FromSeconds (headTimeClipped - tailTimeClipped).Seconds
+    let portionIndex     = seg.nFramesOf (_TimeSpan.FromSeconds (tailTimeClipped - seg.TimeBase).Seconds)
+    let portionNFrames   = seg.nFramesOf portionDuration
+    let portionDuration2 = seg.durationOf portionNFrames
+    let portionTailIndex = segTail + portionIndex
+    let portionHeadIndex = portionTailIndex + portionNFrames
+    let sStatus = $"""
+      time             %A{time            }
+      duration         %A{duration        }
+      segTailTime      %A{segTailTime     }
+      segHeadTime      %A{segHeadTime     }
+      segDuration      %A{segDuration     }
+      segTail          %A{segTail         }
+      segHead          %A{segHead         }
+      segLength        %A{segLength       }
+      tailTime         %A{tailTime        }
+      headTime         %A{headTime        }
+      tailTimeClipped  %A{tailTimeClipped }
+      headTimeClipped  %A{headTimeClipped }
+      portionTime      %A{portionTime     }
+      portionDuration  %A{portionDuration }
+      portionIndex     %A{portionIndex    }
+      portionNFrames   %A{portionNFrames  }
+      portionDuration2 %A{portionDuration2}
+      portionTailIndex %A{portionTailIndex}
+      portionHeadIndex %A{portionHeadIndex}
+      """
+    assert (seg.Tail <= portionTailIndex) ; assert (portionHeadIndex <= seg.Head)
+    FrameRange.NewByBeginDuration portionIndex portionNFrames portionTime portionDuration seg.TimeBase seg.FrameRate
     
-    // let frTimeOffset     = timeBeginClipped - segFr.TimeBegin
-    // let portionDuration  = timeEndClipped - timeBeginClipped
-    //
-    // let segTail          = seg.Tail
-    // let segHead          = seg.Head
-    // let segLength        = seg.NFrames
-    // let portionIndex     = seg.nFramesOf frTimeOffset
-    // let portionNFrames   = seg.nFramesOf portionDuration
-    // let portionDuration2 = seg.durationOf portionNFrames
-    //
-    // let portionTailIndex = segTail + portionIndex
-    // let portionHeadIndex = portionTailIndex + portionNFrames
-    // let sStatus = $"""
-    //   time             %A{time            }
-    //   duration         %A{duration        }
-    //   segTailTime      %A{segFr.TimeBegin     }
-    //   segHeadTime      %A{segFr.TimeEnd     }
-    //   segDuration      %A{segFr.Duration     }
-    //   segTail          %A{segTail         }
-    //   segHead          %A{segHead         }
-    //   segLength        %A{segLength       }
-    //   tailTime         %A{timeBegin        }
-    //   headTime         %A{timeEnd        }
-    //   tailTimeClipped  %A{timeBeginClipped }
-    //   headTimeClipped  %A{timeEndClipped }
-    //   portionTime      %A{frTimeOffset     }
-    //   portionDuration  %A{portionDuration }
-    //   portionIndex     %A{portionIndex    }
-    //   portionNFrames   %A{portionNFrames  }
-    //   portionDuration2 %A{portionDuration2}
-    //   portionTailIndex %A{portionTailIndex}
-    //   portionHeadIndex %A{portionHeadIndex}
-    //   """
-    // assert (seg.Tail <= portionTailIndex) ; assert (portionHeadIndex <= seg.Head)
-    // { indexBegin    = portionTailIndex
-    //   nFrames       = portionNFrames
-    //   timeBegin     = tailTimeClipped
-    //   duration      = portionDuration }
+  // member seg.clipToFit (time: _DateTime) (duration: _TimeSpan)  : FrameRange =
+  //   let tr    = TimeRange.NewByBeginDuration time duration
+  //   let segFr = seg.ToFrameRange()
+  //   let timeBegin        = time
+  //   let timeEnd          = time + duration
+  //   let timeBeginClipped = max tr.TimeBegin segFr.TimeBegin
+  //   let timeEndClipped   = min tr.TimeEnd   segFr.TimeEnd
+  //   let trClipped = TimeRange.NewByBeginEnd timeBeginClipped timeEndClipped
+  //   
+  //   // let frTimeOffset     = timeBeginClipped - segFr.TimeBegin
+  //   // let portionDuration  = timeEndClipped - timeBeginClipped
+  //   //
+  //   // let segTail          = seg.Tail
+  //   // let segHead          = seg.Head
+  //   // let segLength        = seg.NFrames
+  //   // let portionIndex     = seg.nFramesOf frTimeOffset
+  //   // let portionNFrames   = seg.nFramesOf portionDuration
+  //   // let portionDuration2 = seg.durationOf portionNFrames
+  //   //
+  //   // let portionTailIndex = segTail + portionIndex
+  //   // let portionHeadIndex = portionTailIndex + portionNFrames
+  //   // let sStatus = $"""
+  //   //   time             %A{time            }
+  //   //   duration         %A{duration        }
+  //   //   segTailTime      %A{segFr.TimeBegin     }
+  //   //   segHeadTime      %A{segFr.TimeEnd     }
+  //   //   segDuration      %A{segFr.Duration     }
+  //   //   segTail          %A{segTail         }
+  //   //   segHead          %A{segHead         }
+  //   //   segLength        %A{segLength       }
+  //   //   tailTime         %A{timeBegin        }
+  //   //   headTime         %A{timeEnd        }
+  //   //   tailTimeClipped  %A{timeBeginClipped }
+  //   //   headTimeClipped  %A{timeEndClipped }
+  //   //   portionTime      %A{frTimeOffset     }
+  //   //   portionDuration  %A{portionDuration }
+  //   //   portionIndex     %A{portionIndex    }
+  //   //   portionNFrames   %A{portionNFrames  }
+  //   //   portionDuration2 %A{portionDuration2}
+  //   //   portionTailIndex %A{portionTailIndex}
+  //   //   portionHeadIndex %A{portionHeadIndex}
+  //   //   """
+  //   // assert (seg.Tail <= portionTailIndex) ; assert (portionHeadIndex <= seg.Head)
+  //   // { indexBegin    = portionTailIndex
+  //   //   nFrames       = portionNFrames
+  //   //   timeBegin     = tailTimeClipped
+  //   //   duration      = portionDuration }
 
   member seg.SetTail index dateTime =  seg.Tail <- index ; seg.TailTime <- dateTime
                                        assert (seg.Tail     <= seg.Head)
