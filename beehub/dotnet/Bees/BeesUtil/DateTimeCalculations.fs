@@ -3,23 +3,22 @@ module BeesUtil.DateTimeCalculations
 open System
 open System.Threading.Tasks
 
-let getMostRecentSecondBoundary (sec: double) =
-  let now = System.DateTime.Now
-  now.AddSeconds(-double(now.Second % int sec))
+open BeesUtil.DateTimeShim
 
-let getNextSecondBoundary (sec: double) =
-  let dt = getMostRecentSecondBoundary sec
+let getMostRecentSecondBoundary sec (from: _DateTime) =
+  from.AddSeconds(-double(from.Second % sec))
+
+let getNextSecondBoundary sec (from: _DateTime) =
+  let dt = getMostRecentSecondBoundary sec from
   dt.AddSeconds(double sec)
     
-let getMostRecentStartOfMinute (dt: DateTime) =
+let getMostRecentStartOfMinute (dt: _DateTime) =
   dt.AddSeconds(-dt.Second)
 
-let getMostRecentStartOfHour (dt: DateTime) =
+let getMostRecentStartOfHour (dt: _DateTime) =
   let dt = getMostRecentStartOfMinute dt
   dt.AddMinutes(-dt.Minute)
 
-let waitUntil (future: DateTime) =
-  let now = DateTime.Now
-  let duration = future - now
-  if duration > TimeSpan.Zero then  Task.Delay duration
-                              else  Task.CompletedTask
+let waitUntil dateTime =
+  let duration = dateTime - _DateTime.Now
+  if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()

@@ -64,13 +64,19 @@ let saveMp3 (inputStream: InputStream) =
     // Array.Copy(array, indexNS, deliveredArray, destIndexNS, nSamples)
     // destIndexNS <- destIndexNS + nSamples
     // nDeliveries <- nDeliveries + 1
-  let interval = 5.0
-  let startTime = getNextSecondBoundary(interval).AddSeconds(interval)
-  Task.Run(fun () -> waitUntil startTime).Wait()
-  let rec repeat dt =\
-    xxx
-    let time = (dt: DateTime).AddSeconds(-interval)
-    let duration = TimeSpan.FromSeconds interval
+  let intervalSec = 5
+  //  ...|....|....|....
+  //   |<––––––––– now
+  //          |<– delayUntil startTime
+  //     |––––| mp3 file 1
+  //               |<– delayUntil startTime + intervalSec 
+  //          |––––| mp3 file 2
+  let startTime = getNextSecondBoundary intervalSec _DateTime.Now
+  printfn $"%A{startTime - _DateTime.Now}"
+  let rec saveMp3File dt =
+    waitUntil (dt: DateTime)
+    let time     = dt.AddSeconds(-intervalSec)
+    let duration = _TimeSpan.FromSeconds intervalSec
     let resultEnum, deliveredTime, deliveredDuration as result = inputStream.read time duration acceptOneDelivery
     match resultEnum with
     | InputStreamGetResult.ErrorTimeout       
@@ -79,9 +85,9 @@ let saveMp3 (inputStream: InputStream) =
     | InputStreamGetResult.WarnClippedBothEnds
     | InputStreamGetResult.WarnClippedTail    
     | InputStreamGetResult.WarnClippedHead    
-    | InputStreamGetResult.AsRequested         -> printfn $"%A{deliveredTime}  %A{deliveredDuration}"
-    waitUntil (time.AddSeconds interval)
-  repeat startTime
+    | InputStreamGetResult.AsRequested         -> printfn $"%A{deliveredTime}  %A{deliveredDuration} %A{resultEnum}"
+    saveMp3File (time.AddSeconds intervalSec)
+  saveMp3File startTime
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run inputStream = task {
@@ -89,7 +95,7 @@ let run inputStream = task {
   inputStream.Start()
   use cts = new CancellationTokenSource()
   printfn "Reading..."
-  (saveMp3 inputStream).Wait()
+  saveMp3 inputStream
   do! keyboardKeyInput "" cts
   printfn "Stopping..."    ; inputStream.Stop()
   printfn "Stopped"
