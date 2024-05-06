@@ -12,6 +12,7 @@ open BeesUtil.DateTimeShim
 open BeesUtil.DebugGlobals
 open BeesUtil.PortAudioUtils
 open BeesUtil.DateTimeCalculations
+open BeesUtil.Mp3
 open BeesLib.InputStream
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
@@ -49,6 +50,8 @@ let prepareArgumentsForStreamCreation verbose =
   log $"outputParameters=%A{outputParameters}"
   sampleRate, inputParameters, outputParameters
 
+let CreateSampleArray nFrames nChannels = Array.zeroCreate (nFrames * nChannels)
+
 /// save a 5-second mp3 file every 10 seconds
 let saveMp3 (inputStream: InputStream) =
   let mutable deliveredArray: float32[] = [||] // samples
@@ -57,13 +60,10 @@ let saveMp3 (inputStream: InputStream) =
   let acceptOneDelivery (array, sizeNF, indexNF, nFrames, nChannels, time, duration) =
     let printRange() = printfn $"index %d{indexNF}  length %d{nFrames}  time %A{time}  duration %A{duration}"
     printRange()
-    // let sizeNS   = sizeNF  * nChannels
-    // let indexNS  = indexNF * nChannels
-    // let nSamples = nFrames * nChannels
-    // if destIndexNS = 0 then  deliveredArray <- Array.zeroCreate<float32> sizeNS
-    // Array.Copy(array, indexNS, deliveredArray, destIndexNS, nSamples)
-    // destIndexNS <- destIndexNS + nSamples
-    // nDeliveries <- nDeliveries + 1
+    // if destIndexNS = 0 then  deliveredArray <- CreateSampleArray sizeNF nChannels
+    // copy to deliveredArray
+    // let inSampleRate   = inputStream.BeesConfig.InSampleRate
+    // let inChannelCount = inputStream.BeesConfig.InChannelCount
   let intervalSec = 5
   //  ...|....|....|....
   //   |<––––––––– now
@@ -71,22 +71,25 @@ let saveMp3 (inputStream: InputStream) =
   //     |––––| mp3 file 1
   //               |<– delayUntil startTime + intervalSec 
   //          |––––| mp3 file 2
+  let duration = _TimeSpan.FromSeconds intervalSec
   let startTime = getNextSecondBoundary intervalSec _DateTime.Now
   printfn $"%A{startTime - _DateTime.Now}"
-  let rec saveMp3File dt =
-    waitUntil (dt: DateTime)
-    let time     = dt.AddSeconds(-intervalSec)
-    let duration = _TimeSpan.FromSeconds intervalSec
+  let rec saveMp3File (time: _DateTime) =
+    waitUntil (time + duration)
     let resultEnum, deliveredTime, deliveredDuration as result = inputStream.read time duration acceptOneDelivery
+    let save() =
+    //   saveAsMp3 "save" inSampleRate inChannelCount (samples: float32[])
+      ()
     match resultEnum with
     | InputStreamGetResult.ErrorTimeout       
     | InputStreamGetResult.ErrorBeforeData    
-    | InputStreamGetResult.ErrorAfterData     
+    | InputStreamGetResult.ErrorAfterData      ->  printfn $"%A{deliveredTime}  %A{deliveredDuration} %A{resultEnum}"
     | InputStreamGetResult.WarnClippedBothEnds
     | InputStreamGetResult.WarnClippedTail    
     | InputStreamGetResult.WarnClippedHead    
-    | InputStreamGetResult.AsRequested         -> printfn $"%A{deliveredTime}  %A{deliveredDuration} %A{resultEnum}"
-    saveMp3File (time.AddSeconds intervalSec)
+    | InputStreamGetResult.AsRequested         ->  printfn $"%A{deliveredTime}  %A{deliveredDuration} %A{resultEnum}"
+                                                   save()
+    saveMp3File (time + duration)
   saveMp3File startTime
 
 /// Run the stream for a while, then stop it and terminate PortAudio.

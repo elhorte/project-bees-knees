@@ -133,6 +133,7 @@ type CbState = {
   mutable StartTime       : _DateTime  // for getting DateTime from timeInfo.inputBufferAdcTime
   mutable TimeInfoBase    : float  // for getting DateTime from timeInfo.inputBufferAdcTime
   InChannelCount          : int
+  InSampleRate            : float
   FrameSize               : int  // bytes
   Logger                  : Logger
   Simulating              : SimulatingCallbacks } with
@@ -204,7 +205,7 @@ type CbState = {
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The callback – Copy data from the audio driver into our ring.
 
-let mutable thresh = 44100
+let mutable thresh = 0
 
 let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) statusFlags userDataPtr =
   let (input : IntPtr) = input
@@ -212,7 +213,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   let handle  = GCHandle.FromIntPtr(userDataPtr)
   let cbs     = handle.Target :?> CbState
   let nFrames = int frameCount
-  cbs.SeqNums.UnstableEnter()
+  cbs.SeqNums.EnterUnstable()
 
   if cbs.WithEcho then
     let size = uint64 (frameCount * uint32 cbs.FrameSize)
@@ -298,10 +299,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   cbs.Segs.Cur.AdvanceHead nFrames
 //Console.Write(".")
 //if cbs.SeqNums.N1 % 20us = 0us then  Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / nFrames} %10f{timeInfo.inputBufferAdcTime - cbs.TimeInfoBase}"
-  if cbs.Segs.Cur.Head > thresh then
-    thresh <- thresh + 44100
-    Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / nFrames} %10f{timeInfo.inputBufferAdcTime - cbs.TimeInfoBase}"
-  cbs.SeqNums.UnstableLeave()
+  cbs.SeqNums.LeaveUnstable()
 
 //cbs.Logger.Add cbs.SeqNum2 cbs.TimeStamp "cb bufs=" ""
   cbs.CallbackHandoff.HandOff()
@@ -377,6 +375,7 @@ type InputStream(beesConfig       : BeesConfig          ,
     StartTime       = tbdDateTime
     TimeInfoBase    = 0.0  // timeInfoBase + adcInputTime -> cbState.TimeStamp
     InChannelCount  = beesConfig.InChannelCount
+    InSampleRate    = beesConfig.InSampleRate
     FrameSize       = frameSize
     Logger          = Logger(8000, startTime)
     Simulating      = sim  }
@@ -434,7 +433,12 @@ type InputStream(beesConfig       : BeesConfig          ,
               callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
 
   member this.AfterCallback() =
-    () // if cbState.Simulating = NotSimulating then Console.Write ","
+    let cbs = this.CbStateSnapshot()
+    if cbs.Segs.Cur.Head > thresh then
+      thresh <- thresh + int (round (cbs.InSampleRate))
+      Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / int cbs.FrameCount} %10f{cbs.TimeInfo.inputBufferAdcTime - cbs.TimeInfoBase}"
+    cbs.Segs.Cur.Check()
+     // if cbState.Simulating = NotSimulating then Console.Write ","
 
   member private is.debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
     Console.Write ","
@@ -464,7 +468,7 @@ type InputStream(beesConfig       : BeesConfig          ,
   // time and duration of the range of the delivered data.
   // Synchronizatrion with the callback is handled by the CbStateSnapshot property without locking.
   member this.read (time: _DateTime) (duration: _TimeSpan) (deliver: ReadDelivery)
-                  : (InputStreamGetResult * _DateTime * _TimeSpan) =
+                   : (InputStreamGetResult * _DateTime * _TimeSpan) =
     let cbs = this.CbStateSnapshot()
     let (|BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK|) (wantTime, wantDuration, haveTime, haveDuration) =
       // Return the situation along with time and duration clipped to fit within Segs.

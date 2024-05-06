@@ -34,8 +34,8 @@ type Foo() =
 [<EntryPoint>]
 let main _ =
   let foo = Foo()
-  let incrN1() = foo.FS.SeqNums.UnstableEnter()
-  let incrN2() = foo.FS.SeqNums.UnstableLeave()
+  let incrN1() = foo.FS.SeqNums.EnterUnstable()
+  let incrN2() = foo.FS.SeqNums.LeaveUnstable()
   let timeout = TimeSpan.FromMilliseconds 10
   let doWork() = "work"
   incrN1()

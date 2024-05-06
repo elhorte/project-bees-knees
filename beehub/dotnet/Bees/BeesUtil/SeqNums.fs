@@ -21,10 +21,10 @@ type SeqNums = { mutable S : uint32 } with
   static member New() =  SeqNums.Make (uint16 -1) (uint16 -1)
 
   /// Producer: enter the critical section
-  member sn.UnstableEnter() =  let n1, n2 =  sn.GetPair() in sn.Set (n1 + 1us)  n2
+  member sn.EnterUnstable() =  let n1, n2 =  sn.GetPair() in sn.Set (n1 + 1us)  n2
 
   /// Producer: leave the critical section
-  member sn.UnstableLeave() =  let n1, n2 =  sn.GetPair() in sn.Set  n1        (n2 + 1us)
+  member sn.LeaveUnstable() =  let n1, n2 =  sn.GetPair() in sn.Set  n1        (n2 + 1us)
 
   /// Consumer: call a function while not in the critical section; busywait and retry as necessary.
   member sn.WhenStable (f: unit -> 'T) timeout  : SeqNumsResult<'T> =  sn.WhenStableInternal f timeout Int32.MaxValue ignore

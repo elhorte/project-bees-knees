@@ -131,10 +131,20 @@ type Seg = {
     fr.Check()
     fr
 
-  member seg.Check() = seg.ToFrameRange().Check()
+  member seg.Check() =
+    let frameDuration = _TimeSpan.FromSeconds(1.0 / float seg.FrameRate)
+    assert (seg.NFrames = seg.Head - seg.Tail     )
+    let duration = seg.HeadTime - seg.TailTime
+    if duration <> seg.Duration then printfn $"Head %x{seg.Head} Duration exp {duration} act {seg.Duration}" 
+    let nFrames = int (round (seg.Duration / frameDuration))
+    if nFrames <> seg.NFrames then printfn $"Head %x{seg.Head} NFrames exp {nFrames} act {seg.NFrames}"
+    assert (seg.Tail = int (round ((seg.TailTime - seg.TimeBase) / frameDuration)))
+    let head = int (round ((seg.HeadTime - seg.TimeBase) / frameDuration))
+    if head <> seg.Head then  printfn $"Head %x{seg.Head} Head exp {head} act {seg.Head}"
+
 
   member seg.Copy() = { seg with Tail = seg.Tail }
-    
+
   member seg.durationOf nFrames = durationOf seg.FrameRate nFrames
   member seg.nFramesOf duration = nFramesOf  seg.FrameRate duration
   
