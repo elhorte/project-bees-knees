@@ -89,6 +89,7 @@ let saveMp3 (inputStream: InputStream) =
     | InputStreamGetResult.WarnClippedHead    
     | InputStreamGetResult.AsRequested         ->  printfn $"%A{deliveredTime}  %A{deliveredDuration} %A{resultEnum}"
                                                    save()
+    | _                                        ->  failwith "unkonwn enum"
     saveMp3File (time + duration)
   saveMp3File startTime
 

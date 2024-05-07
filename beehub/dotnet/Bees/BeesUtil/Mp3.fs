@@ -24,10 +24,10 @@ let saveAsMp3 (filePath: string) sampleRate nChannels (samples: float32[]) =
     with
     | :? System.IO.IOException as ex ->
       printfn "Failed to write to file %s, Error: %s" filePath ex.Message
-    | :? System.Exception as ex ->
+    | ex ->
       printfn "An error occurred: %s" ex.Message 
   with
   | :? System.IO.IOException as ex ->
     printfn "Failed to write to file %s, Error: %s" filePath ex.Message
-  | :? System.Exception as ex ->
+  | ex ->
     printfn "An error occurred: %s" ex.Message 
