@@ -91,6 +91,9 @@ type State = // |––––––––––– ring ––––––––
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // InputStream
 
+type PaTime = float
+let  PaTimeBad = 0.0
+
 [<Struct>]
 type Segs = {
   mutable Cur : Seg
@@ -108,35 +111,38 @@ type Segs = {
     // Cur is now empty.
     this.Cur.TailTime <- tbdDateTime
 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+
 // Callback state, shared across callbacks, updated by each callback.
 type CbState = {
   // callback args
-  mutable Input           : IntPtr
-  mutable Output          : IntPtr
-  mutable FrameCount      : uint32
-  mutable TimeInfo        : PortAudioSharp.StreamCallbackTimeInfo
-  mutable StatusFlags     : PortAudioSharp.StreamCallbackFlags
+  mutable Input              : IntPtr
+  mutable Output             : IntPtr
+  mutable FrameCount         : uint32
+  mutable TimeInfo           : PortAudioSharp.StreamCallbackTimeInfo
+  mutable StatusFlags        : PortAudioSharp.StreamCallbackFlags
   // callback result
-  Ring                    : float32 array // samples not frames
-  mutable State           : State
-  mutable Segs            : Segs
-  mutable AdcStartTime    : _DateTime
-  mutable LatestBlock     : int // ring index where latest input block was copied
-  mutable SeqNums         : SeqNums
-  mutable NRingFrames     : int
-  mutable NRingDataFrames : int
-  mutable NGapFrames      : int
+  Ring                       : float32 array // samples not frames
+  mutable State              : State
+  mutable Segs               : Segs
+  mutable BlockAdcStartTime  : _DateTime  // datetime of first sample collection in this block
+  mutable LatestBlockHead    : int        // ring index where latest input block was copied
+  mutable SeqNums            : SeqNums
+  mutable NRingFrames        : int
+  mutable NRingDataFrames    : int
+  mutable NGapFrames         : int
   // more stuff
-  mutable WithEcho        : bool
-  mutable WithLogging     : bool
-  mutable CallbackHandoff : CallbackHandoff // modified only once
-  mutable StartTime       : _DateTime  // for getting DateTime from timeInfo.inputBufferAdcTime
-  mutable TimeInfoBase    : float  // for getting DateTime from timeInfo.inputBufferAdcTime
-  InChannelCount          : int
-  InSampleRate            : float
-  FrameSize               : int  // bytes
-  Logger                  : Logger
-  Simulating              : SimulatingCallbacks } with
+  mutable NFramesTotal       : uint64
+  mutable WithEcho           : bool
+  mutable WithLogging        : bool
+  mutable CallbackHandoff    : CallbackHandoff
+  mutable StreamAdcStartTime : _DateTime       // datetime of first sample collection since Start()
+  mutable PaStreamTime       : unit -> PaTime  // now, in PaTime units
+  InChannelCount             : int
+  InSampleRate               : float
+  FrameSize                  : int  // bytes
+  Logger                     : Logger
+  Simulating                 : SimulatingCallbacks } with
 
   member cbs.Copy() = { cbs with Segs = cbs.Segs.Copy() }
 
@@ -224,7 +230,10 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   cbs.FrameCount   <- frameCount // in the ”block“ to be copied
   cbs.TimeInfo     <- timeInfo
   cbs.StatusFlags  <- statusFlags
-  cbs.AdcStartTime <- cbs.StartTime + _TimeSpan.FromSeconds (timeInfo.inputBufferAdcTime - cbs.TimeInfoBase)
+  let timeTilNow = TimeSpan.FromSeconds (cbs.PaStreamTime() - timeInfo.inputBufferAdcTime)
+  let inputBuferAdcDateTime = _DateTime.Now - timeTilNow
+  cbs.BlockAdcStartTime <- inputBuferAdcDateTime
+  if cbs.StreamAdcStartTime = tbdDateTime then  cbs.StreamAdcStartTime <- cbs.BlockAdcStartTime
   
   do
     // Modify the segs so that Segs.Cur.Head points to where the data will go in the ring.
@@ -248,9 +257,9 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       assert (not cbs.Segs.Old.Active)
       cbs.State <- AtEnd // Briefly; quickly changes to Chasing.
       cbs.Segs.Exchange() ; assert (cbs.Segs.Cur.Head = 0  &&  cbs.Segs.Cur.Tail = 0)
-      cbs.Segs.Cur.TimeBase <- cbs.AdcStartTime
-      cbs.Segs.Cur.TailTime <- cbs.AdcStartTime
-      cbs.Segs.Cur.HeadTime <- cbs.AdcStartTime
+      cbs.Segs.Cur.TimeBase <- cbs.BlockAdcStartTime
+      cbs.Segs.Cur.TailTime <- cbs.BlockAdcStartTime
+      cbs.Segs.Cur.HeadTime <- cbs.BlockAdcStartTime
       let h, t = nextValues() in newHead <- h ; newTail <- t
       if cbs.Simulating <> NotSimulating then  cbs.zeroFillRingSpan cbs.Segs.Old.Head (cbs.NRingFrames - cbs.Segs.Old.Head) 
       cbs.State <- Chasing
@@ -261,8 +270,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       assert (not cbs.Segs.Old.Active)
       assert (newHead = nFrames)  // The block will fit at Ring[0]
       cbs.State <- AtBegin
-      cbs.Segs.Cur.TimeBase <- cbs.AdcStartTime
-      cbs.Segs.Cur.TailTime <- cbs.AdcStartTime
+      cbs.Segs.Cur.TimeBase <- cbs.BlockAdcStartTime
+      cbs.Segs.Cur.TailTime <- cbs.BlockAdcStartTime
     | AtBegin ->
       assert (not cbs.Segs.Old.Active)
       assert (cbs.Segs.Cur.Tail = 0)
@@ -294,9 +303,10 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   let curHeadNS = cbs.Segs.Cur.Head * cbs.InChannelCount
   let nSamples  = nFrames           * cbs.InChannelCount
   UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, curHeadNS, nSamples)
-  cbs.LatestBlock <- cbs.Segs.Cur.Head
-  cbs.Segs.Cur.HeadTime <- cbs.AdcStartTime
+  cbs.LatestBlockHead   <- cbs.Segs.Cur.Head
+  cbs.Segs.Cur.HeadTime <- cbs.BlockAdcStartTime
   cbs.Segs.Cur.AdvanceHead nFrames
+  cbs.NFramesTotal <- cbs.NFramesTotal + uint64 frameCount
 //Console.Write(".")
 //if cbs.SeqNums.N1 % 20us = 0us then  Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / nFrames} %10f{timeInfo.inputBufferAdcTime - cbs.TimeInfoBase}"
   cbs.SeqNums.LeaveUnstable()
@@ -353,32 +363,33 @@ type InputStream(beesConfig       : BeesConfig          ,
 
   let cbState = {
     // callback args
-    Input           = IntPtr.Zero
-    Output          = IntPtr.Zero
-    FrameCount      = 0u
-    TimeInfo        = PortAudioSharp.StreamCallbackTimeInfo()
-    StatusFlags     = PortAudioSharp.StreamCallbackFlags()
-    // callback result
-    Ring            = Array.init<float32> nRingSamples (fun _ -> 0.0f)
-    State           = AtStart
-    Segs            = segs
-    AdcStartTime    = _DateTime.MaxValue // placeholder
-    LatestBlock     = 0
-    SeqNums         = SeqNums.New()
-    NRingFrames     = nRingFrames
-    NRingDataFrames = nRingDataFrames
-    NGapFrames      = nGapFrames
+    Input              = IntPtr.Zero
+    Output             = IntPtr.Zero
+    FrameCount         = 0u
+    TimeInfo           = PortAudioSharp.StreamCallbackTimeInfo()
+    StatusFlags        = PortAudioSharp.StreamCallbackFlags()
+    // callback resu   lt
+    Ring               = Array.init<float32> nRingSamples (fun _ -> 0.0f)
+    State              = AtStart
+    Segs               = segs
+    BlockAdcStartTime  = tbdDateTime
+    LatestBlockHead    = 0
+    SeqNums            = SeqNums.New()
+    NRingFrames        = nRingFrames
+    NRingDataFrames    = nRingDataFrames
+    NGapFrames         = nGapFrames
     // more stuff
-    WithEcho        = withEcho
-    WithLogging     = withLogging
-    CallbackHandoff = dummyInstance<CallbackHandoff>()  // tbd
-    StartTime       = tbdDateTime
-    TimeInfoBase    = 0.0  // timeInfoBase + adcInputTime -> cbState.TimeStamp
-    InChannelCount  = beesConfig.InChannelCount
-    InSampleRate    = beesConfig.InSampleRate
-    FrameSize       = frameSize
-    Logger          = Logger(8000, startTime)
-    Simulating      = sim  }
+    NFramesTotal       = 0UL
+    WithEcho           = withEcho
+    WithLogging        = withLogging
+    CallbackHandoff    = dummyInstance<CallbackHandoff>()  // tbd
+    StreamAdcStartTime = tbdDateTime
+    PaStreamTime       = fun () -> PaTimeBad
+    InChannelCount     = beesConfig.InChannelCount
+    InSampleRate       = beesConfig.InSampleRate
+    FrameSize          = frameSize
+    Logger             = Logger(8000, startTime)
+    Simulating         = sim  }
 
   let paStream =
     if cbState.Simulating <> NotSimulating then
@@ -388,13 +399,15 @@ type InputStream(beesConfig       : BeesConfig          ,
         // The intermediate lambda here is required to avoid a compiler error.
         fun        input output frameCount  timeInfo statusFlags userDataPtr ->
           callback input output frameCount &timeInfo statusFlags userDataPtr )
-      paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
-                                                             outParams       = Nullable<_>(outputParameters)        ,
-                                                             sampleRate      = beesConfig.InSampleRate              ,
-                                                             framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
-                                                             streamFlags     = StreamFlags.ClipOff                  ,
-                                                             callback        = streamCallback                       ,
-                                                             userData        = cbState                              ) )
+      let paStream = paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
+                                                                            outParams       = Nullable<_>(outputParameters)        ,
+                                                                            sampleRate      = beesConfig.InSampleRate              ,
+                                                                            framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
+                                                                            streamFlags     = StreamFlags.ClipOff                  ,
+                                                                            callback        = streamCallback                       ,
+                                                                            userData        = cbState                              ) )
+      cbState.PaStreamTime <- fun () -> paStream.Time
+      paStream
   do
     printfn $"{beesConfig.InSampleRate}"
 
@@ -403,8 +416,8 @@ type InputStream(beesConfig       : BeesConfig          ,
 
   member val  PaStream          = paStream
   member val  CbState           = cbState
-  member val  CbStateLatest     = cbState             with get, set
-  member val  StartTime         = cbState.StartTime
+  member val  CbStateLatest     = cbState                      with get, set
+  member val  StartTime         = cbState.StreamAdcStartTime
   member val  BeesConfig        = beesConfig
   member val  RingDuration      = audioDuration
   member val  GapDuration       = gapDuration
@@ -418,8 +431,6 @@ type InputStream(beesConfig       : BeesConfig          ,
     if this.CbState.Simulating <> NotSimulating then ()
     else
     paTryCatchRethrow (fun() -> this.PaStream.Start() )
-    this.CbState.StartTime    <- _DateTime.Now
-    this.CbState.TimeInfoBase <- this.PaStream.Time
     printfn $"InputStream size: {this.NRingBytes / 1_000_000} MB for {this.RingDuration}"
     printfn $"InputStream nFrames: {this.CbState.NRingFrames}"
 
@@ -436,7 +447,7 @@ type InputStream(beesConfig       : BeesConfig          ,
     let cbs = this.CbStateSnapshot()
     if cbs.Segs.Cur.Head > thresh then
       thresh <- thresh + int (round (cbs.InSampleRate))
-      Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / int cbs.FrameCount} %10f{cbs.TimeInfo.inputBufferAdcTime - cbs.TimeInfoBase}"
+      Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / int cbs.FrameCount} %10f{cbs.TimeInfo.inputBufferAdcTime - this.PaStream.Time}"
     cbs.Segs.Cur.Check()
      // if cbState.Simulating = NotSimulating then Console.Write ","
 
