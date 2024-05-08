@@ -19,8 +19,8 @@ let tbdDateTime = _DateTime.MinValue
 let tbdTimeSpan = _TimeSpan.MinValue
 
     
-let durationOf inSampleRate nFrames  = _TimeSpan.FromSeconds (float nFrames / float inSampleRate)
-let nFramesOf  inSampleRate duration = int (round ((duration: _TimeSpan).TotalMicroseconds / 1_000_000.0 * float inSampleRate))
+let durationOf frameRate nFrames  = _TimeSpan.FromSeconds (float nFrames / float frameRate)
+let nFramesOf  frameRate duration = int (round ((duration: _TimeSpan).TotalMicroseconds / 1_000_000.0 * float frameRate))
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // Seg class, used by InputStream.  The ring buffer can comprise 0, 1, or 2 segs.
@@ -104,7 +104,7 @@ type Seg = {
   
   with
 
-  static member New (head: int) (tail: int) (nRingFrames: int) (inSampleRate: int) =
+  static member New (head: int) (tail: int) (nRingFrames: int) (frameRate: int) =
     assert (head >= tail)
     let seg = {
       Tail        = tail
@@ -113,10 +113,10 @@ type Seg = {
       HeadTime    = tbdDateTime
       TimeBase    = tbdDateTime
       NRingFrames = nRingFrames
-      FrameRate   = inSampleRate  }
+      FrameRate   = frameRate  }
     seg
 
-  static member NewEmpty (nRingFrames: int) (inSampleRate: int) =  Seg.New 0 0 nRingFrames inSampleRate
+  static member NewEmpty (nRingFrames: int) (frameeRate: int) =  Seg.New 0 0 nRingFrames frameeRate
 
   member seg.ToFrameRange() =
     let fr = {
@@ -293,7 +293,7 @@ type CbMessage = {
   static member New (ip: ItemPool<CbMessage>) (beesConfig: BeesConfig) (nRingFrames: int) =
     let timeInfo          = StreamCallbackTimeInfo() // Replace with actual time info.
     let primingOutputFlag = StreamCallbackFlags.PrimingOutput
-    let newSeg()          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
+    let newSeg()          = Seg.NewEmpty nRingFrames beesConfig.InFrameRate
     
     // Most initializer values here are placeholders that will be overwritten by the callback.
     // as this is an object recycled in a pool so there is no allocation.

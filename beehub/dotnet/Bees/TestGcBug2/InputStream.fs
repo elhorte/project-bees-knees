@@ -390,13 +390,13 @@ let newInputStream( beesConfig       : BeesConfig       )
 
   let startTime         = _DateTime.Now
   let ringDuration      = _TimeSpan.FromMilliseconds(200) // beesConfig.RingBufferDuration
-  let nRingFrames       = if DebugGlobals.simulatingCallbacks then 37 else durationToNFrames beesConfig.InSampleRate ringDuration
+  let nRingFrames       = if DebugGlobals.simulatingCallbacks then 37 else durationToNFrames beesConfig.InFrameRate ringDuration
   let nUsableRingFrames = 0 // calculated later
   let frameSize         = beesConfig.FrameSize
   let nRingBytes        = int nRingFrames * frameSize
   let gapDuration       = _TimeSpan.FromMilliseconds 10
   let cbMessageWorkList = SubscriberList<CbMessage>()
-  let nGapFrames        = if DebugGlobals.simulatingCallbacks then 2 else durationToNFrames beesConfig.InSampleRate gapDuration 
+  let nGapFrames        = if DebugGlobals.simulatingCallbacks then 2 else durationToNFrames beesConfig.InFrameRate gapDuration 
   let cbMessagePool     = makeCbMessagePool beesConfig nRingFrames
   let cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
   let poolItemCurrent   = PoolItem .New cbMessagePool cbMessageCurrent
@@ -422,8 +422,8 @@ let newInputStream( beesConfig       : BeesConfig       )
     cbMessageWorkList = SubscriberList<CbMessage>()
     cbMessageCurrent  = CbMessage.New cbMessagePool beesConfig nRingFrames
     poolItemCurrent   = poolItemCurrent
-    cbSegCur          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
-    cbSegOld          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
+    cbSegCur          = Seg.NewEmpty nRingFrames beesConfig.InFrameRate
+    cbSegOld          = Seg.NewEmpty nRingFrames beesConfig.InFrameRate
     callbackHandoff   = dummyInstance<CallbackHandoff>()
     BeesConfig        = beesConfig
     debugSimulating   = DebugGlobals.simulatingCallbacks
@@ -450,7 +450,7 @@ let newInputStream( beesConfig       : BeesConfig       )
         callback input output frameCount timeInfo statusFlags userDataPtr )
     is.paStream <- paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                                                           outParams       = Nullable<_>(outputParameters)        ,
-                                                                          sampleRate      = beesConfig.InSampleRate              ,
+                                                                          sampleRate      = beesConfig.InFrameRate               ,
                                                                           framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
                                                                           streamFlags     = StreamFlags.ClipOff                  ,
                                                                           callback        = callbackStub                         ,

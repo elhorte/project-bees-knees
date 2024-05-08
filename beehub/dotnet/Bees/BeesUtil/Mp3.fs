@@ -4,7 +4,7 @@ open NAudio.Lame
 open NAudio.Wave
 
 
-let saveAsMp3 (filePath: string) sampleRate nChannels (samples: float32[]) =
+let saveAsMp3 (filePath: string) frameRate nChannels (samples: float32[]) =
   let sampleSize   = sizeof<float32>
   let sampleSize_1 = sampleSize - 1
   let outputBuffer = Array.zeroCreate<byte> (samples.Length * sampleSize)
@@ -16,7 +16,7 @@ let saveAsMp3 (filePath: string) sampleRate nChannels (samples: float32[]) =
   ) |> ignore
   
   // Use NAudio.Lame to save amplified buffer to mp3
-  let outFormat = WaveFormat(sampleRate, nChannels)
+  let outFormat = WaveFormat(frameRate, nChannels)
   try
     use outWriter = new LameMP3FileWriter(filePath, outFormat, LAMEPreset.ABR_128)
     try
@@ -24,10 +24,10 @@ let saveAsMp3 (filePath: string) sampleRate nChannels (samples: float32[]) =
     with
     | :? System.IO.IOException as ex ->
       printfn "Failed to write to file %s, Error: %s" filePath ex.Message
-    | :? System.Exception as ex ->
+    | ex ->
       printfn "An error occurred: %s" ex.Message 
   with
   | :? System.IO.IOException as ex ->
     printfn "Failed to write to file %s, Error: %s" filePath ex.Message
-  | :? System.Exception as ex ->
+  | ex ->
     printfn "An error occurred: %s" ex.Message 

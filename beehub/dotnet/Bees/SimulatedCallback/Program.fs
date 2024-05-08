@@ -169,9 +169,9 @@ let run inputStream = task {
     cbs.PrintTitle()
     for i in 0..32 do
       let frameCount  = uint32 (if i < 25 then  initialFrameCount else  2 * initialFrameCount)
-      let durationMs  = 1000 * int frameCount / inputStream.BeesConfig.InSampleRate
+      let durationMs  = 1000 * int frameCount / inputStream.BeesConfig.InFrameRate
       let durationSec = float durationMs / 1000.0
-      let adcTimeMsF  = (cbs.TimeInfoBase + timeInfo.inputBufferAdcTime) * 1000.0
+      let adcTimeMsF  = (cbs.PaStreamTime() + timeInfo.inputBufferAdcTime) * 1000.0
       let adcTimeMs   = int (round adcTimeMsF)
       let sampleCount = frameCount * uint32 cbs.InChannelCount
       let iArray = makeArray frameCount cbs.InChannelCount i adcTimeMs
@@ -183,6 +183,7 @@ let run inputStream = task {
       if i = 26 then runReadTests inputStream
       if i = 31 then runReadTests inputStream
       timeInfo.inputBufferAdcTime <- timeInfo.inputBufferAdcTime + durationSec
+      _DateTime.Now <- _DateTime.Now + _TimeSpan(durationMs)
   test()
 
   use cts = new CancellationTokenSource()
@@ -229,7 +230,7 @@ let main _ =
     InputStreamRingGapDuration  = _TimeSpan.FromMilliseconds   20 // These are ignored when the SimTimes struct is used, as above
     SampleSize                  = sampleSize
     InChannelCount              = 1 // inputParameters.channelCount
-    InSampleRate                = 1000 }
+    InFrameRate                 = 1000 }
   printBeesConfig beesConfig
 //keyboardInputInit()
   try

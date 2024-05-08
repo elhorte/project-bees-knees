@@ -139,7 +139,7 @@ type CbState = {
   mutable StreamAdcStartTime : _DateTime       // datetime of first sample collection since Start()
   mutable PaStreamTime       : unit -> PaTime  // now, in PaTime units
   InChannelCount             : int
-  InSampleRate               : float
+  FrameRate                  : float
   FrameSize                  : int  // bytes
   Logger                     : Logger
   Simulating                 : SimulatingCallbacks } with
@@ -230,7 +230,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   cbs.FrameCount   <- frameCount // in the ”block“ to be copied
   cbs.TimeInfo     <- timeInfo
   cbs.StatusFlags  <- statusFlags
-  let timeTilNow = TimeSpan.FromSeconds (cbs.PaStreamTime() - timeInfo.inputBufferAdcTime)
+  let timeTilNow = _TimeSpan.FromSeconds (cbs.PaStreamTime() - timeInfo.inputBufferAdcTime)
   let inputBuferAdcDateTime = _DateTime.Now - timeTilNow
   cbs.BlockAdcStartTime <- inputBuferAdcDateTime
   if cbs.StreamAdcStartTime = tbdDateTime then  cbs.StreamAdcStartTime <- cbs.BlockAdcStartTime
@@ -346,15 +346,15 @@ type InputStream(beesConfig       : BeesConfig          ,
 
   let audioDuration   = cbSimAudioDuration sim (fun () -> beesConfig.InputStreamAudioDuration                     )
   let gapDuration     = cbSimGapDuration   sim (fun () -> beesConfig.InputStreamRingGapDuration * 2.0             )
-  let nRingDataFrames = cbSimNDataFrames   sim (fun () -> durationToNFrames beesConfig.InSampleRate audioDuration )
-  let nGapFrames      = cbSimNGapFrames    sim (fun () -> durationToNFrames beesConfig.InSampleRate gapDuration   )
+  let nRingDataFrames = cbSimNDataFrames   sim (fun () -> durationToNFrames beesConfig.InFrameRate audioDuration )
+  let nGapFrames      = cbSimNGapFrames    sim (fun () -> durationToNFrames beesConfig.InFrameRate gapDuration   )
   let nRingFrames     = nRingDataFrames + (3 * nGapFrames) / 2
   let nRingSamples    = nRingFrames * beesConfig.InChannelCount
   let frameSize       = beesConfig.FrameSize
   let nRingBytes      = int nRingFrames * frameSize
   let startTime       = _DateTime.Now
-  let segs            = { Cur = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
-                          Old = Seg.NewEmpty nRingFrames beesConfig.InSampleRate }
+  let segs            = { Cur = Seg.NewEmpty nRingFrames beesConfig.InFrameRate
+                          Old = Seg.NewEmpty nRingFrames beesConfig.InFrameRate }
   
   // When unmanaged code calls managed code (e.g., a callback from unmanaged to managed),
   // the CLR ensures that the garbage collector will not move referenced managed objects
@@ -368,7 +368,7 @@ type InputStream(beesConfig       : BeesConfig          ,
     FrameCount         = 0u
     TimeInfo           = PortAudioSharp.StreamCallbackTimeInfo()
     StatusFlags        = PortAudioSharp.StreamCallbackFlags()
-    // callback resu   lt
+    // callback result
     Ring               = Array.init<float32> nRingSamples (fun _ -> 0.0f)
     State              = AtStart
     Segs               = segs
@@ -386,13 +386,14 @@ type InputStream(beesConfig       : BeesConfig          ,
     StreamAdcStartTime = tbdDateTime
     PaStreamTime       = fun () -> PaTimeBad
     InChannelCount     = beesConfig.InChannelCount
-    InSampleRate       = beesConfig.InSampleRate
+    FrameRate          = beesConfig.InFrameRate
     FrameSize          = frameSize
     Logger             = Logger(8000, startTime)
     Simulating         = sim  }
 
   let paStream =
     if cbState.Simulating <> NotSimulating then
+      cbState.PaStreamTime <- fun () -> cbState.TimeInfo.inputBufferAdcTime
       dummyInstance<PortAudioSharp.Stream>()
     else
       let streamCallback = PortAudioSharp.Stream.Callback(
@@ -401,7 +402,7 @@ type InputStream(beesConfig       : BeesConfig          ,
           callback input output frameCount &timeInfo statusFlags userDataPtr )
       let paStream = paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                                                             outParams       = Nullable<_>(outputParameters)        ,
-                                                                            sampleRate      = beesConfig.InSampleRate              ,
+                                                                            sampleRate      = beesConfig.InFrameRate               ,
                                                                             framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
                                                                             streamFlags     = StreamFlags.ClipOff                  ,
                                                                             callback        = streamCallback                       ,
@@ -409,7 +410,7 @@ type InputStream(beesConfig       : BeesConfig          ,
       cbState.PaStreamTime <- fun () -> paStream.Time
       paStream
   do
-    printfn $"{beesConfig.InSampleRate}"
+    printfn $"{beesConfig.InFrameRate}"
 
   member  this.echoEnabled   () = Volatile.Read &cbState.WithEcho
   member  this.loggingEnabled() = Volatile.Read &cbState.WithEcho
@@ -446,7 +447,7 @@ type InputStream(beesConfig       : BeesConfig          ,
   member this.AfterCallback() =
     let cbs = this.CbStateSnapshot()
     if cbs.Segs.Cur.Head > thresh then
-      thresh <- thresh + int (round (cbs.InSampleRate))
+      thresh <- thresh + int (round (cbs.FrameRate))
       Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / int cbs.FrameCount} %10f{cbs.TimeInfo.inputBufferAdcTime - this.PaStream.Time}"
     cbs.Segs.Cur.Check()
      // if cbState.Simulating = NotSimulating then Console.Write ","
@@ -454,8 +455,8 @@ type InputStream(beesConfig       : BeesConfig          ,
   member private is.debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
     Console.Write ","
     
-  member this.durationOf nFrames = durationOf beesConfig.InSampleRate nFrames
-  member this.nFramesOf duration = nFramesOf  beesConfig.InSampleRate duration
+  member this.durationOf nFrames = durationOf beesConfig.InFrameRate nFrames
+  member this.nFramesOf duration = nFramesOf  beesConfig.InFrameRate duration
 
   member this.tailTime = this.CbStateLatest.Segs.TailTime
   member this.headTime = this.CbStateLatest.Segs.HeadTime
@@ -503,7 +504,7 @@ type InputStream(beesConfig       : BeesConfig          ,
                                                                  assert (wantEnd  <= haveEnd )
                                                                  OK              (timeAndDuration wantTime wantEnd )
     let deliver (time: _DateTime) duration =
-      let nFrames  = nFramesOf beesConfig.InSampleRate duration
+      let nFrames  = nFramesOf beesConfig.InFrameRate duration
       let headTime = time + duration
       assert (cbs.Segs.TailTime <= time) ; assert (headTime <= cbs.Segs.HeadTime)
       let deliverSegPortion (seg: Seg) =
@@ -641,12 +642,12 @@ type InputStream(beesConfig       : BeesConfig          ,
 /// </summary>
 /// <param name="inputParameters" > Parameters for input audio stream                               </param>
 /// <param name="outputParameters"> Parameters for output audio stream                              </param>
-/// <param name="sampleRate"      > Audio sample rate                                               </param>
+/// <param name="frameRate"       > Audio frame rate (a.k.a, sample rate)                           </param>
 /// <param name="withEchoRef"     > A Boolean determining if input should be echoed to output       </param>
 /// <param name="withLoggingRef"  > A Boolean determining if the callback should do logging         </param>
 /// <param name="cbMessageQueue"  > CbMessageQueue object handling audio stream                     </param>
 /// <returns>An <c>InputStream</c></returns>
-// let makeInputStream beesConfig inputParameters outputParameters sampleRate withEcho withLogging  : InputStream =
+// let makeInputStream beesConfig inputParameters outputParameters frameRate withEcho withLogging  : InputStream =
 //   initPortAudio()
 //   let inputStream = new InputStream(beesConfig, withEcho, withLogging)
 //   let callback = PortAudioSharp.Stream.Callback( // The fun has to be here because of a limitation of the compiler, apparently.
@@ -656,7 +657,7 @@ type InputStream(beesConfig       : BeesConfig          ,
 //       PortAudioSharp.StreamCallbackResult.Continue )
 //   let paStream = paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
 //                                                                         outParams       = Nullable<_>(outputParameters)        ,
-//                                                                         sampleRate      = sampleRate                           ,
+//                                                                         sampleRate      = frameRate                           ,
 //                                                                         framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
 //                                                                         streamFlags     = StreamFlags.ClipOff                  ,
 //                                                                         callback        = callback                             ,

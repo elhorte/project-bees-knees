@@ -3,22 +3,26 @@ module BeesUtil.DateTimeCalculations
 open System
 open System.Threading.Tasks
 
+open DateTimeDebugging
 open BeesUtil.DateTimeShim
 
+let addSeconds dateTime sec =
+  let dateTime = (dateTime: _DateTime)
+  if UsingFakeDateTime then  dateTime
+                       else  dateTime.AddSeconds sec
+
 let getMostRecentSecondBoundary sec (from: _DateTime) =
-  from.AddSeconds(-double(from.Second % sec))
+  addSeconds from (-double(from.Second % sec))
 
 let getNextSecondBoundary sec (from: _DateTime) =
   let dt = getMostRecentSecondBoundary sec from
-  dt.AddSeconds(double sec)
+  addSeconds dt (double sec)
     
 let getMostRecentStartOfMinute (dt: _DateTime) =
-  dt.AddSeconds(-dt.Second)
-
-let getMostRecentStartOfHour (dt: _DateTime) =
-  let dt = getMostRecentStartOfMinute dt
-  dt.AddMinutes(-dt.Minute)
+  addSeconds dt (-dt.Second)
 
 let waitUntil dateTime =
-  let duration = dateTime - _DateTime.Now
+  if UsingFakeDateTime then  ()
+  else
+  let duration = dateTime - DateTime.Now
   if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()

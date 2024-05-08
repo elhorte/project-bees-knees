@@ -114,7 +114,7 @@ let main _ =
     InputStreamRingGapDuration  = _TimeSpan.FromSeconds 1
     SampleSize                  = sampleSize
     InChannelCount              = inputParameters.channelCount
-    InSampleRate                = sampleRate }
+    InFrameRate                 = sampleRate }
   use iS = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging, sim)
   GC.Collect()
   try
