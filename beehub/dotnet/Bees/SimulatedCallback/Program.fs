@@ -101,7 +101,8 @@ let runReadTests inputStream =
       let sizeNS   = sizeNF  * nChannels
       let indexNS  = indexNF * nChannels
       let nSamples = nFrames * nChannels
-      if destIndexNS = 0 then  deliveredArray <- Array.zeroCreate<float32> sizeNS
+      if destIndexNS = 0 then  deliveredArray <- Array.create<float32> sizeNS 12345678.0f
+      if Array.length array < indexNS + nSamples then  printfn "too short"
       Array.Copy(array, indexNS, deliveredArray, destIndexNS, nSamples)
       destIndexNS <- destIndexNS + nSamples
       nDeliveries <- nDeliveries + 1
@@ -179,6 +180,8 @@ let run inputStream = task {
       let input  = getHandle iArray
       let output = getHandle oArray
       let _ = showGC (fun () -> callback input output frameCount &timeInfo statusFlags userDataPtr |> ignore )
+      if i = 11 then runReadTests inputStream
+      if i = 12 then runReadTests inputStream
       if i = 15 then runReadTests inputStream
       if i = 26 then runReadTests inputStream
       if i = 31 then runReadTests inputStream
@@ -240,6 +243,7 @@ let main _ =
       inputStream.CbState.Logger.Print "Log:" }
     t.Wait()
     printfn "Task done."
-  finally
-    printfn "Exiting with 0."
+  with ex ->
+    printfn "%A" ex
+  printfn "Exiting with 0."
   0

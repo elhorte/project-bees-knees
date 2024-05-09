@@ -108,8 +108,7 @@ type Segs = {
 
   member this.Exchange() =
     let tmp = this.Cur  in  this.Cur <- this.Old  ;  this.Old <- tmp
-    // Cur is now empty.
-    this.Cur.TailTime <- tbdDateTime
+    assert (not this.Cur.Active)
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -202,9 +201,9 @@ type CbState = {
 
   member cbs.PrintTitle() =
     let s0 = String.init cbs.NRingFrames (fun _ -> " ")
-    let s1 = " seq nFrames timeOld timeCur duration   Cur    new   Old    size   gap   state"
-    let s2 = " ––– ––––––– ––––––– ––––––– ––––––––  ––––– –––––– ––––– –––––––– –––  –––––––"
-           //   24    5    164.185 185.220 35+21=56  00.35 -16.40 64.85 35+21=56  29  Chasing 
+    let s1 = " seq nFrames timeOld timeCur duration      Cur    new       Old    size   gap   state"
+    let s2 = " ––– ––––––– ––––––– ––––––– ––––––––  ––––––––– –––––– ––––––––– –––––––– –––  –––––––"
+           //   24    5    164.185 185.220 35+21=56  000+00.35 -16.40 000+64.85 35+21=56  29  Chasing 
     Console.WriteLine $"%s{s0}%s{s1}"
     Console.WriteLine $"%s{s0}%s{s2}"
 
@@ -257,9 +256,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       assert (not cbs.Segs.Old.Active)
       cbs.State <- AtEnd // Briefly; quickly changes to Chasing.
       cbs.Segs.Exchange() ; assert (cbs.Segs.Cur.Head = 0  &&  cbs.Segs.Cur.Tail = 0)
-      cbs.Segs.Cur.TimeBase <- cbs.BlockAdcStartTime
-      cbs.Segs.Cur.TailTime <- cbs.BlockAdcStartTime
-      cbs.Segs.Cur.HeadTime <- cbs.BlockAdcStartTime
+      cbs.Segs.Cur.Offset <- cbs.Segs.Old.Offset + cbs.Segs.Old.Head
       let h, t = nextValues() in newHead <- h ; newTail <- t
       if cbs.Simulating <> NotSimulating then  cbs.zeroFillRingSpan cbs.Segs.Old.Head (cbs.NRingFrames - cbs.Segs.Old.Head) 
       cbs.State <- Chasing
@@ -270,8 +267,6 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       assert (not cbs.Segs.Old.Active)
       assert (newHead = nFrames)  // The block will fit at Ring[0]
       cbs.State <- AtBegin
-      cbs.Segs.Cur.TimeBase <- cbs.BlockAdcStartTime
-      cbs.Segs.Cur.TailTime <- cbs.BlockAdcStartTime
     | AtBegin ->
       assert (not cbs.Segs.Old.Active)
       assert (cbs.Segs.Cur.Tail = 0)
@@ -289,7 +284,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       assert (cbs.Segs.Cur.Head < cbs.Segs.Old.Tail)
       trimCurTail() |> ignore
       if cbs.Segs.Old.NFrames <= nFrames then
-        // Segs.Old is so small that it vanishes.
+        // Segs.Old is so small that it can’t survive.
         cbs.Segs.Old.Reset()
         cbs.State <- Moving
       else
@@ -304,7 +299,6 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   let nSamples  = nFrames           * cbs.InChannelCount
   UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, curHeadNS, nSamples)
   cbs.LatestBlockHead   <- cbs.Segs.Cur.Head
-  cbs.Segs.Cur.HeadTime <- cbs.BlockAdcStartTime
   cbs.Segs.Cur.AdvanceHead nFrames
   cbs.NFramesTotal <- cbs.NFramesTotal + uint64 frameCount
 //Console.Write(".")
@@ -353,8 +347,8 @@ type InputStream(beesConfig       : BeesConfig          ,
   let frameSize       = beesConfig.FrameSize
   let nRingBytes      = int nRingFrames * frameSize
   let startTime       = _DateTime.Now
-  let segs            = { Cur = Seg.NewEmpty nRingFrames beesConfig.InFrameRate
-                          Old = Seg.NewEmpty nRingFrames beesConfig.InFrameRate }
+  let segs            = { Cur = Seg.NewEmpty nRingFrames beesConfig.InFrameRate 
+                          Old = Seg.NewEmpty nRingFrames beesConfig.InFrameRate  }
   
   // When unmanaged code calls managed code (e.g., a callback from unmanaged to managed),
   // the CLR ensures that the garbage collector will not move referenced managed objects
@@ -512,7 +506,7 @@ type InputStream(beesConfig       : BeesConfig          ,
         deliver (cbs.Ring, nFrames, p.IndexBegin, p.NFrames, cbs.InChannelCount, p.TimeBegin, p.Duration)
       if cbs.Segs.Old.Active  &&  time < cbs.Segs.Old.HeadTime     then  deliverSegPortion cbs.Segs.Old
       if                          cbs.Segs.Cur.TailTime < headTime then  deliverSegPortion cbs.Segs.Cur
-    if cbs.Simulating <> NotSimulating then Console.Write "R"
+    if cbs.Simulating = NotSimulating then Console.Write "R"
     match (time, duration, cbs.Segs.TailTime, cbs.Segs.Duration) with
     | BeforeData      (t, d) ->               (InputStreamGetResult.ErrorBeforeData    , t, d)
     | AfterData       (t, d) ->               (InputStreamGetResult.ErrorAfterData     , t, d)
