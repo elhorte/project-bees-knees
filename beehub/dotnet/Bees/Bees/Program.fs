@@ -1,7 +1,6 @@
 ﻿
 open System
 open System.Threading
-open System.Threading.Tasks
 open FSharp.Control
 
 open PortAudioSharp
@@ -12,7 +11,6 @@ open BeesUtil.DateTimeShim
 open BeesUtil.DebugGlobals
 open BeesUtil.PortAudioUtils
 open BeesUtil.DateTimeCalculations
-open BeesUtil.Mp3
 open BeesLib.InputStream
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool

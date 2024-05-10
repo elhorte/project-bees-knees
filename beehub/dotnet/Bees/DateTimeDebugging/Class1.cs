@@ -3,7 +3,6 @@
 public struct _DateTime : IComparable {
   public int    Millisecond { get; }
   public int    TimeOfDay    => Millisecond;
-  private static int NowMs;
   
   private _DateTime(int ms) => Millisecond = ms;
 

@@ -56,7 +56,8 @@ let prepareArgumentsForStreamCreation() =
 let compose inChannelCount n ms i =
   let i = i / inChannelCount
   let intVal = 1_000_00 * n  +  100 * (ms + i)  +  i
-  assert (intVal <= 16_777_216) // max of range of contiguously representable ints in float32
+  let inFloat32ContiguousRepresentableRange i = i <= 16_777_216
+  assert inFloat32ContiguousRepresentableRange intVal
   float32 intVal
 
 // 1517601 -> ms=176
@@ -90,9 +91,19 @@ let runReadTests inputStream =
         let deliveredTime = deliveredTime: _DateTime
         let msExpected    = deliveredTime.Millisecond + i
         deliveredMs = msExpected
-      deliveredArray
-      |> Seq.mapi compare
-      |> Seq.forall id
+  //  deliveredArray
+  //  |> Seq.mapi compare
+  //  |> Seq.forall id
+      let rec check i  : bool =
+         if i < Array.length deliveredArray then
+           let data = deliveredArray[i]
+           let msDelivered = decomposeMs data
+           let msExpected  = deliveredTime.Millisecond + i
+           if msDelivered = msExpected then  check (i + 1)
+                                       else  false
+         else
+           true
+      check 0
     let mutable deliveredArray: float32[] = [||] // samples
     let mutable destIndexNS = 0
     let mutable nDeliveries = 0

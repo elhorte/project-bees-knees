@@ -320,7 +320,6 @@ type InputStream = {
     let tmp = this.cbSegCur  in  this.cbSegCur <- this.cbSegOld  ;  this.cbSegOld <- tmp
     // if this.cbSegCur.Head <> 0 then  Console.WriteLine "head != 0"
     // assert (this.cbSegCur.Head = 0)
-    this.cbSegCur.HeadTime <- tbdDateTime
 
   // In case the callback’s nFrames arg varies from one callback to the next,
   // adjust nGapFrames for the maximum nFrames arg seen.
