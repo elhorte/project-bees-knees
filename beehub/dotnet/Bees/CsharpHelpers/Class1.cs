@@ -4,9 +4,6 @@ namespace CSharpHelpers {
   
   public static class UnsafeHelpers {
     
-    public static unsafe Span<float> CreateSpan(float* pointer, int length) {
-      return new Span<float>(pointer, length); }
-        
     /// <summary>
     /// Copies a block of memory using source pointer to a float array.
     /// </summary>

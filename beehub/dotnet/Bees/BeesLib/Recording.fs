@@ -38,18 +38,18 @@ type Recording = {
   interval          : _TimeSpan     // x >= 0
   label             : string       // thread_id
   filenameExtension : string       // file_format       
-  targetSampleRate  : int          // target_sample_rate               
+  targetFrameRate   : int          // target_sample_rate               
   targetChannels    : int          //                
   activityType      : ActivityType // continuous recording or time or day range
-  inputSampleRate   : int
+  frameRate         : int
   mutable state     : State
   cancellationToken : CancellationToken }
 
 type sf() =
-  static member write(fullPathName: string, audioData: Buf, targetSampleRate: int, ?format: string) = ()
+  static member write(fullPathName: string, audioData: Buf, targetFrameRate: int, ?format: string) = ()
 
-let inputSampleRate = 17
-let downsampleAudio audioData inputSampleRate fileSampleRate  =
+let frameRate = 17
+let downsampleAudio audioData inputFrameRate fileFrameRate  =
   Buf (Array.init 1024 (fun _ -> 0.0f))
 let pcmToMp3Write data name =
   ()
@@ -86,7 +86,7 @@ let rangePosition todRange now =
 //     elif r.interval = _TimeSpan.Zero then  RecordingUntil (recEnd + r.recordingPeriod) // start again
 //                                     else  xxxx           (recEnd + r.interval)
 //   let waitingUntil dt =
-//     let recordingFileSize (duration: _TimeSpan) = duration.Seconds * r.targetSampleRate * r.targetChannels 
+//     let recordingFileSize (duration: _TimeSpan) = duration.Seconds * r.targetFrameRate * r.targetChannels 
 //     if now < dt then  WaitingUntil    dt
 //                 else  RecordingUntil  (recordingFileSize r.recordingPeriod)
 //   r.state <-
@@ -120,8 +120,8 @@ let doRecording r (inputStream: InputStream) =
     let name = $"%s{timestamp}_%s{r.label}_%A{r.recordingPeriod}_%A{r.interval}_{beesConfig.LocationId}_{beesConfig.HiveId}"
     $"%s{name}.{r.filenameExtension.ToLower()}"
   let downSampleIfNeeded r buf =
-    if r.targetSampleRate < r.inputSampleRate then  downsampleAudio buf inputSampleRate r.targetSampleRate
-                                              else  buf
+    if r.targetFrameRate < r.frameRate then  downsampleAudio buf frameRate r.targetFrameRate
+                                       else  buf
   // let record() = seq {
   //   while true do
   //     match queue.Dequeue() with
@@ -138,7 +138,7 @@ let doRecording r (inputStream: InputStream) =
   //   //   let fileExt = r.filenameExtension.ToLower()
   //   //   match fileExt with
   //   //   | "mp3" ->
-  //   //     match r.targetSampleRate with
+  //   //     match r.targetFrameRate with
   //   //     | 44100 | 48000 ->
   //   //       fullPathName <- osPathJoin config.MonitorDir outputFilename
   //   //       pcmToMp3Write audioData fullPathName
@@ -147,7 +147,7 @@ let doRecording r (inputStream: InputStream) =
   //   //       System.Environment.Exit -1
   //   //   | _ ->
   //   //     fullPathName <- osPathJoin config.PrimaryDir outputFilename
-  //   //     sf.write(fullPathName, audioData, r.targetSampleRate, format=fileExt)
+  //   //     sf.write(fullPathName, audioData, r.targetFrameRate, format=fileExt)
   //   //   printfn $"Saved %s{r.label} audio to %s{fullPathName}, period: %A{r.recordingPeriod}, interval %A{r.interval} seconds"
   //   yield ()
   // }

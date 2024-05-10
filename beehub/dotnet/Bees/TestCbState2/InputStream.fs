@@ -243,11 +243,11 @@ type InputStream(beesConfig       : BeesConfig       ,
   let startTime         = _DateTime.Now
   let ringDuration      = _TimeSpan.FromMilliseconds(200) // beesConfig.InputStreamBufferDuration
   let gapDuration       = _TimeSpan.FromMilliseconds 10   // beesConfig.InputStreamGapDuration
-  let nRingFrames       = if BeesLib.DebugGlobals.simulatingCallbacks then 37 else durationToNFrames beesConfig.InSampleRate ringDuration
+  let nRingFrames       = if BeesLib.DebugGlobals.simulatingCallbacks then 37 else durationToNFrames beesConfig.InFrameRate ringDuration
   let nUsableRingFrames = 0 // calculated later
   let frameSize         = beesConfig.FrameSize
   let nRingBytes        = int nRingFrames * frameSize
-  let nGapFrames        = if BeesLib.DebugGlobals.simulatingCallbacks then 2 else durationToNFrames beesConfig.InSampleRate gapDuration 
+  let nGapFrames        = if BeesLib.DebugGlobals.simulatingCallbacks then 2 else durationToNFrames beesConfig.InFrameRate gapDuration 
 
   // When unmanaged code calls managed code (e.g., a callback from unmanaged to managed),
   // the CLR ensures that the garbage collector will not move referenced managed objects
@@ -260,8 +260,8 @@ type InputStream(beesConfig       : BeesConfig       ,
     FrameCount      = 0u
     TimeInfo        = dummyInstance<PortAudioSharp.StreamCallbackTimeInfo>()
     StatusFlags     = dummyInstance<PortAudioSharp.StreamCallbackFlags>()
-    SegCur          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
-    SegOld          = Seg.NewEmpty nRingFrames beesConfig.InSampleRate
+    SegCur          = Seg.NewEmpty nRingFrames beesConfig.InFrameRate
+    SegOld          = Seg.NewEmpty nRingFrames beesConfig.InFrameRate
     SeqNum          = 0UL
     InputRingCopy   = IntPtr.Zero
     TimeStamp       = _DateTime.MaxValue // placeholder
@@ -300,7 +300,7 @@ type InputStream(beesConfig       : BeesConfig       ,
           callback input output frameCount timeInfo statusFlags userDataPtr )
       Some (paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                                                    outParams       = Nullable<_>(outputParameters)        ,
-                                                                   sampleRate      = beesConfig.InSampleRate              ,
+                                                                   sampleRate      = beesConfig.InFrameRate               ,
                                                                    framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
                                                                    streamFlags     = StreamFlags.ClipOff                  ,
                                                                    callback        = callbackStub                         ,

@@ -43,6 +43,6 @@ let terminatePortAudio() =
 let floatToMicrosecondsFractionOnly (time: float) : int =
   int (1_000_000.0 * (time % 1.0))
 
-let durationToNFrames sampleRate (duration: _TimeSpan) =
-  let nFramesApprox = duration.TotalSeconds * float sampleRate
+let durationToNFrames frameRate (duration: _TimeSpan) =
+  let nFramesApprox = duration.TotalSeconds * float frameRate
   int (Math.Ceiling nFramesApprox)
