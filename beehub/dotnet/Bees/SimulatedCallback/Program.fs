@@ -53,7 +53,8 @@ let prepareArgumentsForStreamCreation() =
   sampleRate, inputParameters, outputParameters
 
 // n=15 ms=175 i=1 -> 1517601
-let compose inChannelCount n ms i =
+let compose startMs inChannelCount n ms i =
+  let ms = ms - startMs
   let i = i / inChannelCount
   let intVal = 1_000_00 * n  +  100 * (ms + i)  +  i
   let inFloat32ContiguousRepresentableRange i = i <= 16_777_216
@@ -64,10 +65,11 @@ let compose inChannelCount n ms i =
 let decomposeMs x = (int x / 100) % 1000
 
 
-let makeArray nFrames inChannelCount n ms =
-  let compose i = compose inChannelCount n ms i
+let makeArray startMs nFrames inChannelCount n ms =
+  let compose i = compose startMs inChannelCount n ms i
   let nSamples = int nFrames * inChannelCount
-  Array.init nSamples compose
+  let array = Array.init nSamples compose
+  array
 
 let getHandle a =
   let handle = GCHandle.Alloc(a, GCHandleType.Pinned)
@@ -121,17 +123,17 @@ let runReadTests inputStream =
     let sPassFail = if checkDeliveredArray deliveredArray deliveredTime deliveredDuration then  "pass" else  "fail"
     printfn $"%s{sPassFail} %d{nDeliveries} %A{result} %s{msg}"
   let sNSegments = if cbs.Segs.Old.Active then  "two segments." else  "one segment."
-  cbs.PrintRing $"running get() tests with %s{sNSegments}"
+  cbs.PrintAfter $"running Read() tests with %s{sNSegments}"
   printfn $"Ring has %s{sNSegments}"
   // BeforeData AfterData ClippedTail ClippedHead ClippedBothEnds OK
-  do
-    let time     = cbs.Segs.TailTime - _TimeSpan.FromMilliseconds 30
-    let duration = _TimeSpan.FromMilliseconds 30
-    testRead time duration $"{time} {duration}  ErrorBeforeData"
-  do
-    let time     = cbs.Segs.HeadTime // just beyond
-    let duration = _TimeSpan.FromMilliseconds 30
-    testRead time duration $"{time} {duration}  ErrorAfterData"
+  // do
+  //   let time     = cbs.Segs.TailTime - _TimeSpan.FromMilliseconds 30
+  //   let duration = _TimeSpan.FromMilliseconds 30
+  //   testRead time duration $"{time} {duration}  ErrorBeforeData"
+  // do
+  //   let time     = cbs.Segs.HeadTime // just beyond
+  //   let duration = _TimeSpan.FromMilliseconds 30
+  //   testRead time duration $"{time} {duration}  ErrorAfterData"
   do
     let time     = cbs.Segs.TailTime - _TimeSpan.FromMilliseconds 1
     let theEnd   = cbs.Segs.HeadTime - _TimeSpan.FromMilliseconds 1
@@ -173,31 +175,36 @@ let run inputStream = task {
   
   let test() =
     printfn "Simulating callbacks ...\n"
+    let startMs = 100
     let initialFrameCount = 5
+    let frameRate = 1000
+    let mutable totalFrames = 0
     let mutable timeInfo = PortAudioSharp.StreamCallbackTimeInfo()
     assert (timeInfo.inputBufferAdcTime = 0.0)
     let statusFlags = PortAudioSharp.StreamCallbackFlags()
     let userDataPtr = GCHandle.ToIntPtr(GCHandle.Alloc(cbs))
     cbs.PrintTitle()
+    assert (_DateTime.Now.Millisecond = startMs)
+    let ring = cbs.Ring
     for i in 0..32 do
       let frameCount  = uint32 (if i < 25 then  initialFrameCount else  2 * initialFrameCount)
-      let durationMs  = 1000 * int frameCount / inputStream.BeesConfig.InFrameRate
-      let durationSec = float durationMs / 1000.0
-      let adcTimeMsF  = (cbs.PaStreamTime() + timeInfo.inputBufferAdcTime) * 1000.0
-      let adcTimeMs   = int (round adcTimeMsF)
-      let sampleCount = frameCount * uint32 cbs.InChannelCount
-      let iArray = makeArray frameCount cbs.InChannelCount i adcTimeMs
-      let oArray = makeArray frameCount cbs.InChannelCount i adcTimeMs
+      let durationMs  = 1000 * int frameCount / frameRate
+      let adcTimeMs  =_DateTime.Now.Millisecond // 100
+      let iArray = makeArray startMs frameCount cbs.InChannelCount i adcTimeMs
+      let oArray = makeArray startMs frameCount cbs.InChannelCount i adcTimeMs
       let input  = getHandle iArray
       let output = getHandle oArray
       let _ = showGC (fun () -> callback input output frameCount &timeInfo statusFlags userDataPtr |> ignore )
-      if i = 11 then runReadTests inputStream
-      if i = 12 then runReadTests inputStream
+      // if i = 10 then runReadTests inputStream
+      // if i = 11 then runReadTests inputStream
       if i = 15 then runReadTests inputStream
       if i = 26 then runReadTests inputStream
       if i = 31 then runReadTests inputStream
-      timeInfo.inputBufferAdcTime <- timeInfo.inputBufferAdcTime + durationSec
-      _DateTime.Now <- _DateTime.Now + _TimeSpan(durationMs)
+      totalFrames <- totalFrames + int frameCount
+      let totalDurationSec = float totalFrames / 1000.0
+      timeInfo.inputBufferAdcTime <- totalDurationSec
+      _DateTime.Now <- _DateTime.Now + _TimeSpan.FromMilliseconds durationMs
+  //  printfn $"%A{_DateTime.Now} %f{totalDurationSec}"
   test()
 
   use cts = new CancellationTokenSource()

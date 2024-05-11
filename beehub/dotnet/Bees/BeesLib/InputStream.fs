@@ -150,10 +150,8 @@ type CbState = {
     let nSamples        = nFrames       * cbs.InChannelCount
     Array.Fill(cbs.Ring, 0f, srcFrameIndexNS, nSamples)
   
-  member cbs.Print newTail newHead msg =
-    let sRing =
+  member cbs.PrintRing dataChar msg =
       let empty = '.'
-      let data  = '◾'
       let getsNum i = i % 10 = 0
       let mutable ring =
         let num i = char ((i / 10 % 10).ToString())
@@ -165,7 +163,7 @@ type CbState = {
           let first = seg.Tail
           let last  = seg.Head - 1
           let getsNum i = first < i  &&  i < last  &&  getsNum i  // show only interior numbers
-          let setDataFor i = if not (getsNum i) then  ring[i] <- data     
+          let setDataFor i = if not (getsNum i) then  ring[i] <- dataChar     
           for i in first..last do  setDataFor i
         if cbs.Segs.Old.Active then
           assert (cbs.State = Chasing)
@@ -174,6 +172,9 @@ type CbState = {
         // "◾◾◾◾◾◾◾◾◾◾1◾◾◾◾◾◾◾◾◾2◾◾◾◾◾◾◾◾◾3◾◾◾◾.....4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
         showDataFor cbs.Segs.Cur
       String ring
+  
+  member cbs.Print newTail newHead msg =
+    let sRing = cbs.PrintRing '◾' msg
     let sText =
       let sSeqNum  = sprintf "%2d" cbs.SeqNums.N1
       let sX       = if String.length msg > 0 then  "*" else  " "
@@ -197,7 +198,7 @@ type CbState = {
       $"%s{sSeqNum}%s{sX}%4d{sNFrames}    %s{sTime} %s{sDur}  %s{sCur} %s{sNew} %s{sOld} %s{sTotal}  {sGap:s2}  %s{sState}  %s{msg}"
     Console.WriteLine $"%s{sRing}  %s{sText}"
 
-  member cbs.PrintRing msg =  cbs.Print 0 -1 msg
+  member cbs.PrintAfter msg =  cbs.Print 0 -1 msg
 
   member cbs.PrintTitle() =
     let s0 = String.init cbs.NRingFrames (fun _ -> " ")
@@ -229,10 +230,13 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   cbs.FrameCount   <- frameCount // in the ”block“ to be copied
   cbs.TimeInfo     <- timeInfo
   cbs.StatusFlags  <- statusFlags
-  let timeTilNow = _TimeSpan.FromSeconds (cbs.PaStreamTime() - timeInfo.inputBufferAdcTime)
-  let inputBuferAdcDateTime = _DateTime.Now - timeTilNow
-  cbs.BlockAdcStartTime <- inputBuferAdcDateTime
-  if cbs.StreamAdcStartTime = tbdDateTime then  cbs.StreamAdcStartTime <- cbs.BlockAdcStartTime
+  let inputBuferAdcDateTime =
+    let f = cbs.PaStreamTime()
+    let secondsSinceAdcTime = f - timeInfo.inputBufferAdcTime
+    let timeTilNow = _TimeSpan.FromSeconds secondsSinceAdcTime
+    _DateTime.Now - timeTilNow
+  cbs.BlockAdcStartTime                                                <- inputBuferAdcDateTime
+  if cbs.StreamAdcStartTime = tbdDateTime then  cbs.StreamAdcStartTime <- inputBuferAdcDateTime
   
   do
     // Modify the segs so that Segs.Cur.Head points to where the data will go in the ring.
@@ -387,7 +391,7 @@ type InputStream(beesConfig       : BeesConfig          ,
 
   let paStream =
     if cbState.Simulating <> NotSimulating then
-      cbState.PaStreamTime <- fun () -> cbState.TimeInfo.inputBufferAdcTime
+      cbState.PaStreamTime <- fun () -> cbState.TimeInfo.inputBufferAdcTime // seconds
       dummyInstance<PortAudioSharp.Stream>()
     else
       let streamCallback = PortAudioSharp.Stream.Callback(
@@ -442,7 +446,8 @@ type InputStream(beesConfig       : BeesConfig          ,
     let cbs = this.CbStateSnapshot()
     if cbs.Segs.Cur.Head > thresh then
       thresh <- thresh + int (round (cbs.FrameRate))
-      Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / int cbs.FrameCount} %10f{cbs.TimeInfo.inputBufferAdcTime - this.PaStream.Time}"
+      let sinceStart = cbs.TimeInfo.inputBufferAdcTime - this.PaStream.Time
+      Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / int cbs.FrameCount} %10f{sinceStart}"
     cbs.Segs.Cur.Check()
      // if cbState.Simulating = NotSimulating then Console.Write ","
 

@@ -56,7 +56,7 @@ type FrameRange = {
   FrameRate  : int        } with
 
   static member NewByBeginDuration timeBegin duration startTime frameRate =
-    let timeOffset = timeBegin - startTime 
+    let timeOffset = timeBegin - (startTime: _DateTime)
     let indexBegin = nFramesOf frameRate timeOffset
     let nFrames    = nFramesOf frameRate duration
     let fr = {
@@ -88,7 +88,7 @@ type FrameRange = {
 type Seg = {
   mutable Tail     : int  // frames not samples
   mutable Head     : int  // frames not samples
-  mutable Offset   : int
+  mutable Offset   : int  // totalFrames at beginning of seg
   mutable Start    : _DateTime
   NRingFrames      : int
   FrameRate        : int  }
