@@ -145,10 +145,10 @@ type CbState = {
 
   member cbs.Copy() = { cbs with Segs = cbs.Segs.Copy() }
 
-  member cbs.zeroFillRingSpan srcFrameIndex nFrames =
+  member cbs.markRingSpanAsDead srcFrameIndex nFrames =
     let srcFrameIndexNS = srcFrameIndex * cbs.InChannelCount
     let nSamples        = nFrames       * cbs.InChannelCount
-    Array.Fill(cbs.Ring, 0f, srcFrameIndexNS, nSamples)
+    Array.Fill(cbs.Ring, 9999999f, srcFrameIndexNS, nSamples)
   
   member cbs.PrintRing dataChar msg =
       let empty = '.'
@@ -179,10 +179,10 @@ type CbState = {
       let sSeqNum  = sprintf "%2d" cbs.SeqNums.N1
       let sX       = if String.length msg > 0 then  "*" else  " "
       let sTime    = sprintf "%3d.%3d %3d.%3d"
-                       cbs.Segs.Old.TailTime.Millisecond
-                       cbs.Segs.Old.HeadTime.Millisecond
                        cbs.Segs.Cur.TailTime.Millisecond
                        cbs.Segs.Cur.HeadTime.Millisecond
+                       cbs.Segs.Old.TailTime.Millisecond
+                       cbs.Segs.Old.HeadTime.Millisecond
       let sDur     = let sum = cbs.Segs.Cur.Duration.Milliseconds + cbs.Segs.Old.Duration.Milliseconds
                      $"{cbs.Segs.Cur.Duration.Milliseconds:d2}+{cbs.Segs.Old.Duration.Milliseconds:d2}={sum:d2}"
       let sCur     = cbs.Segs.Cur.ToString()
@@ -202,9 +202,9 @@ type CbState = {
 
   member cbs.PrintTitle() =
     let s0 = String.init cbs.NRingFrames (fun _ -> " ")
-    let s1 = " seq nFrames timeOld timeCur duration      Cur    new       Old    size   gap   state"
+    let s1 = " seq nFrames timeCur timeOld duration      Cur    new       Old    size   gap   state"
     let s2 = " ––– ––––––– ––––––– ––––––– ––––––––  ––––––––– –––––– ––––––––– –––––––– –––  –––––––"
-           //   24    5    164.185 185.220 35+21=56  000+00.35 -16.40 000+64.85 35+21=56  29  Chasing 
+           //   24    5    185.220 164.185 35+21=56  000+00.35 -16.40 000+64.85 35+21=56  29  Chasing 
     Console.WriteLine $"%s{s0}%s{s1}"
     Console.WriteLine $"%s{s0}%s{s2}"
 
@@ -235,8 +235,11 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     let secondsSinceAdcTime = f - timeInfo.inputBufferAdcTime
     let timeTilNow = _TimeSpan.FromSeconds secondsSinceAdcTime
     _DateTime.Now - timeTilNow
-  cbs.BlockAdcStartTime                                                <- inputBuferAdcDateTime
-  if cbs.StreamAdcStartTime = tbdDateTime then  cbs.StreamAdcStartTime <- inputBuferAdcDateTime
+  cbs.BlockAdcStartTime <- inputBuferAdcDateTime
+  if cbs.StreamAdcStartTime = tbdDateTime then
+    cbs.StreamAdcStartTime <- inputBuferAdcDateTime
+    cbs.Segs.Old.Start     <- inputBuferAdcDateTime
+    cbs.Segs.Cur.Start     <- inputBuferAdcDateTime
   
   do
     // Modify the segs so that Segs.Cur.Head points to where the data will go in the ring.
@@ -262,7 +265,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
       cbs.Segs.Exchange() ; assert (cbs.Segs.Cur.Head = 0  &&  cbs.Segs.Cur.Tail = 0)
       cbs.Segs.Cur.Offset <- cbs.Segs.Old.Offset + cbs.Segs.Old.Head
       let h, t = nextValues() in newHead <- h ; newTail <- t
-      if cbs.Simulating <> NotSimulating then  cbs.zeroFillRingSpan cbs.Segs.Old.Head (cbs.NRingFrames - cbs.Segs.Old.Head) 
+      if cbs.Simulating <> NotSimulating then  cbs.markRingSpanAsDead cbs.Segs.Old.Head (cbs.NRingFrames - cbs.Segs.Old.Head) 
       cbs.State <- Chasing
       printRing "exchanged"
     match cbs.State with

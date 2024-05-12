@@ -54,7 +54,7 @@ let prepareArgumentsForStreamCreation() =
 
 // n=15 ms=175 i=1 -> 1517601
 let compose startMs inChannelCount n ms i =
-  let ms = ms - startMs
+//let ms = ms - startMs
   let i = i / inChannelCount
   let intVal = 1_000_00 * n  +  100 * (ms + i)  +  i
   let inFloat32ContiguousRepresentableRange i = i <= 16_777_216

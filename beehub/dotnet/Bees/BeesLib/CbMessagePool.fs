@@ -15,8 +15,8 @@ open BeesUtil.DebugGlobals
 
 
 
-let tbdDateTime = _DateTime.MinValue
-let tbdTimeSpan = _TimeSpan.MinValue
+let tbdDateTime = _DateTime.BadValue
+let tbdTimeSpan = _TimeSpan.BadValue
 
     
 let durationOf frameRate nFrames  = _TimeSpan.FromSeconds (float nFrames / float frameRate)
@@ -174,19 +174,18 @@ type Seg = {
     //   portionHeadIndex %A{portionHeadIndex}
     //   """
     // assert (seg.Tail <= portionTailIndex) ; assert (portionHeadIndex <= seg.Head)
-    let fr = FrameRange.NewByBeginDuration portionTime portionDuration seg.Start seg.FrameRate
+    let fr = FrameRange.NewByBeginDuration portionTime portionDuration seg.TailTime seg.FrameRate
     fr
 
-  member seg.SetTail index dateTime =  seg.Tail <- index
-                                       assert (seg.Tail     <= seg.Head)
-                                       assert (seg.TailTime <= seg.HeadTime)
-  member seg.SetHead index dateTime =  seg.Head <- index
-                                       assert (seg.Tail     <= seg.Head)
-                                       assert (seg.TailTime <= seg.HeadTime)
-                                       assert (seg.Head <= seg.NRingFrames)
+  member seg.SetTail index =  seg.Tail <- index
+                              assert (seg.Tail <= seg.Head)
+                              assert (seg.Tail <= seg.NRingFrames)
+  member seg.SetHead index =  seg.Head <- index
+                              assert (seg.Tail <= seg.Head)
+                              assert (seg.Head <= seg.NRingFrames)
 
-  member seg.AdvanceTail nFrames =  seg.SetTail (seg.Tail + nFrames) (seg.TailTime + seg.durationOf nFrames)
-  member seg.AdvanceHead nFrames =  seg.SetHead (seg.Head + nFrames) (seg.HeadTime + seg.durationOf nFrames)
+  member seg.AdvanceTail nFrames =  seg.SetTail (seg.Tail + nFrames)
+  member seg.AdvanceHead nFrames =  seg.SetHead (seg.Head + nFrames)
   
   override seg.ToString() = $"{seg.Offset:D3}+{seg.Tail:D2}.{seg.Head:D2}"
 
