@@ -510,8 +510,8 @@ type InputStream(beesConfig       : BeesConfig          ,
       let headTime = time + duration
       assert (cbs.Segs.TailTime <= time) ; assert (headTime <= cbs.Segs.HeadTime)
       let deliverSegPortion (seg: Seg) =
-        let p = seg.clipToFit time duration
-        deliver (cbs.Ring, nFrames, p.IndexBegin, p.NFrames, cbs.InChannelCount, p.TimeBegin, p.Duration)
+        let from = seg.clipToFit time duration
+        deliver (cbs.Ring, nFrames, from.IndexBegin, from.NFrames, cbs.InChannelCount, from.TimeBegin, from.Duration)
       if cbs.Segs.Old.Active  &&  time < cbs.Segs.Old.HeadTime     then  deliverSegPortion cbs.Segs.Old
       if                          cbs.Segs.Cur.TailTime < headTime then  deliverSegPortion cbs.Segs.Cur
     if cbs.Simulating = NotSimulating then Console.Write "R"
