@@ -331,7 +331,7 @@ type ReadResult = {
   Duration  : _TimeSpan  // duration
   Parts     : ( int      // indexNF into Ring
               * int )    // nFrames
-              seq  }
+              array }
 
 type InputStreamGetResult =
   | ErrorTimeout        = 0
@@ -505,9 +505,9 @@ type InputStream(beesConfig       : BeesConfig          ,
       NChannels = this.BeesConfig.InChannelCount
       Time      = time
       Duration  = duration
-      Parts     = seq {
+      Parts     = [|
         if cbs.Segs.Old.Active then getPart cbs.Segs.Old
-                                    getPart cbs.Segs.Cur  } }
+                                    getPart cbs.Segs.Cur  |] }
     result
 
   member this.Read (from: _DateTime, duration: _TimeSpan) =

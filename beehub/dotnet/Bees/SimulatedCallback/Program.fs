@@ -124,7 +124,8 @@ let runReadTests inputStream =
     result.Parts
     |> Seq.iter (fun _ -> ())
     let sPassFail = if checkDeliveredArray deliveredArray result.Time result.Duration then  "pass" else  "fail"
-    printfn $"%s{sPassFail} %d{nDeliveries} %A{result} %s{msg}"
+//  printfn $"%s{sPassFail} %d{nDeliveries} %A{result} %s{msg}"
+    ()
   let sNSegments = if cbs.Segs.Old.Active then  "two segments." else  "one segment."
   cbs.PrintAfter $"running Read() tests with %s{sNSegments}"
   printfn $"Ring has %s{sNSegments}"
