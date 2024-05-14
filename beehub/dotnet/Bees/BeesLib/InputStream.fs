@@ -456,7 +456,6 @@ type InputStream(beesConfig       : BeesConfig          ,
       thresh <- thresh + int (round (cbs.FrameRate))
       let sinceStart = cbs.TimeInfo.inputBufferAdcTime - this.PaStream.Time
       Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / int cbs.FrameCount} %10f{sinceStart}"
-    cbs.Segs.Cur.Check()
      // if cbState.Simulating = NotSimulating then Console.Write ","
 
   member private is.debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =

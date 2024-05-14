@@ -19,7 +19,7 @@ type BeesConfig = {
   InputStreamRingGapDuration : _TimeSpan // long enough for the largest automatically adjusted frameCount arg to callback
   SampleSize                 : int
   InChannelCount             : int
-  InFrameRate                : int  } with
+  InFrameRate                : double  } with
 
   member this.FrameSize = this.SampleSize * this.InChannelCount
 

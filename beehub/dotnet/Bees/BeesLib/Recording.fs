@@ -38,15 +38,15 @@ type Recording = {
   interval          : _TimeSpan     // x >= 0
   label             : string       // thread_id
   filenameExtension : string       // file_format       
-  targetFrameRate   : int          // target_sample_rate               
+  targetFrameRate   : double       // target_sample_rate               
   targetChannels    : int          //                
   activityType      : ActivityType // continuous recording or time or day range
-  frameRate         : int
+  frameRate         : double
   mutable state     : State
   cancellationToken : CancellationToken }
 
 type sf() =
-  static member write(fullPathName: string, audioData: Buf, targetFrameRate: int, ?format: string) = ()
+  static member write(fullPathName: string, audioData: Buf, targetFrameRate: double, ?format: string) = ()
 
 let frameRate = 17
 let downsampleAudio audioData inputFrameRate fileFrameRate  =

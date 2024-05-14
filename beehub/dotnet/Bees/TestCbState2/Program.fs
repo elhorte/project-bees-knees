@@ -129,7 +129,7 @@ let main _ =
     InputStreamRingGapDuration = _TimeSpan.FromSeconds 3
     SampleSize                 = sizeof<SampleType>
     InChannelCount             = inputParameters.channelCount
-    InFrameRate                = int sampleRate  }
+    InFrameRate                = sampleRate  }
 //printBeesConfig beesConfig
 //keyboardInputInit()
   use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging)
