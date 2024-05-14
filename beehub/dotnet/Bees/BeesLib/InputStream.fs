@@ -16,6 +16,7 @@ open BeesUtil.SubscriberList
 open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
 open BeesUtil.SeqNums
+open BeesUtil.Ranges
 open BeesLib.BeesConfig
 open BeesLib.CbMessagePool
 open CSharpHelpers
@@ -99,12 +100,14 @@ type Segs = {
   mutable Cur : Seg
   mutable Old : Seg }  with
 
-  member this.Copy()   = { Cur = this.Cur.Copy()
-                           Old = this.Old.Copy() }
-  member this.Oldest   = if this.Old.Active then this.Old else this.Cur
-  member this.TailTime = this.Oldest.TailTime
-  member this.HeadTime = this.Cur   .HeadTime
-  member this.Duration = this.HeadTime - this.TailTime
+  member this.Copy()    = { Cur = this.Cur.Copy()
+                            Old = this.Old.Copy() }
+  member this.Oldest    = if this.Old.Active then this.Old else this.Cur
+  member this.TailInAll = this.Oldest.TailInAll
+  member this.HeadInAll = this.Cur   .HeadInAll
+  member this.TailTime  = this.Oldest.TailTime
+  member this.HeadTime  = this.Cur   .HeadTime
+  member this.Duration  = this.HeadTime - this.TailTime
 
   member this.Exchange() =
     let tmp = this.Cur  in  this.Cur <- this.Old  ;  this.Old <- tmp
@@ -319,14 +322,16 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The InputStream class
 
-type ReadDelivery = float32[]   // source array
-                  * int         // sizeNF
-                  * int         // indexNF
-                  * int         // nFrames 
-                  * int         // nChannels
-                  * _DateTime   // time
-                  * _TimeSpan   // duration
-                   -> unit
+type ReadResult = {
+  RangeClip : RangeClip  // any clipping that happened
+  Ring      : float32[]  // source array
+  Length    : int        // result length
+  NChannels : int        // nChannels
+  Time      : _DateTime  // time
+  Duration  : _TimeSpan  // duration
+  Parts     : ( int      // indexNF into Ring
+              * int )    // nFrames
+              seq  }
 
 type InputStreamGetResult =
   | ErrorTimeout        = 0
@@ -481,50 +486,32 @@ type InputStream(beesConfig       : BeesConfig          ,
   // The result is a tuple of an InputStreamGetResult enum and the 
   // time and duration of the range of the delivered data.
   // Synchronizatrion with the callback is handled by the CbStateSnapshot property without locking.
-  member this.read (time: _DateTime) (duration: _TimeSpan) (deliver: ReadDelivery)
-                   : (InputStreamGetResult * _DateTime * _TimeSpan) =
+  member this.read (time: _DateTime) (duration: _TimeSpan)  : ReadResult =
     let cbs = this.CbStateSnapshot()
-    let (|BeforeData|AfterData|ClippedTail|ClippedHead|ClippedBothEnds|OK|) (wantTime, wantDuration, haveTime, haveDuration) =
-      // Return the situation along with time and duration clipped to fit within Segs.
-      //      Segs.Old         Segs.Cur
-      // [.........◾◾◾◾◾◾◾] [◾◾◾◾◾◾◾.....]
-      //           a      b  a      b
-      //           tail             head
-      let wantEnd: _DateTime = wantTime + wantDuration
-      let haveEnd: _DateTime = haveTime + haveDuration
-      let timeAndDuration tail head =
-        let duration = head - tail
-        assert (cbs.Segs.Oldest.TailTime <= tail) ; assert (head <= cbs.Segs.Cur.HeadTime)
-        tail, duration
-      match () with
-      | _ when wantEnd  <= haveTime                          ->  BeforeData      (timeAndDuration haveTime haveTime)
-      | _ when                           haveEnd <= wantTime ->  AfterData       (timeAndDuration haveEnd  haveEnd )
-      | _ when wantTime <  haveTime  &&  haveEnd <  wantEnd  ->  ClippedBothEnds (timeAndDuration haveTime haveEnd )
-      | _ when wantTime <  haveTime                          ->  ClippedTail     (timeAndDuration haveTime wantEnd )
-      | _ when                           haveEnd <  wantEnd  ->  ClippedHead     (timeAndDuration wantTime haveEnd )
-      | _                                                    ->  assert (haveTime <= wantTime)
-                                                                 assert (wantEnd  <= haveEnd )
-                                                                 OK              (timeAndDuration wantTime wantEnd )
-    let deliver (time: _DateTime) duration =
-      let nFrames  = nFramesOf beesConfig.InFrameRate duration
-      let headTime = time + duration
-      assert (cbs.Segs.TailTime <= time) ; assert (headTime <= cbs.Segs.HeadTime)
-      let deliverSegPortion (seg: Seg) =
-        let from = seg.clipToFit time duration
-        deliver (cbs.Ring, nFrames, from.IndexBegin, from.NFrames, cbs.InChannelCount, from.TimeBegin, from.Duration)
-      if cbs.Segs.Old.Active  &&  time < cbs.Segs.Old.HeadTime     then  deliverSegPortion cbs.Segs.Old
-      if                          cbs.Segs.Cur.TailTime < headTime then  deliverSegPortion cbs.Segs.Cur
     if cbs.Simulating = NotSimulating then Console.Write "R"
-    match (time, duration, cbs.Segs.TailTime, cbs.Segs.Duration) with
-    | BeforeData      (t, d) ->               (InputStreamGetResult.ErrorBeforeData    , t, d)
-    | AfterData       (t, d) ->               (InputStreamGetResult.ErrorAfterData     , t, d)
-    | ClippedTail     (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedTail    , t, d)
-    | ClippedHead     (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedHead    , t, d)
-    | ClippedBothEnds (t, d) -> deliver t d ; (InputStreamGetResult.WarnClippedBothEnds, t, d)
-    | OK              (t, d) -> deliver t d ; (InputStreamGetResult.AsRequested        , t, d)  
+    let indexBeginArg = nFramesOf cbs.FrameRate (time - cbs.StreamAdcStartTime)
+    let nFramesArg    = nFramesOf cbs.FrameRate duration
+    let rangeClip, indexBegin, nFrames = clipRange indexBeginArg nFramesArg cbs.Segs.TailInAll cbs.Segs.HeadInAll
+    let duration = durationOf cbs.FrameRate nFrames
+    let time     = cbs.StreamAdcStartTime + (durationOf cbs.FrameRate indexBegin)
+    let duration = durationOf cbs.FrameRate nFrames
+    let getPart seg =
+      let _, indexBegin, nFrames = clipRange indexBegin nFrames cbs.Segs.TailInAll cbs.Segs.HeadInAll
+      indexBegin, nFrames
+    let result = {
+      RangeClip = rangeClip
+      Ring      = cbs.Ring
+      Length    = nFrames
+      NChannels = this.BeesConfig.InChannelCount
+      Time      = time
+      Duration  = duration
+      Parts     = seq {
+        if cbs.Segs.Old.Active then getPart cbs.Segs.Old
+                                    getPart cbs.Segs.Cur  } }
+    result
 
-  member this.Read (from: _DateTime, duration: _TimeSpan, f: ReadDelivery) =
-    this.read from duration f
+  member this.Read (from: _DateTime, duration: _TimeSpan) =
+    this.read from duration
     
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 

@@ -119,8 +119,11 @@ let runReadTests inputStream =
       Array.Copy(array, indexNS, deliveredArray, destIndexNS, nSamples)
       destIndexNS <- destIndexNS + nSamples
       nDeliveries <- nDeliveries + 1
-    let resultEnum, deliveredTime, deliveredDuration as result = inputStream.read time duration acceptOneDelivery
-    let sPassFail = if checkDeliveredArray deliveredArray deliveredTime deliveredDuration then  "pass" else  "fail"
+    let result = inputStream.read time duration
+    let deliveredArray = Array.create<float32> result.Length 12345678.0f
+    result.Parts
+    |> Seq.iter (fun _ -> ())
+    let sPassFail = if checkDeliveredArray deliveredArray result.Time result.Duration then  "pass" else  "fail"
     printfn $"%s{sPassFail} %d{nDeliveries} %A{result} %s{msg}"
   let sNSegments = if cbs.Segs.Old.Active then  "two segments." else  "one segment."
   cbs.PrintAfter $"running Read() tests with %s{sNSegments}"

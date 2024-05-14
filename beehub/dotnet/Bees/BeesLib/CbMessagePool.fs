@@ -19,8 +19,8 @@ let tbdDateTime = _DateTime.BadValue
 let tbdTimeSpan = _TimeSpan.BadValue
 
     
-let durationOf frameRate nFrames  = _TimeSpan.FromSeconds (float nFrames / float frameRate)
-let nFramesOf  frameRate duration = int (round ((duration: _TimeSpan).TotalMicroseconds / 1_000_000.0 * float frameRate))
+let durationOf frameRate nFrames  = _TimeSpan.FromSeconds (float nFrames / frameRate)
+let nFramesOf  frameRate duration = int (round ((duration: _TimeSpan).TotalMicroseconds / 1_000_000.0 * frameRate))
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // Seg class, used by InputStream.  The ring buffer can comprise 0, 1, or 2 segs.
@@ -53,7 +53,7 @@ type FrameRange = {
   TimeEnd    : _DateTime
   Duration   : _TimeSpan
   StartTime  : _DateTime
-  FrameRate  : int        } with
+  FrameRate  : float      } with
 
   static member NewByBeginDuration timeBegin duration startTime frameRate =
     let timeOffset = timeBegin - (startTime: _DateTime)
@@ -125,13 +125,15 @@ type Seg = {
   member seg.durationOf nFrames = durationOf seg.FrameRate nFrames
   member seg.nFramesOf duration = nFramesOf  seg.FrameRate duration
   
-  member seg.NFrames  = seg.Head - seg.Tail
-  member seg.Duration = seg.durationOf seg.NFrames
-  member seg.TailTime = seg.Start + seg.durationOf (seg.Offset + seg.Tail)
-  member seg.HeadTime = seg.Start + seg.durationOf (seg.Offset + seg.Head)
+  member seg.NFrames   = seg.Head - seg.Tail
+  member seg.Duration  = seg.durationOf seg.NFrames
+  member seg.TailInAll = seg.Offset + seg.Tail
+  member seg.HeadInAll = seg.Offset + seg.Head
+  member seg.TailTime  = seg.Start + seg.durationOf seg.TailInAll
+  member seg.HeadTime  = seg.Start + seg.durationOf seg.HeadInAll
 
-  member seg.Active   = seg.NFrames <> 0
-  member seg.Reset()  = seg.Head <- 0 ; seg.Tail <- 0 ; assert (not seg.Active)
+  member seg.Active    = seg.NFrames <> 0
+  member seg.Reset()   = seg.Head <- 0 ; seg.Tail <- 0 ; assert (not seg.Active)
   
   /// identify the portion of seg that overlaps with the given time and duration
   member seg.clipToFit (time: _DateTime) (duration: _TimeSpan)  : FrameRange =
