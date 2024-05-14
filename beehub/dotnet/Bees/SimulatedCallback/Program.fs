@@ -106,23 +106,20 @@ let runReadTests inputStream =
          else
            true
       check 0
-    let mutable deliveredArray: float32[] = [||] // samples
     let mutable destIndexNS = 0
-    let mutable nDeliveries = 0
-    let acceptOneDelivery (array, sizeNF, indexNF, nFrames, nChannels, time, duration) =
-      let printRange() = printfn $"index %d{indexNF}  length %d{nFrames}  time %A{time}  duration %A{duration}"
-      let sizeNS   = sizeNF  * nChannels
-      let indexNS  = indexNF * nChannels
-      let nSamples = nFrames * nChannels
-      if destIndexNS = 0 then  deliveredArray <- Array.create<float32> sizeNS 12345678.0f
-      if Array.length array < indexNS + nSamples then  printfn "too short"
-      Array.Copy(array, indexNS, deliveredArray, destIndexNS, nSamples)
-      destIndexNS <- destIndexNS + nSamples
-      nDeliveries <- nDeliveries + 1
+    let mutable nParts = 0
     let result = inputStream.read time duration
     let deliveredArray = Array.create<float32> result.Length 12345678.0f
+    let copyResultPart (indexNF, nFrames) =
+      let printRange() = printfn $"index %d{indexNF}  length %d{nFrames}  time %A{time}  duration %A{duration}"
+      let indexNS  = indexNF * result.NChannels
+      let nSamples = nFrames * result.NChannels
+      if Array.length result.Ring < indexNS + nSamples then  printfn "too short"
+      Array.Copy(result.Ring, indexNS, deliveredArray, destIndexNS, nSamples)
+      destIndexNS <- destIndexNS + nSamples
+      nParts <- nParts + 1
     result.Parts
-    |> Seq.iter (fun _ -> ())
+    |> Array.iter copyResultPart
     let sPassFail = if checkDeliveredArray deliveredArray result.Time result.Duration then  "pass" else  "fail"
 //  printfn $"%s{sPassFail} %d{nDeliveries} %A{result} %s{msg}"
     ()
