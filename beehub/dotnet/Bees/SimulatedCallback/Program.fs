@@ -53,10 +53,10 @@ let prepareArgumentsForStreamCreation() =
   sampleRate, inputParameters, outputParameters
 
 // n=15 ms=175 i=1 -> 1517601
-let compose startMs inChannelCount n ms i =
+let compose inChannelCount n ms i =
 //let ms = ms - startMs
-  let i = i / inChannelCount
-  let intVal = 1_000_00 * n  +  100 * (ms + i)  +  i
+  let iMs = i / inChannelCount
+  let intVal = 1_000_00 * n  +  100 * (ms + iMs)  +  i
   let inFloat32ContiguousRepresentableRange i = i <= 16_777_216
   assert inFloat32ContiguousRepresentableRange intVal
   float32 intVal
@@ -65,8 +65,8 @@ let compose startMs inChannelCount n ms i =
 let decomposeMs x = (int x / 100) % 1000
 
 
-let makeArray startMs nFrames inChannelCount n ms =
-  let compose i = compose startMs inChannelCount n ms i
+let makeArray nFrames inChannelCount n ms =
+  let compose i = compose inChannelCount n ms i
   let nSamples = int nFrames * inChannelCount
   let array = Array.init nSamples compose
   array
@@ -100,7 +100,7 @@ let runReadTests inputStream =
          if i < Array.length deliveredArray then
            let data = deliveredArray[i]
            let msDelivered = decomposeMs data
-           let msExpected  = deliveredTime.Millisecond + i
+           let msExpected  = deliveredTime.Millisecond + (i / cbs.InChannelCount)
            if msDelivered = msExpected then  check (i + 1)
                                        else  false
          else
@@ -109,60 +109,61 @@ let runReadTests inputStream =
     let mutable destIndexNS = 0
     let mutable nParts = 0
     let result = inputStream.read time duration
-    let deliveredArray = Array.create<float32> result.Length 12345678.0f
-    let copyResultPart (indexNF, nFrames) =
-      let printRange() = printfn $"index %d{indexNF}  length %d{nFrames}  time %A{time}  duration %A{duration}"
-      let indexNS  = indexNF * result.NChannels
-      let nSamples = nFrames * result.NChannels
-      if Array.length result.Ring < indexNS + nSamples then  printfn "too short"
+    let deliveredArray = Array.create<float32> result.NSamples 12345678.0f
+    let copyResultPart { Index = indexNF; NFrames = nFrames } =
+      let printRange() = printfn $"ringLen %d{result.Ring.Length} end %d{indexNF + nFrames} index %d{indexNF}  length %d{nFrames}  time %A{time}  duration %A{duration}"
+      // printRange()
+      let indexNS  = indexNF * cbs.InChannelCount
+      let nSamples = nFrames * cbs.InChannelCount
+      if indexNS + nSamples > Array.length result.Ring then  printfn "asking for more than is there"
       Array.Copy(result.Ring, indexNS, deliveredArray, destIndexNS, nSamples)
       destIndexNS <- destIndexNS + nSamples
       nParts <- nParts + 1
-    result.Parts
+    result.Parts.P
     |> Array.iter copyResultPart
     let sPassFail = if checkDeliveredArray deliveredArray result.Time result.Duration then  "pass" else  "fail"
-//  printfn $"%s{sPassFail} %d{nDeliveries} %A{result} %s{msg}"
+    printfn $"%s{sPassFail} – %s{result.ToString()} %s{msg}"
     ()
   let sNSegments = if cbs.Segs.Old.Active then  "two segments." else  "one segment."
   cbs.PrintAfter $"running Read() tests with %s{sNSegments}"
   printfn $"Ring has %s{sNSegments}"
   // BeforeData AfterData ClippedTail ClippedHead ClippedBothEnds OK
-  // do
-  //   let time     = cbs.Segs.TailTime - _TimeSpan.FromMilliseconds 30
-  //   let duration = _TimeSpan.FromMilliseconds 30
-  //   testRead time duration $"{time} {duration}  ErrorBeforeData"
-  // do
-  //   let time     = cbs.Segs.HeadTime // just beyond
-  //   let duration = _TimeSpan.FromMilliseconds 30
-  //   testRead time duration $"{time} {duration}  ErrorAfterData"
-  do
+  do // BeforeData
+    let time     = cbs.Segs.TailTime - _TimeSpan.FromMilliseconds 30
+    let duration = _TimeSpan.FromMilliseconds 30
+    testRead time duration $"{time} {duration}"
+  do // AfterData
+    let time     = cbs.Segs.HeadTime // just beyond
+    let duration = _TimeSpan.FromMilliseconds 30
+    testRead time duration $"{time} {duration}"
+  do // ClippedTail
     let time     = cbs.Segs.TailTime - _TimeSpan.FromMilliseconds 1
-    let theEnd   = cbs.Segs.HeadTime - _TimeSpan.FromMilliseconds 1
+    let theEnd   = cbs.Segs.HeadTime
     let duration = theEnd - time
-    testRead time duration $"{time} {duration}  WarnClippedTail"
-  do
+    testRead time duration $"{time} {duration}"
+  do // ClippedHead
     let time     = cbs.Segs.TailTime + _TimeSpan.FromMilliseconds 1
     let theEnd   = cbs.Segs.HeadTime + _TimeSpan.FromMilliseconds 1
     let duration = theEnd - time
-    testRead time duration $"{time} {duration}  WarnClippedHead"
-  do
+    testRead time duration $"{time} {duration}"
+  do // ClippedBothEnds
     let time     = cbs.Segs.TailTime - _TimeSpan.FromMilliseconds 1
     let theEnd   = cbs.Segs.HeadTime + _TimeSpan.FromMilliseconds 1
     let duration = theEnd - time
-    testRead time duration $"{time} {duration}  WarnClippedBothEnds"
-  do
+    testRead time duration $"{time} {duration}"
+  do // RangeOK
     let time     = cbs.Segs.TailTime
     let duration = cbs.Segs.Duration
     testRead time duration "OK - all of the data"
-  do
+  do // RangeOK
     let time     = cbs.Segs.TailTime + _TimeSpan.FromMilliseconds 1
     let duration = cbs.Segs.Duration - _TimeSpan.FromMilliseconds 2
     testRead time duration "OK -  all but the first and last 1"
-  do
+  do // RangeOK
     let time     = cbs.Segs.TailTime        + _TimeSpan.FromMilliseconds 1
     let duration = cbs.Segs.Oldest.Duration - _TimeSpan.FromMilliseconds 2
     testRead time duration "OK -  all but the first and last 1 of the oldest seg"
-  do
+  do // RangeOK
     let time     = cbs.Segs.Cur.TailTime + _TimeSpan.FromMilliseconds 1
     let duration = cbs.Segs.Cur.Duration - _TimeSpan.FromMilliseconds 2
     testRead time duration "OK -  all but the first and last 1 of the current seg"
@@ -189,18 +190,19 @@ let run inputStream = task {
     let ring = cbs.Ring
     for i in 0..32 do
       let frameCount  = uint32 (if i < 25 then  initialFrameCount else  2 * initialFrameCount)
+      let sampleCount = int frameCount * cbs.InChannelCount
       let durationMs  = 1000 * int frameCount / frameRate
       let adcTimeMs  =_DateTime.Now.Millisecond // 100
-      let iArray = makeArray startMs frameCount cbs.InChannelCount i adcTimeMs
-      let oArray = makeArray startMs frameCount cbs.InChannelCount i adcTimeMs
+      let iArray = makeArray sampleCount cbs.InChannelCount i adcTimeMs
+      let oArray = makeArray sampleCount cbs.InChannelCount i adcTimeMs
       let input  = getHandle iArray
       let output = getHandle oArray
       let _ = showGC (fun () -> callback input output frameCount &timeInfo statusFlags userDataPtr |> ignore )
-      // if i = 10 then runReadTests inputStream
-      // if i = 11 then runReadTests inputStream
-      if i = 15 then runReadTests inputStream
-      if i = 26 then runReadTests inputStream
-      if i = 31 then runReadTests inputStream
+      if i = 10 then runReadTests inputStream  // AtBegin
+      if i = 11 then runReadTests inputStream  // Moving
+      if i = 15 then runReadTests inputStream  // Chasing
+      if i = 26 then runReadTests inputStream  // Moving  with Segs.Cur.Offset non-0
+      if i = 31 then runReadTests inputStream  // Chasing with Segs.Cur.Offset non-0
       totalFrames <- totalFrames + int frameCount
       let totalDurationSec = float totalFrames / 1000.0
       timeInfo.inputBufferAdcTime <- totalDurationSec

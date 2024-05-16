@@ -1,6 +1,7 @@
 ﻿
 open System
 open System.Threading
+open BeesUtil.Ranges
 open FSharp.Control
 
 open PortAudioSharp
@@ -74,20 +75,19 @@ let saveMp3 (inputStream: InputStream) =
   printfn $"%A{startTime - _DateTime.Now}"
   let rec saveMp3File (time: _DateTime) =
     waitUntil (time + duration)
-    let resultEnum, deliveredTime, deliveredDuration as result = inputStream.read time duration acceptOneDelivery
+    let result = inputStream.read time duration 
     let save() =
     //   saveAsMp3 "save" inSampleRate inChannelCount (samples: float32[])
       ()
-    match resultEnum with
-    | InputStreamGetResult.ErrorTimeout       
-    | InputStreamGetResult.ErrorBeforeData    
-    | InputStreamGetResult.ErrorAfterData      ->  printfn $"%A{deliveredTime}  %A{deliveredDuration} %A{resultEnum}"
-    | InputStreamGetResult.WarnClippedBothEnds
-    | InputStreamGetResult.WarnClippedTail    
-    | InputStreamGetResult.WarnClippedHead    
-    | InputStreamGetResult.AsRequested         ->  printfn $"%A{deliveredTime}  %A{deliveredDuration} %A{resultEnum}"
-                                                   save()
-    | _                                        ->  failwith "unkonwn enum"
+    match result.RangeClip with
+    | RangeClip.BeforeData    
+    | RangeClip.AfterData       ->  printfn $"%A{result.Time}  %A{result.Duration} %A{result.RangeClip}"
+    | RangeClip.ClippedBothEnds
+    | RangeClip.ClippedTail    
+    | RangeClip.ClippedHead    
+    | RangeClip.RangeOK         ->  printfn $"%A{result.Time}  %A{result.Duration} %A{result.RangeClip}"
+                                    save()
+    | _                         ->  failwith "unkonwn result code"
     saveMp3File (time + duration)
   saveMp3File startTime
 

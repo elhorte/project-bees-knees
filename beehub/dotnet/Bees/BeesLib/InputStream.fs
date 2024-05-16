@@ -105,6 +105,7 @@ type Segs = {
   member this.Oldest    = if this.Old.Active then this.Old else this.Cur
   member this.TailInAll = this.Oldest.TailInAll
   member this.HeadInAll = this.Cur   .HeadInAll
+  member this.NFrames   = this.HeadInAll - this.TailInAll
   member this.TailTime  = this.Oldest.TailTime
   member this.HeadTime  = this.Cur   .HeadTime
   member this.Duration  = this.HeadTime - this.TailTime
@@ -153,8 +154,9 @@ type CbState = {
     let nSamples        = nFrames       * cbs.InChannelCount
     Array.Fill(cbs.Ring, 9999999f, srcFrameIndexNS, nSamples)
   
-  member cbs.PrintRing dataChar msg =
-      let empty = '.'
+  member cbs.PrintRing msg =
+      let empty    = '.'
+      let dataChar = '◾'
       let getsNum i = i % 10 = 0
       let mutable ring =
         let num i = char ((i / 10 % 10).ToString())
@@ -177,7 +179,7 @@ type CbState = {
       String ring
   
   member cbs.Print newTail newHead msg =
-    let sRing = cbs.PrintRing '◾' msg
+    let sRing = cbs.PrintRing msg
     let sText =
       let sSeqNum  = sprintf "%2d" cbs.SeqNums.N1
       let sX       = if String.length msg > 0 then  "*" else  " "
@@ -219,8 +221,8 @@ let mutable thresh = 0
 let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) statusFlags userDataPtr =
   let (input : IntPtr) = input
   let (output: IntPtr) = output
-  let handle  = GCHandle.FromIntPtr(userDataPtr)
-  let cbs     = handle.Target :?> CbState
+  let handle   = GCHandle.FromIntPtr(userDataPtr)
+  let cbs      = handle.Target :?> CbState
   let nFrames = int frameCount
   cbs.SeqNums.EnterUnstable()
 
@@ -322,25 +324,28 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The InputStream class
 
+type RingSpan = {
+  Index   : int  // in frames
+  NFrames : int  } with
+  override t.ToString() = $"[ I %d{t.Index} N %d{t.NFrames} ]"
+
+type Parts = { P : RingSpan array } with
+  override t.ToString() =
+    match t.P.Length with
+    | 0 -> "(no parts)"
+    | 1 -> $"%A{t.P[0].ToString()}" 
+    | 2 -> $"%A{t.P[0].ToString()} %A{t.P[1].ToString()}" 
+    | _ -> "(bad parts)"
+
 type ReadResult = {
   RangeClip : RangeClip  // any clipping that happened
   Ring      : float32[]  // source array
-  Length    : int        // result length
-  NChannels : int        // nChannels
+  NSamples  : int        // result array length
   Time      : _DateTime  // time
   Duration  : _TimeSpan  // duration
-  Parts     : ( int      // indexNF into Ring
-              * int )    // nFrames
-              array }
+  Parts     : Parts     } with
 
-type InputStreamGetResult =
-  | ErrorTimeout        = 0
-  | ErrorBeforeData     = 1
-  | ErrorAfterData      = 2
-  | WarnClippedBothEnds = 3
-  | WarnClippedTail     = 4
-  | WarnClippedHead     = 5
-  | AsRequested         = 6
+  override t.ToString() = $"%d{t.Parts.P.Length} %A{t.RangeClip} %d{t.NSamples} L %s{t.Parts.ToString()}"
 
 // initPortAudio() must be called before this constructor.
 type InputStream(beesConfig       : BeesConfig          ,
@@ -452,6 +457,8 @@ type InputStream(beesConfig       : BeesConfig          ,
 
   member this.AfterCallback() =
     let cbs = this.CbStateSnapshot()
+    if cbs.Simulating <> NotSimulating then ()
+    else
     if cbs.Segs.Cur.Head > thresh then
       thresh <- thresh + int (round (cbs.FrameRate))
       let sinceStart = cbs.TimeInfo.inputBufferAdcTime - this.PaStream.Time
@@ -461,8 +468,8 @@ type InputStream(beesConfig       : BeesConfig          ,
   member private is.debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
     Console.Write ","
     
-  member this.durationOf nFrames = durationOf beesConfig.InFrameRate nFrames
-  member this.nFramesOf duration = nFramesOf  beesConfig.InFrameRate duration
+  member this.durationOf nFrames = durationOf this.CbState.FrameRate nFrames
+  member this.nFramesOf duration = nFramesOf  this.CbState.FrameRate duration
 
   member this.tailTime = this.CbStateLatest.Segs.TailTime
   member this.headTime = this.CbStateLatest.Segs.HeadTime
@@ -490,23 +497,26 @@ type InputStream(beesConfig       : BeesConfig          ,
     if cbs.Simulating = NotSimulating then Console.Write "R"
     let indexBeginArg = nFramesOf cbs.FrameRate (time - cbs.StreamAdcStartTime)
     let nFramesArg    = nFramesOf cbs.FrameRate duration
-    let rangeClip, indexBegin, nFrames = clipRange indexBeginArg nFramesArg cbs.Segs.TailInAll cbs.Segs.HeadInAll
-    let duration = durationOf cbs.FrameRate nFrames
-    let time     = cbs.StreamAdcStartTime + (durationOf cbs.FrameRate indexBegin)
-    let duration = durationOf cbs.FrameRate nFrames
-    let getPart seg =
-      let _, indexBegin, nFrames = clipRange indexBegin nFrames cbs.Segs.TailInAll cbs.Segs.HeadInAll
-      indexBegin, nFrames
+    let rangeClip, indexBeginInAll, nFramesInAll = clipRange indexBeginArg nFramesArg cbs.Segs.TailInAll cbs.Segs.NFrames
+    let time     = cbs.StreamAdcStartTime + (durationOf cbs.FrameRate indexBeginInAll)
+    let duration = durationOf cbs.FrameRate nFramesInAll
+    let getPart (seg: Seg) =
+      let _, indexBegin, nFrames = clipRange indexBeginInAll nFramesInAll seg.TailInAll seg.NFrames
+      { Index = indexBegin - seg.Offset; NFrames = nFrames } // Index, indexBegin, and seg.Offset are all in frames not samples
+    let parts = [|
+      match rangeClip with
+      | RangeClip.BeforeData | RangeClip.AfterData -> ()
+      | _ ->
+      if cbs.Segs.Old.Active then
+        getPart cbs.Segs.Old
+      getPart cbs.Segs.Cur  |]
     let result = {
       RangeClip = rangeClip
       Ring      = cbs.Ring
-      Length    = nFrames
-      NChannels = this.BeesConfig.InChannelCount
+      NSamples  = nFramesInAll * cbs.InChannelCount
       Time      = time
       Duration  = duration
-      Parts     = [|
-        if cbs.Segs.Old.Active then getPart cbs.Segs.Old
-                                    getPart cbs.Segs.Cur  |] }
+      Parts     = { P = parts } }
     result
 
   member this.Read (from: _DateTime, duration: _TimeSpan) =

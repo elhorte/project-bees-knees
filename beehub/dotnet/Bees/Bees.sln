@@ -52,8 +52,6 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestSeqNums", "TestSeqNums\
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestMp3Save", "TestMp3Save\TestMp3Save.fsproj", "{5F6CE8AD-0E86-4515-A276-16542D957FD7}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestMeasures", "TestMeasures\TestMeasures.fsproj", "{09EDC955-359A-4237-840C-EAF2AF34EB79}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -164,9 +162,5 @@ Global
 		{5F6CE8AD-0E86-4515-A276-16542D957FD7}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5F6CE8AD-0E86-4515-A276-16542D957FD7}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5F6CE8AD-0E86-4515-A276-16542D957FD7}.Release|Any CPU.Build.0 = Release|Any CPU
-		{09EDC955-359A-4237-840C-EAF2AF34EB79}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{09EDC955-359A-4237-840C-EAF2AF34EB79}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{09EDC955-359A-4237-840C-EAF2AF34EB79}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{09EDC955-359A-4237-840C-EAF2AF34EB79}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

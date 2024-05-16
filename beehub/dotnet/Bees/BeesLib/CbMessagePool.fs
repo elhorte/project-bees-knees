@@ -26,12 +26,12 @@ let nFramesOf  frameRate duration = int (round ((duration: _TimeSpan).TotalMicro
 // Seg class, used by InputStream.  The ring buffer can comprise 0, 1, or 2 segs.
 
 type Seg = {
-  mutable Tail     : int  // frames not samples
-  mutable Head     : int  // frames not samples
-  mutable Offset   : int  // totalFrames at beginning of seg
-  mutable Start    : _DateTime
-  NRingFrames      : int
-  FrameRate        : double  }
+  mutable Tail   : int  // frames not samples
+  mutable Head   : int  // frames not samples
+  mutable Offset : int  // totalFrames at beginning of seg
+  mutable Start  : _DateTime
+  NRingFrames    : int
+  FrameRate      : double  }
   
   with
 
@@ -41,12 +41,12 @@ type Seg = {
       Tail        = tail
       Head        = head
       Offset      = 0
-      Start       = start        // set only once
-      NRingFrames = nRingFrames  // set only once
-      FrameRate   = frameRate  } // set only once
+      Start       = start        // set only once, at first callback
+      NRingFrames = nRingFrames
+      FrameRate   = frameRate  }
     seg
 
-  static member NewEmpty (nRingFrames: int) (frameRate: double) =  Seg.New 0 0 tbdDateTime nRingFrames frameRate
+  static member NewEmpty nRingFrames frameRate =  Seg.New 0 0 tbdDateTime nRingFrames frameRate 
 
   member seg.Copy() = { seg with Tail = seg.Tail }
 
