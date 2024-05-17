@@ -14,7 +14,6 @@ open BeesUtil.DebugGlobals
 open BeesUtil.PortAudioUtils
 open BeesLib.InputStream
 open BeesLib.BeesConfig
-open BeesLib.CbMessagePool
 
 // See Theory of Operation comment before main at the end of this file.
 
@@ -87,25 +86,22 @@ let runReadTests inputStream =
   let cbs = (inputStream: InputStream).CbState
   let testRead time (duration:_TimeSpan) msg =
     let checkDeliveredArray deliveredArray deliveredTime deliveredDuration =
-      let compare i frame =
-        let i = i / cbs.InChannelCount
-        let deliveredMs   = decomposeMs frame
+      let compare i sample =
+        let deliveredMs   = decomposeMs sample
         let deliveredTime = deliveredTime: _DateTime
-        let msExpected    = deliveredTime.Millisecond + i
-        deliveredMs = msExpected
-  //  deliveredArray
-  //  |> Seq.mapi compare
-  //  |> Seq.forall id
-      let rec check i  : bool =
-         if i < Array.length deliveredArray then
-           let data = deliveredArray[i]
-           let msDelivered = decomposeMs data
-           let msExpected  = deliveredTime.Millisecond + (i / cbs.InChannelCount)
-           if msDelivered = msExpected then  check (i + 1)
-                                       else  false
-         else
-           true
-      check 0
+        let expectedMs    = deliveredTime.Millisecond + i / cbs.InChannelCount
+        deliveredMs = expectedMs
+      deliveredArray
+      |> Seq.mapi compare
+      |> Seq.forall id
+      // let rec check i  : bool =
+      //    if i < Array.length deliveredArray then
+      //      let frame = deliveredArray[i]
+      //      if compare i frame then  check (i + 1)
+      //                         else  false
+      //    else
+      //      true
+      // check 0
     let mutable destIndexNS = 0
     let mutable nParts = 0
     let result = inputStream.read time duration
@@ -176,7 +172,7 @@ let run inputStream = task {
   inputStream.Start()
   
   let test() =
-    printfn "Simulating callbacks ...\n"
+    printfn $"Simulating callbacks. Channels: %d{cbs.InChannelCount}\n"
     let startMs = 100
     let initialFrameCount = 5
     let frameRate = 1000

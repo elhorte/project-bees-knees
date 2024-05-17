@@ -7,7 +7,6 @@ open BeesUtil.DateTimeShim
 
 open BeesUtil.DebugGlobals
 open BeesLib.BeesConfig
-open BeesLib.CbMessagePool
 open BeesLib.InputStream
 
 // def recording_worker_thread(record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
