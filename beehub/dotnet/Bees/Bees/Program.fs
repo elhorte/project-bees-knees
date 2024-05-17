@@ -12,9 +12,9 @@ open BeesUtil.DateTimeShim
 open BeesUtil.DebugGlobals
 open BeesUtil.PortAudioUtils
 open BeesUtil.DateTimeCalculations
+open BeesUtil.Mp3
 open BeesLib.InputStream
 open BeesLib.BeesConfig
-open BeesLib.CbMessagePool
 open BeesLib.Keyboard
 
 // See Theory of Operation comment before main at the end of this file.
@@ -73,11 +73,12 @@ let saveMp3 (inputStream: InputStream) =
   let duration = _TimeSpan.FromSeconds intervalSec
   let startTime = getNextSecondBoundary intervalSec _DateTime.Now
   printfn $"%A{startTime - _DateTime.Now}"
-  let rec saveMp3File (time: _DateTime) =
+  let rec saveMp3File (time: _DateTime) (readResult: ReadResult) =
     waitUntil (time + duration)
     let result = inputStream.read time duration 
     let save() =
-    //   saveAsMp3 "save" inSampleRate inChannelCount (samples: float32[])
+      // let samples = inputStream.MakeReadResult readResult
+      // saveAsMp3 "save" inputStream.BeesConfig.InFrameRate inputStream.BeesConfig.InChannelCount (samples: float32[])
       ()
     match result.RangeClip with
     | RangeClip.BeforeData    
@@ -86,7 +87,7 @@ let saveMp3 (inputStream: InputStream) =
     | RangeClip.ClippedTail    
     | RangeClip.ClippedHead    
     | RangeClip.RangeOK         ->  printfn $"%A{result.Time}  %A{result.Duration} %A{result.RangeClip}"
-                                    save()
+                                    save result
     | _                         ->  failwith "unkonwn result code"
     saveMp3File (time + duration)
   saveMp3File startTime
@@ -110,10 +111,9 @@ let run inputStream = task {
 // pro forma.  Actually set in main.
 let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 
+
 //–––––––––––––––––––––––––––––––––––––
 // Main
-
-
 
 [<EntryPoint>]
 let main _ =
@@ -122,25 +122,25 @@ let main _ =
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation false
   beesConfig <- {
-    LocationId                  = 1
-    HiveId                      = 1
-    PrimaryDir                  = "primary"
-    MonitorDir                  = "monitor"
-    PlotDir                     = "plot"
-    InputStreamAudioDuration    = _TimeSpan.FromMinutes 16
-    InputStreamRingGapDuration  = _TimeSpan.FromSeconds 1
-    SampleSize                  = sizeof<SampleType>
-    InChannelCount              = inputParameters.channelCount
-    InFrameRate                 = sampleRate  }
+    LocationId                 = 1
+    HiveId                     = 1
+    PrimaryDir                 = "primary"
+    MonitorDir                 = "monitor"
+    PlotDir                    = "plot"
+    InputStreamAudioDuration   = _TimeSpan.FromMinutes 16
+    InputStreamRingGapDuration = _TimeSpan.FromSeconds 1
+    SampleSize                 = sizeof<SampleType>
+    InChannelCount             = inputParameters.channelCount
+    InFrameRate                = sampleRate  }
   printBeesConfig beesConfig
   keyboardInputInit()
   try
-      let inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging, NotSimulating)
-      let t = task {
-        do! run inputStream 
-        inputStream.CbState.Logger.Print "Log:" }
-      t.Wait() 
-      printfn "Task done." 
+    let inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging, NotSimulating)
+    let t = task {
+      do! run inputStream 
+      inputStream.CbState.Logger.Print "Log:" }
+    t.Wait() 
+    printfn "Task done." 
   finally
     printfn "Exiting with 0."
   0

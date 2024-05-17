@@ -5,7 +5,6 @@ open System.Threading
 open DateTimeDebugging
 open BeesUtil.DateTimeShim
 
-open BeesUtil.DebugGlobals
 open BeesLib.BeesConfig
 open BeesLib.InputStream
 

@@ -21,8 +21,8 @@ open BeesLib.BeesConfig
 open CSharpHelpers
 
 
-let tbdDateTime = _DateTime.BadValue
-let tbdTimeSpan = _TimeSpan.BadValue
+let tbdDateTime = _DateTime.MaxValue  // .BadValue
+let tbdTimeSpan = _TimeSpan.MaxValue  // .BadValue
 
 
 let durationOf frameRate nFrames  = _TimeSpan.FromSeconds (float nFrames / frameRate)
