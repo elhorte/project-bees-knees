@@ -7,8 +7,8 @@ public struct _DateTime : IComparable {
   private _DateTime(int ms) => Millisecond = ms;
 
   public static _DateTime MinValue => new _DateTime(0);
-  public static _DateTime MaxValue => new _DateTime(int.MaxValue);
-  public static _DateTime BadValue => MaxValue;
+  public static _DateTime BadValue => new _DateTime(99999);
+  public static _DateTime MaxValue => BadValue;
   public static _DateTime Now { get; set; }
   static _DateTime() { Now = new _DateTime(100); }
   public static _DateTime UtcNow   => new _DateTime(100);
@@ -39,7 +39,8 @@ public struct _TimeSpan  : IComparable {
   public static _TimeSpan Zero     => new _TimeSpan(0);
   public static _TimeSpan MinValue => new _TimeSpan(0);
   public static _TimeSpan BadValue => _TimeSpan.FromSeconds(99.999999);
-  
+  public static _TimeSpan MaxValue => BadValue;
+
   public static _TimeSpan FromMilliseconds(double s) => new _TimeSpan(s);
   public static _TimeSpan FromMinutes     (double s) => new _TimeSpan(s * 1000.0 * 60);
   public static _TimeSpan FromSeconds     (double s) => new _TimeSpan(s * 1000.0);

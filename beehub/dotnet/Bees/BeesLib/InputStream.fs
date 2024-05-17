@@ -405,12 +405,13 @@ type Parts = { P : RingSpan array } with
     | _ -> "(bad parts)"
 
 type ReadResult = {
-  RangeClip : RangeClip  // any clipping that happened
-  Ring      : float32[]  // source array
-  NSamples  : int        // result array length
-  Time      : _DateTime  // time
-  Duration  : _TimeSpan  // duration
-  Parts     : Parts     } with
+  Ring           : float32[]  // source array
+  InChannelCount : int
+  RangeClip      : RangeClip  // any clipping that happened
+  NSamples       : int        // result array length
+  Time           : _DateTime  // time
+  Duration       : _TimeSpan  // duration
+  Parts          : Parts     } with
 
   override t.ToString() = $"%d{t.Parts.P.Length} %A{t.RangeClip} %d{t.NSamples} L %s{t.Parts.ToString()}"
 
@@ -578,16 +579,32 @@ type InputStream(beesConfig       : BeesConfig          ,
         getPart cbs.Segs.Old
       getPart cbs.Segs.Cur  |]
     let result = {
-      RangeClip = rangeClip
-      Ring      = cbs.Ring
-      NSamples  = nFramesInAll * cbs.InChannelCount
-      Time      = time
-      Duration  = duration
-      Parts     = { P = parts } }
+      Ring           = cbs.Ring
+      InChannelCount = cbs.InChannelCount 
+      RangeClip      = rangeClip
+      NSamples       = nFramesInAll * cbs.InChannelCount
+      Time           = time
+      Duration       = duration
+      Parts          = { P = parts } }
     result
 
   member this.Read (from: _DateTime, duration: _TimeSpan) =
     this.read from duration
+
+  member this.CopyFromReadResult result =
+    let mutable destIndexNS = 0
+    let mutable nParts = 0
+    let deliveredArray = Array.create<float32> result.NSamples 12345678.0f
+    let copyResultPart { Index = indexNF; NFrames = nFrames } =
+      let indexNS  = indexNF * result.InChannelCount
+      let nSamples = nFrames * result.InChannelCount
+      if indexNS + nSamples > Array.length result.Ring then  printfn "asking for more than is there"
+      Array.Copy(result.Ring, indexNS, deliveredArray, destIndexNS, nSamples)
+      destIndexNS <- destIndexNS + nSamples
+      nParts <- nParts + 1
+    result.Parts.P
+    |> Array.iter copyResultPart
+    deliveredArray
     
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 

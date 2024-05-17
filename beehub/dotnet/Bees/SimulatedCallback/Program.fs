@@ -102,21 +102,8 @@ let runReadTests inputStream =
       //    else
       //      true
       // check 0
-    let mutable destIndexNS = 0
-    let mutable nParts = 0
     let result = inputStream.read time duration
-    let deliveredArray = Array.create<float32> result.NSamples 12345678.0f
-    let copyResultPart { Index = indexNF; NFrames = nFrames } =
-      let printRange() = printfn $"ringLen %d{result.Ring.Length} end %d{indexNF + nFrames} index %d{indexNF}  length %d{nFrames}  time %A{time}  duration %A{duration}"
-      // printRange()
-      let indexNS  = indexNF * cbs.InChannelCount
-      let nSamples = nFrames * cbs.InChannelCount
-      if indexNS + nSamples > Array.length result.Ring then  printfn "asking for more than is there"
-      Array.Copy(result.Ring, indexNS, deliveredArray, destIndexNS, nSamples)
-      destIndexNS <- destIndexNS + nSamples
-      nParts <- nParts + 1
-    result.Parts.P
-    |> Array.iter copyResultPart
+    let deliveredArray = inputStream.CopyFromReadResult result
     let sPassFail = if checkDeliveredArray deliveredArray result.Time result.Duration then  "pass" else  "fail"
     printfn $"%s{sPassFail} – %s{result.ToString()} %s{msg}"
     ()
