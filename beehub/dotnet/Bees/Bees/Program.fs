@@ -6,7 +6,6 @@ open FSharp.Control
 
 open PortAudioSharp
 
-open DateTimeDebugging
 open BeesUtil.DateTimeShim
 
 open BeesUtil.DebugGlobals
@@ -51,46 +50,53 @@ let prepareArgumentsForStreamCreation verbose =
 
 let CreateSampleArray nFrames nChannels = Array.zeroCreate (nFrames * nChannels)
 
-/// save a 5-second mp3 file every 10 seconds
-let saveMp3 (inputStream: InputStream) =
-  let mutable deliveredArray: float32[] = [||] // samples
-  let mutable destIndexNS = 0
-  let mutable nDeliveries = 0
-  let acceptOneDelivery (array, sizeNF, indexNF, nFrames, nChannels, time, duration) =
-    let printRange() = printfn $"index %d{indexNF}  length %d{nFrames}  time %A{time}  duration %A{duration}"
-    printRange()
-    // if destIndexNS = 0 then  deliveredArray <- CreateSampleArray sizeNF nChannels
-    // copy to deliveredArray
-    // let inSampleRate   = inputStream.BeesConfig.InSampleRate
-    // let inChannelCount = inputStream.BeesConfig.InChannelCount
-  let intervalSec = 5
-  //  ...|....|....|....
+/// <summary>
+/// Saves to an MP3 file from the inputStream buffer at given time for a given duration.
+/// </summary>
+/// <param name="inputStream">The audio input stream to save.</param>
+/// <param name="time">The starting time of the save operation.</param>
+/// <param name="duration">The duration of each saved audio file.</param>
+let rec saveMp3File (inputStream: InputStream) (time: _DateTime) duration =
+  let save readResult =
+    let samplesArray = InputStream.CopyFromReadResult readResult
+//  saveAsMp3 "save" readResult.FrameRate readResult.InChannelCount samplesArray
+    ()
+  Console.WriteLine (sprintf $"saveMp3File %A{time.TimeOfDay} %A{duration}")
+  let readResult = inputStream.read time duration 
+  match readResult.RangeClip with
+  | RangeClip.BeforeData    
+  | RangeClip.AfterData       ->  printfn $"%A{readResult.Time}  %A{readResult.Duration} %A{readResult.RangeClip}"
+  | RangeClip.ClippedBothEnds
+  | RangeClip.ClippedTail    
+  | RangeClip.ClippedHead    
+  | RangeClip.RangeOK         ->  Console.WriteLine (sprintf $"%A{readResult.Time.TimeOfDay}  %A{readResult.Duration} %A{readResult.RangeClip}")
+                                  save readResult
+  | _                         ->  failwith "unkonwn result code"
+
+/// <summary>
+/// Periodically saves the audio stream to an MP3 file for a specified duration and period.
+/// </summary>
+/// <param name="inputStream">The audio input stream to save.</param>
+/// <param name="duration">The duration of each saved audio file.</param>
+/// <param name="period">The interval between each save.</param>
+let saveMp3Periodically (inputStream: InputStream) duration period =
+  //  ....|.....|.....|....
   //   |<––––––––– now
-  //          |<– delayUntil startTime
-  //     |––––| mp3 file 1
-  //               |<– delayUntil startTime + intervalSec 
-  //          |––––| mp3 file 2
-  let duration = _TimeSpan.FromSeconds intervalSec
-  let startTime = getNextSecondBoundary intervalSec _DateTime.Now
-  printfn $"%A{startTime - _DateTime.Now}"
-  let rec saveMp3File (time: _DateTime) (readResult: ReadResult) =
-    waitUntil (time + duration)
-    let result = inputStream.read time duration 
-    let save() =
-      // let samples = inputStream.MakeReadResult readResult
-      // saveAsMp3 "save" inputStream.BeesConfig.InFrameRate inputStream.BeesConfig.InChannelCount (samples: float32[])
-      ()
-    match result.RangeClip with
-    | RangeClip.BeforeData    
-    | RangeClip.AfterData       ->  printfn $"%A{result.Time}  %A{result.Duration} %A{result.RangeClip}"
-    | RangeClip.ClippedBothEnds
-    | RangeClip.ClippedTail    
-    | RangeClip.ClippedHead    
-    | RangeClip.RangeOK         ->  printfn $"%A{result.Time}  %A{result.Duration} %A{result.RangeClip}"
-                                    save result
-    | _                         ->  failwith "unkonwn result code"
-    saveMp3File (time + duration)
-  saveMp3File startTime
+  //      |<– startTIme
+  //       saveFrom startTime
+  //         |<– delayUntil saveTime + duration (actually, slightly after)
+  //      |––|   save file 1
+  //             saveFrom saveTime + period
+  //               |<– delayUntil saveTime + duration 
+  //            |––|   save file 2
+  let periodSec = (period: TimeSpan).Seconds
+  let startTime = getNextSecondBoundary periodSec _DateTime.Now
+  printfn $"startTime %A{startTime.TimeOfDay}  slop %A{startTime - _DateTime.Now}"
+  let rec saveFrom saveTime =
+    waitUntil (saveTime + duration)
+    saveMp3File inputStream saveTime duration
+    saveFrom (saveTime + period)
+  saveFrom startTime
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run inputStream = task {
@@ -98,7 +104,7 @@ let run inputStream = task {
   inputStream.Start()
   use cts = new CancellationTokenSource()
   printfn "Reading..."
-  saveMp3 inputStream
+  saveMp3Periodically inputStream (TimeSpan.FromSeconds 2)  (TimeSpan.FromSeconds 5)
   do! keyboardKeyInput "" cts
   printfn "Stopping..."    ; inputStream.Stop()
   printfn "Stopped"

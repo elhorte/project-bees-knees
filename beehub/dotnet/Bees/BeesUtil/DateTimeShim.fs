@@ -1,16 +1,21 @@
 module BeesUtil.DateTimeShim
 
-// Every usage of this file must have both of these:
-//   open DateTimeDebugging
-//   open BeesUtil.DateTimeShim
 
-// To use System.DateTime and System.TimeSpan, 
-// comment these out
-open DateTimeDebugging
-let UsingFakeDateTime = true
 
-// Or to use the DateTimeDebugging.cs versions of _DateTime and _TimeSpan,
-// comment these out 
-// type _DateTime = System.DateTime
-// type _TimeSpan = System.TimeSpan
+#if USE_FAKE_DATE_TIME
+
+// open DateTimeDebugging
+
+// let UsingFakeDateTime = true
+
+type _DateTime = DateTimeDebugging._DateTime
+type _TimeSpan = DateTimeDebugging._TimeSpan
+
+#else
+
 // let UsingFakeDateTime = false
+
+type _DateTime = System.DateTime
+type _TimeSpan = System.TimeSpan
+
+#endif

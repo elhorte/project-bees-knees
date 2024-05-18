@@ -5,7 +5,6 @@ open System.Threading.Tasks
 
 open PortAudioSharp
 
-open DateTimeDebugging
 open BeesUtil.DateTimeShim
 
 open BeesUtil.DebugGlobals

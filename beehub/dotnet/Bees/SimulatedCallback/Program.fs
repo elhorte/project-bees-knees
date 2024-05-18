@@ -7,7 +7,6 @@ open FSharp.Control
 
 open PortAudioSharp
 
-open DateTimeDebugging
 open BeesUtil.DateTimeShim
 
 open BeesUtil.DebugGlobals
@@ -103,7 +102,7 @@ let runReadTests inputStream =
       //      true
       // check 0
     let result = inputStream.read time duration
-    let deliveredArray = inputStream.CopyFromReadResult result
+    let deliveredArray = InputStream.CopyFromReadResult result
     let sPassFail = if checkDeliveredArray deliveredArray result.Time result.Duration then  "pass" else  "fail"
     printfn $"%s{sPassFail} – %s{result.ToString()} %s{msg}"
     ()
@@ -157,7 +156,7 @@ let run inputStream = task {
   let inputStream = (inputStream: InputStream)
   let cbs         = inputStream.CbState
   inputStream.Start()
-  
+
   let test() =
     printfn $"Simulating callbacks. Channels: %d{cbs.InChannelCount}\n"
     let startMs = 100

@@ -3,7 +3,6 @@ open System
 
 open PortAudioSharp
 
-open DateTimeDebugging
 open BeesUtil.DateTimeShim
 
 open BeesUtil.DebugGlobals

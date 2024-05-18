@@ -4,7 +4,6 @@ open System.Runtime.InteropServices
 
 open PortAudioSharp
 
-open DateTimeDebugging
 open BeesUtil.DateTimeShim
 
 open BeesUtil.DebugGlobals

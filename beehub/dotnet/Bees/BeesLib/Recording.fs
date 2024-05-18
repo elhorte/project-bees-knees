@@ -2,7 +2,6 @@ module BeesLib.Recording
 
 open System.Threading
 
-open DateTimeDebugging
 open BeesUtil.DateTimeShim
 
 open BeesLib.BeesConfig

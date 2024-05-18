@@ -2,7 +2,6 @@ module BeesLib.BeesConfig
 
 open System.Text
 
-open DateTimeDebugging
 open BeesUtil.DateTimeShim
 
 

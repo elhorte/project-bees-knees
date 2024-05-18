@@ -3,7 +3,6 @@ module BeesUtil.Logger
 open System
 open System.Text
 
-open DateTimeDebugging
 open BeesUtil.DateTimeShim
 
 type LogEntry(seqNum: uint64, timestamp: _DateTime, message: string, data: obj) =
