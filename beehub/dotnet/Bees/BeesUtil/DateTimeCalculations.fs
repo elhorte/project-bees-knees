@@ -13,8 +13,12 @@ let addSeconds dateTime sec =
   dateTime.AddSeconds sec
 #endif
 
-let getMostRecentSecondBoundary sec (from: _DateTime) =
-  addSeconds from (-double(from.Second % sec))
+let truncateToSecond (d: _DateTime) =
+  _DateTime(d.Year, d.Month, d.Day, d.Hour, d.Minute, d.Second)
+
+let getMostRecentSecondBoundary sec (d: DateTime) = 
+    addSeconds d ((float d.Second % float sec) * -1.0)
+    |> truncateToSecond
 
 let getNextSecondBoundary sec (from: _DateTime) =
   let dt = getMostRecentSecondBoundary sec from

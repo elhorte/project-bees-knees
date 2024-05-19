@@ -16,6 +16,7 @@ open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
 open BeesUtil.SeqNums
 open BeesUtil.Ranges
+open BeesUtil.DateTimeCalculations
 open BeesLib.BeesConfig
 open CSharpHelpers
 
@@ -308,6 +309,7 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
     _DateTime.Now - timeTilNow
   cbs.BlockAdcStartTime <- inputBuferAdcDateTime
   if cbs.StreamAdcStartTime = tbdDateTime then
+//  Console.WriteLine "first callback"
     cbs.StreamAdcStartTime <- inputBuferAdcDateTime
     cbs.Segs.Old.Start     <- inputBuferAdcDateTime
     cbs.Segs.Cur.Start     <- inputBuferAdcDateTime
@@ -511,7 +513,7 @@ type InputStream(beesConfig       : BeesConfig          ,
     if this.CbState.Simulating <> NotSimulating then ()
     else
     paTryCatchRethrow (fun() -> this.PaStream.Start() )
-    printfn $"InputStream size: {this.NRingBytes / 1_000_000} MB for {this.RingDuration}"
+    printfn $"InputStream size:    {this.NRingBytes / 1_000_000} MB for {this.RingDuration}"
     printfn $"InputStream nFrames: {this.CbState.NRingFrames}"
 
   member this.Stop() =
@@ -524,14 +526,15 @@ type InputStream(beesConfig       : BeesConfig          ,
               callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
 
   member this.AfterCallback() =
-    let cbs = this.CbStateSnapshot()
+    let cbs = this.CbStateSnapshot
     if cbs.Simulating <> NotSimulating then ()
     else
     if cbs.Segs.Cur.Head > thresh then
       thresh <- thresh + int (round (cbs.FrameRate))
       let sinceStart = cbs.TimeInfo.inputBufferAdcTime - this.PaStream.Time
-      Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / int cbs.FrameCount} %10f{sinceStart}"
-     // if cbState.Simulating = NotSimulating then Console.Write ","
+  //  Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / int cbs.FrameCount} %10f{sinceStart}"
+  //  if cbState.Simulating = NotSimulating then Console.Write ","
+      ()
 
   member private is.debuggingSubscriber cbMessage subscriptionId unsubscriber  : unit =
     Console.Write ","
@@ -539,13 +542,21 @@ type InputStream(beesConfig       : BeesConfig          ,
   member this.durationOf nFrames = durationOf this.CbState.FrameRate nFrames
   member this.nFramesOf duration = nFramesOf  this.CbState.FrameRate duration
 
-  member this.tailTime = this.CbStateLatest.Segs.TailTime
-  member this.headTime = this.CbStateLatest.Segs.HeadTime
+  member this.TailTime = this.CbStateSnapshot.Segs.TailTime
+  member this.HeadTime = this.CbStateSnapshot.Segs.HeadTime
   
-  member this.CbStateSnapshot() : CbState =
+  /// Wait until the buffer contains the given DateTime.
+  member this.WaitUntil dateTime =
+    let rec loop() =
+      if this.HeadTime < dateTime then
+        waitUntil dateTime
+        loop()
+    loop()
+    
+  member this.CbStateSnapshot : CbState =
     let copyCbState() = this.CbState.Copy()
     let timeout = TimeSpan.FromMicroseconds 1
-    match this.CbState.SeqNums.WhenStable copyCbState timeout with
+    match this.CbState.SeqNums.WhenStableAndEntered timeout copyCbState with
     | OK cbState -> cbState
     | TimedOut s -> failwith "Timed out taking a snapshot of CbState" 
 
@@ -561,7 +572,7 @@ type InputStream(beesConfig       : BeesConfig          ,
   // time and duration of the range of the delivered data.
   // Synchronizatrion with the callback is handled by the CbStateSnapshot property without locking.
   member this.read (time: _DateTime) (duration: _TimeSpan)  : ReadResult =
-    let cbs = this.CbStateSnapshot()
+    let cbs = this.CbStateSnapshot
     if cbs.Simulating = NotSimulating then Console.Write "R"
     let indexBeginArg = nFramesOf cbs.FrameRate (time - cbs.StreamAdcStartTime)
     let nFramesArg    = nFramesOf cbs.FrameRate duration
@@ -656,7 +667,7 @@ type InputStream(beesConfig       : BeesConfig          ,
     // tailTime
 
   member private is.offsetOfDateTime (dateTime: _DateTime)  : Option<Seg * int> =
-    if not (is.tailTime <= dateTime && dateTime <= is.headTime) then Some (is.CbStateLatest.Segs.Cur, 1)
+    if not (is.TailTime <= dateTime && dateTime <= is.HeadTime) then Some (is.CbStateLatest.Segs.Cur, 1)
     else None
 
 

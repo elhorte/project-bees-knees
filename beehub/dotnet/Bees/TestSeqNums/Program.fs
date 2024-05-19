@@ -27,7 +27,7 @@ type Foo() =
   
   member this.CbStateSnapshot timeout  : SeqNumsResult<FooState> =
     let copyFS() = this.FS.Copy()
-    this.FS.SeqNums.WhenStable copyFS timeout
+    this.FS.SeqNums.WhenStable timeout copyFS
 
 
 
@@ -42,7 +42,7 @@ let main _ =
   incrN2()
 
   let test work =
-    match foo.FS.SeqNums.WhenStableInternal work timeout 3 Console.WriteLine with
+    match foo.FS.SeqNums.WhenStableInternal false timeout work 3 Console.WriteLine with
     | OK result  -> printfn "%A" result
     | TimedOut s -> printfn $"Timed out %s{s}"
 

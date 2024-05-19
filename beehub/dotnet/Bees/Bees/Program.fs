@@ -59,7 +59,7 @@ let CreateSampleArray nFrames nChannels = Array.zeroCreate (nFrames * nChannels)
 let rec saveMp3File (inputStream: InputStream) (time: _DateTime) duration =
   let save readResult =
     let samplesArray = InputStream.CopyFromReadResult readResult
-//  saveAsMp3 "save" readResult.FrameRate readResult.InChannelCount samplesArray
+    saveAsMp3 "save" readResult.FrameRate readResult.InChannelCount samplesArray
     ()
   Console.WriteLine (sprintf $"saveMp3File %A{time.TimeOfDay} %A{duration}")
   let readResult = inputStream.read time duration 
@@ -81,7 +81,7 @@ let rec saveMp3File (inputStream: InputStream) (time: _DateTime) duration =
 /// <param name="period">The interval between each save.</param>
 let saveMp3Periodically (inputStream: InputStream) duration period =
   //  ....|.....|.....|....
-  //   |<––––––––– now
+  //   |<––––––––– Now
   //      |<– startTIme
   //       saveFrom startTime
   //         |<– delayUntil saveTime + duration (actually, slightly after)
@@ -90,10 +90,11 @@ let saveMp3Periodically (inputStream: InputStream) duration period =
   //               |<– delayUntil saveTime + duration 
   //            |––|   save file 2
   let periodSec = (period: TimeSpan).Seconds
-  let startTime = getNextSecondBoundary periodSec _DateTime.Now
+  let headTime = inputStream.HeadTime
+  let startTime = getNextSecondBoundary periodSec headTime
   printfn $"startTime %A{startTime.TimeOfDay}  slop %A{startTime - _DateTime.Now}"
   let rec saveFrom saveTime =
-    waitUntil (saveTime + duration)
+    inputStream.WaitUntil (saveTime + duration)
     saveMp3File inputStream saveTime duration
     saveFrom (saveTime + period)
   saveFrom startTime

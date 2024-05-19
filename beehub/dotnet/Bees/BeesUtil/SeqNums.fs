@@ -13,12 +13,13 @@ type SeqNumsResultInternal<'T> =
   | TimedOut_ of string
   | Trying
 
+let seqNumsInitValue = uint16 -1
 
 /// A pair of sequence numbers for producer/consumer synchronization without locking.
 
 type SeqNums = { mutable S : uint32 } with
 
-  static member New() =  SeqNums.Make (uint16 -1) (uint16 -1)
+  static member New() = SeqNums.Make seqNumsInitValue seqNumsInitValue
 
   /// Producer: enter the critical section
   member sn.EnterUnstable() =  let n1, n2 =  sn.GetPair() in sn.Set (n1 + 1us)  n2
@@ -26,8 +27,13 @@ type SeqNums = { mutable S : uint32 } with
   /// Producer: leave the critical section
   member sn.LeaveUnstable() =  let n1, n2 =  sn.GetPair() in sn.Set  n1        (n2 + 1us)
 
+  member sn.NeverEntered = sn.N1 = seqNumsInitValue
+    
   /// Consumer: call a function while not in the critical section; busywait and retry as necessary.
-  member sn.WhenStable (f: unit -> 'T) timeout  : SeqNumsResult<'T> =  sn.WhenStableInternal f timeout Int32.MaxValue ignore
+  member sn.WhenStable                timeout (f: unit -> 'T)                        : SeqNumsResult<'T> =
+         sn.WhenStableInternal false  timeout  f              Int32.MaxValue ignore
+  member sn.WhenStableAndEntered      timeout (f: unit -> 'T)                        : SeqNumsResult<'T> =
+         sn.WhenStableInternal true   timeout  f              Int32.MaxValue ignore
 
   /// Get one or the other sequence number.
   member sn.N1 =  sn.Get()        |> uint16
@@ -46,19 +52,21 @@ type SeqNums = { mutable S : uint32 } with
     if n1 = n2 then  true , n2
                else  false, uint16 -1 // value ignored
 
-  member sn.WhenStableInternal (f: unit -> 'T) timeout maxTries print  : SeqNumsResult<'T> =
+  member sn.WhenStableInternal needEntered timeout (f: unit -> 'T) maxTries print  : SeqNumsResult<'T> =
     let mutable result =  Trying
     let mutable nTries =  0
     let startTime =  DateTime.Now
     let tryAgain message =
-      let noGo =  maxTries > 0 && nTries >= maxTries || maxTries = 0 && DateTime.Now - startTime >= timeout
+      let noGo =  maxTries > 0 && nTries >= maxTries  ||  maxTries = 0 && DateTime.Now - startTime >= timeout
       if noGo then  result <- TimedOut_ message
               else  nTries <- nTries + 1
                     print $"Trying again %s{message}"
     let trying() =  match result with Trying -> true | _ -> false 
     while trying() do
+      let notReady = needEntered && sn.NeverEntered
       match sn.IsStable() with
       | false, _                 ->  tryAgain "while unstable"
+      | true , _ when notReady   ->  tryAgain "while never entered"
       | true , n2 ->
       let funResult =  f()
       match sn.GetPair() with
