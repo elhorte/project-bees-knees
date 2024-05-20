@@ -10,6 +10,7 @@
     <Compile Include="BeesConfig.fs" />
     <Compile Include="InputStream.fs" />
     <Compile Include="Recording.fs" />
+    <Compile Include="PlaySound.fs" />
     <Compile Include="Commands.fs" />
     <Compile Include="Keyboard.fs" />
   </ItemGroup>

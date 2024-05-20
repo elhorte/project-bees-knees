@@ -59,7 +59,10 @@ let CreateSampleArray nFrames nChannels = Array.zeroCreate (nFrames * nChannels)
 let rec saveMp3File (inputStream: InputStream) (time: _DateTime) duration =
   let save readResult =
     let samplesArray = InputStream.CopyFromReadResult readResult
-    saveAsMp3 "save" readResult.FrameRate readResult.InChannelCount samplesArray
+    let sDate = time.ToString("o")
+    let name1 = $"save-{sDate}.mp3"
+    let namefixed = name1.Replace(":", ".")
+    saveAsMp3 namefixed readResult.FrameRate readResult.InChannelCount samplesArray
     ()
   Console.WriteLine (sprintf $"saveMp3File %A{time.TimeOfDay} %A{duration}")
   let readResult = inputStream.read time duration 
