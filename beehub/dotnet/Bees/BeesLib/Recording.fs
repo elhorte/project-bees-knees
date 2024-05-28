@@ -113,7 +113,7 @@ let rangePosition todRange now =
 let doRecording r (inputStream: InputStream) =
   let makeFilename beesConfig r =
     let beesConfig = (beesConfig: BeesConfig)
-    let timestamp = _DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+    let timestamp = _DateTime.Now.ToString("yyyy-MM-dd HH.mm.ss")
     let name = $"%s{timestamp}_%s{r.label}_%A{r.recordingPeriod}_%A{r.interval}_{beesConfig.LocationId}_{beesConfig.HiveId}"
     $"%s{name}.{r.filenameExtension.ToLower()}"
   let downSampleIfNeeded r buf =

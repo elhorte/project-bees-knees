@@ -1,4 +1,4 @@
-﻿namespace DateTimeDebugging;
+﻿namespace DateTimeFakes;
 
 public struct _DateTime : IComparable {
   public int    Millisecond { get; }
