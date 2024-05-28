@@ -81,31 +81,29 @@ let generateBadInputsC() = seq {
   sec  0.001, CBad
   sec  0.000, CBad }
 
-let start = DateTime.MinValue
-            + (day 13)
-            + (hr  17)
-            + (min  9)
-            + (sec 14)
+let format = "M/d/yyyy HH:mm:ss"
+let provider = System.Globalization.CultureInfo.InvariantCulture
+let start = DateTime.ParseExact("1/13/0001 10:09:14", format, provider)
 
-let generatePrevGoodInputs() = seq {
+let generatePrevGoodInputs() = [|
   (start, (day  7.0)), Some (start - (day 6) - (sec start.Second) - (min start.Minute) - (hr start.Hour))
-  (start, (hr  12.0)), Some (start - (hr  5) - (sec start.Second) - (min start.Minute))
+  (start, (hr   8.0)), Some (start - (hr  2) - (sec start.Second) - (min start.Minute))
   (start, (min  6.0)), Some (start - (min 3) - (sec start.Second))
-  (start, (sec 10.0)), Some (start - (sec 4)) }
+  (start, (sec 10.0)), Some (start - (sec 4)) |]
 
-let generateNextGoodInputs() = seq {
+let generateNextGoodInputs() = [|
   (start, (day  7.0)), Some (start + (day 1) - (sec start.Second) - (min start.Minute) - (hr start.Hour))
-  (start, (hr  12.0)), Some (start + (hr  7) - (sec start.Second) - (min start.Minute))
+  (start, (hr   8.0)), Some (start + (hr  6) - (sec start.Second) - (min start.Minute))
   (start, (min  6.0)), Some (start + (min 3) - (sec start.Second))
-  (start, (sec 10.0)), Some (start + (sec 6)) }
+  (start, (sec 10.0)), Some (start + (sec 6)) |]
   
-let generatePrevBadInputs() = seq {
+let generateBadInputs() = [|
   (start, day 99.001), None
   (start, hr  23.001), None
   (start, min 59.001), None
   (start, sec 59.001), None
   (start, sec  0.001), None
-  (start, sec  0.000), None }
+  (start, sec  0.000), None |]
 
 
 type TestMode =
@@ -134,13 +132,13 @@ let checkC textWriter testMode result =
     fprintfn textWriter ""
 
 
-let check textWriter testMode result =
+let check msg textWriter testMode result =
   let (dt,ts),expected,actual = result
   let passed = actual = expected
   if not passed  ||  testMode = PrintAll then
     let ok = if passed then  " √" else  "# "
     let sInput = $"%A{ts}"
-    fprintf textWriter $"%s{ok} %-19s{sInput} "
+    fprintf textWriter $"%s{ok} %s{msg} %-19s{sInput} "
     let printResult result =
       match result with
       | Some dt  -> printf $"%A{dt}"
@@ -177,33 +175,28 @@ let main argv =
       ts,expected,actual
     let checkOne (result: InputExpectedActualC)  : unit =
       checkC writer testMode result
-    if true then
-      let runAll generator =
-        generator()
-        |> Seq.map  classifyOne
-        |> Seq.iter checkOne
-      runAll generateGoodInputsC
-      runAll generateBadInputsC
-    else
-      seq {
-        min 5.0, CMinutes 5 }
-      |> Seq.map classifyOne
+    let runAll generator =
+      generator()
+      |> Seq.map  classifyOne
       |> Seq.iter checkOne
-  let testGetPrevNext() =
-    let getOne get (input: InputAndExpected)  : InputExpectedActual =
+    runAll generateGoodInputsC
+    runAll generateBadInputsC
+  let testGetPrevNext prevOrNext =
+    let get = if prevOrNext = "next" then getNextBoundary else getPreviousBoundary
+    let getOne (input: InputAndExpected)  : InputExpectedActual =
       let (dt, ts), expected = input
       let actual = ts |> get dt
       (dt,ts),expected,actual
     let checkOne (result: InputExpectedActual)  : unit =
-      check writer testMode result
-    let runAll get generator =
+      check prevOrNext writer testMode result
+    let runAll generator =
       generator()
-      |> Seq.map  (getOne get)
-      |> Seq.iter checkOne
-    runAll getNextBoundary     generateNextGoodInputs
-    runAll getPreviousBoundary generatePrevGoodInputs
-    runAll getPreviousBoundary generatePrevBadInputs
-  testGetPrevNext()
+      |> Array.map  getOne
+      |> Array.iter checkOne
+    if prevOrNext = "prev" then runAll generatePrevGoodInputs else runAll generateNextGoodInputs
+    if prevOrNext = "next" then runAll generateBadInputs
+  testGetPrevNext "prev"
+  testGetPrevNext "next"
   0
   
 // let t1 = day 400
