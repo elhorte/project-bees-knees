@@ -11,7 +11,7 @@ let sec n = TimeSpan.FromSeconds n
 type TsClassification = Choice<int, int, int, int, unit, unit>
 
 /// Classifies the given TimeSpan for use as a repeating interval.
-/// Success requires a nonzero integer in one of Days, Hours, Minutes, or Seconds.
+/// Requires a nonzero integer in exactly one of Days, Hours, Minutes, or Seconds.
 /// ts: The TimeSpan to classify.
 /// returns: The classification of t.
 let (|Days|Hours|Minutes|Seconds|Zero|Bad|) ts  : TsClassification =
@@ -33,9 +33,9 @@ let getPreviousBoundary (dt: DateTime) (ts: TimeSpan)  : DateTime option =
 
 let getNextBoundary (dt: DateTime) (ts: TimeSpan)  : DateTime option =
   match ts with
-  | Days     d -> Some (dt + day (float (d - dt.Day    % d)))
-  | Hours    h -> Some (dt + hr  (float (h - dt.Hour   % h)))
-  | Minutes  m -> Some (dt + min (float (m - dt.Minute % m)))
+  | Days     d -> Some (dt + day (float (d - dt.Day    % d)) - sec dt.Second - min dt.Minute - hr dt.Hour)
+  | Hours    h -> Some (dt + hr  (float (h - dt.Hour   % h)) - sec dt.Second - min dt.Minute)
+  | Minutes  m -> Some (dt + min (float (m - dt.Minute % m)) - sec dt.Second)
   | Seconds  s -> Some (dt + sec (float (s - dt.Second % s)))
   | _          -> None
 
