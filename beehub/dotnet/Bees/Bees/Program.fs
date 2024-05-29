@@ -94,9 +94,9 @@ let saveMp3Periodically (inputStream: InputStream) duration period =
   //             saveFrom saveTime + period
   //               |<– delayUntil saveTime + duration 
   //            |––|   save file 2
-  let periodSec = (period: TimeSpan).Seconds
-  let headTime = inputStream.HeadTime
-  let startTime = getNextSecondBoundary periodSec headTime
+  match roundUpToInterval inputStream.HeadTime period with
+  | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
+  | Good startTime -> 
   printfn $"startTime %A{startTime.TimeOfDay}  slop %A{startTime - _DateTime.Now}"
   let rec saveFrom saveTime =
     inputStream.WaitUntil (saveTime + duration)

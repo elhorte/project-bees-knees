@@ -5,7 +5,7 @@ open System.Threading
 
 
 type SeqNumsResult<'T> =
-  | OK       of 'T
+  | Stable       of 'T
   | TimedOut of string
 
 type SeqNumsResultInternal<'T> =
@@ -75,7 +75,7 @@ type SeqNums = { mutable S : uint32 } with
       | _ ->
       result <- OK_ funResult
     match result with
-    | OK_       x -> OK x
+    | OK_       x -> Stable x
     | TimedOut_ s -> TimedOut s
     | Trying      -> failwith "Can’t return Trying result"
 

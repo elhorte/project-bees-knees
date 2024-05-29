@@ -5,6 +5,16 @@ open System.Threading.Tasks
 
 open BeesUtil.DateTimeShim
 
+
+let waitUntil dateTime =
+#if USE_FAKE_DATE_TIME
+  ()
+#else
+  let duration = dateTime - DateTime.Now
+  if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()
+#endif
+
+
 let addSeconds dateTime sec =
   let dateTime = (dateTime: _DateTime)
 #if USE_FAKE_DATE_TIME
@@ -34,6 +44,10 @@ let hr  n = TimeSpan.FromHours   n
 let min n = TimeSpan.FromMinutes n
 let sec n = TimeSpan.FromSeconds n
 
+type RoundedDateTime =
+| Good  of DateTime
+| Error of string
+
 type TsClassification = Choice<int, int, int, int, unit, unit>
 
 /// Classifies the given TimeSpan for use as a repeating interval.
@@ -49,18 +63,19 @@ let (|Days|Hours|Minutes|Seconds|Zero|Bad|) ts  : TsClassification =
   | _ when ts.TotalSeconds >= 1.0  &&  ts.TotalSeconds % 1.0 = 0  -> Seconds ts.Seconds
   | _ -> Bad
 
-let getPreviousBoundary (dt: DateTime) (ts: TimeSpan)  : DateTime option =
+let roundDownToInterval (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
   match ts with
-  | Days     d -> Some (dt - day (float (    dt.Day    % d)) - sec dt.Second - min dt.Minute - hr dt.Hour)
-  | Hours    h -> Some (dt - hr  (float (    dt.Hour   % h)) - sec dt.Second - min dt.Minute)
-  | Minutes  m -> Some (dt - min (float (    dt.Minute % m)) - sec dt.Second)
-  | Seconds  s -> Some (dt - sec (float (    dt.Second % s)))
-  | _          -> None
+  | Days     d -> Good (dt - day (float (    dt.Day    % d)) - sec dt.Second - min dt.Minute - hr dt.Hour)
+  | Hours    h -> Good (dt - hr  (float (    dt.Hour   % h)) - sec dt.Second - min dt.Minute)
+  | Minutes  m -> Good (dt - min (float (    dt.Minute % m)) - sec dt.Second)
+  | Seconds  s -> Good (dt - sec (float (    dt.Second % s)))
+  | _          -> Error "Unusable time period"
 
-let getNextBoundary (dt: DateTime) (ts: TimeSpan)  : DateTime option =
+let roundUpToInterval (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
   match ts with
-  | Days     d -> Some (dt + day (float (d - dt.Day    % d)) - sec dt.Second - min dt.Minute - hr dt.Hour)
-  | Hours    h -> Some (dt + hr  (float (h - dt.Hour   % h)) - sec dt.Second - min dt.Minute)
-  | Minutes  m -> Some (dt + min (float (m - dt.Minute % m)) - sec dt.Second)
-  | Seconds  s -> Some (dt + sec (float (s - dt.Second % s)))
-  | _          -> None
+  | Days     d -> Good (dt + day (float (d - dt.Day    % d)) - sec dt.Second - min dt.Minute - hr dt.Hour)
+  | Hours    h -> Good (dt + hr  (float (h - dt.Hour   % h)) - sec dt.Second - min dt.Minute)
+  | Minutes  m -> Good (dt + min (float (m - dt.Minute % m)) - sec dt.Second)
+  | Seconds  s -> Good (dt + sec (float (s - dt.Second % s)))
+  | _          -> Error "Unusable time period"
+

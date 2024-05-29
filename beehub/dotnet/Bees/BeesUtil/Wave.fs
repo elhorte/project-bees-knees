@@ -16,5 +16,5 @@ let saveAsWave (filePath: string) (frameRate: float) nChannels (samples: float32
   let frameRate      = int (round frameRate)
   let samplesAsInt16 = convertFloat32ToInt16 samples
   let outFormat      = WaveFormat(frameRate, nChannels)
-  use outWriter      = WaveFileWriter(filePath, outFormat)
+  use outWriter      = new WaveFileWriter(filePath, outFormat)
   outWriter.Write(samplesAsInt16, 0, samplesAsInt16.Length)

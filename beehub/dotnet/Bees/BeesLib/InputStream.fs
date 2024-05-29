@@ -557,7 +557,7 @@ type InputStream(beesConfig       : BeesConfig          ,
     let copyCbState() = this.CbState.Copy()
     let timeout = TimeSpan.FromMicroseconds 1
     match this.CbState.SeqNums.WhenStableAndEntered timeout copyCbState with
-    | OK cbState -> cbState
+    | Stable cbState -> cbState
     | TimedOut s -> failwith "Timed out taking a snapshot of CbState" 
 
   member this.range() = this.CbState.Segs.TailTime, this.CbState.Segs.HeadTime

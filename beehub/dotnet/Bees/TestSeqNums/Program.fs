@@ -43,7 +43,7 @@ let main _ =
 
   let test work =
     match foo.FS.SeqNums.WhenStableInternal false timeout work 3 Console.WriteLine with
-    | OK result  -> printfn "%A" result
+    | Stable result  -> printfn "%A" result
     | TimedOut s -> printfn $"Timed out %s{s}"
 
   printfn "– success"
