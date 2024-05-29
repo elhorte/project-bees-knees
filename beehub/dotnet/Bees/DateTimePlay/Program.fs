@@ -63,6 +63,15 @@ let roundDownToInterval (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
   | Microseconds n -> Good (DateTime(dt.Year, dt.Month, dt.DayOfYear, dt.Hour, dt.Minute, dt.Second, kind) + ms dt.Microsecond + us n)
   | _          -> Error "Unusable time period"
 
+let roundUpToInterval (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
+  match roundDownToInterval dt ts with
+  | Days         n -> Good n
+  | Hours        n -> Good n
+  | Minutes      n -> Good n
+  | Seconds      n -> Good n
+  | Milliseconds n -> Good n
+  | Error        s -> Error "Unusable time period"
+
 // let roundUpToInterval (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
 //   match ts with
 //   | Days         n -> Good (dt + day (float (n - dt.Day         % n)) - ms dt.Millisecond - sec dt.Second - min dt.Minute - hr dt.Hour)
