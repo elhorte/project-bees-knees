@@ -51,7 +51,7 @@ type RoundedDateTime =
 type TsClassification = Choice<int, int, int, int, unit, unit>
 
 /// Classifies the given TimeSpan for use as a repeating interval.
-/// Requires a nonzero integer in exactly one of Days, Hours, Minutes, or Seconds.
+/// Requires exactly one nonzero value of Days, Hours, Minutes, or Seconds.
 /// ts: The TimeSpan to classify.
 /// returns: The classification of ts.
 let (|Days|Hours|Minutes|Seconds|Zero|Bad|) ts  : TsClassification =
@@ -61,7 +61,7 @@ let (|Days|Hours|Minutes|Seconds|Zero|Bad|) ts  : TsClassification =
   | _ when ts.TotalHours   >= 1.0  &&  ts.TotalHours   % 1.0 = 0  -> Hours   ts.Hours  
   | _ when ts.TotalMinutes >= 1.0  &&  ts.TotalMinutes % 1.0 = 0  -> Minutes ts.Minutes
   | _ when ts.TotalSeconds >= 1.0  &&  ts.TotalSeconds % 1.0 = 0  -> Seconds ts.Seconds
-  | _ -> Bad
+  | _                                                             -> Bad
 
 let roundDownToInterval (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
   match ts with

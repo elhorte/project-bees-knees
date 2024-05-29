@@ -65,7 +65,6 @@ let rec save saveFunction ext (inputStream: InputStream) (time: _DateTime) durat
     let name1 = $"save-{sDate}.{ext}"
     let namefixed = name1.Replace(":", ".")
     saveToFile saveFunction namefixed readResult.FrameRate readResult.InChannelCount samplesArray
-    ()
   Console.WriteLine (sprintf $"saveMp3File %A{time.TimeOfDay} %A{duration}")
   let readResult = inputStream.read time duration 
   match readResult.RangeClip with
