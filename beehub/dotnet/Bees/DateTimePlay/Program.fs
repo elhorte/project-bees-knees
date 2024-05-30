@@ -4,15 +4,14 @@ open System
 open System.Threading.Tasks
 
 
-let dtToString dt =
-  let date = DateTime.Now
-  let ticks = date.Ticks % TimeSpan.TicksPerMillisecond // remaining ticks within the last millisecond
-  let microseconds = ticks * 10 // because 1 tick is 100 ns, so 10 ticks would be 1 microsecond
-  let nanoseconds = ticks * 100 // 1 tick is 100 ns
-  let dateString = date.ToString("yyyy-MM-dd HH:mm:ss.fff") // get the string up to milliseconds
-  let fullDateString = $"{dateString}:{microseconds.ToString("D3")}μs:{nanoseconds.ToString("D3")}ns"
-  printfn $"Date with milliseconds, microseconds, and nanoseconds: {fullDateString}"
+let dtToString (dt: DateTime) =
+  let format = "yyyy-MM-dd HH:mm:ss.ffffff"
+  let ns = int (dt.Ticks % 10000L)
+  $"%s{dt.ToString(format)}_%03d{ns}"
 
+let tsToString (ts: TimeSpan) = 
+    sprintf $"%d{ts.Days}.%02d{ts.Hours}:%02d{ts.Minutes}:%02d{ts.Seconds}.%03d{ts.Milliseconds}%03d{int (ts.Ticks % 10000L)}"
+    
 let day n = TimeSpan.FromDays         n
 let hr  n = TimeSpan.FromHours        n
 let min n = TimeSpan.FromMinutes      n
@@ -26,6 +25,8 @@ type RoundedDateTime =
 | Error of string
 
 type TsClassification = Choice<int, int, int, int, int, int, unit>
+
+let tsMalformedMessage = "Malformed time period for rounding"
 
 /// Classifies the given TimeSpan for use as a repeating interval.
 /// Requires exactly one nonzero value of Days, Hours, Minutes, or Seconds.
@@ -42,45 +43,23 @@ let (|Days|Hours|Minutes|Seconds|Milliseconds|Microseconds|Bad|) ts  : TsClassif
   | _ when ts.TotalMicroseconds >= 1.0  &&  ts.TotalMicroseconds % 1.0 = 0  -> Microseconds ts.Microseconds
   | _                                                                       -> Bad
 
-// let roundDownToIntervalx (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
-//   match ts with
-//   | Days         n -> Good (dt - day (float (    dt.Day         % n)) - us dt.Microsecond - ms dt.Millisecond - sec dt.Second - min dt.Minute - hr dt.Hour)
-//   | Hours        n -> Good (dt - hr  (float (    dt.Hour        % n)) - us dt.Microsecond - ms dt.Millisecond - sec dt.Second - min dt.Minute)
-//   | Minutes      n -> Good (dt - min (float (    dt.Minute      % n)) - us dt.Microsecond - ms dt.Millisecond - sec dt.Second)
-//   | Seconds      n -> Good (dt - sec (float (    dt.Second      % n)) - us dt.Microsecond - ms dt.Millisecond)
-//   | Milliseconds n -> Good (dt - ms  (float (    dt.Millisecond % n)) - us dt.Microsecond)
-//   | Microseconds n -> Good (dt - us  (float (    dt.Microsecond % n)))
-//   | _          -> Error "Unusable time period"
+type UpDown = Up | Down
 
-let roundDownToInterval (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
-  let kind = dt.Kind
+let roundToInterval (upDown: UpDown) (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
+  let tsIfUp = match upDown with Up -> ts | Down -> TimeSpan.Zero
+  let dateTime y M d h m s k  = DateTime(y, M, d, h, m, s, dt.Kind) + tsIfUp
   match ts with
-  | Days         n -> Good (DateTime(dt.Year, dt.Month, n           , 0      , 0        , 0        , kind))
-  | Hours        n -> Good (DateTime(dt.Year, dt.Month, dt.DayOfYear, n      , dt.Minute, dt.Second, kind))
-  | Minutes      n -> Good (DateTime(dt.Year, dt.Month, dt.DayOfYear, dt.Hour, n        , dt.Second, kind))
-  | Seconds      n -> Good (DateTime(dt.Year, dt.Month, dt.DayOfYear, dt.Hour, dt.Minute, n        , kind))
-  | Milliseconds n -> Good (DateTime(dt.Year, dt.Month, dt.DayOfYear, dt.Hour, dt.Minute, dt.Second, kind) + ms n) 
-  | Microseconds n -> Good (DateTime(dt.Year, dt.Month, dt.DayOfYear, dt.Hour, dt.Minute, dt.Second, kind) + ms dt.Microsecond + us n)
-  | _          -> Error "Unusable time period"
+  | Days         n -> Good ((dateTime dt.Year dt.Month 1      0       0         0         0             ) + day n)
+  | Hours        n -> Good ((dateTime dt.Year dt.Month dt.Day 0       0         0         0             ) + hr  n)
+  | Minutes      n -> Good ((dateTime dt.Year dt.Month dt.Day dt.Hour 0         0         0             ) + min n)
+  | Seconds      n -> Good ((dateTime dt.Year dt.Month dt.Day dt.Hour dt.Minute 0         0             ) + sec n)
+  | Milliseconds n -> Good ((dateTime dt.Year dt.Month dt.Day dt.Hour dt.Minute dt.Second 0             ) + ms  n) 
+  | Microseconds n -> Good ((dateTime dt.Year dt.Month dt.Day dt.Hour dt.Minute dt.Second dt.Millisecond) + us  n)
+  | _              -> Error tsMalformedMessage
 
-let roundUpToInterval (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
-  match roundDownToInterval dt ts with
-  | Days         n -> Good n
-  | Hours        n -> Good n
-  | Minutes      n -> Good n
-  | Seconds      n -> Good n
-  | Milliseconds n -> Good n
-  | Error        s -> Error "Unusable time period"
 
-// let roundUpToInterval (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
-//   match ts with
-//   | Days         n -> Good (dt + day (float (n - dt.Day         % n)) - ms dt.Millisecond - sec dt.Second - min dt.Minute - hr dt.Hour)
-//   | Hours        n -> Good (dt + hr  (float (n - dt.Hour        % n)) - ms dt.Millisecond - sec dt.Second - min dt.Minute)
-//   | Minutes      n -> Good (dt + min (float (n - dt.Minute      % n)) - ms dt.Millisecond - sec dt.Second)
-//   | Seconds      n -> Good (dt + sec (float (n - dt.Second      % n)) - ms dt.Millisecond)
-//   | Milliseconds n -> Good (dt - ms  (float (n - dt.Millisecond % n)))
-//   | _          -> Error "Unusable time period"
-
+let roundDownToInterval dt ts : RoundedDateTime = roundToInterval Down dt ts
+let roundUpToInterval   dt ts : RoundedDateTime = roundToInterval Up   dt ts
 
 
 type TSClass =
@@ -93,7 +72,7 @@ type TSClass =
   | CZero   
   | CBad
 
-let classify2 ts =
+let classify ts =
   match ts with
   | Days         n -> CDays    n
   | Hours        n -> CHours   n
@@ -102,22 +81,13 @@ let classify2 ts =
   | Milliseconds n -> CMilliseconds n
   | Microseconds n -> CMicroseconds n
   | Bad            -> CBad      
-
-// let classify ts =
-//   match ts with
-//   | Days     n -> printfn $"Days    %d{n}"
-//   | Hours    n -> printfn $"Hours   %d{n}"
-//   | Minutes  n -> printfn $"Minutes %d{n}"
-//   | Seconds  n -> printfn $"Seconds %d{n}"
-//   | Zero       -> printfn $"zero"
-//   | Bad        -> printfn $"bad"
   
 let generateGoodInputsC() = seq {
   day 100.0, CDays    100
   hr   23.0, CHours    23
   min  59.0, CMinutes  59
   sec  59.0, CSeconds  59 }
-  
+
 let generateBadInputsC() = seq {
   day 99.001, CBad
   hr  23.001, CBad
@@ -126,9 +96,10 @@ let generateBadInputsC() = seq {
   sec  0.001, CBad
   sec  0.000, CBad }
 
-let format = "M/d/yyyy HH:mm:ss.fff"
+let format = "M/d/yyyy HH:mm:ss.ffffff"
 let provider = System.Globalization.CultureInfo.InvariantCulture
-let start = DateTime.ParseExact("1/13/0001 10:09:14.123", format, provider) + us 456 + ns 789
+let start = DateTime.ParseExact("1/13/0001 10:09:14.123456", format, provider) + ns 789
+printfn $"%A{dtToString start}"
 
 let generatePrevGoodInputs() = [|
   (start, (day  7.0)), Good (start - (day 6) - (sec start.Second) - (min start.Minute) - (hr start.Hour))
@@ -143,12 +114,12 @@ let generateNextGoodInputs() = [|
   (start, (sec 10.0)), Good (start + (sec 6)) |]
   
 let generateBadInputs() = [|
-  (start, day 99.001), Error "Unusable time period"
-  (start, hr  23.001), Error "Unusable time period"
-  (start, min 59.001), Error "Unusable time period"
-  (start, sec 59.001), Error "Unusable time period"
-  (start, ms  99.001), Error "Unusable time period"
-  (start, us  99.100), Error "Unusable time period" |]
+  (start, day 99.001), Error tsMalformedMessage
+  (start, hr  23.001), Error tsMalformedMessage
+  (start, min 59.001), Error tsMalformedMessage
+  (start, sec 59.001), Error tsMalformedMessage
+  (start, ms  99.001), Error tsMalformedMessage
+  (start, us  99.100), Error tsMalformedMessage |]
 
 
 type TestMode =
@@ -182,11 +153,11 @@ let check msg textWriter testMode result =
   let passed = actual = expected
   if not passed  ||  testMode = PrintAll then
     let ok = if passed then  " √" else  "# "
-    let sInput = $"%A{ts}"
-    fprintf textWriter $"%s{ok} %s{msg} %-19s{sInput} "
+    let sTsInput = $"%A{tsToString ts}"
+    fprintf textWriter $"%s{ok} %s{msg} %-19s{sTsInput} "
     let printResult result =
       match result with
-      | Good  dt  -> printf $"%A{dt}"
+      | Good  dt  -> printf $"%s{dtToString dt}"
       | Error s   -> printf $"%s{s}"
     printResult actual
     if not passed then
@@ -212,10 +183,10 @@ let runPeriodically period =
   match roundDownToInterval (DateTime.Now - TimeSpan.FromMilliseconds 10) period with
   | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
   | Good startTime -> 
-  printfn $"startTime %A{startTime.TimeOfDay}  slop %A{startTime - DateTime.Now}"
+  printfn $"startTime %A{tsToString startTime.TimeOfDay}  slop %A{tsToString (startTime - DateTime.Now)}"
   let rec saveFrom saveTime =
     waitUntil (saveTime + period)
-    printfn $"%A{saveTime}"
+    printfn $"%A{dtToString saveTime}"
     saveFrom (saveTime + period)
   saveFrom startTime
 
@@ -233,7 +204,7 @@ let main argv =
   let testClassify() =
     let classifyOne (input: InputAndExpectedC)  : InputExpectedActualC =
       let ts,expected = input
-      let actual = ts |> classify2
+      let actual = ts |> classify
       ts,expected,actual
     let checkOne (result: InputExpectedActualC)  : unit =
       checkC writer testMode result
@@ -259,25 +230,6 @@ let main argv =
     if prevOrNext = "next" then runAll generateBadInputs
   testGetPrevNext "prev"
   testGetPrevNext "next"
-  runPeriodically (TimeSpan.FromSeconds 2)
+//runPeriodically (TimeSpan.FromSeconds 2)
   0
-  
-// let t1 = day 400
-// (match t1 with Bad |Zero -> false | _ -> true) |> printfn "%A" 
-// let getMostRecentBoundary (d: DateTime) (t1: TimeSpan) =
-//   match t1 with 
-//   | Bad        -> None
-//   | Years    t
-//   | Days     t
-//   | Hours    t -> None
-//   | Minutes  t -> Some getMostRecentMinuteBoundary d t.Minutes
-//   | Seconds  t -> Some getMostRecentSecondBoundary d t.Seconds
-
-
-// let waitUntil dateTime =
-// #if USE_FAKE_DATE_TIME
-//   ()
-// #else
-//   let duration = dateTime - DateTime.Now
-//   if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()
-// #endif
+ 
