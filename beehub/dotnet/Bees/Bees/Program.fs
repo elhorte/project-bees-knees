@@ -94,7 +94,7 @@ let saveMp3Periodically (inputStream: InputStream) duration period =
   //             saveFrom saveTime + period
   //               |<– delayUntil saveTime + duration 
   //            |––|   save file 2
-  match roundUpToInterval inputStream.HeadTime period with
+  match roundUp inputStream.HeadTime period with
   | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
   | Good startTime -> 
   printfn $"startTime %A{startTime.TimeOfDay}  slop %A{startTime - _DateTime.Now}"
