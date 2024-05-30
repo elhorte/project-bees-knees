@@ -66,14 +66,15 @@ let rec save saveFunction ext (inputStream: InputStream) (time: _DateTime) durat
     let namefixed = name1.Replace(":", ".")
     saveToFile saveFunction namefixed readResult.FrameRate readResult.InChannelCount samplesArray
   Console.WriteLine (sprintf $"saveMp3File %A{time.TimeOfDay} %A{duration}")
-  let readResult = inputStream.read time duration 
+  let readResult = inputStream.read time duration
+  let print() = Console.WriteLine (sprintf $"adcStartTime %A{readResult.Time.TimeOfDay}  %A{readResult.Duration} %A{readResult.RangeClip}")
   match readResult.RangeClip with
   | RangeClip.BeforeData    
-  | RangeClip.AfterData       ->  printfn $"%A{readResult.Time}  %A{readResult.Duration} %A{readResult.RangeClip}"
+  | RangeClip.AfterData       ->  print()
   | RangeClip.ClippedBothEnds
   | RangeClip.ClippedTail    
   | RangeClip.ClippedHead    
-  | RangeClip.RangeOK         ->  Console.WriteLine (sprintf $"%A{readResult.Time.TimeOfDay}  %A{readResult.Duration} %A{readResult.RangeClip}")
+  | RangeClip.RangeOK         ->  print()
                                   save readResult
   | _                         ->  failwith "unkonwn result code"
 

@@ -3,79 +3,71 @@ module BeesUtil.DateTimeCalculations
 open System
 open System.Threading.Tasks
 
-open BeesUtil.DateTimeShim
 
+let dtToString (dt: DateTime) =
+  let format = "yyyy-MM-dd HH:mm:ss.ffffff"
+  let ns = 100 * int (dt.Ticks % 10L)
+  $"%s{dt.ToString(format)}_%03d{ns}"
 
-let waitUntil dateTime =
-#if USE_FAKE_DATE_TIME
-  ()
-#else
-  let duration = dateTime - DateTime.Now
-  if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()
-#endif
+let tsToString (ts: TimeSpan) = 
+    sprintf $"%d{ts.Days}.%02d{ts.Hours}:%02d{ts.Minutes}:%02d{ts.Seconds}.%03d{ts.Milliseconds}%03d{ts.Microseconds}_%d{int (ts.Ticks % 10L)}00"
 
+let ticksPerMicrosecond = TimeSpan.TicksPerMillisecond / 1000L // 10
+let nsPerTick = 1000 / int ticksPerMicrosecond
 
-let addSeconds dateTime sec =
-  let dateTime = (dateTime: _DateTime)
-#if USE_FAKE_DATE_TIME
-  dateTime
-#else
-  dateTime.AddSeconds sec
-#endif
+let day n = TimeSpan.FromDays         (float n)
+let hr  n = TimeSpan.FromHours        (float n)
+let min n = TimeSpan.FromMinutes      (float n)
+let sec n = TimeSpan.FromSeconds      (float n)
+let ms  n = TimeSpan.FromMilliseconds (float n)
+let us  n = TimeSpan.FromMicroseconds (float n)
+let ns  n = TimeSpan.FromTicks        (int64 (round (float n / float nsPerTick)))
 
-let truncateToSecond (d: _DateTime) =
-  _DateTime(d.Year, d.Month, d.Day, d.Hour, d.Minute, d.Second)
+let dtNs (dt: DateTime) = int (dt.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
+let tsNs (ts: TimeSpan) = int (ts.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
 
-let getMostRecentSecondBoundary sec (d: DateTime) = 
-    addSeconds d ((float d.Second % float sec) * -1.0)
-    |> truncateToSecond
-
-let getNextSecondBoundary sec (from: _DateTime) =
-  let dt = getMostRecentSecondBoundary sec from
-  addSeconds dt (double sec)
-    
-let getMostRecentMinuteBoundary (dt: _DateTime) =
-  addSeconds dt (-dt.Second)
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-
-let day n = TimeSpan.FromDays    n
-let hr  n = TimeSpan.FromHours   n
-let min n = TimeSpan.FromMinutes n
-let sec n = TimeSpan.FromSeconds n
-
-type RoundedDateTime =
-| Good  of DateTime
-| Error of string
-
-type TsClassification = Choice<int, int, int, int, unit, unit>
+let tsMalformedMessage = "Malformed time period for rounding"
 
 /// Classifies the given TimeSpan for use as a repeating interval.
 /// Requires exactly one nonzero value of Days, Hours, Minutes, or Seconds.
 /// ts: The TimeSpan to classify.
 /// returns: The classification of ts.
-let (|Days|Hours|Minutes|Seconds|Zero|Bad|) ts  : TsClassification =
+let (|Days|Hours|Minutes|Seconds|Milliseconds|Microseconds|Bad|) ts =
   match (ts: TimeSpan) with
-  | _ when ts = TimeSpan.Zero                                     -> Zero
-  | _ when ts.TotalDays    >= 1.0  &&  ts.TotalDays    % 1.0 = 0  -> Days    ts.Days
-  | _ when ts.TotalHours   >= 1.0  &&  ts.TotalHours   % 1.0 = 0  -> Hours   ts.Hours  
-  | _ when ts.TotalMinutes >= 1.0  &&  ts.TotalMinutes % 1.0 = 0  -> Minutes ts.Minutes
-  | _ when ts.TotalSeconds >= 1.0  &&  ts.TotalSeconds % 1.0 = 0  -> Seconds ts.Seconds
-  | _                                                             -> Bad
+  | _ when ts = TimeSpan.Zero          -> Bad
+  | _ when ts.TotalDays         >= 1.0         &&  ts.TotalDays         % 1.0 = 0  -> Days         ts.Days
+  | _ when ts.TotalDays         >= 1.0 -> Bad                                       
+  | _ when ts.TotalHours        >= 1.0         &&  ts.TotalHours        % 1.0 = 0  -> Hours        ts.Hours
+  | _ when ts.TotalHours        >= 1.0 -> Bad                                         
+  | _ when ts.TotalMinutes      >= 1.0         &&  ts.TotalMinutes      % 1.0 = 0  -> Minutes      ts.Minutes
+  | _ when ts.TotalMinutes      >= 1.0 -> Bad                                       
+  | _ when ts.TotalSeconds      >= 1.0         &&  ts.TotalSeconds      % 1.0 = 0  -> Seconds      ts.Seconds
+  | _ when ts.TotalSeconds      >= 1.0 -> Bad                                       
+  | _ when ts.TotalMilliseconds >= 1.0         &&  ts.TotalMilliseconds % 1.0 = 0  -> Milliseconds ts.Milliseconds
+  | _ when ts.TotalMilliseconds >= 1.0 -> Bad                                       
+  | _ when ts.TotalMicroseconds >= 1.0         &&  tsNs ts                    = 0  -> Microseconds ts.Microseconds
+  | _ when ts.TotalMicroseconds >= 1.0 -> Bad                                       
+  | _                                  -> Bad
 
-let roundDownToInterval (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
+type UpDown = Up | Down
+
+type RoundedDateTime =
+| Good  of DateTime
+| Error of string
+
+let roundToInterval (upDown: UpDown) (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
+  let tsIfUp = match upDown with Up -> ts | Down -> TimeSpan.Zero
+  let dateTime y M d h m s k  = DateTime(y, M, d, h, m, s, k, dt.Kind) + tsIfUp
+  let floor divisor n = n - (n % divisor)
   match ts with
-  | Days     d -> Good (dt - day (float (    dt.Day    % d)) - sec dt.Second - min dt.Minute - hr dt.Hour)
-  | Hours    h -> Good (dt - hr  (float (    dt.Hour   % h)) - sec dt.Second - min dt.Minute)
-  | Minutes  m -> Good (dt - min (float (    dt.Minute % m)) - sec dt.Second)
-  | Seconds  s -> Good (dt - sec (float (    dt.Second % s)))
-  | _          -> Error "Unusable time period"
+  | Days         n -> Good ((dateTime dt.Year dt.Month 1      0       0         0         0             ) + day (floor n dt.Day        ))
+  | Hours        n -> Good ((dateTime dt.Year dt.Month dt.Day 0       0         0         0             ) + hr  (floor n dt.Hour       ))
+  | Minutes      n -> Good ((dateTime dt.Year dt.Month dt.Day dt.Hour 0         0         0             ) + min (floor n dt.Minute     ))
+  | Seconds      n -> Good ((dateTime dt.Year dt.Month dt.Day dt.Hour dt.Minute 0         0             ) + sec (floor n dt.Second     ))
+  | Milliseconds n -> Good ((dateTime dt.Year dt.Month dt.Day dt.Hour dt.Minute dt.Second 0             ) + ms  (floor n dt.Millisecond)) 
+  | Microseconds n -> Good ((dateTime dt.Year dt.Month dt.Day dt.Hour dt.Minute dt.Second dt.Millisecond) + us  (floor n dt.Microsecond))
+  | _              -> Error tsMalformedMessage
 
-let roundUpToInterval (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
-  match ts with
-  | Days     d -> Good (dt + day (float (d - dt.Day    % d)) - sec dt.Second - min dt.Minute - hr dt.Hour)
-  | Hours    h -> Good (dt + hr  (float (h - dt.Hour   % h)) - sec dt.Second - min dt.Minute)
-  | Minutes  m -> Good (dt + min (float (m - dt.Minute % m)) - sec dt.Second)
-  | Seconds  s -> Good (dt + sec (float (s - dt.Second % s)))
-  | _          -> Error "Unusable time period"
 
+let roundDownToInterval dt ts : RoundedDateTime = roundToInterval Down dt ts
+let roundUpToInterval   dt ts : RoundedDateTime = roundToInterval Up   dt ts

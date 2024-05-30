@@ -46,6 +46,12 @@ let delayMs ms =
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––
 
+let waitUntil dateTime =
+  let duration = dateTime - DateTime.Now
+  if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()
+
+//–––––––––––––––––––––––––––––––––––––––––––––––––––
+
 let gc() =
   Console.Write "GC {"
   GC.Collect()
