@@ -10,17 +10,19 @@ type RoundedDateTime =
 
 let roundAway value = Math.Round((value: float), MidpointRounding.AwayFromZero)
 
-module Utils = 
+module Utils =
+  
   let ticksPerMicrosecond = TimeSpan.TicksPerMillisecond / 1000L // 10
   let nsPerTick = 1000 / int ticksPerMicrosecond
+  let nsToTicks ns = int64 (roundAway (float ns / float nsPerTick))
 
-  let day n = TimeSpan.FromDays         (float n)
-  let hr  n = TimeSpan.FromHours        (float n)
-  let min n = TimeSpan.FromMinutes      (float n)
-  let sec n = TimeSpan.FromSeconds      (float n)
-  let ms  n = TimeSpan.FromMilliseconds (float n)
-  let us  n = TimeSpan.FromMicroseconds (float n)
-  let ns  n = TimeSpan.FromTicks        (int64 (roundAway (float n / float nsPerTick)))
+  let day n = TimeSpan.FromDays         (float    n)
+  let hr  n = TimeSpan.FromHours        (float    n)
+  let min n = TimeSpan.FromMinutes      (float    n)
+  let sec n = TimeSpan.FromSeconds      (float    n)
+  let ms  n = TimeSpan.FromMilliseconds (float    n)
+  let us  n = TimeSpan.FromMicroseconds (float    n)
+  let ns  n = TimeSpan.FromTicks        (nsToTicks n)
 
   let dtNs (dt: DateTime) = int (dt.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
   let tsNs (ts: TimeSpan) = int (ts.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
@@ -50,7 +52,7 @@ module Utils =
 
   type UpDown = Up | Down
 
-  let roundToInterval upDown (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
+  let roundToTimeSpan upDown (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
     let tsIfUp = match upDown with Up -> ts | Down -> TimeSpan.Zero
     let dateTime y M d h m s k  = DateTime(y, M, d, h, m, s, k, dt.Kind) + tsIfUp
     let floor divisor n = n - (n % divisor)
@@ -71,7 +73,7 @@ open Utils
 ///   - dateTime: The DateTime to be rounded up.
 ///   - timeSpan: The TimeSpan representing the interval to round down to.
 /// - Returns: A RoundedDateTime value representing the rounded down DateTime or an error message if the TimeSpan is unsuitable for rounding.
-let roundDown dateTime timeSpan : RoundedDateTime = roundToInterval Down dateTime timeSpan
+let roundDown dateTime timeSpan : RoundedDateTime = roundToTimeSpan Down dateTime timeSpan
 
 /// Rounds up a DateTime to the nearest interval specified by the given TimeSpan.
 ///
@@ -79,7 +81,7 @@ let roundDown dateTime timeSpan : RoundedDateTime = roundToInterval Down dateTim
 ///   - dateTime: The DateTime to be rounded up.
 ///   - timeSpan: The TimeSpan representing the interval to round up to.
 /// - Returns: A RoundedDateTime value representing the rounded up DateTime or an error message if the TimeSpan is unsuitable for rounding.
-let roundUp   dateTime timeSpan : RoundedDateTime = roundToInterval Up   dateTime timeSpan
+let roundUp   dateTime timeSpan : RoundedDateTime = roundToTimeSpan Up   dateTime timeSpan
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -163,7 +165,7 @@ module TestClassification =
     if not passed  ||  testMode = PrintAll then
       let ok = if passed then  " √" else  "# "
       let sTsInput = $"%s{tsToString ts}"
-      fprintf writer $"%s{ok} classify %-22s{sTsInput} "
+      fprintf writer $"%s{ok} classify  %-22s{sTsInput} "
       let printResult result =
         match result with
         | CDays         n -> fprintf writer $"%d{n} Days"
@@ -215,20 +217,22 @@ module TestRounding =
   let start = parseDT "02/13/0001 10:09:14.123456" 250
 
   let goodInputsDown = [|
-    (start, (day  7)), Good (parseDT "02/08/0001 00:00:00.000000" 0)
-    (start, (hr   8)), Good (parseDT "02/13/0001 08:00:00.000000" 0)
-    (start, (min  6)), Good (parseDT "02/13/0001 10:06:00.000000" 0)
-    (start, (sec 10)), Good (parseDT "02/13/0001 10:09:10.000000" 0)
-    (start, (ms  10)), Good (parseDT "02/13/0001 10:09:14.120000" 0)
-    (start, (us  20)), Good (parseDT "02/13/0001 10:09:14.123440" 0)  |]
+    (start, day  7        ), Good (parseDT "02/08/0001 00:00:00.000000" 0)
+    (start, hr   8        ), Good (parseDT "02/13/0001 08:00:00.000000" 0)
+    (start, min  6        ), Good (parseDT "02/13/0001 10:06:00.000000" 0)
+    (start, sec 10        ), Good (parseDT "02/13/0001 10:09:10.000000" 0)
+    (start, ms  10        ), Good (parseDT "02/13/0001 10:09:14.120000" 0)
+    (start, us  20        ), Good (parseDT "02/13/0001 10:09:14.123440" 0)
+    (start, us  20 + ns 49), Good (parseDT "02/13/0001 10:09:14.123440" 0)  |]
 
   let goodInputsUp = [|
-    (start, (day  7)), Good (parseDT "02/15/0001 00:00:00.000000" 0)
-    (start, (hr   8)), Good (parseDT "02/13/0001 16:00:00.000000" 0)
-    (start, (min  6)), Good (parseDT "02/13/0001 10:12:00.000000" 0)
-    (start, (sec 10)), Good (parseDT "02/13/0001 10:09:20.000000" 0)
-    (start, (ms  10)), Good (parseDT "02/13/0001 10:09:14.130000" 0)
-    (start, (us  20)), Good (parseDT "02/13/0001 10:09:14.123460" 0)  |]
+    (start, day  7        ), Good (parseDT "02/15/0001 00:00:00.000000" 0)
+    (start, hr   8        ), Good (parseDT "02/13/0001 16:00:00.000000" 0)
+    (start, min  6        ), Good (parseDT "02/13/0001 10:12:00.000000" 0)
+    (start, sec 10        ), Good (parseDT "02/13/0001 10:09:20.000000" 0)
+    (start, ms  10        ), Good (parseDT "02/13/0001 10:09:14.130000" 0)
+    (start, us  20        ), Good (parseDT "02/13/0001 10:09:14.123460" 0)
+    (start, us  20 + ns 49), Good (parseDT "02/13/0001 10:09:14.123460" 0)  |]
 
   let badInputs =
     BadInputs.data
@@ -240,7 +244,7 @@ module TestRounding =
     if not passed  ||  testMode = PrintAll then
       let ok = if passed then  " √" else  "# "
       let sTsInput = $"%s{tsToString ts}"
-      fprintf writer $"%s{ok} %-8s{msg} %-22s{sTsInput} "
+      fprintf writer $"%s{ok} %-5s{msg} %-22s{sTsInput} "
       let printResult result =
         match result with
         | Good  dt  -> fprintf writer $"%s{dtToString dt}"
@@ -254,26 +258,26 @@ module TestRounding =
   type InputAndExpected    = (DateTime * TimeSpan) * RoundedDateTime
   type InputExpectedActual = (DateTime * TimeSpan) * RoundedDateTime * RoundedDateTime
 
-  let test writer prevOrNext testMode =
-    let get =
-      match prevOrNext with
-      | "prev" -> roundDown
-      | "next" -> roundUp
+  let test writer upOrDown testMode =
+    let round =
+      match upOrDown with
+      | "down" -> roundDown
+      | "up  " -> roundUp
       | "bad "
       | _      -> roundDown
-    let getOne (input: InputAndExpected)  : InputExpectedActual =
+    let roundOne (input: InputAndExpected)  : InputExpectedActual =
       let (dt, ts), expected = input
-      let actual = ts |> get dt
+      let actual = ts |> round dt
       (dt,ts),expected,actual
     let checkOne (result: InputExpectedActual)  : unit =
-      check writer prevOrNext testMode result
+      check writer upOrDown testMode result
     let runAll source =
       source
-      |> Array.map  getOne
+      |> Array.map  roundOne
       |> Array.iter checkOne
-    match prevOrNext with
-    | "prev" -> runAll goodInputsDown
-    | "next" -> runAll goodInputsUp
+    match upOrDown with
+    | "down" -> runAll goodInputsDown
+    | "up  " -> runAll goodInputsUp
     | "bad "
     | _      -> runAll badInputs
 
@@ -286,18 +290,19 @@ module RunPeriodically =
     if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()
 
   let test writer period count =
-    match roundDown (DateTime.Now - TimeSpan.FromMilliseconds 10) period with
-    | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
+    let now = DateTime.Now
+    match roundUp now period with
+    | Error s -> failwith s
     | Good startTime -> 
-    fprintfn writer $"startTime %s{tsToString startTime.TimeOfDay}  slop %s{tsToString (startTime - DateTime.Now)}"
-    let rec saveFrom saveTime count =
+    fprintfn writer $"from now %A{tsToString now.TimeOfDay}, wait %s{tsToString (startTime - DateTime.Now)}"
+    let rec next (dt: DateTime) count =
       if count <= 0 then ()
       else
-      waitUntil (saveTime + period)
-      fprintfn writer $"%s{dtToString saveTime}"
+      waitUntil (dt + period)
+      fprintfn writer $"%s{tsToString dt.TimeOfDay}"
       let count' = count - 1
-      saveFrom (saveTime + period) count'
-    saveFrom startTime count
+      next (dt + period) count'
+    next startTime count
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -313,14 +318,14 @@ let main argv =
     match output with
     | Stdout    ->  Console.Out
     | File path ->  new IO.StreamWriter(path)
-  fprintfn writer ""
+  let nl() = fprintfn writer ""
   fprintfn writer "TestMode is %A" testMode
   fprintfn writer "Output   is %A" output
-  fprintfn writer "" ; TestClassification.test writer testMode
-  fprintfn writer "" ; fprintfn writer $"start is %A{dtToString TestRounding.start}"
-  fprintfn writer "" ; TestRounding.test writer "prev" testMode
-  fprintfn writer "" ; TestRounding.test writer "next" testMode
-  fprintfn writer "" ; TestRounding.test writer "bad " testMode
-  fprintfn writer "" ; RunPeriodically.test writer (TimeSpan.FromSeconds 2) 3
+  nl() ; TestClassification.test writer testMode
+  nl() ; fprintfn writer $"start is %A{dtToString TestRounding.start}"
+  nl() ; TestRounding.test writer "down" testMode
+  nl() ; TestRounding.test writer "up  " testMode
+  nl() ; TestRounding.test writer "bad " testMode
+  nl() ; RunPeriodically.test writer (TimeSpan.FromSeconds 2) 3
   0
  

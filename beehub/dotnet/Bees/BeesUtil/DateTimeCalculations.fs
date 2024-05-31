@@ -8,17 +8,19 @@ type RoundedDateTime =
 
 let roundAway value = Math.Round((value: float), MidpointRounding.AwayFromZero)
 
-module Utils = 
+module Utils =
+  
   let ticksPerMicrosecond = TimeSpan.TicksPerMillisecond / 1000L // 10
   let nsPerTick = 1000 / int ticksPerMicrosecond
+  let nsToTicks ns = int64 (roundAway (float ns / float nsPerTick))
 
-  let day n = TimeSpan.FromDays         (float n)
-  let hr  n = TimeSpan.FromHours        (float n)
-  let min n = TimeSpan.FromMinutes      (float n)
-  let sec n = TimeSpan.FromSeconds      (float n)
-  let ms  n = TimeSpan.FromMilliseconds (float n)
-  let us  n = TimeSpan.FromMicroseconds (float n)
-  let ns  n = TimeSpan.FromTicks        (int64 (roundAway (float n / float nsPerTick)))
+  let day n = TimeSpan.FromDays         (float    n)
+  let hr  n = TimeSpan.FromHours        (float    n)
+  let min n = TimeSpan.FromMinutes      (float    n)
+  let sec n = TimeSpan.FromSeconds      (float    n)
+  let ms  n = TimeSpan.FromMilliseconds (float    n)
+  let us  n = TimeSpan.FromMicroseconds (float    n)
+  let ns  n = TimeSpan.FromTicks        (nsToTicks n)
 
   let dtNs (dt: DateTime) = int (dt.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
   let tsNs (ts: TimeSpan) = int (ts.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
@@ -48,7 +50,7 @@ module Utils =
 
   type UpDown = Up | Down
 
-  let roundToInterval upDown (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
+  let roundToTimeSpan upDown (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
     let tsIfUp = match upDown with Up -> ts | Down -> TimeSpan.Zero
     let dateTime y M d h m s k  = DateTime(y, M, d, h, m, s, k, dt.Kind) + tsIfUp
     let floor divisor n = n - (n % divisor)
@@ -69,7 +71,7 @@ open Utils
 ///   - dateTime: The DateTime to be rounded up.
 ///   - timeSpan: The TimeSpan representing the interval to round down to.
 /// - Returns: A RoundedDateTime value representing the rounded down DateTime or an error message if the TimeSpan is unsuitable for rounding.
-let roundDown dateTime timeSpan : RoundedDateTime = roundToInterval Down dateTime timeSpan
+let roundDown dateTime timeSpan : RoundedDateTime = roundToTimeSpan Down dateTime timeSpan
 
 /// Rounds up a DateTime to the nearest interval specified by the given TimeSpan.
 ///
@@ -77,4 +79,4 @@ let roundDown dateTime timeSpan : RoundedDateTime = roundToInterval Down dateTim
 ///   - dateTime: The DateTime to be rounded up.
 ///   - timeSpan: The TimeSpan representing the interval to round up to.
 /// - Returns: A RoundedDateTime value representing the rounded up DateTime or an error message if the TimeSpan is unsuitable for rounding.
-let roundUp   dateTime timeSpan : RoundedDateTime = roundToInterval Up   dateTime timeSpan
+let roundUp   dateTime timeSpan : RoundedDateTime = roundToTimeSpan Up   dateTime timeSpan
