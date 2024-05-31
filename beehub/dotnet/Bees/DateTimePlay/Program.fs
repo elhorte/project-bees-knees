@@ -1,13 +1,16 @@
 ﻿module BeesUtil.DateTimeCalculations
 
 open System
+open System.Globalization
 open System.Threading.Tasks
 
 type RoundedDateTime =
 | Good  of DateTime
 | Error of string
 
-module private Utils =
+let roundAway value = Math.Round((value: float), MidpointRounding.AwayFromZero)
+
+module Utils = 
   let ticksPerMicrosecond = TimeSpan.TicksPerMillisecond / 1000L // 10
   let nsPerTick = 1000 / int ticksPerMicrosecond
 
@@ -17,7 +20,7 @@ module private Utils =
   let sec n = TimeSpan.FromSeconds      (float n)
   let ms  n = TimeSpan.FromMilliseconds (float n)
   let us  n = TimeSpan.FromMicroseconds (float n)
-  let ns  n = TimeSpan.FromTicks        (int64 (round (float n / float nsPerTick)))
+  let ns  n = TimeSpan.FromTicks        (int64 (roundAway (float n / float nsPerTick)))
 
   let dtNs (dt: DateTime) = int (dt.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
   let tsNs (ts: TimeSpan) = int (ts.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
@@ -28,7 +31,7 @@ module private Utils =
   /// Requires exactly one nonzero value of Days, Hours, Minutes, or Seconds.
   /// ts: The TimeSpan to classify.
   /// returns: The classification of ts.
-  let (|Days|Hours|Minutes|Seconds|Milliseconds|Microseconds|Bad|) ts =
+  let (|Days|Hours|Minutes|Seconds|Milliseconds|Microseconds|Bad|) ts =  // Max 7 cases supported by the compiler
     match ts with
     | _ when ts = TimeSpan.Zero          -> Bad
     | _ when ts.TotalDays         >= 1.0         &&  ts.TotalDays         % 1.0 = 0  -> Days         ts.Days
@@ -47,7 +50,7 @@ module private Utils =
 
   type UpDown = Up | Down
 
-  let roundToInterval (upDown: UpDown) (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
+  let roundToInterval upDown (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
     let tsIfUp = match upDown with Up -> ts | Down -> TimeSpan.Zero
     let dateTime y M d h m s k  = DateTime(y, M, d, h, m, s, k, dt.Kind) + tsIfUp
     let floor divisor n = n - (n % divisor)
@@ -78,6 +81,7 @@ let roundDown dateTime timeSpan : RoundedDateTime = roundToInterval Down dateTim
 /// - Returns: A RoundedDateTime value representing the rounded up DateTime or an error message if the TimeSpan is unsuitable for rounding.
 let roundUp   dateTime timeSpan : RoundedDateTime = roundToInterval Up   dateTime timeSpan
 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 type TSClass =
   | CDays         of int 
@@ -86,7 +90,6 @@ type TSClass =
   | CSeconds      of int
   | CMilliseconds of int
   | CMicroseconds of int
-  | CZero   
   | CBad
 
 let classify ts =
@@ -99,22 +102,19 @@ let classify ts =
   | Microseconds n -> CMicroseconds n
   | Bad            -> CBad      
   
-let generateGoodInputsC() = seq {
-  day 100, CDays    100
-  hr   23, CHours    23
-  min  59, CMinutes  59
-  sec  59, CSeconds  59 }
+let generateGoodInputsC() = [|
+  day  7        , CDays          7
+  hr   8        , CHours         8
+  min  6        , CMinutes       6
+  sec 10        , CSeconds      10
+  ms  10        , CMilliseconds 10 
+  us  20        , CMicroseconds 20 
+  us  20 + ns 49, CMicroseconds 20 |]
 
-let generateBadInputsC() = seq {
-  day 99 + hr  1, CBad
-  hr  23 + min 1, CBad
-  min 59 + sec 1, CBad
-  sec 59 + ms  1, CBad
-  ms   0 + us  1, CBad
-  us   0 + ns  1, CBad }
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 let format = "M/d/yyyy HH:mm:ss.ffffff"
-let provider = System.Globalization.CultureInfo.InvariantCulture
+let provider = CultureInfo.InvariantCulture
 let parseDT s nsArg = DateTime.ParseExact(s, format, provider) + ns nsArg
 let start = parseDT "02/13/0001 10:09:14.123456" 250
 
@@ -133,16 +133,48 @@ let generateNextGoodInputs() = [|
   (start, (sec 10)), Good (parseDT "02/13/0001 10:09:20.000000"   0)
   (start, (ms  10)), Good (parseDT "02/13/0001 10:09:14.130000"   0)
   (start, (us  20)), Good (parseDT "02/13/0001 10:09:14.123460"   0)  |]
-  
-let generateBadInputs() = [|
-  (start, day  7 + hr    1), Error tsMalformedMessage
-  (start, hr  23 + min   1), Error tsMalformedMessage
-  (start, min 59 + sec   1), Error tsMalformedMessage
-  (start, sec 59 + ms    1), Error tsMalformedMessage
-  (start, ms  10 + us    1), Error tsMalformedMessage
-  (start, us  10 + ns  500), Error tsMalformedMessage
-  (start, ns 200          ), Error tsMalformedMessage |]
 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
+
+let bad = [|
+  day   1 + hr   1
+  day   2 + min  1
+  day   1 + sec  1
+  day   3 + ms   1
+  day   4 + us   1
+  day   5 + ns  50
+  //––––––––––––––
+  hr    1 + min  1
+  hr    1 + sec  1
+  hr    1 + ms   1
+  hr    1 + us   1
+  hr    1 + ns  50
+  //––––––––––––––
+  min   1 + sec  1
+  min   1 + ms   1
+  min   1 + us   1
+  min   1 + ns  50
+  //––––––––––––––
+  sec   1 + ms   1
+  sec   1 + us   1
+  sec   1 + ns  50
+  //––––––––––––––
+  ms    1 + us   1
+  ms    1 + ns  50
+  //––––––––––––––
+  us    1 + ns  50
+  //––––––––––––––
+  ns   50          |]
+
+let badInputsC() =
+  bad
+  |> Array.map (fun input -> input, CBad)
+
+let badInputs() =
+  bad
+  |> Array.map (fun input -> input, Error tsMalformedMessage)
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 let dtToString (dt: DateTime) =
   let format = "yyyy-MM-dd HH:mm:ss.ffffff"
@@ -151,6 +183,8 @@ let dtToString (dt: DateTime) =
 
 let tsToString (ts: TimeSpan) = 
     sprintf $"%d{ts.Days}.%02d{ts.Hours}:%02d{ts.Minutes}:%02d{ts.Seconds}.%03d{ts.Milliseconds}%03d{ts.Microseconds}_%d{int (ts.Ticks % 10L)}00"
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 type TestMode =
   | PrintFailures
@@ -161,8 +195,8 @@ let checkC textWriter testMode result =
   let passed = actual = expected
   if not passed  ||  testMode = PrintAll then
     let ok = if passed then  " √" else  "# "
-    let sInput = $"%A{ts}"
-    fprintf textWriter $"%s{ok} classify %-19s{sInput} "
+    let sTsInput = $"%s{tsToString ts}"
+    fprintf textWriter $"%s{ok} classify %-22s{sTsInput} "
     let printResult result =
       match result with
       | CDays         n -> printf $"%d{n} Days"
@@ -171,9 +205,7 @@ let checkC textWriter testMode result =
       | CSeconds      n -> printf $"%d{n} Seconds"
       | CMilliseconds n -> printf $"%d{n} Milliseconds"
       | CMicroseconds n -> printf $"%d{n} Microseconds"
-      | CZero           -> printf $"zero"
       | CBad            -> printf $"bad"
-      | _               -> printf $"unaccounted for"
     printResult actual
     if not passed then
       fprintf textWriter "          –– expected: "
@@ -186,8 +218,8 @@ let check msg textWriter testMode result =
   let passed = actual = expected
   if not passed  ||  testMode = PrintAll then
     let ok = if passed then  " √" else  "# "
-    let sTsInput = $"%A{tsToString ts}"
-    fprintf textWriter $"%s{ok} %s{msg} %-19s{sTsInput} "
+    let sTsInput = $"%s{tsToString ts}"
+    fprintf textWriter $"%s{ok} %-8s{msg} %-22s{sTsInput} "
     let printResult result =
       match result with
       | Good  dt  -> printf $"%s{dtToString dt}"
@@ -198,6 +230,7 @@ let check msg textWriter testMode result =
       printResult expected
     fprintfn textWriter ""
 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 type InputAndExpectedC    = TimeSpan * TSClass
 type InputExpectedActualC = TimeSpan * TSClass * TSClass
@@ -207,34 +240,37 @@ type InputExpectedActual = (DateTime * TimeSpan) * RoundedDateTime * RoundedDate
 
 type Output = Stdout | File of string
 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
+
 let waitUntil dateTime =
   let duration = dateTime - DateTime.Now
   if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()
 
-
-let runPeriodically period =
+let runPeriodically period count =
   match roundDown (DateTime.Now - TimeSpan.FromMilliseconds 10) period with
   | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
   | Good startTime -> 
-  printfn $"startTime %A{tsToString startTime.TimeOfDay}  slop %A{tsToString (startTime - DateTime.Now)}"
-  let rec saveFrom saveTime =
+  printfn $"startTime %s{tsToString startTime.TimeOfDay}  slop %s{tsToString (startTime - DateTime.Now)}"
+  let rec saveFrom saveTime count =
+    if count <= 0 then ()
+    else
     waitUntil (saveTime + period)
-    printfn $"%A{dtToString saveTime}"
-    saveFrom (saveTime + period)
-  saveFrom startTime
+    printfn $"%s{dtToString saveTime}"
+    let count' = count - 1
+    saveFrom (saveTime + period) count'
+  saveFrom startTime count
 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 [<EntryPoint>]
 let main argv =
   printfn $"start is %A{dtToString start}"
-  let dt0 = start - (day  (start.Day - 1)) - (ns (dtNs start)) - (us start.Microsecond) - (ms start.Millisecond) - (sec start.Second) - (min start.Minute) - (hr start.Hour)
-  printfn $"%A{dtToString dt0}"
   let testMode = match 2 with | 1 -> PrintFailures | 2 -> PrintAll       | _ -> failwith "bad choice"
   let output   = match 1 with | 1 -> Stdout        | 2 -> File "out.txt" | _ -> failwith "bad choice"
   use writer =
     match output with
-    | Stdout    ->  System.Console.Out
-    | File path ->  new System.IO.StreamWriter(path)
+    | Stdout    ->  Console.Out
+    | File path ->  new IO.StreamWriter(path)
   printfn "TestMode is %A" testMode
   printfn "Output   is %A" output
   let testClassify() =
@@ -249,7 +285,7 @@ let main argv =
       |> Seq.map  classifyOne
       |> Seq.iter checkOne
     runAll generateGoodInputsC
-    runAll generateBadInputsC
+    runAll badInputsC
   let testGetPrevNext prevOrNext =
     let get =
       match prevOrNext with
@@ -271,13 +307,14 @@ let main argv =
     | "prev" -> runAll generatePrevGoodInputs
     | "next" -> runAll generateNextGoodInputs
     | "bad "
-    | _      -> runAll generateBadInputs
+    | _      -> runAll badInputs
   testClassify()
+  printfn ""
   testGetPrevNext "prev"
   printfn ""
   testGetPrevNext "next"
   printfn ""
   testGetPrevNext "bad "
-//runPeriodically (TimeSpan.FromSeconds 2)
+  runPeriodically (TimeSpan.FromSeconds 2) 3
   0
  

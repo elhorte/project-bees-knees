@@ -6,7 +6,9 @@ type RoundedDateTime =
 | Good  of DateTime
 | Error of string
 
-module private Utils =
+let roundAway value = Math.Round((value: float), MidpointRounding.AwayFromZero)
+
+module Utils = 
   let ticksPerMicrosecond = TimeSpan.TicksPerMillisecond / 1000L // 10
   let nsPerTick = 1000 / int ticksPerMicrosecond
 
@@ -16,7 +18,7 @@ module private Utils =
   let sec n = TimeSpan.FromSeconds      (float n)
   let ms  n = TimeSpan.FromMilliseconds (float n)
   let us  n = TimeSpan.FromMicroseconds (float n)
-  let ns  n = TimeSpan.FromTicks        (int64 (round (float n / float nsPerTick)))
+  let ns  n = TimeSpan.FromTicks        (int64 (roundAway (float n / float nsPerTick)))
 
   let dtNs (dt: DateTime) = int (dt.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
   let tsNs (ts: TimeSpan) = int (ts.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
@@ -27,7 +29,7 @@ module private Utils =
   /// Requires exactly one nonzero value of Days, Hours, Minutes, or Seconds.
   /// ts: The TimeSpan to classify.
   /// returns: The classification of ts.
-  let (|Days|Hours|Minutes|Seconds|Milliseconds|Microseconds|Bad|) ts =
+  let (|Days|Hours|Minutes|Seconds|Milliseconds|Microseconds|Bad|) ts =  // Max 7 cases supported by the compiler
     match ts with
     | _ when ts = TimeSpan.Zero          -> Bad
     | _ when ts.TotalDays         >= 1.0         &&  ts.TotalDays         % 1.0 = 0  -> Days         ts.Days
@@ -46,7 +48,7 @@ module private Utils =
 
   type UpDown = Up | Down
 
-  let roundToInterval (upDown: UpDown) (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
+  let roundToInterval upDown (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
     let tsIfUp = match upDown with Up -> ts | Down -> TimeSpan.Zero
     let dateTime y M d h m s k  = DateTime(y, M, d, h, m, s, k, dt.Kind) + tsIfUp
     let floor divisor n = n - (n % divisor)
