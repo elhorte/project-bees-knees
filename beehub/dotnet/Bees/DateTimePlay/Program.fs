@@ -172,7 +172,7 @@ let badInputsC() =
 
 let badInputs() =
   bad
-  |> Array.map (fun input -> input, Error tsMalformedMessage)
+  |> Array.map (fun input -> (start, input), Error tsMalformedMessage)
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -196,7 +196,7 @@ let checkC textWriter testMode result =
   if not passed  ||  testMode = PrintAll then
     let ok = if passed then  " √" else  "# "
     let sTsInput = $"%s{tsToString ts}"
-    fprintf textWriter $"%s{ok} classify %-22s{sTsInput} "
+    fprintf textWriter $"%s{ok} classify  %-22s{sTsInput} "
     let printResult result =
       match result with
       | CDays         n -> printf $"%d{n} Days"
@@ -219,7 +219,7 @@ let check msg textWriter testMode result =
   if not passed  ||  testMode = PrintAll then
     let ok = if passed then  " √" else  "# "
     let sTsInput = $"%s{tsToString ts}"
-    fprintf textWriter $"%s{ok} %-8s{msg} %-22s{sTsInput} "
+    fprintf textWriter $"%s{ok} %s{msg}  %-22s{sTsInput} "
     let printResult result =
       match result with
       | Good  dt  -> printf $"%s{dtToString dt}"
@@ -247,18 +247,19 @@ let waitUntil dateTime =
   if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()
 
 let runPeriodically period count =
-  match roundDown (DateTime.Now - TimeSpan.FromMilliseconds 10) period with
-  | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
+  let now = DateTime.Now
+  match roundUp now period with
+  | Error s -> failwith s
   | Good startTime -> 
-  printfn $"startTime %s{tsToString startTime.TimeOfDay}  slop %s{tsToString (startTime - DateTime.Now)}"
-  let rec saveFrom saveTime count =
+  printfn $"from now %A{tsToString now.TimeOfDay}, wait %s{tsToString (startTime - DateTime.Now)}"
+  let rec doNext (dt: DateTime) count =
     if count <= 0 then ()
     else
-    waitUntil (saveTime + period)
-    printfn $"%s{dtToString saveTime}"
+    waitUntil (dt + period)
+    printfn $"%s{tsToString dt.TimeOfDay}"
     let count' = count - 1
-    saveFrom (saveTime + period) count'
-  saveFrom startTime count
+    doNext (dt + period) count'
+  doNext startTime count
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -286,35 +287,37 @@ let main argv =
       |> Seq.iter checkOne
     runAll generateGoodInputsC
     runAll badInputsC
-  let testGetPrevNext prevOrNext =
-    let get =
-      match prevOrNext with
-      | "prev" -> roundDown
-      | "next" -> roundUp
+  let testGetPrevNext upOrDown =
+    let round =
+      match upOrDown with
+      | "down" -> roundDown
+      | "up  " -> roundUp
       | "bad "
       | _      -> roundDown
     let getOne (input: InputAndExpected)  : InputExpectedActual =
       let (dt, ts), expected = input
-      let actual = ts |> get dt
+      let actual = ts |> round dt
       (dt,ts),expected,actual
     let checkOne (result: InputExpectedActual)  : unit =
-      check prevOrNext writer testMode result
+      check upOrDown writer testMode result
     let runAll generator =
       generator()
       |> Array.map  getOne
       |> Array.iter checkOne
-    match prevOrNext with
-    | "prev" -> runAll generatePrevGoodInputs
-    | "next" -> runAll generateNextGoodInputs
+    match upOrDown with
+    | "down" -> runAll generatePrevGoodInputs
+    | "up  " -> runAll generateNextGoodInputs
     | "bad "
     | _      -> runAll badInputs
-  testClassify()
+//printfn ""
+//testClassify()
   printfn ""
-  testGetPrevNext "prev"
+  testGetPrevNext "down"
   printfn ""
-  testGetPrevNext "next"
+  testGetPrevNext "up  "
   printfn ""
   testGetPrevNext "bad "
+  printfn ""
   runPeriodically (TimeSpan.FromSeconds 2) 3
   0
  
