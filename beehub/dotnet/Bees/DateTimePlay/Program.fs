@@ -83,99 +83,6 @@ let roundUp   dateTime timeSpan : RoundedDateTime = roundToInterval Up   dateTim
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 
-type TSClass =
-  | CDays         of int 
-  | CHours        of int
-  | CMinutes      of int
-  | CSeconds      of int
-  | CMilliseconds of int
-  | CMicroseconds of int
-  | CBad
-
-let classify ts =
-  match ts with
-  | Days         n -> CDays    n
-  | Hours        n -> CHours   n
-  | Minutes      n -> CMinutes n
-  | Seconds      n -> CSeconds n
-  | Milliseconds n -> CMilliseconds n
-  | Microseconds n -> CMicroseconds n
-  | Bad            -> CBad      
-  
-let generateGoodInputsC() = [|
-  day  7        , CDays          7
-  hr   8        , CHours         8
-  min  6        , CMinutes       6
-  sec 10        , CSeconds      10
-  ms  10        , CMilliseconds 10 
-  us  20        , CMicroseconds 20 
-  us  20 + ns 49, CMicroseconds 20 |]
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––
-
-let format = "M/d/yyyy HH:mm:ss.ffffff"
-let provider = CultureInfo.InvariantCulture
-let parseDT s nsArg = DateTime.ParseExact(s, format, provider) + ns nsArg
-let start = parseDT "02/13/0001 10:09:14.123456" 250
-
-let generatePrevGoodInputs() = [|
-  (start, (day  7)), Good (parseDT "02/08/0001 00:00:00.000000"   0)
-  (start, (hr   8)), Good (parseDT "02/13/0001 08:00:00.000000"   0)
-  (start, (min  6)), Good (parseDT "02/13/0001 10:06:00.000000"   0)
-  (start, (sec 10)), Good (parseDT "02/13/0001 10:09:10.000000"   0)
-  (start, (ms  10)), Good (parseDT "02/13/0001 10:09:14.120000"   0)
-  (start, (us  20)), Good (parseDT "02/13/0001 10:09:14.123440"   0)  |]
-
-let generateNextGoodInputs() = [|
-  (start, (day  7)), Good (parseDT "02/15/0001 00:00:00.000000"   0)
-  (start, (hr   8)), Good (parseDT "02/13/0001 16:00:00.000000"   0)
-  (start, (min  6)), Good (parseDT "02/13/0001 10:12:00.000000"   0)
-  (start, (sec 10)), Good (parseDT "02/13/0001 10:09:20.000000"   0)
-  (start, (ms  10)), Good (parseDT "02/13/0001 10:09:14.130000"   0)
-  (start, (us  20)), Good (parseDT "02/13/0001 10:09:14.123460"   0)  |]
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––
-
-let bad = [|
-  day   1 + hr   1
-  day   2 + min  1
-  day   1 + sec  1
-  day   3 + ms   1
-  day   4 + us   1
-  day   5 + ns  50
-  //––––––––––––––
-  hr    1 + min  1
-  hr    1 + sec  1
-  hr    1 + ms   1
-  hr    1 + us   1
-  hr    1 + ns  50
-  //––––––––––––––
-  min   1 + sec  1
-  min   1 + ms   1
-  min   1 + us   1
-  min   1 + ns  50
-  //––––––––––––––
-  sec   1 + ms   1
-  sec   1 + us   1
-  sec   1 + ns  50
-  //––––––––––––––
-  ms    1 + us   1
-  ms    1 + ns  50
-  //––––––––––––––
-  us    1 + ns  50
-  //––––––––––––––
-  ns   50          |]
-
-let badInputsC() =
-  bad
-  |> Array.map (fun input -> input, CBad)
-
-let badInputs() =
-  bad
-  |> Array.map (fun input -> input, Error tsMalformedMessage)
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––
-
 let dtToString (dt: DateTime) =
   let format = "yyyy-MM-dd HH:mm:ss.ffffff"
   let ns = nsPerTick * int (dt.Ticks % ticksPerMicrosecond)
@@ -190,103 +97,164 @@ type TestMode =
   | PrintFailures
   | PrintAll
 
-let checkC textWriter testMode result =
-  let ts,expected,actual = result
-  let passed = actual = expected
-  if not passed  ||  testMode = PrintAll then
-    let ok = if passed then  " √" else  "# "
-    let sTsInput = $"%s{tsToString ts}"
-    fprintf textWriter $"%s{ok} classify %-22s{sTsInput} "
-    let printResult result =
-      match result with
-      | CDays         n -> printf $"%d{n} Days"
-      | CHours        n -> printf $"%d{n} Hours"
-      | CMinutes      n -> printf $"%d{n} Minutes"
-      | CSeconds      n -> printf $"%d{n} Seconds"
-      | CMilliseconds n -> printf $"%d{n} Milliseconds"
-      | CMicroseconds n -> printf $"%d{n} Microseconds"
-      | CBad            -> printf $"bad"
-    printResult actual
-    if not passed then
-      fprintf textWriter "          –– expected: "
-      printResult expected
-    fprintfn textWriter ""
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
 
-
-let check msg textWriter testMode result =
-  let (dt,ts),expected,actual = result
-  let passed = actual = expected
-  if not passed  ||  testMode = PrintAll then
-    let ok = if passed then  " √" else  "# "
-    let sTsInput = $"%s{tsToString ts}"
-    fprintf textWriter $"%s{ok} %-8s{msg} %-22s{sTsInput} "
-    let printResult result =
-      match result with
-      | Good  dt  -> printf $"%s{dtToString dt}"
-      | Error s   -> printf $"%s{s}"
-    printResult actual
-    if not passed then
-      fprintf textWriter "       –– expected: "
-      printResult expected
-    fprintfn textWriter ""
+module BadInputs =
+  
+  let data = [|
+    day 1 + hr  1
+    day 2 + min 1
+    day 1 + sec 1
+    day 3 + ms  1
+    day 4 + us  1
+    day 5 + ns 50 // ns 50 rounds to 100
+    //–––––––––––
+    hr  1 + min 1
+    hr  1 + sec 1
+    hr  1 + ms  1
+    hr  1 + us  1
+    hr  1 + ns 50
+    //–––––––––––
+    min 1 + sec 1
+    min 1 + ms  1
+    min 1 + us  1
+    min 1 + ns 50
+    //–––––––––––
+    sec 1 + ms  1
+    sec 1 + us  1
+    sec 1 + ns 50
+    //–––––––––––
+    ms  1 + us  1
+    ms  1 + ns 50
+    //–––––––––––
+    us  1 + ns 50
+    //–––––––––––
+    ns 50         |]
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 
-type InputAndExpectedC    = TimeSpan * TSClass
-type InputExpectedActualC = TimeSpan * TSClass * TSClass
+module TestClassification =
 
-type InputAndExpected    = (DateTime * TimeSpan) * RoundedDateTime
-type InputExpectedActual = (DateTime * TimeSpan) * RoundedDateTime * RoundedDateTime
+  type TSClass =
+    | CDays         of int 
+    | CHours        of int
+    | CMinutes      of int
+    | CSeconds      of int
+    | CMilliseconds of int
+    | CMicroseconds of int
+    | CBad
+    
+  let goodInputs() = [|
+    day  7        , CDays          7
+    hr   8        , CHours         8
+    min  6        , CMinutes       6
+    sec 10        , CSeconds      10
+    ms  10        , CMilliseconds 10 
+    us  20        , CMicroseconds 20 
+    us  20 + ns 49, CMicroseconds 20 |] // ns 49 rounds to 0
 
-type Output = Stdout | File of string
+  let badInputs() =
+    BadInputs.data
+    |> Array.map (fun input -> input, CBad)
 
-//––––––––––––––––––––––––––––––––––––––––––––––––––––
+  let check writer testMode result =
+    let ts,expected,actual = result
+    let passed = actual = expected
+    if not passed  ||  testMode = PrintAll then
+      let ok = if passed then  " √" else  "# "
+      let sTsInput = $"%s{tsToString ts}"
+      fprintf writer $"%s{ok} classify %-22s{sTsInput} "
+      let printResult result =
+        match result with
+        | CDays         n -> fprintf writer $"%d{n} Days"
+        | CHours        n -> fprintf writer $"%d{n} Hours"
+        | CMinutes      n -> fprintf writer $"%d{n} Minutes"
+        | CSeconds      n -> fprintf writer $"%d{n} Seconds"
+        | CMilliseconds n -> fprintf writer $"%d{n} Milliseconds"
+        | CMicroseconds n -> fprintf writer $"%d{n} Microseconds"
+        | CBad            -> fprintf writer $"bad"
+      printResult actual
+      if not passed then
+        fprintf writer "          –– expected: "
+        printResult expected
+      fprintfn writer ""
 
-let waitUntil dateTime =
-  let duration = dateTime - DateTime.Now
-  if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()
+  type InputAndExpected    = TimeSpan * TSClass
+  type InputExpectedActual = TimeSpan * TSClass * TSClass
 
-let runPeriodically period count =
-  match roundDown (DateTime.Now - TimeSpan.FromMilliseconds 10) period with
-  | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
-  | Good startTime -> 
-  printfn $"startTime %s{tsToString startTime.TimeOfDay}  slop %s{tsToString (startTime - DateTime.Now)}"
-  let rec saveFrom saveTime count =
-    if count <= 0 then ()
-    else
-    waitUntil (saveTime + period)
-    printfn $"%s{dtToString saveTime}"
-    let count' = count - 1
-    saveFrom (saveTime + period) count'
-  saveFrom startTime count
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––
-
-[<EntryPoint>]
-let main argv =
-  printfn $"start is %A{dtToString start}"
-  let testMode = match 2 with | 1 -> PrintFailures | 2 -> PrintAll       | _ -> failwith "bad choice"
-  let output   = match 1 with | 1 -> Stdout        | 2 -> File "out.txt" | _ -> failwith "bad choice"
-  use writer =
-    match output with
-    | Stdout    ->  Console.Out
-    | File path ->  new IO.StreamWriter(path)
-  printfn "TestMode is %A" testMode
-  printfn "Output   is %A" output
-  let testClassify() =
-    let classifyOne (input: InputAndExpectedC)  : InputExpectedActualC =
+  let test writer testMode =
+    let classifyOne (input: InputAndExpected)  : InputExpectedActual =
+      let classify ts =
+        match ts with
+        | Days         n -> CDays    n
+        | Hours        n -> CHours   n
+        | Minutes      n -> CMinutes n
+        | Seconds      n -> CSeconds n
+        | Milliseconds n -> CMilliseconds n
+        | Microseconds n -> CMicroseconds n
+        | Bad            -> CBad      
       let ts,expected = input
       let actual = ts |> classify
       ts,expected,actual
-    let checkOne (result: InputExpectedActualC)  : unit =
-      checkC writer testMode result
+    let checkOne (result: InputExpectedActual)  : unit =
+      check writer testMode result
     let runAll generator =
       generator()
       |> Seq.map  classifyOne
       |> Seq.iter checkOne
-    runAll generateGoodInputsC
-    runAll badInputsC
-  let testGetPrevNext prevOrNext =
+    runAll goodInputs
+    runAll badInputs
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
+
+module TestRounding =
+
+  let format = "M/d/yyyy HH:mm:ss.ffffff"
+  let provider = CultureInfo.InvariantCulture
+  let parseDT s nsArg = DateTime.ParseExact(s, format, provider) + ns nsArg
+  let start = parseDT "02/13/0001 10:09:14.123456" 250
+
+  let goodInputsDown = [|
+    (start, (day  7)), Good (parseDT "02/08/0001 00:00:00.000000" 0)
+    (start, (hr   8)), Good (parseDT "02/13/0001 08:00:00.000000" 0)
+    (start, (min  6)), Good (parseDT "02/13/0001 10:06:00.000000" 0)
+    (start, (sec 10)), Good (parseDT "02/13/0001 10:09:10.000000" 0)
+    (start, (ms  10)), Good (parseDT "02/13/0001 10:09:14.120000" 0)
+    (start, (us  20)), Good (parseDT "02/13/0001 10:09:14.123440" 0)  |]
+
+  let goodInputsUp = [|
+    (start, (day  7)), Good (parseDT "02/15/0001 00:00:00.000000" 0)
+    (start, (hr   8)), Good (parseDT "02/13/0001 16:00:00.000000" 0)
+    (start, (min  6)), Good (parseDT "02/13/0001 10:12:00.000000" 0)
+    (start, (sec 10)), Good (parseDT "02/13/0001 10:09:20.000000" 0)
+    (start, (ms  10)), Good (parseDT "02/13/0001 10:09:14.130000" 0)
+    (start, (us  20)), Good (parseDT "02/13/0001 10:09:14.123460" 0)  |]
+
+  let badInputs =
+    BadInputs.data
+    |> Array.map (fun ts -> (start, ts), Error tsMalformedMessage)
+
+  let check writer msg testMode result =
+    let (dt,ts),expected,actual = result
+    let passed = actual = expected
+    if not passed  ||  testMode = PrintAll then
+      let ok = if passed then  " √" else  "# "
+      let sTsInput = $"%s{tsToString ts}"
+      fprintf writer $"%s{ok} %-8s{msg} %-22s{sTsInput} "
+      let printResult result =
+        match result with
+        | Good  dt  -> fprintf writer $"%s{dtToString dt}"
+        | Error s   -> fprintf writer $"%s{s}"
+      printResult actual
+      if not passed then
+        fprintf writer "       –– expected: "
+        printResult expected
+      fprintfn writer ""
+
+  type InputAndExpected    = (DateTime * TimeSpan) * RoundedDateTime
+  type InputExpectedActual = (DateTime * TimeSpan) * RoundedDateTime * RoundedDateTime
+
+  let test writer prevOrNext testMode =
     let get =
       match prevOrNext with
       | "prev" -> roundDown
@@ -298,23 +266,61 @@ let main argv =
       let actual = ts |> get dt
       (dt,ts),expected,actual
     let checkOne (result: InputExpectedActual)  : unit =
-      check prevOrNext writer testMode result
-    let runAll generator =
-      generator()
+      check writer prevOrNext testMode result
+    let runAll source =
+      source
       |> Array.map  getOne
       |> Array.iter checkOne
     match prevOrNext with
-    | "prev" -> runAll generatePrevGoodInputs
-    | "next" -> runAll generateNextGoodInputs
+    | "prev" -> runAll goodInputsDown
+    | "next" -> runAll goodInputsUp
     | "bad "
     | _      -> runAll badInputs
-  testClassify()
-  printfn ""
-  testGetPrevNext "prev"
-  printfn ""
-  testGetPrevNext "next"
-  printfn ""
-  testGetPrevNext "bad "
-  runPeriodically (TimeSpan.FromSeconds 2) 3
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
+
+module RunPeriodically =
+  
+  let waitUntil dateTime =
+    let duration = dateTime - DateTime.Now
+    if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()
+
+  let test writer period count =
+    match roundDown (DateTime.Now - TimeSpan.FromMilliseconds 10) period with
+    | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
+    | Good startTime -> 
+    fprintfn writer $"startTime %s{tsToString startTime.TimeOfDay}  slop %s{tsToString (startTime - DateTime.Now)}"
+    let rec saveFrom saveTime count =
+      if count <= 0 then ()
+      else
+      waitUntil (saveTime + period)
+      fprintfn writer $"%s{dtToString saveTime}"
+      let count' = count - 1
+      saveFrom (saveTime + period) count'
+    saveFrom startTime count
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
+
+type Output = Stdout | File of string
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
+
+[<EntryPoint>]
+let main argv =
+  let testMode = match 2 with | 1 -> PrintFailures | 2 -> PrintAll       | _ -> failwith "bad choice"
+  let output   = match 1 with | 1 -> Stdout        | 2 -> File "out.txt" | _ -> failwith "bad choice"
+  use writer =
+    match output with
+    | Stdout    ->  Console.Out
+    | File path ->  new IO.StreamWriter(path)
+  fprintfn writer ""
+  fprintfn writer "TestMode is %A" testMode
+  fprintfn writer "Output   is %A" output
+  fprintfn writer "" ; TestClassification.test writer testMode
+  fprintfn writer "" ; fprintfn writer $"start is %A{dtToString TestRounding.start}"
+  fprintfn writer "" ; TestRounding.test writer "prev" testMode
+  fprintfn writer "" ; TestRounding.test writer "next" testMode
+  fprintfn writer "" ; TestRounding.test writer "bad " testMode
+  fprintfn writer "" ; RunPeriodically.test writer (TimeSpan.FromSeconds 2) 3
   0
  
