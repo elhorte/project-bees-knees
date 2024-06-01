@@ -3,6 +3,7 @@ module BeesUtil.DebugGlobals
 open DateTimeShim
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// Simulating callbacks for testing and debugging
 
 type SimIntsData = {
   NData: int
@@ -10,7 +11,7 @@ type SimIntsData = {
 type SimTimesData = {
   AudioDuration : _TimeSpan
   GapDuration   : _TimeSpan  }
-type SimulatingCallbacks = NotSimulating | SimInts of SimIntsData | SimTimes of SimTimesData
+type Simulating = NotSimulating | SimInts of SimIntsData | SimTimes of SimTimesData
 // let mutable simulatingCallbacks = NotSimulating
 let cbSimNDataFrames   sim f = match sim with | SimInts  d -> d.NData         | _ -> f()
 let cbSimNGapFrames    sim f = match sim with | SimInts  d -> d.NGap          | _ -> f() 

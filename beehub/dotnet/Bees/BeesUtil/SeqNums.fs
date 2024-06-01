@@ -21,15 +21,16 @@ type SeqNums = { mutable S : uint32 } with
 
   static member New() = SeqNums.Make seqNumsInitValue seqNumsInitValue
 
-  /// Producer: enter the critical section
+  /// Enters the critical section on behalf of a producer.
   member sn.EnterUnstable() =  let n1, n2 =  sn.GetPair() in sn.Set (n1 + 1us)  n2
 
-  /// Producer: leave the critical section
+  /// Leaves the critical section on behalf of a producer
   member sn.LeaveUnstable() =  let n1, n2 =  sn.GetPair() in sn.Set  n1        (n2 + 1us)
 
   member sn.NeverEntered = sn.N1 = seqNumsInitValue
     
-  /// Consumer: call a function while not in the critical section; busywait and retry as necessary.
+  /// Calls a function on behalf of a consumer one or more times until the last time,
+  /// which is guaranteed to be while stable, i.e., not in the critical section.
   member sn.WhenStable                timeout (f: unit -> 'T)                        : SeqNumsResult<'T> =
          sn.WhenStableInternal false  timeout  f              Int32.MaxValue ignore
   member sn.WhenStableAndEntered      timeout (f: unit -> 'T)                        : SeqNumsResult<'T> =
@@ -40,7 +41,7 @@ type SeqNums = { mutable S : uint32 } with
   member sn.N2 =  sn.Get() >>> 16 |> uint16
 
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-  // Not normally used by clients
+  // Internals
 
   static member Make n1 n2 =  { S = (uint32 n2 <<< 16) ||| uint32 n1 }
   member sn.Set (n1: uint16) (n2: uint16) =  Volatile.Write(&sn.S, (SeqNums.Make n1 n2).S)

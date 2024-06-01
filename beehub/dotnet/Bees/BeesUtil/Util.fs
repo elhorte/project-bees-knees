@@ -5,6 +5,11 @@ open System.Threading.Tasks
 
 open DateTimeShim
 
+
+//–––––––––––––––––––––––––––––––––––––––––––––––––––
+
+let roundAway value = Math.Round((value: float), MidpointRounding.AwayFromZero)
+
 //–––––––––––––––––––––––––––––––––––––––––––––––––––
 
 // for debugging simulating callbacks

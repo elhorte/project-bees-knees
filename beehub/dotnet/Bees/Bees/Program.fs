@@ -1,6 +1,7 @@
 ﻿
 open System
 open System.Threading
+open System.Threading.Tasks
 open BeesUtil.Ranges
 open FSharp.Control
 
@@ -84,7 +85,7 @@ let rec save saveFunction ext (inputStream: InputStream) (time: _DateTime) durat
 /// <param name="inputStream">The audio input stream to save.</param>
 /// <param name="duration">The duration of each saved audio file.</param>
 /// <param name="period">The interval between each save.</param>
-let saveMp3Periodically (inputStream: InputStream) duration period =
+let saveMp3Periodically (inputStream: InputStream) duration period (ctsToken: CancellationToken) =
   //  ....|.....|.....|....
   //   |<––––––––– Now
   //      |<– startTIme
@@ -99,6 +100,8 @@ let saveMp3Periodically (inputStream: InputStream) duration period =
   | Good startTime -> 
   printfn $"startTime %A{startTime.TimeOfDay}  slop %A{startTime - _DateTime.Now}"
   let rec saveFrom saveTime =
+    if ctsToken.IsCancellationRequested then ()
+    else
     inputStream.WaitUntil (saveTime + duration)
     save saveAsMp3 "mp3" inputStream saveTime duration
     saveFrom (saveTime + period)
@@ -110,7 +113,7 @@ let run inputStream = task {
   inputStream.Start()
   use cts = new CancellationTokenSource()
   printfn "Reading..."
-  saveMp3Periodically inputStream (TimeSpan.FromSeconds 4)  (TimeSpan.FromSeconds 5)
+  Task.Run(fun () -> saveMp3Periodically inputStream (TimeSpan.FromSeconds 4)  (TimeSpan.FromSeconds 5) cts.Token) |> ignore
   do! keyboardKeyInput "" cts
   printfn "Stopping..."    ; inputStream.Stop()
   printfn "Stopped"
@@ -147,7 +150,7 @@ let main _ =
   printBeesConfig beesConfig
   keyboardInputInit()
   try
-    let inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging, NotSimulating)
+    use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging, NotSimulating)
     let t = task {
       do! run inputStream 
       inputStream.CbState.Logger.Print "Log:" }
