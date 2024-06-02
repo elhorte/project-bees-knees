@@ -629,148 +629,22 @@ type InputStream(beesConfig       : BeesConfig          ,
       nParts <- nParts + 1
     result.Parts.P
     |> Array.iter copyResultPart
+
+  static member DeliverReadResultFPq (result: ReadResult) deliver =
+    let foldFunc (destIndexNS, nParts) { Index = indexNF; NFrames = nFrames } =
+      let indexNS  = indexNF * result.InChannelCount
+      let nSamples = nFrames * result.InChannelCount
+      deliver indexNS destIndexNS nSamples
+      destIndexNS + nSamples, nParts + 1
+    let destIndexNS, nParts =
+      result.Parts.P
+      |> Array.fold foldFunc (0, 0)
+    assert (destIndexNS = result.NSamples)
+    assert (nParts = result.Parts.P.Length)
     
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-
-
-
-  // let getSome timeStart count  : (int * int) seq = seq {
-  //   if cbMessage.Segs.Old.Active then
-  //     if timeStart >= segHead then
-  //       // return empty sequence
-  //     let timeOffset = timeStart - cbMessage.Segs.Old.TailTime
-  //     assert (timeOffset >= 0)
-  //     let nFrames = cbMessage.Segs.Old.NFramesOf timeOffset
-  //     let indexStart = cbMessage.Segs.Old.Tail + nFrames
-  //     if indexStart < cbMessage.Segs.Old.Head then
-  //       yield (indexStart, nFrames)
-  //   if cbMessage.Segs.Cur.Active then yield (cbMessage.Segs.Cur.Tail, cbMessage.Segs.Cur.NFrames)
-  // }
-
-  //
-  // let x = tailTime
-  // let get (dateTime: _DateTime) (duration: _TimeSpan) (worker: Worker) =
-  //   let now = _DateTime.Now
-  //   let timeStart = max dateTime tailTime
-  //   if timeStart + duration > now then  Error "insufficient buffered data"
-  //   else
-  //   let rec deliver timeStart nFrames =
-  //     let nSamples = nFrames / frameSize
-  //     let r = worker fromPtr nSamples
-  //   let nextIndex = ringIndex timeStart
-  //   let count =
-  //   deliver next timeStart
-  //   Success timeStart
-
-
-  // let keep (duration: _TimeSpan) =
-    // assert (duration > _TimeSpan.Zero)
-    // let now = _DateTime.Now
-    // let dateTime = now - duration
-    // tailTime <-
-    //   if dateTime < tailTime then  tailTime
-    //                          else  dateTime
-    // tailTime
-
-  member private is.offsetOfDateTime (dateTime: _DateTime)  : Option<Seg * int> =
-    if not (is.TailTime <= dateTime && dateTime <= is.HeadTime) then Some (is.CbStateLatest.Segs.Cur, 1)
-    else None
-
-
-  // member private is.take inputTake =
-  //   let from = match inputTake.FromRef with BufRef arrRef -> !arrRef
-  //   let size = frameCountToByteCount inputTake.FrameCount
-  //   System.Buffer.BlockCopy(from, 0, buffer, index, size)
-  //   advanceIndex inputTake.FrameCount
-  //   inputTake.CompletionSource.SetResult()
-
-
-  /// Create a stream of samples starting at a past _DateTime.
-  /// The stream is exhausted when it gets to the end of buffered data.
-  /// The recipient is responsible for separating out channels from the sequence.
-  // member this.Get(dateTime: _DateTime, worker: Worker)  : SampleType seq option = seq {
-  //    let segIndex = segOfDateTime dateTime
-  //    match seg with
-  //    | None: return! None
-  //    | Some seg :
-  //    if isInSegs.Old dateTime then
-  //    WIP
-  //
-  // }
 
   interface IDisposable with
     member this.Dispose() =
       Console.WriteLine("Disposing inputStream")
   //  this.PaStream.Dispose()  // I think this crashes because PaStream doesn’t like being closed twice.
-
-
-
-// See Theory of Operation comment before main at the end of this file.
-
-
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// callback –> CbMessage –> CbMessageQueue handler
-
-/// NEEDS WORK
-/// Main does the following:
-/// - Initialize PortAudio.
-/// - Create everything the callback will need.
-///   - sampleRate, inputParameters, outputParameters
-///   - a CbMessageQueue, which
-///     - accepts a CbMessage from each callback
-///     - calls the given handler asap for each CbMessage queued
-///   - a CbContext struct, which is passed to each callback
-/// - runs the cbMessageQueue
-/// The audio callback is designed to do as little as possible at interrupt time:
-/// - grabs a CbMessage from a preallocated ItemPool
-/// - copies the input data buf into the CbMessage
-/// - inserts the CbMessage into in the CbMessageQueue for later processing
-
-// <summary>
-//   Creates a Stream.Callback that:
-//   <list type="bullet">
-//     <item><description> Allocates no memory because this is a system-level callback </description></item>
-//     <item><description> Gets a <c>CbMessage</c> from the pool and fills it in        </description></item>
-//     <item><description> Posts the <c>CbMessage</c> to the <c>cbMessageQueue</c>     </description></item>
-//   </list>
-// </summary>
-// <param name="cbContextRef"> A reference to the associated <c>CbContext</c> </param>
-// <param name="cbMessageQueue" > The <c>CbMessageQueue</c> to post to           </param>
-// <returns> A Stream.Callback to be called by PortAudioSharp                 </returns>
-
-//–––––––––––––––––––––––––––––––––––––
-// PortAudioSharp.Stream
-
-/// <summary>
-///   Creates an audio stream, to be started by the caller.
-///   The stream will echo input to output if desired.
-/// </summary>
-/// <param name="inputParameters" > Parameters for input audio stream                               </param>
-/// <param name="outputParameters"> Parameters for output audio stream                              </param>
-/// <param name="frameRate"       > Audio frame rate (a.k.a, sample rate)                           </param>
-/// <param name="withEchoRef"     > A Boolean determining if input should be echoed to output       </param>
-/// <param name="withLoggingRef"  > A Boolean determining if the callback should do logging         </param>
-/// <param name="cbMessageQueue"  > CbMessageQueue object handling audio stream                     </param>
-/// <returns>An <c>InputStream</c></returns>
-// let makeInputStream beesConfig inputParameters outputParameters frameRate withEcho withLogging  : InputStream =
-//   initPortAudio()
-//   let inputStream = new InputStream(beesConfig, withEcho, withLogging)
-//   let callback = PortAudioSharp.Stream.Callback( // The fun has to be here because of a limitation of the compiler, apparently.
-//     fun                    input  output  frameCount  timeInfo  statusFlags  userDataPtr ->
-//       // inputStream.Callback(input, output, frameCount, timeInfo, statusFlags, userDataPtr) )
-//       Console.Write(".\007")
-//       PortAudioSharp.StreamCallbackResult.Continue )
-//   let paStream = paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
-//                                                                         outParams       = Nullable<_>(outputParameters)        ,
-//                                                                         sampleRate      = frameRate                           ,
-//                                                                         framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
-//                                                                         streamFlags     = StreamFlags.ClipOff                  ,
-//                                                                         callback        = callback                             ,
-//                                                                         userData        = Nullable()                           ) )
-//   inputStream.PaStream <- paStream
-//   paTryCatchRethrow(fun() -> inputStream.Start())
-//   inputStream
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-

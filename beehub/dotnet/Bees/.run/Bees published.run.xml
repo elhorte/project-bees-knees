@@ -1,0 +1,6 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Bees published" type="DotNetFolderPublish" factoryName="Publish to folder">
+    <riderPublish configuration="Release" platform="Any CPU" ready_to_run="true" runtime="osx-x64" target_folder="$PROJECT_DIR$/Bees/bin/Release/net8.0/osx-x64/publish" target_framework="net8.0" uuid_high="-9099129202884393212" uuid_low="-5042077961946282342" />
+    <method v="2" />
+  </configuration>
+</component>
