@@ -74,7 +74,7 @@ let rec save ext (inputStream: InputStream) (time: _DateTime) duration =
     saveToFile saveFunction name readResult.FrameRate readResult.InChannelCount samplesArray
   Console.WriteLine (sprintf $"saveMp3File %A{time.TimeOfDay} %A{duration}")
   let readResult = inputStream.read time duration
-  let print() = Console.WriteLine (sprintf $"adcStartTime %A{readResult.Time.TimeOfDay}  %A{readResult.Duration} %A{readResult.RangeClip}")
+  let print() = Console.WriteLine $"adcStartTime %A{readResult.Time.TimeOfDay}  %A{readResult.Duration} %A{readResult.RangeClip}"
   match readResult.RangeClip with
   | RangeClip.BeforeData    
   | RangeClip.AfterData       ->  print()
