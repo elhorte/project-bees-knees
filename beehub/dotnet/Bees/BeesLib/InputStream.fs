@@ -11,12 +11,10 @@ open BeesUtil.DateTimeShim
 open BeesUtil.DebugGlobals
 open BeesUtil.Util
 open BeesUtil.Logger
-open BeesUtil.SubscriberList
 open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
 open BeesUtil.SeqNums
 open BeesUtil.Ranges
-open BeesUtil.DateTimeCalculations
 open BeesLib.BeesConfig
 open CSharpHelpers
 
@@ -387,12 +385,13 @@ type RingSpan = {
   NFrames : int  } with
   override t.ToString() = $"[ I %d{t.Index} N %d{t.NFrames} ]"
 
-type Parts = { P : RingSpan array } with
-  override t.ToString() =
-    match t.P.Length with
+type Parts = RingSpan array
+
+let partsToString (parts: Parts) =
+    match parts.Length with
     | 0 -> "(no parts)"
-    | 1 -> $"%A{t.P[0].ToString()}" 
-    | 2 -> $"%A{t.P[0].ToString()} %A{t.P[1].ToString()}" 
+    | 1 -> $"%A{parts[0].ToString()}" 
+    | 2 -> $"%A{parts[0].ToString()} %A{parts[1].ToString()}" 
     | _ -> "(bad parts)"
 
 
@@ -407,7 +406,7 @@ type ReadResult = {
   Parts          : Parts     } // 0 1 or 2 portions of the Ring
 with
 
-  override t.ToString() = $"%d{t.Parts.P.Length} %A{t.RangeClip} %d{t.NSamples} L %s{t.Parts.ToString()}"
+  override t.ToString() = $"%d{t.Parts.Length} %A{t.RangeClip} %d{t.NSamples} L %s{partsToString t.Parts}"
 
 // initPortAudio() must be called before this constructor.
 type InputStream(beesConfig       : BeesConfig          ,
@@ -579,7 +578,6 @@ type InputStream(beesConfig       : BeesConfig          ,
   /// <returns>A ReadResult via which the data can be accessed.</returns>
   member this.read (time: _DateTime) (duration: _TimeSpan)  : ReadResult =
     let cbs = this.CbStateSnapshot
-    if cbs.Simulating = NotSimulating then Console.Write "R"
     let indexBeginArg = nFramesOf cbs.FrameRate (time - cbs.StreamAdcStartTime)
     let nFramesArg    = nFramesOf cbs.FrameRate duration
     let rangeClip, indexBeginInAll, nFramesInAll = clipRange indexBeginArg nFramesArg cbs.Segs.TailInAll cbs.Segs.NFrames
@@ -603,7 +601,7 @@ type InputStream(beesConfig       : BeesConfig          ,
       NSamples       = nFramesInAll * cbs.InChannelCount
       Time           = time
       Duration       = duration
-      Parts          = { P = parts } }
+      Parts          = parts  }
     result
 
   member this.Read (from: _DateTime, duration: _TimeSpan) =
@@ -619,28 +617,20 @@ type InputStream(beesConfig       : BeesConfig          ,
     resultArray
 
   static member DeliverReadResult (result: ReadResult) deliver =
-    let mutable destIndexNS = 0
-    let mutable nParts = 0
-    let copyResultPart { Index = indexNF; NFrames = nFrames } =
-      let indexNS  = indexNF * result.InChannelCount
-      let nSamples = nFrames * result.InChannelCount
-      deliver indexNS destIndexNS nSamples
-      destIndexNS <- destIndexNS + nSamples
-      nParts <- nParts + 1
-    result.Parts.P
-    |> Array.iter copyResultPart
-
-  static member DeliverReadResultFPq (result: ReadResult) deliver =
-    let foldFunc (destIndexNS, nParts) { Index = indexNF; NFrames = nFrames } =
+    let copyResultPart (destIndexNS, nParts) { Index = indexNF; NFrames = nFrames } =
       let indexNS  = indexNF * result.InChannelCount
       let nSamples = nFrames * result.InChannelCount
       deliver indexNS destIndexNS nSamples
       destIndexNS + nSamples, nParts + 1
-    let destIndexNS, nParts =
-      result.Parts.P
-      |> Array.fold foldFunc (0, 0)
-    assert (destIndexNS = result.NSamples)
-    assert (nParts = result.Parts.P.Length)
+    let foldInitialState = 0, 0 // destIndexNS, nParts
+    result.Parts
+    |> Array.fold copyResultPart foldInitialState
+    |> if true then ignore
+       else
+       // The following is only to reinforce what happened, for those new to functional programming.
+       (fun (destIndexNS, nParts) ->
+         assert (destIndexNS = result.NSamples)    // We copied the total number of samples
+         assert (nParts = result.Parts.Length) ) // in the given number of parts
     
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 

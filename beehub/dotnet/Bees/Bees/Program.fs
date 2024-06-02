@@ -59,13 +59,19 @@ let CreateSampleArray nFrames nChannels = Array.zeroCreate (nFrames * nChannels)
 /// <param name="inputStream">The audio input stream to save.</param>
 /// <param name="time">The starting time of the save operation.</param>
 /// <param name="duration">The duration of each saved audio file.</param>
-let rec save saveFunction ext (inputStream: InputStream) (time: _DateTime) duration =
+let rec save ext (inputStream: InputStream) (time: _DateTime) duration =
+  let saveFunction =
+    match ext with
+    | "mp3" ->  saveAsMp3
+    | "wav" ->  saveAsWave
+    | _     ->  let msg = $"unknown audio file format: %A{ext}"
+                fprintfn System.Console.Error "ERROR – Can’t save audio files. %s" msg
+                failwith msg
   let save readResult =
     let samplesArray = InputStream.CopyFromReadResult readResult
-    let sDate = time.ToString("o")
-    let name1 = $"save-{sDate}.{ext}"
-    let namefixed = name1.Replace(":", ".")
-    saveToFile saveFunction namefixed readResult.FrameRate readResult.InChannelCount samplesArray
+    let sDate = time.ToString("o").Replace(":", ".")
+    let name = $"save-{sDate}.{ext}"
+    saveToFile saveFunction name readResult.FrameRate readResult.InChannelCount samplesArray
   Console.WriteLine (sprintf $"saveMp3File %A{time.TimeOfDay} %A{duration}")
   let readResult = inputStream.read time duration
   let print() = Console.WriteLine (sprintf $"adcStartTime %A{readResult.Time.TimeOfDay}  %A{readResult.Duration} %A{readResult.RangeClip}")
@@ -98,14 +104,15 @@ let saveMp3Periodically (inputStream: InputStream) duration period (ctsToken: Ca
   match roundUp inputStream.HeadTime period with
   | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
   | Good startTime -> 
-  printfn $"startTime %A{startTime.TimeOfDay}  slop %A{startTime - _DateTime.Now}"
-  let rec saveFrom saveTime =
-    if ctsToken.IsCancellationRequested then ()
-    else
-    inputStream.WaitUntil (saveTime + duration)
-    save saveAsMp3 "mp3" inputStream saveTime duration
-    saveFrom (saveTime + period)
-  saveFrom startTime
+    let now = DateTime.Now in printfn $"from now %A{now.TimeOfDay}, wait %A{startTime - now}"
+    inputStream.WaitUntil startTime
+    let rec saveFrom saveTime =
+      if ctsToken.IsCancellationRequested then ()
+      else
+      inputStream.WaitUntil  saveTime             ; printf "Started recording ... "
+      inputStream.WaitUntil (saveTime + duration) ; save "mp3x" inputStream saveTime duration
+      saveFrom (saveTime + period)
+    saveFrom startTime
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run inputStream = task {
@@ -113,7 +120,7 @@ let run inputStream = task {
   inputStream.Start()
   use cts = new CancellationTokenSource()
   printfn "Reading..."
-  Task.Run(fun () -> saveMp3Periodically inputStream (TimeSpan.FromSeconds 4)  (TimeSpan.FromSeconds 5) cts.Token) |> ignore
+  Task.Run(fun () -> saveMp3Periodically inputStream (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) cts.Token) |> ignore
   do! keyboardKeyInput "" cts
   printfn "Stopping..."    ; inputStream.Stop()
   printfn "Stopped"
