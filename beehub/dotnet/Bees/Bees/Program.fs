@@ -11,11 +11,8 @@ open BeesUtil.DateTimeShim
 
 open BeesUtil.DebugGlobals
 open BeesUtil.PortAudioUtils
-open BeesUtil.DateTimeCalculations
-open BeesUtil.AudioUtil
-open BeesUtil.SaveAsMp3
-open BeesUtil.SaveAsWave
 open BeesLib.InputStream
+open BeesLib.SaveAudioFile
 open BeesLib.BeesConfig
 open BeesLib.Keyboard
 
@@ -51,68 +48,6 @@ let prepareArgumentsForStreamCreation verbose =
   log $"outputParameters=%A{outputParameters}"
   sampleRate, inputParameters, outputParameters
 
-let CreateSampleArray nFrames nChannels = Array.zeroCreate (nFrames * nChannels)
-
-/// <summary>
-/// Saves to an MP3 file from the inputStream buffer at given time for a given duration.
-/// </summary>
-/// <param name="inputStream">The audio input stream to save.</param>
-/// <param name="time">The starting time of the save operation.</param>
-/// <param name="duration">The duration of each saved audio file.</param>
-let rec save ext (inputStream: InputStream) (time: _DateTime) duration =
-  let saveFunction =
-    match ext with
-    | "mp3" ->  saveAsMp3
-    | "wav" ->  saveAsWave
-    | _     ->  let msg = $"unknown audio file format: %A{ext}"
-                fprintfn System.Console.Error "ERROR – Can’t save audio files. %s" msg
-                failwith msg
-  let save readResult =
-    let samplesArray = InputStream.CopyFromReadResult readResult
-    let sDate = time.ToString("o").Replace(":", ".")
-    let name = $"save-{sDate}.{ext}"
-    saveToFile saveFunction name readResult.FrameRate readResult.InChannelCount samplesArray
-  Console.WriteLine (sprintf $"saveMp3File %A{time.TimeOfDay} %A{duration}")
-  let readResult = inputStream.read time duration
-  let print() = Console.WriteLine $"adcStartTime %A{readResult.Time.TimeOfDay}  %A{readResult.Duration} %A{readResult.RangeClip}"
-  match readResult.RangeClip with
-  | RangeClip.BeforeData    
-  | RangeClip.AfterData       ->  print()
-  | RangeClip.ClippedBothEnds
-  | RangeClip.ClippedTail    
-  | RangeClip.ClippedHead    
-  | RangeClip.RangeOK         ->  print()
-                                  save readResult
-  | _                         ->  failwith "unkonwn result code"
-
-/// <summary>
-/// Periodically saves the audio stream to an MP3 file for a specified duration and period.
-/// </summary>
-/// <param name="inputStream">The audio input stream to save.</param>
-/// <param name="duration">The duration of each saved audio file.</param>
-/// <param name="period">The interval between each save.</param>
-let saveMp3Periodically (inputStream: InputStream) duration period (ctsToken: CancellationToken) =
-  //  ....|.....|.....|....
-  //   |<––––––––– Now
-  //      |<– startTIme
-  //       saveFrom startTime
-  //         |<– delayUntil saveTime + duration (actually, slightly after)
-  //      |––|   save file 1
-  //             saveFrom saveTime + period
-  //               |<– delayUntil saveTime + duration 
-  //            |––|   save file 2
-  match roundUp inputStream.HeadTime period with
-  | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
-  | Good startTime -> 
-    let now = DateTime.Now in printfn $"from now %A{now.TimeOfDay}, wait %A{startTime - now}"
-    inputStream.WaitUntil startTime
-    let rec saveFrom saveTime =
-      if ctsToken.IsCancellationRequested then ()
-      else
-      inputStream.WaitUntil  saveTime             ; printf "Started recording ... "
-      inputStream.WaitUntil (saveTime + duration) ; save "mp3x" inputStream saveTime duration
-      saveFrom (saveTime + period)
-    saveFrom startTime
 
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run inputStream = task {
@@ -120,7 +55,7 @@ let run inputStream = task {
   inputStream.Start()
   use cts = new CancellationTokenSource()
   printfn "Reading..."
-  Task.Run(fun () -> saveMp3Periodically inputStream (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) cts.Token) |> ignore
+  Task.Run(fun () -> saveAudioFilePeriodically "mp3" inputStream (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) cts.Token) |> ignore
   do! keyboardKeyInput "" cts
   printfn "Stopping..."    ; inputStream.Stop()
   printfn "Stopped"

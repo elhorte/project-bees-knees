@@ -8,10 +8,10 @@ type RoundedDateTime =
 | Good  of DateTime
 | Error of string
 
-let roundAway value = Math.Round((value: float), MidpointRounding.AwayFromZero)
-
 module Utils =
-  
+
+  let roundAway value = Math.Round((value: float), MidpointRounding.AwayFromZero)
+
   let ticksPerMicrosecond = TimeSpan.TicksPerMillisecond / 1000L // 10
   let nsPerTick = 1000 / int ticksPerMicrosecond
   let nsToTicks ns = int64 (roundAway (float ns / float nsPerTick))
@@ -27,28 +27,25 @@ module Utils =
   let dtNs (dt: DateTime) = int (dt.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
   let tsNs (ts: TimeSpan) = int (ts.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
 
+open Utils
+
+module Calculations =
+
   let tsMalformedMessage = "TimeSpan is unsuitable for rounding"
 
   /// Classifies the given TimeSpan for rounding.
-  /// Requires exactly one nonzero value of Days, Hours, Minutes, or Seconds.
+  /// Requires exactly one nonzero value of Days, Hours, Minutes, Seconds, Milliseconds or Microseconds.
   /// ts: The TimeSpan to classify.
   /// returns: The classification of ts.
   let (|Days|Hours|Minutes|Seconds|Milliseconds|Microseconds|Bad|) ts =  // Max 7 cases supported by the compiler
-    match ts with
-    | _ when ts = TimeSpan.Zero          -> Bad
-    | _ when ts.TotalDays         >= 1.0         &&  ts.TotalDays         % 1.0 = 0  -> Days         ts.Days
-    | _ when ts.TotalDays         >= 1.0 -> Bad                                       
-    | _ when ts.TotalHours        >= 1.0         &&  ts.TotalHours        % 1.0 = 0  -> Hours        ts.Hours
-    | _ when ts.TotalHours        >= 1.0 -> Bad                                         
-    | _ when ts.TotalMinutes      >= 1.0         &&  ts.TotalMinutes      % 1.0 = 0  -> Minutes      ts.Minutes
-    | _ when ts.TotalMinutes      >= 1.0 -> Bad                                       
-    | _ when ts.TotalSeconds      >= 1.0         &&  ts.TotalSeconds      % 1.0 = 0  -> Seconds      ts.Seconds
-    | _ when ts.TotalSeconds      >= 1.0 -> Bad                                       
-    | _ when ts.TotalMilliseconds >= 1.0         &&  ts.TotalMilliseconds % 1.0 = 0  -> Milliseconds ts.Milliseconds
-    | _ when ts.TotalMilliseconds >= 1.0 -> Bad                                       
-    | _ when ts.TotalMicroseconds >= 1.0         &&  tsNs ts                    = 0  -> Microseconds ts.Microseconds
-    | _ when ts.TotalMicroseconds >= 1.0 -> Bad                                       
-    | _                                  -> Bad
+    if   ts = TimeSpan.Zero          then                                         Bad
+    elif ts.TotalDays         >= 1.0 then if ts.TotalDays         % 1.0 <> 0 then Bad else Days         ts.Days
+    elif ts.TotalHours        >= 1.0 then if ts.TotalHours        % 1.0 <> 0 then Bad else Hours        ts.Hours
+    elif ts.TotalMinutes      >= 1.0 then if ts.TotalMinutes      % 1.0 <> 0 then Bad else Minutes      ts.Minutes
+    elif ts.TotalSeconds      >= 1.0 then if ts.TotalSeconds      % 1.0 <> 0 then Bad else Seconds      ts.Seconds
+    elif ts.TotalMilliseconds >= 1.0 then if ts.TotalMilliseconds % 1.0 <> 0 then Bad else Milliseconds ts.Milliseconds
+    elif ts.TotalMicroseconds >= 1.0 then if tsNs ts                    <> 0 then Bad else Microseconds ts.Microseconds
+    else                                                                          Bad
 
   type UpDown = Up | Down
 
@@ -61,11 +58,11 @@ module Utils =
     | Hours        n -> Good ((dateTime dt.Year dt.Month dt.Day 0       0         0         0             ) + hr  (floor n dt.Hour       ))
     | Minutes      n -> Good ((dateTime dt.Year dt.Month dt.Day dt.Hour 0         0         0             ) + min (floor n dt.Minute     ))
     | Seconds      n -> Good ((dateTime dt.Year dt.Month dt.Day dt.Hour dt.Minute 0         0             ) + sec (floor n dt.Second     ))
-    | Milliseconds n -> Good ((dateTime dt.Year dt.Month dt.Day dt.Hour dt.Minute dt.Second 0             ) + ms  (floor n dt.Millisecond)) 
+    | Milliseconds n -> Good ((dateTime dt.Year dt.Month dt.Day dt.Hour dt.Minute dt.Second 0             ) + ms  (floor n dt.Millisecond))
     | Microseconds n -> Good ((dateTime dt.Year dt.Month dt.Day dt.Hour dt.Minute dt.Second dt.Millisecond) + us  (floor n dt.Microsecond))
     | _              -> Error tsMalformedMessage
 
-open Utils
+open Calculations
 
 /// Rounds down a DateTime to the nearest interval specified by the given TimeSpan.
 ///
@@ -90,7 +87,7 @@ let dtToString (dt: DateTime) =
   let ns = nsPerTick * int (dt.Ticks % ticksPerMicrosecond)
   $"%s{dt.ToString(format)}_%03d{ns}"
 
-let tsToString (ts: TimeSpan) = 
+let tsToString (ts: TimeSpan) =
     sprintf $"%d{ts.Days}.%02d{ts.Hours}:%02d{ts.Minutes}:%02d{ts.Seconds}.%03d{ts.Milliseconds}%03d{ts.Microseconds}_%d{int (ts.Ticks % 10L)}00"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -102,7 +99,7 @@ type TestMode =
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 module BadInputs =
-  
+
   let data = [|
     day 1 + hr  1
     day 2 + min 1
@@ -138,21 +135,21 @@ module BadInputs =
 module TestClassification =
 
   type TSClass =
-    | CDays         of int 
+    | CDays         of int
     | CHours        of int
     | CMinutes      of int
     | CSeconds      of int
     | CMilliseconds of int
     | CMicroseconds of int
     | CBad
-    
+
   let goodInputs() = [|
     day  7        , CDays          7
     hr   8        , CHours         8
     min  6        , CMinutes       6
     sec 10        , CSeconds      10
-    ms  10        , CMilliseconds 10 
-    us  20        , CMicroseconds 20 
+    ms  10        , CMilliseconds 10
+    us  20        , CMicroseconds 20
     us  20 + ns 49, CMicroseconds 20 |] // ns 49 rounds to 0
 
   let badInputs() =
@@ -194,7 +191,7 @@ module TestClassification =
         | Seconds      n -> CSeconds n
         | Milliseconds n -> CMilliseconds n
         | Microseconds n -> CMicroseconds n
-        | Bad            -> CBad      
+        | Bad            -> CBad
       let ts,expected = input
       let actual = ts |> classify
       ts,expected,actual
@@ -284,7 +281,7 @@ module TestRounding =
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 module RunPeriodically =
-  
+
   let waitUntil dateTime =
     let duration = dateTime - DateTime.Now
     if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()
@@ -293,7 +290,7 @@ module RunPeriodically =
     let now = DateTime.Now
     match roundUp now period with
     | Error s -> failwith s
-    | Good startTime -> 
+    | Good startTime ->
     fprintfn writer $"from now %A{tsToString now.TimeOfDay}, wait %s{tsToString (startTime - DateTime.Now)}"
     let rec next (dt: DateTime) count =
       if count <= 0 then ()
@@ -328,4 +325,3 @@ let main argv =
   nl() ; TestRounding.test writer "bad " testMode
   nl() ; RunPeriodically.test writer (TimeSpan.FromSeconds 2) 3
   0
- 
