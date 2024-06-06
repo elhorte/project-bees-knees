@@ -76,7 +76,8 @@ let keyboardKeyInput message cancellationTokenSource = task {
   do! takeKeys()
   printfn "Quitting per ‘q’ keyboard command" }
 
-
+// Sketch of taking command lines instead of command characters
+//
 // /// beehive keyboard triggered management utilities
 // let performCommand (command: string) cancellationTokenSource =
 //   task {
