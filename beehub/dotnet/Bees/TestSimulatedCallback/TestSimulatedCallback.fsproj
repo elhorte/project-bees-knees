@@ -3,14 +3,16 @@
     <PropertyGroup>
         <OutputType>Exe</OutputType>
         <TargetFramework>net8.0</TargetFramework>
+        <RootNamespace>SimulatedCallback</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Include="Program.fs"/>
+      <ProjectReference Include="..\BeesLib\BeesLib.fsproj" />
+      <ProjectReference Include="..\BeesUtil\BeesUtil.fsproj" />
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="PortAudioSharp2" Version="1.0.0" />
+      <Compile Include="Program.fs" />
     </ItemGroup>
 
 </Project>

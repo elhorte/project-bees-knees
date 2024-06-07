@@ -12,12 +12,9 @@
         <Compile Include="DebugGlobals.fs" />
         <Compile Include="Util.fs"                 />
         <Compile Include="CallbackHandoff.fs"      />
-        <Compile Include="Parallel.fs"             />
         <Compile Include="CancelAfterDelay.fs"     />
         <Compile Include="CpuStopwatch.fs"         />
         <Compile Include="Logger.fs"               />
-        <Compile Include="AsyncConcurrentQueue.fs" />
-        <Compile Include="ItemPool.fs"             />
         <Compile Include="SubscriberList.fs"       />
         <Compile Include="PortAudioUtils.fs"       />
         <Compile Include="Mp3.fs"                  />

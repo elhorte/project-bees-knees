@@ -1,5 +1,4 @@
-﻿module BeesUtil.DateTimeCalculations
-
+﻿
 open System
 open System.Globalization
 open System.Threading.Tasks
