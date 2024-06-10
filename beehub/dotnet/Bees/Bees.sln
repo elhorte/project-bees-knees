@@ -18,7 +18,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsharpHelpers", "CsharpHelp
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DateTimeFakes", "DateTimeFakes\DateTimeFakes.csproj", "{46AF4950-D38A-43EF-A625-CDE7D863B2B8}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestSeqNums", "TestSeqNums\TestSeqNums.fsproj", "{71714F8A-F443-4976-A5E6-C2AB1D08DDB4}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestSynchronizer", "TestSynchronizer\TestSynchronizer.fsproj", "{71714F8A-F443-4976-A5E6-C2AB1D08DDB4}"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestMp3Save", "TestMp3Save\TestMp3Save.fsproj", "{5F6CE8AD-0E86-4515-A276-16542D957FD7}"
 EndProject

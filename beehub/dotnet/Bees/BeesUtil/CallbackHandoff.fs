@@ -9,7 +9,8 @@ type CallbackHandoff = {
   F            : unit -> unit
   Semaphore    : SemaphoreSlim
   Cts          : CancellationTokenSource
-  mutable Task : Task option } with
+  mutable Task : Task option }
+with
  
   /// <summary>
   /// Create a new instance.

@@ -10,6 +10,11 @@ open BeesLib.InputStream
 // Sketches only so far
 
 
+type SampleType  = float32
+type BufArray    = SampleType array
+type Buf         = Buf    of BufArray
+
+
 // def recording_worker_thread(record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
 //  
 //   recording_period    the length of time to record in seconds

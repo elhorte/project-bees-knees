@@ -4,7 +4,7 @@
         <TargetFramework>net8.0</TargetFramework>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <RootNamespace>BeesUtil</RootNamespace>
-<!--        <DefineConstants>USE_FAKE_DATE_TIME</DefineConstants>-->
+        <DefineConstants>USE_FAKE_DATE_TIME</DefineConstants>
     </PropertyGroup>
     
     <ItemGroup>
@@ -17,10 +17,10 @@
         <Compile Include="Logger.fs"               />
         <Compile Include="SubscriberList.fs"       />
         <Compile Include="PortAudioUtils.fs"       />
+        <Compile Include="AudioUtils.fs" />
         <Compile Include="Mp3.fs"                  />
         <Compile Include="Wave.fs"                 />
-        <Compile Include="AudioUtil.fs"            />
-        <Compile Include="SeqNums.fs"              />
+        <Compile Include="Synchronizer.fs" />
         <Compile Include="DateTimeCalculations.fs" />
         <Compile Include="Ranges.fs"               />
     </ItemGroup>

@@ -2,7 +2,6 @@
 open System
 open System.Threading
 open System.Threading.Tasks
-open BeesUtil.Ranges
 open FSharp.Control
 
 open PortAudioSharp
@@ -19,7 +18,7 @@ open BeesLib.Keyboard
 // See Theory of Operation comment before main at the end of this file.
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// App
+// PortAudio argument prep
 
 /// Creates and returns the sample rate and the input parameters.
 let prepareArgumentsForStreamCreation verbose =
@@ -49,8 +48,11 @@ let prepareArgumentsForStreamCreation verbose =
   sampleRate, inputParameters, outputParameters
 
 
-/// Run the stream for a while, then stop it and terminate PortAudio.
-let run inputStream = task {
+//–––––––––––––––––––––––––––––––––––––
+// Recording
+
+/// Run the application for a while using a PortAudio stream, then stop the stream and terminate PortAudio.
+let runTheApp inputStream = task {
   let inputStream = (inputStream: InputStream)
   inputStream.Start()
   use cts = new CancellationTokenSource()
@@ -62,18 +64,11 @@ let run inputStream = task {
   printfn "Terminating..." ; terminatePortAudio()
   printfn "Terminated" }
 
-//–––––––––––––––––––––––––––––––––––––
-// BeesConfig
-
-// pro forma.  Actually set in main.
+// placeholder for the global value.  Initialized by main.
 let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 
-
-//–––––––––––––––––––––––––––––––––––––
-// Main
-
-[<EntryPoint>]
-let main _ =
+/// Start audio stream and do recording until it is done.
+let startRecordingAudio() =
   let withEcho    = false
   let withLogging = false
   initPortAudio()
@@ -86,18 +81,25 @@ let main _ =
     PlotDir                    = "plot"
     InputStreamAudioDuration   = _TimeSpan.FromMinutes 16
     InputStreamRingGapDuration = _TimeSpan.FromSeconds 1
-    SampleSize                 = sizeof<SampleType>
+    SampleSize                 = sizeof<float32>
     InChannelCount             = inputParameters.channelCount
     InFrameRate                = sampleRate  }
   printBeesConfig beesConfig
-  keyboardInputInit()
   try
     use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging, NotSimulating)
     let t = task {
-      do! run inputStream 
+      do! runTheApp inputStream 
       inputStream.CbState.Logger.Print "Log:" }
     t.Wait() 
     printfn "Task done." 
   finally
-    printfn "Exiting with 0."
+    printfn "Recording done."
+
+//–––––––––––––––––––––––––––––––––––––
+// Main
+
+[<EntryPoint>]
+let main _ =
+  startKeyboardBackground()
+  startRecordingAudio()
   0

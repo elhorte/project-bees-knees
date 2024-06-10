@@ -7,6 +7,8 @@ type RoundedDateTime =
 | Good  of DateTime
 | Error of string
 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
+
 module Utils =
 
   let roundAway value = Math.Round((value: float), MidpointRounding.AwayFromZero)
@@ -23,10 +25,12 @@ module Utils =
   let us  n = TimeSpan.FromMicroseconds (float    n)
   let ns  n = TimeSpan.FromTicks        (nsToTicks n)
 
-  let dtNs (dt: DateTime) = int (dt.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
   let tsNs (ts: TimeSpan) = int (ts.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
 
 open Utils
+
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 module Calculations =
 
@@ -34,7 +38,7 @@ module Calculations =
   
   type UpDown = Up | Down
 
-  // See roundUp and roundDown below.
+  // Used by roundUp and roundDown below.
   let roundToTimeSpan upDown (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
     let tsToAddIfRoundUp = match upDown with Up -> ts | Down -> TimeSpan.Zero
     let newDt day hr min sec ms = DateTime(dt.Year, dt.Month, day, hr, min, sec, ms, dt.Kind) + tsToAddIfRoundUp
@@ -54,16 +58,16 @@ module Calculations =
   // /// ts: The TimeSpan to classify.
   // /// returns: The classification of ts.
   // let (|Days|Hours|Minutes|Seconds|Milliseconds|Microseconds|Bad|) ts =  // Max 7 cases supported by the compiler
-  //   if   ts = TimeSpan.Zero          then                                         Bad
-  //   elif ts.TotalDays         >= 1.0 then if ts.TotalDays         % 1.0 <> 0 then Bad else Days         ts.Days
-  //   elif ts.TotalHours        >= 1.0 then if ts.TotalHours        % 1.0 <> 0 then Bad else Hours        ts.Hours
-  //   elif ts.TotalMinutes      >= 1.0 then if ts.TotalMinutes      % 1.0 <> 0 then Bad else Minutes      ts.Minutes
-  //   elif ts.TotalSeconds      >= 1.0 then if ts.TotalSeconds      % 1.0 <> 0 then Bad else Seconds      ts.Seconds
-  //   elif ts.TotalMilliseconds >= 1.0 then if ts.TotalMilliseconds % 1.0 <> 0 then Bad else Milliseconds ts.Milliseconds
-  //   elif ts.TotalMicroseconds >= 1.0 then if tsNs ts                    <> 0 then Bad else Microseconds ts.Microseconds
-  //   else                                                                          Bad
+  //   if   ts = TimeSpan.Zero        then                                         Bad
+  //   elif ts.TotalDays         >= 1 then if ts.TotalDays         % 1.0 <> 0 then Bad else Days         ts.Days
+  //   elif ts.TotalHours        >= 1 then if ts.TotalHours        % 1.0 <> 0 then Bad else Hours        ts.Hours
+  //   elif ts.TotalMinutes      >= 1 then if ts.TotalMinutes      % 1.0 <> 0 then Bad else Minutes      ts.Minutes
+  //   elif ts.TotalSeconds      >= 1 then if ts.TotalSeconds      % 1.0 <> 0 then Bad else Seconds      ts.Seconds
+  //   elif ts.TotalMilliseconds >= 1 then if ts.TotalMilliseconds % 1.0 <> 0 then Bad else Milliseconds ts.Milliseconds
+  //   elif ts.TotalMicroseconds >= 1 then if tsNs ts                    <> 0 then Bad else Microseconds ts.Microseconds
+  //   else                                                                        Bad
   //
-  // let roundToTimeSpan2 upDown (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
+  // let roundToTimeSpan upDown (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
   //   let tsToAddIfRoundUp = match upDown with Up -> ts | Down -> TimeSpan.Zero
   //   let newDt day hr min sec ms = DateTime(dt.Year, dt.Month, day, hr, min, sec, ms, dt.Kind) + tsToAddIfRoundUp
   //   let floor divisor n = n - (n % divisor)
@@ -107,12 +111,6 @@ let tsToString (ts: TimeSpan) =
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 
-type TestMode =
-  | PrintFailures
-  | PrintAll
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––
-
 module BadInputs =
 
   let data = [|
@@ -144,6 +142,12 @@ module BadInputs =
     us  1 + ns 50
     //–––––––––––
     ns 50         |]
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––
+
+type TestMode =
+  | PrintFailures
+  | PrintAll
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -219,6 +223,7 @@ module BadInputs =
 //     runAll goodInputs
 //     runAll badInputs
 
+
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 module TestRounding =
@@ -293,6 +298,7 @@ module TestRounding =
     | "bad "
     | _      -> runAll badInputs
 
+
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 module RunPeriodically =
@@ -315,6 +321,7 @@ module RunPeriodically =
       let count' = count - 1
       next (dt + period) count'
     next startTime count
+
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 

@@ -8,8 +8,8 @@ module BeesUtil.DateTimeShim
 
 // let UsingFakeDateTime = true
 
-type _DateTime = DateTimeDebugging._DateTime
-type _TimeSpan = DateTimeDebugging._TimeSpan
+type _DateTime = DateTimeFakes._DateTime
+type _TimeSpan = DateTimeFakes._TimeSpan
 
 #else
 

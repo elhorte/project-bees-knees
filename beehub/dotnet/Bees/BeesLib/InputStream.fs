@@ -13,7 +13,7 @@ open BeesUtil.Util
 open BeesUtil.Logger
 open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
-open BeesUtil.SeqNums
+open BeesUtil.Synchronizer
 open BeesUtil.Ranges
 open BeesLib.BeesConfig
 open CSharpHelpers
@@ -27,7 +27,7 @@ let durationOf frameRate nFrames  = _TimeSpan.FromSeconds (float nFrames / frame
 let nFramesOf  frameRate duration = int (round ((duration: _TimeSpan).TotalMicroseconds / 1_000_000.0 * frameRate))
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// Seg class, used by InputStream.  The ring buffer can comprise 0, 1, or 2 segs.
+// The InputStream Ring buffer comprises 0, 1, or 2 segs.
 
 type Seg = {
   mutable Tail   : int  // frames not samples
@@ -79,14 +79,6 @@ type Seg = {
   
   override seg.ToString() = $"{seg.Offset:D3}+{seg.Tail:D2}.{seg.Head:D2}"
 
-
-
-type SampleType  = float32
-type BufArray    = SampleType array
-type Buf         = Buf    of BufArray
-type BufRef      = BufRef of BufArray ref
-
-type Worker = Buf -> int -> int
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // InputStream
@@ -144,14 +136,11 @@ type State = // |––––––––––– ring ––––––––
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // InputStream
 
-type PaTime = float
-let  PaTimeBad = 0.0
-let  dummySample = 9999999f  // 
-
 [<Struct>]
 type Segs = {
   mutable Cur : Seg
-  mutable Old : Seg }  with
+  mutable Old : Seg }
+with
 
   member this.Copy()    = { Cur = this.Cur.Copy()
                             Old = this.Old.Copy() }
@@ -171,27 +160,27 @@ type Segs = {
 // Callback state, persists across callbacks, updated by each callback.
 
 type CbState = {
-  // callback args
+  // callback args from PortAudioSharp
   mutable Input              : IntPtr
   mutable Output             : IntPtr
   mutable FrameCount         : uint32
   mutable TimeInfo           : PortAudioSharp.StreamCallbackTimeInfo
   mutable StatusFlags        : PortAudioSharp.StreamCallbackFlags
-  // callback result
+  // affected by callbacks
   Ring                       : float32 array   // of samples not frames
   mutable State              : State
   mutable Segs               : Segs
   mutable BlockAdcStartTime  : _DateTime       // DateTime of first sample collection in this block
   mutable LatestBlockHead    : int             // ring index where latest input block was written by a callback
-  mutable SeqNums            : SeqNums
-  mutable NRingFrames        : int
-  mutable NRingDataFrames    : int
-  mutable NGapFrames         : int
+  mutable Synchronizer       : Synchronizer
   mutable NFramesTotal       : uint64          // total number of frames produced by callbacks so far
   // more stuff
   mutable WithEcho           : bool            // echo    is in effect
   mutable WithLogging        : bool            // logging is in effect
-  // these mutables are modified once, as early as possible
+  // constants (the mutables are modified once, as early as possible)
+  mutable NRingFrames        : int
+  mutable NRingDataFrames    : int
+  mutable NGapFrames         : int
   mutable CallbackHandoff    : CallbackHandoff // for handing off events for further processing in managed code
   mutable StreamAdcStartTime : _DateTime       // DateTime of first ever sample collection
   mutable PaStreamTime       : unit -> PaTime  // Function to get the current date and time, in PaTime units
@@ -204,6 +193,7 @@ with
   
   member cbs.Copy() = { cbs with Segs = cbs.Segs.Copy() }
 
+  // only for debugging
   member cbs.markRingSpanAsDead srcFrameIndex nFrames =
     let srcFrameIndexNS = srcFrameIndex * cbs.InChannelCount
     let nSamples        = nFrames       * cbs.InChannelCount
@@ -236,7 +226,7 @@ with
   member cbs.Print newTail newHead msg =
     let sRing = cbs.PrintRing msg
     let sText =
-      let sSeqNum  = sprintf "%2d" cbs.SeqNums.N1
+      let sSeqNum  = sprintf "%2d" cbs.Synchronizer.N1
       let sX       = if String.length msg > 0 then  "*" else  " "
       let sTime    = sprintf "%3d.%3d %3d.%3d"
                        cbs.Segs.Cur.TailTime.Millisecond
@@ -279,17 +269,20 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   let handle   = GCHandle.FromIntPtr(userDataPtr)
   let cbs      = handle.Target :?> CbState
   let nFrames = int frameCount
-  cbs.SeqNums.EnterUnstable()
 
   if cbs.WithEcho then
     let size = uint64 (frameCount * uint32 cbs.FrameSize)
     Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
 
+  cbs.Synchronizer.EnterUnstable()
+
+  // callback args from PortAudioSharp
   cbs.Input        <- input
   cbs.Output       <- output
   cbs.FrameCount   <- frameCount // in the ”block“ to be copied
   cbs.TimeInfo     <- timeInfo
   cbs.StatusFlags  <- statusFlags
+
   let inputBuferAdcDateTime =
     let f = cbs.PaStreamTime()
     let secondsSinceAdcTime = f - timeInfo.inputBufferAdcTime
@@ -370,8 +363,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   cbs.Segs.Cur.AdvanceHead nFrames
   cbs.NFramesTotal <- cbs.NFramesTotal + uint64 frameCount
 //Console.Write(".")
-//if cbs.SeqNums.N1 % 20us = 0us then  Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / nFrames} %10f{timeInfo.inputBufferAdcTime - cbs.TimeInfoBase}"
-  cbs.SeqNums.LeaveUnstable()
+//if cbs.Synchronizer.N1 % 20us = 0us then  Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / nFrames} %10f{timeInfo.inputBufferAdcTime - cbs.TimeInfoBase}"
+  cbs.Synchronizer.LeaveUnstable()
 
 //cbs.Logger.Add cbs.SeqNum2 cbs.TimeStamp "cb bufs=" ""
   cbs.CallbackHandoff.HandOff()
@@ -382,7 +375,8 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
 
 type RingSpan = {
   Index   : int  // in frames
-  NFrames : int  } with
+  NFrames : int  }
+with
   override t.ToString() = $"[ I %d{t.Index} N %d{t.NFrames} ]"
 
 type Parts = RingSpan array
@@ -407,6 +401,12 @@ type ReadResult = {
 with
 
   override t.ToString() = $"%d{t.Parts.Length} %A{t.RangeClip} %d{t.NSamples} L %s{partsToString t.Parts}"
+
+
+let durationToNFrames frameRate (duration: _TimeSpan) =
+  let nFramesApprox = duration.TotalSeconds * frameRate
+  int (round nFramesApprox)
+
 
 // initPortAudio() must be called before this constructor.
 type InputStream(beesConfig       : BeesConfig          ,
@@ -434,26 +434,27 @@ type InputStream(beesConfig       : BeesConfig          ,
   // This happens automatically and does not require manual pinning.
 
   let cbState = {
-    // callback args
+    // callback args from PortAudioSharp
     Input              = IntPtr.Zero
     Output             = IntPtr.Zero
     FrameCount         = 0u
     TimeInfo           = PortAudioSharp.StreamCallbackTimeInfo()
     StatusFlags        = PortAudioSharp.StreamCallbackFlags()
-    // callback result
+    // affected by callbacks
     Ring               = Array.init<float32> nRingSamples (fun _ -> dummySample)
     State              = AtStart
     Segs               = segs
     BlockAdcStartTime  = dummyDateTime
     LatestBlockHead    = 0
-    SeqNums            = SeqNums.New()
+    Synchronizer       = Synchronizer.New()
+    NFramesTotal       = 0UL
+    // more stuff
+    WithEcho           = withEcho
+    WithLogging        = withLogging
+    // constants (the mutables are modified once, as early as possible)
     NRingFrames        = nRingFrames
     NRingDataFrames    = nRingDataFrames
     NGapFrames         = nGapFrames
-    // more stuff
-    NFramesTotal       = 0UL
-    WithEcho           = withEcho
-    WithLogging        = withLogging
     CallbackHandoff    = dummyInstance<CallbackHandoff>()  // tbd
     StreamAdcStartTime = dummyDateTime
     PaStreamTime       = fun () -> PaTimeBad
@@ -558,7 +559,7 @@ type InputStream(beesConfig       : BeesConfig          ,
   member this.CbStateSnapshot : CbState =
     let copyCbState() = this.CbState.Copy()
     let timeout = TimeSpan.FromMicroseconds 1
-    match this.CbState.SeqNums.WhenStableAndEntered timeout copyCbState with
+    match this.CbState.Synchronizer.WhenStableAndEntered timeout copyCbState with
     | Stable cbState -> cbState
     | TimedOut s -> failwith "Timed out taking a snapshot of CbState" 
 

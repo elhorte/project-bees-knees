@@ -1,5 +1,6 @@
 module BeesLib.BeesConfig
 
+open System
 open System.Text
 
 open BeesUtil.DateTimeShim
@@ -18,7 +19,8 @@ type BeesConfig = {
   InputStreamRingGapDuration : _TimeSpan // long enough for the largest automatically adjusted frameCount arg to callback
   SampleSize                 : int
   InChannelCount             : int
-  InFrameRate                : double  } with
+  InFrameRate                : double  }
+with
 
   member this.FrameSize = this.SampleSize * this.InChannelCount
 
@@ -35,4 +37,4 @@ let printBeesConfig bc =
   sb.AppendLine $"  SampleSize                 {bc.SampleSize                }" |> ignore
   sb.AppendLine $"  InChannelCount             {bc.InChannelCount            }" |> ignore
   sb.AppendLine $"  InFrameRate                {bc.InFrameRate               }" |> ignore
-  System.Console.WriteLine (sb.ToString())
+  Console.WriteLine (sb.ToString())

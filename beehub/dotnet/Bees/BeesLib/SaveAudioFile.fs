@@ -2,15 +2,34 @@ module BeesLib.SaveAudioFile
 
 open System
 open System.Threading
+open NAudio.Lame
 
 open BeesUtil.DateTimeShim
 
 open BeesUtil.DateTimeCalculations
-open BeesUtil.AudioUtil
 open BeesUtil.Ranges
 open BeesUtil.SaveAsMp3
 open BeesUtil.SaveAsWave
 open BeesLib.InputStream
+
+
+/// <summary>
+/// Saves the given audio samples as an MP3 file at the given filePath.
+/// </summary>
+/// <param name="saveFunction">The function to save in a specific format.</param>
+/// <param name="filePath">The path of the MP3 file to save.</param>
+/// <param name="frameRate">The sample rate of the audio samples.</param>
+/// <param name="nChannels">The number of channels in the audio samples.</param>
+/// <param name="samples">The audio samples to save.</param>
+let saveToFile f (filePath: string) (frameRate: float) (nChannels: int) (samples: float32[]) =
+  try
+    f filePath frameRate nChannels samples
+  with
+  | :? System.IO.IOException as ex ->
+    printfn "Failed to write to file %s, Error: %s" filePath ex.Message
+  | ex ->
+    printfn "An error occurred: %s" ex.Message
+
 
 /// <summary>
 /// Saves to an MP3 file from the inputStream buffer at given time for a given duration.
@@ -21,10 +40,10 @@ open BeesLib.InputStream
 let rec saveAudioFile ext (inputStream: InputStream) (dateTime: _DateTime) duration =
   let saveFunction =
     match ext with
-    | "mp3" ->  saveAsMp3
+    | "mp3" ->  (saveAsMp3 LAMEPreset.ABR_128)
     | "wav" ->  saveAsWave
     | _     ->  let msg = $"unknown audio file format: %A{ext}"
-                fprintfn System.Console.Error "ERROR – Can’t save audio files. %s" msg
+                fprintfn Console.Error "ERROR – Can’t save audio files. %s" msg
                 failwith msg
   let save readResult =
     let samplesArray = InputStream.CopyFromReadResult readResult
@@ -43,6 +62,7 @@ let rec saveAudioFile ext (inputStream: InputStream) (dateTime: _DateTime) durat
   | RangeClip.RangeOK         ->  print()
                                   save readResult
   | _                         ->  failwith "unkonwn result code"
+
 
 /// <summary>
 /// Periodically saves the audio stream to an MP3 file for a specified duration and period.
@@ -65,12 +85,12 @@ let saveAudioFilePeriodically ext (inputStream: InputStream) duration period (ct
   | Good startTime -> 
     let now = DateTime.Now in printfn $"from now %A{now.TimeOfDay}, wait %A{startTime - now}"
     inputStream.WaitUntil startTime
-    let rec saveFrom saveTime num =
+    let rec saveAt saveTime num =
       if ctsToken.IsCancellationRequested then ()
       else
       inputStream.WaitUntil  saveTime             ; printf $"Recording {num} ..."
       inputStream.WaitUntil (saveTime + duration) ; saveAudioFile ext inputStream saveTime duration
-      saveFrom (saveTime + period) (num+1)
-    saveFrom startTime 1
+      saveAt (saveTime + period) (num+1)
+    saveAt startTime 1
 
 

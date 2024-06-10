@@ -47,7 +47,7 @@ let performKey keyInfo consoleRead cancellationTokenSource =
     | c    ->  printfn $"Unknown command: {c}" }
   |> Task.WaitAll
   
-let keyboardInputInit() =
+let startKeyboardBackground() =
   printfn "Initializing keyboard input."
   let ctrlCEventHandler sender (args: ConsoleCancelEventArgs) =
 //  printfn "\nConsoleCancelEventHandler called."

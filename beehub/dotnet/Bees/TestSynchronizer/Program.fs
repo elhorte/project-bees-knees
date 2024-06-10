@@ -1,16 +1,18 @@
 ﻿
 open System
-open BeesUtil.SeqNums
+open BeesUtil.Synchronizer
 
 type Values = {
-  mutable I : int  } with
+  mutable I : int  }
+with
 
   member this.Copy() = { I = this.I }
 
 type FooState = {
-  mutable V1  : Values
-  mutable V2  : Values
-  mutable SeqNums : SeqNums } with
+  mutable V1           : Values
+  mutable V2           : Values
+  mutable Synchronizer : Synchronizer }
+with
 
   member cbs.Copy() = { cbs with V1 = cbs.V1.Copy() ; V2 = cbs.V2.Copy() }
 
@@ -19,32 +21,32 @@ type FooState = {
 type Foo() =
 
   let fooState = {
-    V1 = { I = 0 }
-    V2 = { I = 0 }
-    SeqNums = SeqNums.New()  }
+    V1           = { I = 0 }
+    V2           = { I = 0 }
+    Synchronizer = Synchronizer.New()  }
   
   member val FS = fooState
   
-  member this.CbStateSnapshot timeout  : SeqNumsResult<FooState> =
+  member this.CbStateSnapshot timeout  : SynchronizerResult<FooState> =
     let copyFS() = this.FS.Copy()
-    this.FS.SeqNums.WhenStable timeout copyFS
+    this.FS.Synchronizer.WhenStable timeout copyFS
 
 
 
 [<EntryPoint>]
 let main _ =
   let foo = Foo()
-  let incrN1() = foo.FS.SeqNums.EnterUnstable()
-  let incrN2() = foo.FS.SeqNums.LeaveUnstable()
+  let incrN1() = foo.FS.Synchronizer.EnterUnstable()
+  let incrN2() = foo.FS.Synchronizer.LeaveUnstable()
   let timeout = TimeSpan.FromMilliseconds 10
   let doWork() = "work"
   incrN1()
   incrN2()
 
   let test work =
-    match foo.FS.SeqNums.WhenStableInternal false timeout work 3 Console.WriteLine with
-    | Stable result  -> printfn "%A" result
-    | TimedOut s -> printfn $"Timed out %s{s}"
+    match foo.FS.Synchronizer.WhenStableInternal false timeout work 3 Console.WriteLine with
+    | Stable result ->  printfn "%A" result
+    | TimedOut s    ->  printfn $"Timed out %s{s}"
 
   printfn "– success"
   test doWork
