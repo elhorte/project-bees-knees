@@ -5,7 +5,7 @@ open System.Threading
 
 
 type SynchronizerResult<'T> =
-  | Stable       of 'T
+  | Stable   of 'T
   | TimedOut of string
 
 type SynchronizerResultInternal<'T> =
@@ -15,31 +15,35 @@ type SynchronizerResultInternal<'T> =
 
 let synchronizerInitValue = uint16 -1
 
-/// A pair of sequence numbers for producer/consumer synchronization without locking.
-
+/// Reader–writer synchronization for a single writer using a variant of a seqlock.
 type Synchronizer = {
-  mutable S : uint32 }
+  mutable S : uint32 }  // two int16 sequence numbers, written as a pair atomically
 with
 
   static member New() = Synchronizer.Make synchronizerInitValue synchronizerInitValue
 
-  /// Enters the critical section on behalf of a producer.
+  /// Enters the critical section on behalf of a writer.
   member sn.EnterUnstable() =  let n1, n2 =  sn.GetPair() in sn.Set (n1 + 1us)  n2
 
-  /// Leaves the critical section on behalf of a producer
+  /// Leaves the critical section on behalf of a writer
   member sn.LeaveUnstable() =  let n1, n2 =  sn.GetPair() in sn.Set  n1        (n2 + 1us)
 
   member sn.NeverEntered = sn.N1 = synchronizerInitValue
     
-  /// Calls a function on behalf of a consumer one or more times until the last time,
-  /// which is guaranteed to be while stable, i.e., not in the critical section.
+  /// Calls a function on behalf of a reader one or more times until the last time,
+  /// which is guaranteed to be while stable, i.e., not during the critical section.
   member sn.WhenStable                timeout (f: unit -> 'T)                        : SynchronizerResult<'T> =
          sn.WhenStableInternal false  timeout  f              Int32.MaxValue ignore
+
+  /// Calls a function on behalf of a reader one or more times until the last time,
+  /// which is guaranteed to be while stable, i.e., not during the critical section;
+  /// also delays until the critical section has been entered at least once.
   member sn.WhenStableAndEntered      timeout (f: unit -> 'T)                        : SynchronizerResult<'T> =
          sn.WhenStableInternal true   timeout  f              Int32.MaxValue ignore
 
-  /// Get one or the other sequence number.
+  /// Get the sequence number incremented when entering the critical section.
   member sn.N1 =  sn.Get()        |> uint16
+  /// Get the sequence number incremented when leaving the critical section.
   member sn.N2 =  sn.Get() >>> 16 |> uint16
 
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

@@ -5,7 +5,8 @@ open System.Diagnostics
 
 type Options = Total | User
 type State = Stopped | Running
- 
+
+/// CPU time measurer.
 type CpuStopwatch(showTotal :Options) =
 
   let proc = Process.GetCurrentProcess()
@@ -26,6 +27,9 @@ type CpuStopwatch(showTotal :Options) =
 
   let start() = if state = Stopped then latestNow     <- now    () ; state <- Running
   let stop () = if state = Running then latestElapsed <- elapsed() ; state <- Stopped
+  
+  //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+  // members
   
   member this.Elapsed    with get() = elapsed()
   member this.IsRunning  with get() = state = Running

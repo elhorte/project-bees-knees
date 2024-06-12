@@ -1,6 +1,5 @@
 module BeesUtil.SubscriberList
 
-/// A subscription service for a generic event
 
 type Unsubscriber   = unit -> unit 
 type SubscriptionId = SubscriptionId of int
@@ -9,6 +8,7 @@ type SubscriberHandler<'Event> = 'Event -> SubscriptionId -> Unsubscriber -> uni
 and  Subscription<'Event>      = Subscription of (SubscriptionId * SubscriberHandler<'Event>)
 
 
+/// A subscription service for a generic event.
 type SubscriberList<'Event>() =
   
   let         subscriptions = ResizeArray<Subscription<'Event>>()
@@ -23,7 +23,7 @@ type SubscriberList<'Event>() =
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // members
   
-  /// Handle the event by running each subscription in order subscribed.
+  /// Handles the event by running each subscription in order subscribed.
   /// The subscriber handler can remove itself when done.
   member this.Broadcast(t: 'Event)  : unit =
     for s in subscriptions.ToArray() do
@@ -31,13 +31,13 @@ type SubscriberList<'Event>() =
       match s with
       | Subscription (id, handler) -> handler t id unsubscribeMe
 
-  /// Subscribe a handler to be called every time an Event is handled.
+  /// Subscribes a handler to be called every time an Event is handled.
   member this.Subscribe(handler: SubscriberHandler<'Event>)  : Subscription<'Event> =
     let s = Subscription (nextId(), handler)
     subscriptions.Add s
     s
 
-  /// Unsubscribe.
+  /// Unsubscribes.
   member this.Unsubscribe(s: Subscription<'Event>)  : bool =
     subscriptions.Remove s
 

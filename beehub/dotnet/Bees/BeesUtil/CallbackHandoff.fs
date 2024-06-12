@@ -13,7 +13,7 @@ type CallbackHandoff = {
 with
  
   /// <summary>
-  /// Create a new instance.
+  /// Creates a new instance.
   /// </summary>
   /// <param name="f">The function to call after each callback.</param>
   /// <returns>The new instance.</returns>
@@ -33,11 +33,11 @@ with
     | Some _ -> ()
     | None   -> ch.Task <- Some (Task.Run loop)
 
-  /// Ensure that the background task is running.
+  /// Ensures that the background task is running.
   member ch.Start   () = ch.doHandoffs()
   
-  /// Cancel the background task.
+  /// Cancels the background task.
   member ch.Stop    () = ch.Cts.Cancel()
   
-  // Signal the end of a callback, so the managed task will run.
+  // Signals the end of a callback, so the managed task will run.
   member ch.HandOff () = ch.Semaphore.Release() |> ignore

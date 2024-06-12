@@ -11,11 +11,11 @@ type RangeClip =
 | ClippedBothEnds = 4
 | RangeOK         = 5
 
-#nowarn "64"  // in case the `inline` is removed on clipRange for debugging
+#nowarn "64"  // in case the `inline` on clipRange is removed for debugging
 
 /// <summary>
-/// Ensures that a desired range (<c>wantBegin</c>, <c>wantLength</c>)
-/// fits within a given range (<c>haveBegin</c>, <c>haveLength</c>).
+/// Fits a desired range (<c>wantBegin</c>, <c>wantLength</c>)
+/// into a given range (<c>haveBegin</c>, <c>haveLength</c>).
 /// </summary>
 /// <remarks>
 /// Works with any (<c>DT</c> and <c>TS</c>) that can compute DT + TS and DT1 - DT2.

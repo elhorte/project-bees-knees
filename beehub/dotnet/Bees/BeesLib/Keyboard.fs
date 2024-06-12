@@ -72,7 +72,7 @@ let keyboardKeyInput message cancellationTokenSource = task {
       match command with
       | None -> ()
       | Some c -> performKey c consoleRead cts }
-  if false then cancelAfterDelay cts 0.5<second> (Some "canceled") |> ignore else ()
+  if false then cancelAfterDelay cts (TimeSpan.FromSeconds 0.5) (Some "canceled") |> ignore else ()
   do! takeKeys()
   printfn "Quitting per ‘q’ keyboard command" }
 

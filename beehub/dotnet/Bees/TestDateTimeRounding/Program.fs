@@ -27,12 +27,12 @@ module Utils =
 
   let tsNs (ts: TimeSpan) = int (ts.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
 
-open Utils
-
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 module Calculations =
+
+  open Utils
 
   let tsMalformedMessage = "TimeSpan is unsuitable for rounding"
   
@@ -53,6 +53,8 @@ module Calculations =
     elif ts.TotalMicroseconds >= 1 then if tsNs ts                    <> 0 then err else Good (newDt dt.Day dt.Hour dt.Minute dt.Second dt.Millisecond + us  (floor ts.Microseconds dt.Microsecond))
     else                                                                        err
 
+  // Alternative way of coding this:
+  
   // /// Classifies the given TimeSpan for rounding.
   // /// Requires exactly one nonzero value of Days, Hours, Minutes, Seconds, Milliseconds or Microseconds.
   // /// ts: The TimeSpan to classify.
@@ -100,6 +102,8 @@ let roundUp   dateTime timeSpan : RoundedDateTime = roundToTimeSpan Up   dateTim
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
+
+open Utils
 
 let dtToString (dt: DateTime) =
   let format = "yyyy-MM-dd HH:mm:ss.ffffff"
