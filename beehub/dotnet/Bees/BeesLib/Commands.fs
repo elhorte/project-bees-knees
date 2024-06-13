@@ -5,29 +5,35 @@ open ConsoleReadAsync
 
 let print name = printfn $" -> {name}"
 
+let help = """
+  c check audio pathway for over/underflows
+  d one shot process to see device list
+  f one shot process to see fft
+  i press i to start/stop listening, 0, 1, 2, or 3 to select channel
+  m select channel to monitor
+  o one shot process to view oscope
+  q stop all background tasks and quit
+  s plot spectrogram of last recording
+  t list background tasks
+  v start/stop cli vu meter"""
 
-// usage: press q to stop all processes
-let stopAll how = task {
-  if how then  print "stopAll and quit"
-         else  printfn "^C -> stopAll without quitting" }
-
-
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press c to check audio pathway for over/underflows
 let checkStreamStatus n = task {
   print "checkStreamStatus 10" }
 
-
-// usage: press d one shot process to see device list
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// usage: press d for one shot process to see device list
 let showAudioDeviceList() = task {
   print "showAudioDeviceList" }
 
-
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // one shot process to see fft
 let triggerFft() = task {
   print "triggerFft" }
 
-
-// usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// start/stop listening, 0, 1, 2, or 3 to select channel
 #nowarn "3511" // This state machine is not statically compilable. A 'let rec' occured in the resumable code.
 let toggleIntercomM consoleRead cts = task {
   let cr = (consoleRead: ConsoleReadAsync)
@@ -47,27 +53,35 @@ let toggleIntercomM consoleRead cts = task {
     | None -> () }
   do! loop() }
 
-
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press m to select channel to monitor
 let changeMonitorChannel() = task {
   print "changeMonitorChannel" }
 
-
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // one shot process to view oscope
 let triggerOscope() = task {
   print "triggerOscope" }
- 
 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// usage: press q to stop all background tasks and quit
+let stopAll how = task {
+  if how then  print "stopAll and quit"
+         else  printfn "^C -> stopAll without quitting" }
+ 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press s to plot spectrogram of last recording
 let triggerSpectrogram() = task {
   print "triggerSpectrogram" }
 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// usage: press t to list background tasks
+let listBackgroundTasks() = task {
+  print "listBackgroundTasks" }
 
-// usage: press t to see all threads
-let listAllThreads() = task {
-  print "listAllThreads" }
-
-
-// usage: press v to start cli vu meter, press v again to stop
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// usage: press v to start/stop cli vu meter
 let toggleVuMeter() = task { 
   print "toggleVuMeter" }
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

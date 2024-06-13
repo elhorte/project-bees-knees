@@ -11,6 +11,7 @@
         <Compile Include="DateTimeShim.fs" />
         <Compile Include="DebugGlobals.fs" />
         <Compile Include="Util.fs"                 />
+        <Compile Include="MasterCancellationToken.fs" />
         <Compile Include="CallbackHandoff.fs"      />
         <Compile Include="CancelAfterDelay.fs"     />
         <Compile Include="CpuStopwatch.fs"         />

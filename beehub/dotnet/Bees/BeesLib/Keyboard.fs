@@ -11,37 +11,25 @@ open BeesLib.Commands
 
 printfn "Press Control-C or Control-Break to exit."
 
-let help = """
-  c check audio pathway for over/underflows
-  d one shot process to see device list
-  f one shot process to see fft
-  i press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
-  m select channel to monitor
-  o one shot process to view oscope
-  q stop all processes and quit
-  s plot spectrogram of last recording
-  t see all threads
-  v start cli vu meter, press v again to stop"""
-
 /// beehive keyboard triggered management utilities
 let performKey keyInfo consoleRead cancellationTokenSource =
   let keyInfo = (keyInfo: ConsoleKeyInfo)
-  let cr = (consoleRead: ConsoleReadAsync)
+  let cts     = (cancellationTokenSource: CancellationTokenSource)
+  let cr      = (consoleRead: ConsoleReadAsync)
   let keyChar = keyInfo.KeyChar
-  let cts = (cancellationTokenSource: CancellationTokenSource)
   task {
     match keyChar with
     | 'q'  ->  cts.Cancel()
-               do! stopAll              true   // stop all processes and quit
+               do! stopAll              true   // stop all background tasks and quit
     | 'c'  ->  do! checkStreamStatus    10     // check audio pathway for over/underflows
     | 'd'  ->  do! showAudioDeviceList  ()     // one shot process to see device list
     | 'f'  ->  do! triggerFft           ()     // one shot process to see fft
-    | 'i'  ->  do! toggleIntercomM      cr cts // press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop
+    | 'i'  ->  do! toggleIntercomM      cr cts // start/stop listening, 0, 1, 2, or 3 to select channel
     | 'm'  ->  do! changeMonitorChannel ()     // select channel to monitor
     | 'o'  ->  do! triggerOscope        ()     // one shot process to view oscope
     | 's'  ->  do! triggerSpectrogram   ()     // plot spectrogram of last recording
-    | 't'  ->  do! listAllThreads       ()     // see all threads
-    | 'v'  ->  do! toggleVuMeter        ()     // start cli vu meter, press v again to stop
+    | 't'  ->  do! listBackgroundTasks  ()     // list background tasks
+    | 'v'  ->  do! toggleVuMeter        ()     // start/stop cli vu meter
     | '\r' ->  printfn ""
     | '?'  ->  printfn $"%s{help}"
     | c    ->  printfn $"Unknown command: {c}" }

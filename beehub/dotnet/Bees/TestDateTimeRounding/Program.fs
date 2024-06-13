@@ -90,7 +90,7 @@ open Calculations
 ///   - dateTime: The DateTime to be rounded up.
 ///   - timeSpan: The TimeSpan representing the interval to round down to.
 /// - Returns: A RoundedDateTime value representing the rounded down DateTime or an error message if the TimeSpan is unsuitable for rounding.
-let roundDown dateTime timeSpan : RoundedDateTime = roundToTimeSpan Down dateTime timeSpan
+let roundDown dateTime timeSpan  : RoundedDateTime = roundToTimeSpan Down dateTime timeSpan
 
 /// Rounds up a DateTime to the nearest interval specified by the given TimeSpan.
 ///
@@ -98,7 +98,7 @@ let roundDown dateTime timeSpan : RoundedDateTime = roundToTimeSpan Down dateTim
 ///   - dateTime: The DateTime to be rounded up.
 ///   - timeSpan: The TimeSpan representing the interval to round up to.
 /// - Returns: A RoundedDateTime value representing the rounded up DateTime or an error message if the TimeSpan is unsuitable for rounding.
-let roundUp   dateTime timeSpan : RoundedDateTime = roundToTimeSpan Up   dateTime timeSpan
+let roundUp   dateTime timeSpan  : RoundedDateTime = roundToTimeSpan Up   dateTime timeSpan
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––
