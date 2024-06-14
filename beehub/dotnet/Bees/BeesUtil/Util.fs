@@ -1,6 +1,7 @@
 module BeesUtil.Util
 
 open System
+open System.Threading
 open System.Threading.Tasks
 
 open DateTimeShim
@@ -54,6 +55,10 @@ let delayMs ms =
 let waitUntil dateTime =
   let duration = dateTime - DateTime.Now
   if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()
+
+let waitUntilWithToken dateTime (ctsToken: CancellationToken) =
+  let duration = dateTime - DateTime.Now
+  if duration > TimeSpan.Zero then  Task.Delay(duration, ctsToken).Wait()
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––
 

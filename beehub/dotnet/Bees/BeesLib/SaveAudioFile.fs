@@ -4,12 +4,17 @@ open System
 open System.Threading
 open NAudio.Lame
 
+open PortAudioSharp
+
 open BeesUtil.DateTimeShim
 
+open BeesUtil.DebugGlobals
 open BeesUtil.DateTimeCalculations
 open BeesUtil.Ranges
 open BeesUtil.SaveAsMp3
 open BeesUtil.SaveAsWave
+open BeesUtil.PortAudioUtils
+open BeesLib.BeesConfig
 open BeesLib.InputStream
 
 
@@ -64,13 +69,47 @@ let rec saveAudioFile ext (inputStream: InputStream) (dateTime: _DateTime) durat
   | _                         ->  failwith "unkonwn result code"
 
 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// PortAudio argument prep
+
+/// Creates and returns the sample rate and the input parameters.
+let prepareArgumentsForStreamCreation verbose =
+  let log string = if verbose then  printfn string else  ()
+  let defaultInput = PortAudio.DefaultInputDevice         in log $"Default input device = %d{defaultInput}"
+  let inputInfo    = PortAudio.GetDeviceInfo defaultInput
+  let nChannels    = inputInfo.maxInputChannels           in log $"Number of channels = %d{nChannels}"
+  let sampleRate   = inputInfo.defaultSampleRate          in log $"Sample rate = %f{sampleRate} (default)"
+  let inputParameters = PortAudioSharp.StreamParameters(
+    device                    = defaultInput                      ,
+    channelCount              = nChannels                         ,
+    sampleFormat              = SampleFormat.Float32              ,
+    suggestedLatency          = inputInfo.defaultHighInputLatency ,
+    hostApiSpecificStreamInfo = IntPtr.Zero                       )
+  log $"%s{inputInfo.ToString()}"
+  log $"inputParameters=%A{inputParameters}"
+  let defaultOutput = PortAudio .DefaultOutputDevice      in log $"Default output device = %d{defaultOutput}"
+  let outputInfo    = PortAudio .GetDeviceInfo defaultOutput
+  let outputParameters = PortAudioSharp.StreamParameters(
+    device                    = defaultOutput                       ,
+    channelCount              = nChannels                           ,
+    sampleFormat              = SampleFormat.Float32                ,
+    suggestedLatency          = outputInfo.defaultHighOutputLatency ,
+    hostApiSpecificStreamInfo = IntPtr.Zero                         )
+  log $"%s{outputInfo.ToString()}"
+  log $"outputParameters=%A{outputParameters}"
+  sampleRate, inputParameters, outputParameters
+
+
+//–––––––––––––––––––––––––––––––––––––
+// Recording
+
 /// <summary>
 /// Periodically saves the audio stream to an MP3 file for a specified duration and period.
 /// </summary>
 /// <param name="inputStream">The audio input stream to save.</param>
 /// <param name="duration">The duration of each saved audio file.</param>
 /// <param name="period">The interval between each save.</param>
-let saveAudioFilePeriodically ext (inputStream: InputStream) duration period (ctsToken: CancellationToken) =
+let saveAudioFilePeriodically ext duration period (ctsToken: CancellationToken) =
   //  ....|.....|.....|....
   //   |<––––––––– Now
   //      |<– startTIme
@@ -80,17 +119,21 @@ let saveAudioFilePeriodically ext (inputStream: InputStream) duration period (ct
   //             saveFrom saveTime + period
   //               |<– delayUntil saveTime + duration 
   //            |––|   save file 2
+  use inputStream = new InputStream(beesConfig)
+  inputStream.CbState.Logger.Print "Log:"
+  inputStream.Start()
   match roundUp inputStream.HeadTime period with
   | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
   | Good startTime -> 
-    let now = DateTime.Now in printfn $"from now %A{now.TimeOfDay}, wait %A{startTime - now}"
-    inputStream.WaitUntil startTime
-    let rec saveAt saveTime num =
-      if ctsToken.IsCancellationRequested then ()
-      else
-      inputStream.WaitUntil  saveTime             ; printf $"Recording {num} ..."
-      inputStream.WaitUntil (saveTime + duration) ; saveAudioFile ext inputStream saveTime duration
-      saveAt (saveTime + period) (num+1)
-    saveAt startTime 1
-
+  let now = DateTime.Now in printfn $"from now %A{now.TimeOfDay}, wait %A{startTime - now}"
+  inputStream.WaitUntil(startTime)
+  let rec saveAt saveTime num =
+    if ctsToken.IsCancellationRequested then ()
+    else
+    inputStream.WaitUntil(saveTime           , ctsToken) ; printf $"Recording {num} ..."
+    inputStream.WaitUntil(saveTime + duration, ctsToken) ; saveAudioFile ext inputStream saveTime duration
+    saveAt (saveTime + period) (num+1)
+  saveAt startTime 1
+  printfn "Stopping..."    ; inputStream.Stop()
+  printfn "Stopped"
 

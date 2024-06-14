@@ -27,6 +27,7 @@ let performKey keyInfo consoleRead cancellationTokenSource =
     | 'i'  ->  do! toggleIntercomM      cr cts // start/stop listening, 0, 1, 2, or 3 to select channel
     | 'm'  ->  do! changeMonitorChannel ()     // select channel to monitor
     | 'o'  ->  do! triggerOscope        ()     // one shot process to view oscope
+    | 'r'  ->  do! toggleRecording      ()     // record audio
     | 's'  ->  do! triggerSpectrogram   ()     // plot spectrogram of last recording
     | 't'  ->  do! listBackgroundTasks  ()     // list background tasks
     | 'v'  ->  do! toggleVuMeter        ()     // start/stop cli vu meter

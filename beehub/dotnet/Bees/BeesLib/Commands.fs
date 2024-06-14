@@ -1,9 +1,18 @@
 module BeesLib.Commands
 
+open System
 open System.Threading
-open ConsoleReadAsync
+open System.Threading.Tasks
 
-let print name = printfn $" -> {name}"
+open ConsoleReadAsync
+open BeesUtil.BackgroundTasks
+
+
+let bgTasks = BackgroundTasks()
+
+
+let makeMessage name = $" -> {name}"
+let print name = makeMessage name |> printfn "%s"
 
 let help = """
   c check audio pathway for over/underflows
@@ -13,6 +22,7 @@ let help = """
   m select channel to monitor
   o one shot process to view oscope
   q stop all background tasks and quit
+  r record audio
   s plot spectrogram of last recording
   t list background tasks
   v start/stop cli vu meter"""
@@ -59,7 +69,7 @@ let changeMonitorChannel() = task {
   print "changeMonitorChannel" }
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// one shot process to view oscope
+// usage: press o to view oscope
 let triggerOscope() = task {
   print "triggerOscope" }
 
@@ -68,6 +78,25 @@ let triggerOscope() = task {
 let stopAll how = task {
   if how then  print "stopAll and quit"
          else  printfn "^C -> stopAll without quitting" }
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// usage: press r to record
+
+module Record =
+  
+  open SaveAudioFile
+
+  let doRecording ctsToken = saveAudioFilePeriodically "mp3" (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) ctsToken
+
+  let bgTask = {
+    Name   = "Recording"
+    Func   = doRecording
+    CTS    = new CancellationTokenSource()
+    Active = false  } 
+  
+let toggleRecording() = task { 
+  let msg = makeMessage "toggleRecording"
+  Record.bgTask.Toggle msg bgTasks }
  
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press s to plot spectrogram of last recording
@@ -77,11 +106,33 @@ let triggerSpectrogram() = task {
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press t to list background tasks
 let listBackgroundTasks() = task {
-  print "listBackgroundTasks" }
+  print "listBackgroundTasks"
+  let list =
+    bgTasks.ListNames
+    |> Seq.map (fun s -> "  " + s)
+    |> String.concat "\n"
+  printfn "%s" list  }
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press v to start/stop cli vu meter
+
+module VuMeter =
+  
+  let rec doVuMeter ctsToken =
+    if (ctsToken: CancellationToken).IsCancellationRequested then ()
+    else
+    printfn "VuMeter is on"
+    (Task.Delay 1000).Wait()
+    doVuMeter ctsToken  
+
+  let bgTask = {
+    Name   = "VuMeter"
+    Func   = doVuMeter
+    CTS    = new CancellationTokenSource()
+    Active = false  } 
+  
 let toggleVuMeter() = task { 
-  print "toggleVuMeter" }
+  let msg = makeMessage "toggleVuMeter"
+  VuMeter.bgTask.Toggle msg bgTasks }
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

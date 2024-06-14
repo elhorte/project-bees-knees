@@ -409,24 +409,24 @@ let durationToNFrames frameRate (duration: _TimeSpan) =
 
 
 // initPortAudio() must be called before this constructor.
-type InputStream(beesConfig       : BeesConfig          ,
-                 inputParameters  : StreamParameters    ,
-                 outputParameters : StreamParameters    ,
-                 withEcho         : bool                ,
-                 withLogging      : bool                ,
-                 sim              : Simulating ) =
+type InputStream(beesConfig: BeesConfig) =
 
-  let audioDuration   = cbSimAudioDuration sim (fun () -> beesConfig.InputStreamAudioDuration                     )
-  let gapDuration     = cbSimGapDuration   sim (fun () -> beesConfig.InputStreamRingGapDuration * 2.0             )
-  let nRingDataFrames = cbSimNDataFrames   sim (fun () -> durationToNFrames beesConfig.InFrameRate audioDuration )
-  let nGapFrames      = cbSimNGapFrames    sim (fun () -> durationToNFrames beesConfig.InFrameRate gapDuration   )
-  let nRingFrames     = nRingDataFrames + (3 * nGapFrames) / 2
-  let nRingSamples    = nRingFrames * beesConfig.InChannelCount
-  let frameSize       = beesConfig.FrameSize
-  let nRingBytes      = int nRingFrames * frameSize
-  let startTime       = _DateTime.Now
-  let segs            = { Cur = Seg.NewEmpty nRingFrames beesConfig.InFrameRate 
-                          Old = Seg.NewEmpty nRingFrames beesConfig.InFrameRate  }
+  let inputParameters  = beesConfig.InputParameters
+  let outputParameters = beesConfig.OutputParameters
+  let withEcho         = beesConfig.WithEcho
+  let withLogging      = beesConfig.WithLogging
+  let sim              = beesConfig.Simulating 
+  let audioDuration    = cbSimAudioDuration sim (fun () -> beesConfig.InputStreamAudioDuration                     )
+  let gapDuration      = cbSimGapDuration   sim (fun () -> beesConfig.InputStreamRingGapDuration * 2.0             )
+  let nRingDataFrames  = cbSimNDataFrames   sim (fun () -> durationToNFrames beesConfig.InFrameRate audioDuration )
+  let nGapFrames       = cbSimNGapFrames    sim (fun () -> durationToNFrames beesConfig.InFrameRate gapDuration   )
+  let nRingFrames      = nRingDataFrames + (3 * nGapFrames) / 2
+  let nRingSamples     = nRingFrames * beesConfig.InChannelCount
+  let frameSize        = beesConfig.FrameSize
+  let nRingBytes       = int nRingFrames * frameSize
+  let startTime        = _DateTime.Now
+  let segs             = { Cur = Seg.NewEmpty nRingFrames beesConfig.InFrameRate 
+                           Old = Seg.NewEmpty nRingFrames beesConfig.InFrameRate  }
   
   // When unmanaged code calls managed code (e.g., a callback from unmanaged to managed),
   // the .NET CLR ensures that the garbage collector will not move referenced managed objects
@@ -554,6 +554,14 @@ type InputStream(beesConfig       : BeesConfig          ,
         waitUntil dateTime
         loop()
     loop()
+  
+  /// Wait until the buffer contains the given DateTime.
+  member this.WaitUntil(dateTime, ctsToken: CancellationToken) =
+    let rec loop() =
+      if this.HeadTime < dateTime then
+        waitUntilWithToken dateTime ctsToken
+        loop()
+    loop()
     
   // The `WhenStableAndEntered` function synchronizes reading by this client and writing by the callback.
   member this.CbStateSnapshot : CbState =
@@ -637,5 +645,6 @@ type InputStream(beesConfig       : BeesConfig          ,
 
   interface IDisposable with
     member this.Dispose() =
-      Console.WriteLine("Disposing inputStream")
+  //  Console.WriteLine("Disposing inputStream")
   //  this.PaStream.Dispose()  // I think this crashes because PaStream doesn’t like being closed twice.
+      ()

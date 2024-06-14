@@ -3,6 +3,9 @@ module BeesLib.BeesConfig
 open System
 open System.Text
 
+open PortAudioSharp
+
+open BeesUtil.DebugGlobals
 open BeesUtil.DateTimeShim
 
 
@@ -18,6 +21,11 @@ type BeesConfig = {
   InputStreamAudioDuration   : _TimeSpan
   InputStreamRingGapDuration : _TimeSpan // long enough for the largest automatically adjusted frameCount arg to callback
   SampleSize                 : int
+  WithEcho                   : bool
+  WithLogging                : bool
+  Simulating                 : Simulating
+  InputParameters            : PortAudioSharp.StreamParameters
+  OutputParameters           : PortAudioSharp.StreamParameters
   InChannelCount             : int
   InFrameRate                : double  }
 with
@@ -38,3 +46,7 @@ let printBeesConfig bc =
   sb.AppendLine $"  InChannelCount             {bc.InChannelCount            }" |> ignore
   sb.AppendLine $"  InFrameRate                {bc.InFrameRate               }" |> ignore
   Console.WriteLine (sb.ToString())
+
+
+// placeholder for the global value.  Initialized by main.
+let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>

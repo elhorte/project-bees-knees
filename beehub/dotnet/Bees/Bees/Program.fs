@@ -4,73 +4,36 @@ open System.Threading
 open System.Threading.Tasks
 open FSharp.Control
 
-open PortAudioSharp
-
 open BeesUtil.DateTimeShim
 
 open BeesUtil.DebugGlobals
 open BeesUtil.PortAudioUtils
-open BeesLib.InputStream
 open BeesLib.SaveAudioFile
 open BeesLib.BeesConfig
 open BeesLib.Keyboard
+open BeesLib.Commands
 
-// See Theory of Operation comment before main at the end of this file.
+let waitForKeyboardCommands() = task {
+  startKeyboardBackground()
+  use cts = new CancellationTokenSource()
+  printfn "Reading keyboard..."
+  do! keyboardKeyInput "" cts
+ }
 
-//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// PortAudio argument prep
-
-/// Creates and returns the sample rate and the input parameters.
-let prepareArgumentsForStreamCreation verbose =
-  let log string = if verbose then  printfn string else  ()
-  let defaultInput = PortAudio.DefaultInputDevice         in log $"Default input device = %d{defaultInput}"
-  let inputInfo    = PortAudio.GetDeviceInfo defaultInput
-  let nChannels    = inputInfo.maxInputChannels           in log $"Number of channels = %d{nChannels}"
-  let sampleRate   = inputInfo.defaultSampleRate          in log $"Sample rate = %f{sampleRate} (default)"
-  let inputParameters = PortAudioSharp.StreamParameters(
-    device                    = defaultInput                      ,
-    channelCount              = nChannels                         ,
-    sampleFormat              = SampleFormat.Float32              ,
-    suggestedLatency          = inputInfo.defaultHighInputLatency ,
-    hostApiSpecificStreamInfo = IntPtr.Zero                       )
-  log $"%s{inputInfo.ToString()}"
-  log $"inputParameters=%A{inputParameters}"
-  let defaultOutput = PortAudio .DefaultOutputDevice      in log $"Default output device = %d{defaultOutput}"
-  let outputInfo    = PortAudio .GetDeviceInfo defaultOutput
-  let outputParameters = PortAudioSharp.StreamParameters(
-    device                    = defaultOutput                       ,
-    channelCount              = nChannels                           ,
-    sampleFormat              = SampleFormat.Float32                ,
-    suggestedLatency          = outputInfo.defaultHighOutputLatency ,
-    hostApiSpecificStreamInfo = IntPtr.Zero                         )
-  log $"%s{outputInfo.ToString()}"
-  log $"outputParameters=%A{outputParameters}"
-  sampleRate, inputParameters, outputParameters
-
+let mainTask() =
+  try
+    let t = task {
+      do! waitForKeyboardCommands() }
+    t.Wait() 
+    printfn "Main task done." 
+  finally
+    printfn "Exiting."
 
 //–––––––––––––––––––––––––––––––––––––
-// Recording
+// Main
 
-/// Run the application for a while using a PortAudio stream, then stop the stream and terminate PortAudio.
-let runTheApp inputStream = task {
-  let inputStream = (inputStream: InputStream)
-  inputStream.Start()
-  use cts = new CancellationTokenSource()
-  printfn "Reading..."
-  Task.Run(fun () -> saveAudioFilePeriodically "mp3" inputStream (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) cts.Token) |> ignore
-  do! keyboardKeyInput "" cts
-  printfn "Stopping..."    ; inputStream.Stop()
-  printfn "Stopped"
-  printfn "Terminating..." ; terminatePortAudio()
-  printfn "Terminated" }
-
-// placeholder for the global value.  Initialized by main.
-let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
-
-/// Start audio stream and do recording until it is done.
-let startRecordingAudio() =
-  let withEcho    = false
-  let withLogging = false
+[<EntryPoint>]
+let main _ =
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation false
   beesConfig <- {
@@ -82,24 +45,17 @@ let startRecordingAudio() =
     InputStreamAudioDuration   = _TimeSpan.FromMinutes 16
     InputStreamRingGapDuration = _TimeSpan.FromSeconds 1
     SampleSize                 = sizeof<float32>
+    WithEcho                   = false 
+    WithLogging                = false
+    Simulating                 = NotSimulating 
+    InputParameters            = inputParameters
+    OutputParameters           = outputParameters
     InChannelCount             = inputParameters.channelCount
     InFrameRate                = sampleRate  }
   printBeesConfig beesConfig
-  try
-    use inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging, NotSimulating)
-    let t = task {
-      do! runTheApp inputStream 
-      inputStream.CbState.Logger.Print "Log:" }
-    t.Wait() 
-    printfn "Task done." 
-  finally
-    printfn "Recording done."
 
-//–––––––––––––––––––––––––––––––––––––
-// Main
+  mainTask()
 
-[<EntryPoint>]
-let main _ =
-  startKeyboardBackground()
-  startRecordingAudio()
+  printfn "Terminating PortAudio..." ; terminatePortAudio()
+  printfn "Terminated"
   0
