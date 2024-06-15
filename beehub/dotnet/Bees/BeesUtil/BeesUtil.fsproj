@@ -11,19 +11,17 @@
         <Compile Include="DateTimeShim.fs"         />
         <Compile Include="DebugGlobals.fs"         />
         <Compile Include="Util.fs"                 />
+        <Compile Include="Logger.fs"               />
+        <Compile Include="CancelAfterDelay.fs"     />
         <Compile Include="BackgroundTasks.fs"      />
         <Compile Include="CallbackHandoff.fs"      />
-        <Compile Include="CancelAfterDelay.fs"     />
-        <Compile Include="CpuStopwatch.fs"         />
-        <Compile Include="Logger.fs"               />
-        <Compile Include="SubscriberList.fs"       />
         <Compile Include="PortAudioUtils.fs"       />
         <Compile Include="AudioUtils.fs"           />
         <Compile Include="Mp3.fs"                  />
         <Compile Include="Wave.fs"                 />
         <Compile Include="Synchronizer.fs"         />
         <Compile Include="DateTimeCalculations.fs" />
-        <Compile Include="Ranges.fs"               />
+        <Compile Include="RangeClipper.fs"         />
     </ItemGroup>
 
     <ItemGroup>

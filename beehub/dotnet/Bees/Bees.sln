@@ -24,6 +24,8 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestMp3Save", "TestMp3Save\
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestDateTimeRounding", "TestDateTimeRounding\TestDateTimeRounding.fsproj", "{41D20A5B-9D28-41A4-A846-D1462B8EFCA4}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Unused", "Unused\Unused.fsproj", "{2C947C5B-9443-44C1-A5E9-589B8B2E20B4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -78,5 +80,9 @@ Global
 		{41D20A5B-9D28-41A4-A846-D1462B8EFCA4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{41D20A5B-9D28-41A4-A846-D1462B8EFCA4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{41D20A5B-9D28-41A4-A846-D1462B8EFCA4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2C947C5B-9443-44C1-A5E9-589B8B2E20B4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2C947C5B-9443-44C1-A5E9-589B8B2E20B4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2C947C5B-9443-44C1-A5E9-589B8B2E20B4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2C947C5B-9443-44C1-A5E9-589B8B2E20B4}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

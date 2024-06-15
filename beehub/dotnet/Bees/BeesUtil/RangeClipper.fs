@@ -1,6 +1,4 @@
-module BeesUtil.Ranges
-
-open System
+module BeesUtil.RangeClipper
 
 
 type RangeClip =
@@ -53,15 +51,16 @@ let inline clipRange (wantBegin: ^DT) (wantLength: ^TS) (haveBegin: ^DT) (haveLe
                                                                 ( RangeClip.RangeOK        , wantBegin, sub wantEnd   wantBegin)
 
 (*
+
 let a1 = clipRange 2 1 3 1
 let a2 = clipRange 4 1 3 1
 let a3 = clipRange 2 2 3 1
 let a4 = clipRange 3 2 3 1
 let a5 = clipRange 2 3 3 1
 let a6 = clipRange 3 1 3 1
-*)
 
-(*
+open System
+
 let wantT = DateTime.Today
 let wantD = TimeSpan.FromSeconds(5)
 let haveT = DateTime.Today

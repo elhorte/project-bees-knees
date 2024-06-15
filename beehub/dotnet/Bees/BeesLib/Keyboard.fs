@@ -9,22 +9,20 @@ open BeesUtil.CancelAfterDelay
 open ConsoleReadAsync
 open BeesLib.Commands
 
-printfn "Press Control-C or Control-Break to exit."
-
-/// beehive keyboard triggered management utilities
+/// Keyboard triggered management utilities
+/// Cancel <c>cancellationTokenSource</c> to tell the caller to stop looking for commands from the keyboard.  
 let performKey keyInfo consoleRead cancellationTokenSource =
   let keyInfo = (keyInfo: ConsoleKeyInfo)
   let cts     = (cancellationTokenSource: CancellationTokenSource)
   let cr      = (consoleRead: ConsoleReadAsync)
   let keyChar = keyInfo.KeyChar
-  task {
+  let t = task {
     match keyChar with
-    | 'q'  ->  cts.Cancel()
-               do! stopAll              true   // stop all background tasks and quit
+    | 'q'  ->  do! quit                 cts    // stop all background tasks and quit
     | 'c'  ->  do! checkStreamStatus    10     // check audio pathway for over/underflows
     | 'd'  ->  do! showAudioDeviceList  ()     // one shot process to see device list
     | 'f'  ->  do! triggerFft           ()     // one shot process to see fft
-    | 'i'  ->  do! toggleIntercomM      cr cts // start/stop listening, 0, 1, 2, or 3 to select channel
+    | 'i'  ->  do! toggleIntercom       cr cts // start/stop listening, 0, 1, 2, or 3 to select channel
     | 'm'  ->  do! changeMonitorChannel ()     // select channel to monitor
     | 'o'  ->  do! triggerOscope        ()     // one shot process to view oscope
     | 'r'  ->  do! toggleRecording      ()     // record audio
@@ -33,25 +31,21 @@ let performKey keyInfo consoleRead cancellationTokenSource =
     | 'v'  ->  do! toggleVuMeter        ()     // start/stop cli vu meter
     | '\r' ->  printfn ""
     | '?'  ->  printfn $"%s{help}"
-    | c    ->  printfn $"Unknown command: {c}" }
-  |> Task.WaitAll
+    | c    ->  printfn $" -> Unknown command: {c}" }
+  t.Wait()
+
+let ctrlCEventHandler sender (args: ConsoleCancelEventArgs) =
+  Console.Write "^C"
+  stopAll().Wait()
+  // Prevent the process from terminating when we return.
+  args.Cancel <- true
   
 let startKeyboardBackground() =
   printfn "Initializing keyboard input."
-  let ctrlCEventHandler sender (args: ConsoleCancelEventArgs) =
-//  printfn "\nConsoleCancelEventHandler called."
-//  printfn $"  Key pressed: {args.SpecialKey}"
-
-    stopAll false |> Task.WaitAll
-
-//  printfn $"  Cancel property: {args.Cancel}"
-    // Prevent the process from terminating when we return.
-    args.Cancel <- true
-
   Console.CancelKeyPress.AddHandler(ConsoleCancelEventHandler ctrlCEventHandler)
   
 
-let keyboardKeyInput message cancellationTokenSource = task {
+let keyboardKeyInput cancellationTokenSource = task {
   let cts = (cancellationTokenSource: CancellationTokenSource)
   let takeKeys() = task {
     use consoleRead = new ConsoleReadAsync()
@@ -59,8 +53,8 @@ let keyboardKeyInput message cancellationTokenSource = task {
     while not cts.IsCancellationRequested do
       let! command = consoleRead.readKeyAsync(cts.Token)
       match command with
-      | None -> ()
-      | Some c -> performKey c consoleRead cts }
+      | None   ->  ()
+      | Some c ->  performKey c consoleRead cts }
   if false then cancelAfterDelay cts (TimeSpan.FromSeconds 0.5) (Some "canceled") |> ignore else ()
   do! takeKeys()
   printfn "Quitting per ‘q’ keyboard command" }

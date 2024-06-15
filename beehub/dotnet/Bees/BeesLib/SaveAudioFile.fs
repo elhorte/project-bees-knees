@@ -10,7 +10,7 @@ open BeesUtil.DateTimeShim
 
 open BeesUtil.DebugGlobals
 open BeesUtil.DateTimeCalculations
-open BeesUtil.Ranges
+open BeesUtil.RangeClipper
 open BeesUtil.SaveAsMp3
 open BeesUtil.SaveAsWave
 open BeesUtil.PortAudioUtils
@@ -42,7 +42,7 @@ let saveToFile f (filePath: string) (frameRate: float) (nChannels: int) (samples
 /// <param name="inputStream">The audio input stream to save.</param>
 /// <param name="time">The starting time of the save operation.</param>
 /// <param name="duration">The duration of each saved audio file.</param>
-let rec saveAudioFile ext (inputStream: InputStream) (dateTime: _DateTime) duration =
+let saveAudioFile ext (inputStream: InputStream) (dateTime: _DateTime) duration =
   let saveFunction =
     match ext with
     | "mp3" ->  (saveAsMp3 LAMEPreset.ABR_128)
@@ -103,6 +103,9 @@ let prepareArgumentsForStreamCreation verbose =
 //–––––––––––––––––––––––––––––––––––––
 // Recording
 
+#if USE_FAKE_DATE_TIME
+#else
+
 /// <summary>
 /// Periodically saves the audio stream to an MP3 file for a specified duration and period.
 /// </summary>
@@ -121,7 +124,7 @@ let saveAudioFilePeriodically ext duration period (ctsToken: CancellationToken) 
   //            |––|   save file 2
   use inputStream = new InputStream(beesConfig)
   inputStream.CbState.Logger.Print "Log:"
-  inputStream.Start()
+  inputStream.Start() ; printfn "InputStream started"
   match roundUp inputStream.HeadTime period with
   | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
   | Good startTime -> 
@@ -134,6 +137,6 @@ let saveAudioFilePeriodically ext duration period (ctsToken: CancellationToken) 
     inputStream.WaitUntil(saveTime + duration, ctsToken) ; saveAudioFile ext inputStream saveTime duration
     saveAt (saveTime + period) (num+1)
   saveAt startTime 1
-  printfn "Stopping..."    ; inputStream.Stop()
-  printfn "Stopped"
+  inputStream.Stop() ; printfn "InputStream stopped"
 
+#endif

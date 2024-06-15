@@ -1,7 +1,5 @@
 ﻿
-open System
 open System.Threading
-open System.Threading.Tasks
 open FSharp.Control
 
 open BeesUtil.DateTimeShim
@@ -11,23 +9,20 @@ open BeesUtil.PortAudioUtils
 open BeesLib.SaveAudioFile
 open BeesLib.BeesConfig
 open BeesLib.Keyboard
-open BeesLib.Commands
 
-let waitForKeyboardCommands() = task {
+let processKeyboardCommands() = task {
   startKeyboardBackground()
   use cts = new CancellationTokenSource()
   printfn "Reading keyboard..."
-  do! keyboardKeyInput "" cts
- }
+  do! keyboardKeyInput cts  }
 
 let mainTask() =
   try
     let t = task {
-      do! waitForKeyboardCommands() }
+      do! processKeyboardCommands()  }
     t.Wait() 
-    printfn "Main task done." 
   finally
-    printfn "Exiting."
+    printfn "Main task done." 
 
 //–––––––––––––––––––––––––––––––––––––
 // Main
@@ -56,6 +51,5 @@ let main _ =
 
   mainTask()
 
-  printfn "Terminating PortAudio..." ; terminatePortAudio()
-  printfn "Terminated"
+  terminatePortAudio() ; printfn "PortAudioSharp Terminated"
   0

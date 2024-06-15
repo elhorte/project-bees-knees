@@ -9,6 +9,7 @@ and  Subscription<'Event>      = Subscription of (SubscriptionId * SubscriberHan
 
 
 /// A subscription service for a generic event.
+/// A subscribed event handler can remove itself when done.
 type SubscriberList<'Event>() =
   
   let         subscriptions = ResizeArray<Subscription<'Event>>()
@@ -24,7 +25,6 @@ type SubscriberList<'Event>() =
   // members
   
   /// Handles the event by running each subscription in order subscribed.
-  /// The subscriber handler can remove itself when done.
   member this.Broadcast(t: 'Event)  : unit =
     for s in subscriptions.ToArray() do
       let unsubscribeMe() = unsubscribe s  
@@ -37,9 +37,9 @@ type SubscriberList<'Event>() =
     subscriptions.Add s
     s
 
-  /// Unsubscribes.
+  /// Unsubscribes a handler.
   member this.Unsubscribe(s: Subscription<'Event>)  : bool =
     subscriptions.Remove s
 
-  /// The number of subscriptions.
+  /// Returns the number of subscriptions.
   member this.SubscriberCount = subscriptions.Count

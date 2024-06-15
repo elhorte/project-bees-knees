@@ -318,12 +318,11 @@ module RunPeriodically =
     | Good startTime ->
     fprintfn writer $"from now %A{tsToString now.TimeOfDay}, wait %s{tsToString (startTime - DateTime.Now)}"
     let rec next (dt: DateTime) count =
-      if count <= 0 then ()
-      else
-      waitUntil (dt + period)
-      fprintfn writer $"%s{tsToString dt.TimeOfDay}"
-      let count' = count - 1
-      next (dt + period) count'
+      if count > 0 then
+        waitUntil (dt + period)
+        fprintfn writer $"%s{tsToString dt.TimeOfDay}"
+        let count' = count - 1
+        next (dt + period) count'
     next startTime count
 
 

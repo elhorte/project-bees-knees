@@ -225,7 +225,7 @@ let main _ =
   let sim = SimTimes { AudioDuration = _TimeSpan.FromMilliseconds  56 ; GapDuration = _TimeSpan.FromMilliseconds 15 }
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
-  let sampleSize = sizeof<SampleType>
+  let sampleSize = sizeof<float32>
   beesConfig <- {
     LocationId                  = 1
     HiveId                      = 1
@@ -235,12 +235,17 @@ let main _ =
     InputStreamAudioDuration    = _TimeSpan.FromMilliseconds 1000 // These are ignored when the SimTimes struct is used, as above
     InputStreamRingGapDuration  = _TimeSpan.FromMilliseconds   20 // These are ignored when the SimTimes struct is used, as above
     SampleSize                  = sampleSize
+    WithEcho                    = false 
+    WithLogging                 = false
+    Simulating                  = sim 
+    InputParameters             = inputParameters
+    OutputParameters            = outputParameters
     InChannelCount              = 1 // inputParameters.channelCount
     InFrameRate                 = 1000 }
   printBeesConfig beesConfig
 //keyboardInputInit()
   try
-    let inputStream = new InputStream(beesConfig, inputParameters, outputParameters, withEcho, withLogging, sim)
+    let inputStream = new InputStream(beesConfig)
     let t = task {
       do! run inputStream 
       inputStream.CbState.Logger.Print "Log:" }
