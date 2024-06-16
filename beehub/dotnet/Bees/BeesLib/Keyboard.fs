@@ -2,61 +2,57 @@ module BeesLib.Keyboard
 
 open System
 open System.Threading
-open System.Threading.Tasks
-open Microsoft.FSharp.Data.UnitSystems.SI.UnitNames
 
-open BeesUtil.CancelAfterDelay
 open ConsoleReadAsync
 open BeesLib.Commands
 
-/// Keyboard triggered management utilities
-/// Cancel <c>cancellationTokenSource</c> to tell the caller to stop looking for commands from the keyboard.  
-let performKey keyInfo consoleRead cancellationTokenSource =
-  let keyInfo = (keyInfo: ConsoleKeyInfo)
-  let cts     = (cancellationTokenSource: CancellationTokenSource)
-  let cr      = (consoleRead: ConsoleReadAsync)
-  let keyChar = keyInfo.KeyChar
-  let t = task {
-    match keyChar with
-    | 'q'  ->  do! quit                 cts    // stop all background tasks and quit
-    | 'c'  ->  do! checkStreamStatus    10     // check audio pathway for over/underflows
-    | 'd'  ->  do! showAudioDeviceList  ()     // one shot process to see device list
-    | 'f'  ->  do! triggerFft           ()     // one shot process to see fft
-    | 'i'  ->  do! toggleIntercom       cr cts // start/stop listening, 0, 1, 2, or 3 to select channel
-    | 'm'  ->  do! changeMonitorChannel ()     // select channel to monitor
-    | 'o'  ->  do! triggerOscope        ()     // one shot process to view oscope
-    | 'r'  ->  do! toggleRecording      ()     // record audio
-    | 's'  ->  do! triggerSpectrogram   ()     // plot spectrogram of last recording
-    | 't'  ->  do! listBackgroundTasks  ()     // list background tasks
-    | 'v'  ->  do! toggleVuMeter        ()     // start/stop cli vu meter
-    | '\r' ->  printfn ""
-    | '?'  ->  printfn $"%s{help}"
-    | c    ->  printfn $" -> Unknown command: {c}" }
-  t.Wait()
 
-let ctrlCEventHandler sender (args: ConsoleCancelEventArgs) =
-  Console.Write "^C"
-  stopAll().Wait()
-  // Prevent the process from terminating when we return.
-  args.Cancel <- true
-  
-let startKeyboardBackground() =
-  printfn "Initializing keyboard input."
-  Console.CancelKeyPress.AddHandler(ConsoleCancelEventHandler ctrlCEventHandler)
-  
-
-let keyboardKeyInput cancellationTokenSource = task {
-  let cts = (cancellationTokenSource: CancellationTokenSource)
-  let takeKeys() = task {
-    use consoleRead = new ConsoleReadAsync()
-    printfn "Type a command or q for quit"
-    while not cts.IsCancellationRequested do
-      let! command = consoleRead.readKeyAsync(cts.Token)
-      match command with
-      | None   ->  ()
-      | Some c ->  performKey c consoleRead cts }
-  if false then cancelAfterDelay cts (TimeSpan.FromSeconds 0.5) (Some "canceled") |> ignore else ()
-  do! takeKeys()
+/// <summary>
+/// Waits for keyboard input and executes associated commands.
+/// </summary>
+/// <remarks>
+/// The function listens for keyboard inputs and each character triggers a certain task.
+/// Control-C is intercepted so it is just another character command.
+/// </remarks>
+let waitForKeyboardCommands() = task {
+  printfn "Reading keyboard..."
+  printfn "Type a command letter, q for quit."
+  do // install Control-C handler
+    let ctrlCEventHandler _ (args: ConsoleCancelEventArgs) =
+      Console.Write "^C"
+      stopAll().Wait()
+      args.Cancel <- true // Prevent the process from terminating when we return.
+    Console.CancelKeyPress.AddHandler(ConsoleCancelEventHandler ctrlCEventHandler)
+  use cts = new CancellationTokenSource()
+  use consoleReader = new ConsoleReadAsync()
+  /// Keyboard triggered management utilities
+  /// Cancel <c>cancellationTokenSource</c> to tell the caller to stop looking for commands from the keyboard.  
+  let performKey keyInfo =
+    let keyInfo = (keyInfo: ConsoleKeyInfo)
+    let cr      = consoleReader
+    let dispatch keyChar = task {
+      match keyChar with
+      | 'q'  ->  do! quit                 cts    // stop all background tasks and quit
+      | 'c'  ->  do! checkStreamStatus    10     // check audio pathway for over/underflows
+      | 'd'  ->  do! showAudioDeviceList  ()     // one shot process to see device list
+      | 'f'  ->  do! triggerFft           ()     // one shot process to see fft
+      | 'i'  ->  do! toggleIntercom       cr cts // start/stop listening, 0, 1, 2, or 3 to select channel
+      | 'm'  ->  do! changeMonitorChannel ()     // select channel to monitor
+      | 'o'  ->  do! triggerOscope        ()     // one shot process to view oscope
+      | 'r'  ->  do! toggleRecording      ()     // record audio
+      | 's'  ->  do! triggerSpectrogram   ()     // plot spectrogram of last recording
+      | 't'  ->  do! listBackgroundTasks  ()     // list background tasks
+      | 'v'  ->  do! toggleVuMeter        ()     // start/stop cli vu meter
+      | '\r' ->  printfn ""
+      | '?'  ->  printfn $"%s{help}"
+      | c    ->  printfn $" -> Unknown command: {c}" }
+    let dispatcherTask = dispatch keyInfo.KeyChar
+    dispatcherTask.Wait()
+  while not cts.IsCancellationRequested do
+    let! command = consoleReader.readKeyAsync(cts.Token)
+    match command with
+    | None   ->  ()
+    | Some c ->  performKey c 
   printfn "Quitting per ‘q’ keyboard command" }
 
 // Sketch of taking command lines instead of command characters

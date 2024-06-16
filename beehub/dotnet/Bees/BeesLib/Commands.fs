@@ -122,7 +122,7 @@ let listBackgroundTasks() = task {
     bgTasks.ListNames
     |> Seq.map (fun s -> "  " + s)
     |> String.concat "\n"
-  printfn "%s" list  }
+  printf "%s" list  }
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press v to start/stop cli vu meter

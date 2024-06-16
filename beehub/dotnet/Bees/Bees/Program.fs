@@ -9,20 +9,7 @@ open BeesUtil.PortAudioUtils
 open BeesLib.SaveAudioFile
 open BeesLib.BeesConfig
 open BeesLib.Keyboard
-
-let processKeyboardCommands() = task {
-  startKeyboardBackground()
-  use cts = new CancellationTokenSource()
-  printfn "Reading keyboard..."
-  do! keyboardKeyInput cts  }
-
-let mainTask() =
-  try
-    let t = task {
-      do! processKeyboardCommands()  }
-    t.Wait() 
-  finally
-    printfn "Main task done." 
+open BeesLib.Commands
 
 //–––––––––––––––––––––––––––––––––––––
 // Main
@@ -49,7 +36,11 @@ let main _ =
     InFrameRate                = sampleRate  }
   printBeesConfig beesConfig
 
-  mainTask()
+  try
+    waitForKeyboardCommands().Wait() 
+    printfn "Main task done." 
+  finally
+    printfn "Exiting."
 
   terminatePortAudio() ; printfn "PortAudioSharp Terminated"
   0
