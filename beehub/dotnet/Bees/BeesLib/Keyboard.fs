@@ -27,9 +27,9 @@ let processKeyboardCommands() = task {
   while not cts.IsCancellationRequested do
     let! command = consoleReader.readKeyAsync(cts.Token)
     match command with
-    | None   ->  ()
+    | None         ->  ()
     | Some keyInfo ->
-    let cr  = consoleReader
+    let cr = consoleReader
     match keyInfo.KeyChar with
     | 'q'  ->  quit                 cts    // stop all background tasks and quit
     | 'c'  ->  checkStreamStatus    10     // check audio pathway for over/underflows
