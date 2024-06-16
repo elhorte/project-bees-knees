@@ -16,12 +16,12 @@ module Utils =
   let nsPerTick = 1000 / int ticksPerMicrosecond
   let nsToTicks ns = int64 (roundAway (float ns / float nsPerTick))  // ns 49 rounds to 0, ns 50 rounds to 100
 
-  let day n = TimeSpan.FromDays         (float    n)
-  let hr  n = TimeSpan.FromHours        (float    n)
-  let min n = TimeSpan.FromMinutes      (float    n)
-  let sec n = TimeSpan.FromSeconds      (float    n)
-  let ms  n = TimeSpan.FromMilliseconds (float    n)
-  let us  n = TimeSpan.FromMicroseconds (float    n)
+  let day n = TimeSpan.FromDays         (float     n)
+  let hr  n = TimeSpan.FromHours        (float     n)
+  let min n = TimeSpan.FromMinutes      (float     n)
+  let sec n = TimeSpan.FromSeconds      (float     n)
+  let ms  n = TimeSpan.FromMilliseconds (float     n)
+  let us  n = TimeSpan.FromMicroseconds (float     n)
   let ns  n = TimeSpan.FromTicks        (nsToTicks n)
 
   let tsNs (ts: TimeSpan) = int (ts.Ticks % TimeSpan.TicksPerSecond) * nsPerTick % 1000
@@ -40,7 +40,8 @@ module Calculations =
   // Used by roundUp and roundDown below.
   let roundToTimeSpan upDown (dt: DateTime) (ts: TimeSpan)  : RoundedDateTime =
     let tsToAddIfRoundUp = match upDown with Up -> ts | Down -> TimeSpan.Zero
-    let newDt day hr min sec ms = DateTime(dt.Year, dt.Month, day, hr, min, sec, ms, dt.Kind) + tsToAddIfRoundUp
+    let newDt                     day  hr  min  sec  ms =
+      DateTime(dt.Year, dt.Month, day, hr, min, sec, ms, dt.Kind) + tsToAddIfRoundUp
     let floor divisor n = n - (n % divisor)
     let err = Error tsMalformedMessage
     if   ts = TimeSpan.Zero        then                                         err
