@@ -37,10 +37,10 @@ let main _ =
   printBeesConfig beesConfig
 
   try
-    waitForKeyboardCommands().Wait() 
-    printfn "Main task done." 
+    processKeyboardCommands().Wait() 
   finally
-    printfn "Exiting."
+    printfn "Main task done." 
 
   terminatePortAudio() ; printfn "PortAudioSharp Terminated"
+  printfn "Exiting."
   0
