@@ -1,11 +1,16 @@
 module BeesUtil.SubscriberList
 
+open System.Threading
+
 
 type Unsubscriber   = unit -> unit 
 type SubscriptionId = SubscriptionId of int
 
 type SubscriberHandler<'Event> = 'Event -> SubscriptionId -> Unsubscriber -> unit
 and  Subscription<'Event>      = Subscription of (SubscriptionId * SubscriberHandler<'Event>)
+
+let IsBroadcasting  = 1L
+let NotBroadcasting = 0L
 
 
 /// A subscription service for a generic event.
@@ -14,7 +19,8 @@ type SubscriberList<'Event>() =
   
   let         subscriptions = ResizeArray<Subscription<'Event>>()
   let mutable idCurrent     = 0
-
+  let mutable broadcasting  = NotBroadcasting
+  
   let nextId() =
     idCurrent <- idCurrent + 1
     SubscriptionId idCurrent
@@ -25,11 +31,14 @@ type SubscriberList<'Event>() =
   // members
   
   /// Handles the event by running each subscription in order subscribed.
-  member this.Broadcast(t: 'Event)  : unit =
-    for s in subscriptions.ToArray() do
-      let unsubscribeMe() = unsubscribe s  
-      match s with
-      | Subscription (id, handler) -> handler t id unsubscribeMe
+  /// Does nothing if a broadcast is already in progress.
+  member this.Broadcast(event: 'Event)  : unit =
+    if NotBroadcasting = Interlocked.CompareExchange(&broadcasting, IsBroadcasting, NotBroadcasting) then
+      for s in subscriptions.ToArray() do
+        let unsubscribeMe() = unsubscribe s  
+        match s with
+        | Subscription (id, handler) -> handler event id unsubscribeMe
+      Interlocked.CompareExchange(&broadcasting, NotBroadcasting, IsBroadcasting) |> ignore
 
   /// Subscribes a handler to be called every time an Event is handled.
   member this.Subscribe(handler: SubscriberHandler<'Event>)  : Subscription<'Event> =

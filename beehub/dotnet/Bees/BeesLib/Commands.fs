@@ -4,6 +4,7 @@ open System
 open System.Threading
 open System.Threading.Tasks
 
+open BeesLib.InputStream
 open ConsoleReadAsync
 open BeesUtil.BackgroundTasks
 
@@ -101,14 +102,14 @@ let toggleRecording() =
 
 #else
 
-module Record =
+type Recording(bgTasks: BackgroundTasks, iS: InputStream) =
   let doRecording ctsToken =
-    SaveAudioFile.saveAudioFilePeriodically "mp3" (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) ctsToken
+    SaveAudioFile.saveAudioFilePeriodically iS "mp3" (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) ctsToken
   let bgTask = BgTask.New "Recording" doRecording
   
-let toggleRecording() = 
-  print "toggleRecording"
-  Record.bgTask.Toggle bgTasks
+  member this.Toggle() = 
+    print "toggleRecording"
+    bgTask.Toggle bgTasks
 
 #endif
 
@@ -130,15 +131,16 @@ let listBackgroundTasks() =
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press v to start/stop cli vu meter
 
-module VuMeter =
+type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
   let doVuMeter ctsToken =
     while not (ctsToken: CancellationToken).IsCancellationRequested do
       printfn "– VuMeter is on"
       (Task.Delay 1000).Wait()
+
   let bgTask = BgTask.New "VuMeter" doVuMeter
   
-let toggleVuMeter() = 
-  print "toggleVuMeter"
-  VuMeter.bgTask.Toggle bgTasks
+  member this.Toggle() = 
+    print "toggleVuMeter"
+    bgTask.Toggle bgTasks
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

@@ -9,7 +9,6 @@ open BeesUtil.PortAudioUtils
 open BeesLib.SaveAudioFile
 open BeesLib.BeesConfig
 open BeesLib.Keyboard
-open BeesLib.Commands
 
 //–––––––––––––––––––––––––––––––––––––
 // Main
@@ -37,7 +36,7 @@ let main _ =
   printBeesConfig beesConfig
 
   try
-    processKeyboardCommands().Wait() 
+    (processKeyboardCommands beesConfig).Wait() 
   finally
     printfn "Main task done." 
 

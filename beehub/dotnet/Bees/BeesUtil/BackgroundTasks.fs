@@ -68,7 +68,8 @@ and BackgroundTasks() =
   let stop bgTask =
     if NotActive = Interlocked.CompareExchange(&bgTask.Active, IsActive, IsActive) then
       Console.WriteLine $"  {bgTask.Name} already stopped"
-    else 
+    else
+    // Actually set to NotActive later when the BgTask has actually stopped.
     try
       bgTask.CTS.Cancel()
     with

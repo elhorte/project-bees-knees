@@ -15,6 +15,7 @@ open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
 open BeesUtil.Synchronizer
 open BeesUtil.RangeClipper
+open BeesUtil.SubscriberList
 open BeesLib.BeesConfig
 open CSharpHelpers
 
@@ -485,6 +486,8 @@ type InputStream(beesConfig: BeesConfig) =
                                                                             userData        = cbState                              ) )
       cbState.PaStreamTime <- fun () -> paStream.Time
       paStream
+  let subscriberList = new SubscriberList<CbState>()
+
   do
     printfn $"{beesConfig.InFrameRate}"
 
@@ -522,6 +525,12 @@ type InputStream(beesConfig: BeesConfig) =
     else
     paTryCatchRethrow(fun() -> this.PaStream.Stop () )
 
+  
+  member this.Subscribe  (subscriber: SubscriberHandler<CbState>) = subscriberList.Subscribe subscriber
+
+  member this.Unsubscribe(subscription: Subscription<CbState>) = subscriberList.Unsubscribe subscription
+
+  
   /// Called only when Simulating, to simulate a callback.
   member this.Callback(input, output, frameCount, timeInfo: StreamCallbackTimeInfo byref, statusFlags, userDataPtr) =
               callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
@@ -531,6 +540,7 @@ type InputStream(beesConfig: BeesConfig) =
   /// </summary>
   member this.AfterCallback() =
     let cbs = this.CbStateSnapshot
+    subscriberList.Broadcast cbs
     if cbs.Simulating <> NotSimulating then ()
     else
     if cbs.Segs.Cur.Head > threshold then

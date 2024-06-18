@@ -112,7 +112,7 @@ let prepareArgumentsForStreamCreation verbose =
 /// <param name="inputStream">The audio input stream to save.</param>
 /// <param name="duration">The duration of each saved audio file.</param>
 /// <param name="period">The interval between each save.</param>
-let saveAudioFilePeriodically ext duration period (ctsToken: CancellationToken) =
+let saveAudioFilePeriodically inputStream ext duration period (ctsToken: CancellationToken) =
   //  ....|.....|.....|....
   //   |<––––––––– Now
   //      |<– startTIme
@@ -122,10 +122,7 @@ let saveAudioFilePeriodically ext duration period (ctsToken: CancellationToken) 
   //             saveFrom saveTime + period
   //               |<– delayUntil saveTime + duration 
   //            |––|   save file 2
-  use inputStream = new InputStream(beesConfig)
-  inputStream.CbState.Logger.Print "Log:"
-  inputStream.Start() ; printfn "InputStream started"
-  match roundUp inputStream.HeadTime period with
+  match roundUp (inputStream: InputStream).HeadTime period with
   | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
   | Good startTime -> 
   let now = DateTime.Now in printfn $"from now %A{now.TimeOfDay}, wait %A{startTime - now}"
@@ -137,6 +134,5 @@ let saveAudioFilePeriodically ext duration period (ctsToken: CancellationToken) 
     inputStream.WaitUntil(saveTime + duration, ctsToken) ; saveAudioFile ext inputStream saveTime duration
     saveAt (saveTime + period) (num+1)
   saveAt startTime 1
-  inputStream.Stop() ; printfn "InputStream stopped"
 
 #endif
