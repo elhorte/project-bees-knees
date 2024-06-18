@@ -486,7 +486,7 @@ type InputStream(beesConfig: BeesConfig) =
                                                                             userData        = cbState                              ) )
       cbState.PaStreamTime <- fun () -> paStream.Time
       paStream
-  let subscriberList = new SubscriberList<CbState>()
+  let subscriberList = new SubscriberList<InputStream>()
 
   do
     printfn $"{beesConfig.InFrameRate}"
@@ -526,9 +526,9 @@ type InputStream(beesConfig: BeesConfig) =
     paTryCatchRethrow(fun() -> this.PaStream.Stop () )
 
   
-  member this.Subscribe  (subscriber: SubscriberHandler<CbState>) = subscriberList.Subscribe subscriber
+  member this.Subscribe  (subscriber: SubscriberHandler<InputStream>) = subscriberList.Subscribe subscriber
 
-  member this.Unsubscribe(subscription: Subscription<CbState>) = subscriberList.Unsubscribe subscription
+  member this.Unsubscribe(subscription: Subscription<InputStream>) = subscriberList.Unsubscribe subscription
 
   
   /// Called only when Simulating, to simulate a callback.
@@ -540,7 +540,7 @@ type InputStream(beesConfig: BeesConfig) =
   /// </summary>
   member this.AfterCallback() =
     let cbs = this.CbStateSnapshot
-    subscriberList.Broadcast cbs
+    subscriberList.Broadcast this
     if cbs.Simulating <> NotSimulating then ()
     else
     if cbs.Segs.Cur.Head > threshold then
