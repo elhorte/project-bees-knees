@@ -113,13 +113,15 @@ let toggleRecording() =
 #else
 
 type Recording(bgTasks: BackgroundTasks, iS: InputStream) =
-  let startRecording ctsToken =
-    SaveAudioFile.saveAudioFilePeriodically iS "mp3" (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) ctsToken
+
+  let startRecording cts =
+    let (cts: CancellationTokenSource) = cts
+    SaveAudioFile.saveAudioFilePeriodically iS "mp3" (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) cts.Token
   let bgTask = BgTask.New "Recording" startRecording
   
   member this.Toggle() = 
     print "toggleRecording"
-    bgTask.Toggle bgTasks
+    bgTask.Toggle bgTasks |> ignore
 
 #endif
 
@@ -142,15 +144,40 @@ let listBackgroundTasks() =
 // usage: press v to start/stop cli vu meter
 
 type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
-  let startVuMeter ctsToken =
-    while not (ctsToken: CancellationToken).IsCancellationRequested do
-      printfn "– VuMeter is on"
-      (Task.Delay 1000).Wait()
-
-  let bgTask = BgTask.New "VuMeter" startVuMeter
   
+  let mutable count = 0
+  let mutable nextTime = DateTime.Now
+  let timesPerSecond = 10.0
+  let period = TimeSpan.FromSeconds (1.0 / timesPerSecond)
+  let nChars = 20
+
+  let presentation portion =
+    let c = int (roundAway (portion * float nChars))
+    let empty = '.'
+    let full  = '█'
+    let ch i = if i <= c then  full else  empty
+    // "████████████........" // for 0.6
+    String(Array.init nChars ch)
+
+  let startVuMeter cts =
+    let (cts: CancellationTokenSource) = cts
+    nextTime <- DateTime.Now + period
+    let handler (_: InputStream) (workId: SubscriptionId) unsubscribeMe =
+  //  if count > 50 then cts.Cancel()  // Shows how to cancel early.
+      if cts.Token.IsCancellationRequested then
+        unsubscribeMe()
+      elif DateTime.Now >= nextTime then
+        nextTime <- nextTime + period
+        let s = presentation (float (count % nChars) / float nChars) // This is only a demo.
+        Console.Write $"  %s{s}\r"
+        count <- count + 1
+    count <- 0
+    cts.Token.WaitHandle.WaitOne() |> ignore
+    
+  let bgTask = BgTask.New "VuMeter" startVuMeter
+
   member this.Toggle() = 
     print "toggleVuMeter"
-    bgTask.Toggle bgTasks
+    bgTask.Toggle bgTasks |> ignore
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

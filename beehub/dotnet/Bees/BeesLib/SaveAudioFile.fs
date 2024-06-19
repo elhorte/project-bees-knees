@@ -74,7 +74,7 @@ let saveAudioFile ext (inputStream: InputStream) (dateTime: _DateTime) duration 
 
 /// Creates and returns the sample rate and the input parameters.
 let prepareArgumentsForStreamCreation verbose =
-  let log string = if verbose then  printfn string else  ()
+  let log string = if verbose then  printfn string
   let defaultInput = PortAudio.DefaultInputDevice         in log $"Default input device = %d{defaultInput}"
   let inputInfo    = PortAudio.GetDeviceInfo defaultInput
   let nChannels    = inputInfo.maxInputChannels           in log $"Number of channels = %d{nChannels}"

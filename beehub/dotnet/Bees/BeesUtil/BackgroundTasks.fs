@@ -12,10 +12,10 @@ let NotActive = 0L
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
-// Background Task
+/// Background Task
 type BgTask = {
   Name           : string
-  Func           : CancellationToken -> unit
+  Func           : CancellationTokenSource -> unit
   mutable CTS    : CancellationTokenSource
   mutable Active : int64  }
 with
@@ -30,12 +30,15 @@ with
     bgTask
   
   /// Starts/Stops a background task.
-  member this.Toggle (bgTasks: BackgroundTasks) =
+  /// Returns true if started
+  member this.Toggle (bgTasks: BackgroundTasks)  : bool =
     if IsActive = Interlocked.CompareExchange(&this.Active, IsActive, IsActive) then
-      bgTasks.Stop this
+      bgTasks.Stop this  // The bgTask will be set to InActive after bgTask.Func returns.
+      false
     else
       if not (bgTasks.Start(this)) then
         Console.WriteLine $"{this.Name} is already running."
+      true
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -51,30 +54,31 @@ and BackgroundTasks() =
       Console.WriteLine $"  {bgTask.Name} already started"
     else
     bgTasks.Add(bgTask)
-    bgTask.CTS    <- new CancellationTokenSource()
-    let f() =
+    bgTask.CTS <- new CancellationTokenSource()
+    let wrapper() =
       Console.WriteLine $"  {bgTask.Name} starting"
       try
-        bgTask.Func bgTask.CTS.Token
+        bgTask.Func bgTask.CTS
       finally
         Console.WriteLine $"  {bgTask.Name} stopped"
         bgTasks.Remove bgTask |> ignore
         bgTask.CTS.Dispose()
         if NotActive = Interlocked.CompareExchange(&bgTask.Active, NotActive, IsActive) then
           Console.WriteLine $"  {bgTask.Name} stopped but was not active – can’t happen"
-    Task.Run(f) |> ignore
-
+    Task.Run(wrapper) |> ignore
 
   let stop bgTask =
     if NotActive = Interlocked.CompareExchange(&bgTask.Active, IsActive, IsActive) then
       Console.WriteLine $"  {bgTask.Name} already stopped"
     else
-    // Actually set to NotActive later when the BgTask has actually stopped.
+    // bgTask is actually set to NotActive later when the BgTask has actually stopped.
     try
       bgTask.CTS.Cancel()
     with
     | :? ObjectDisposedException as e -> Console.WriteLine $"{bgTask.Name} trouble canceling: %A{e}."
-    
+
+  //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+  // members
   
   /// <summary>
   /// Returns a sequence of names of running background tasks.
@@ -82,7 +86,6 @@ and BackgroundTasks() =
   member this.ListNames =
     bgTasks
     |> Seq.map (fun {Name = s} -> s)
-
   
   /// <summary>Starts a background task if it is not already running.</summary>
   /// <param bgTask="bgTask">The <c>BgTask</c> to run.</param>
@@ -107,7 +110,6 @@ and BackgroundTasks() =
     match bgTask with
     | Some bgTask -> stop bgTask
     | None        -> ()
-
   
   /// <summary>
   /// Stops all running background tasks.

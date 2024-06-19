@@ -21,12 +21,17 @@ type SubscriberList<'Event>() =
   let mutable idCurrent     = 0
   let mutable broadcasting  = NotBroadcasting
   
+  let unsubscriptionEvent = new AutoResetEvent(false)
+  
   let nextId() =
     idCurrent <- idCurrent + 1
     SubscriptionId idCurrent
 
   let unsubscribe subscription = subscriptions.Remove subscription |> ignore
 
+  let notifyOfUnsubscription() = unsubscriptionEvent.Set    () |> ignore
+  let waitForUnsubscription () = unsubscriptionEvent.WaitOne() |> ignore
+  
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // members
   
@@ -48,7 +53,13 @@ type SubscriberList<'Event>() =
 
   /// Unsubscribes a handler.
   member this.Unsubscribe(s: Subscription<'Event>)  : bool =
-    subscriptions.Remove s
+    let result = subscriptions.Remove s
+    notifyOfUnsubscription()
+    result
 
+  member this.WaitUntilUnsubscribed subscription =
+    while subscriptions.Contains subscription do
+      waitForUnsubscription() 
+    
   /// Returns the number of subscriptions.
   member this.SubscriberCount = subscriptions.Count
