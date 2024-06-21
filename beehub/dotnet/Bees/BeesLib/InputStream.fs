@@ -530,6 +530,8 @@ type InputStream(beesConfig: BeesConfig) =
 
   member this.Unsubscribe(subscription: Subscription<InputStream>) = subscriberList.Unsubscribe subscription
 
+  member this.WaitUntilUnsubscribed(subscription: Subscription<InputStream>) = subscriberList.WaitUntilUnsubscribed subscription
+
   
   /// Called only when Simulating, to simulate a callback.
   member this.Callback(input, output, frameCount, timeInfo: StreamCallbackTimeInfo byref, statusFlags, userDataPtr) =

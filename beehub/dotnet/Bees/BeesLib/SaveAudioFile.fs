@@ -111,7 +111,20 @@ let prepareArgumentsForStreamCreation verbose =
 /// </summary>
 /// <param name="inputStream">The audio input stream to save.</param>
 /// <param name="duration">The duration of each saved audio file.</param>
+/// <param name="ext">The file type, "mp3" etc.</param>
+/// <param name="cancellationToken">The cancellationToken.</param>
+let saveAudioFileWithWait (inputStream: InputStream) ext startTime duration period (ctsToken: CancellationToken) =
+  inputStream.WaitUntil(startTime           , ctsToken) ; printf $"Recording ..."
+  inputStream.WaitUntil(startTime + duration, ctsToken) ; saveAudioFile ext inputStream startTime duration
+
+/// <summary>
+/// Periodically saves the audio stream to an MP3 file for a specified duration and period.
+/// </summary>
+/// <param name="inputStream">The audio input stream to save.</param>
+/// <param name="ext">The file type, "mp3" etc.</param>
+/// <param name="duration">The duration of each saved audio file.</param>
 /// <param name="period">The interval between each save.</param>
+/// <param name="cancellationToken">The cancellationToken.</param>
 let saveAudioFilePeriodically inputStream ext duration period (ctsToken: CancellationToken) =
   //  ....|.....|.....|....
   //   |<––––––––– Now
