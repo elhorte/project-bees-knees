@@ -171,6 +171,7 @@ type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
         let s = presentation (float (count % nChars) / float nChars) // This is only a demo.
         Console.Write $"  %s{s}\r"
         count <- count + 1
+    iS.Subscribe handler |> ignore
     count <- 0
     cts.Token.WaitHandle.WaitOne() |> ignore
     
