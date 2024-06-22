@@ -48,12 +48,12 @@ let processKeyboardCommands beesConfig = task {
       | 'v'  ->  vuMeter.Toggle       ()     // start/stop cli vu meter
       | '?'  ->  printfn $"%s{help}"         // show this help message
       | '\r' ->  printfn ""
-      | c    ->  printfn $" -> Unknown command: {c}"
-    printfn "Quitting per ‘q’ keyboard command" } 
+      | c    ->  printfn $" -> Unknown command: {c}" } 
   use inputStream = new InputStream(beesConfig)
-  inputStream.Start() ; printfn "InputStream started"
+  inputStream.Start() // ; printfn "InputStream started"
   do! processKeys inputStream
-  inputStream.Stop () ; printfn "InputStream stopped"  }
+  inputStream.Stop () // ; printfn "InputStream stopped"
+  }
 
 
 // Sketch of taking command lines instead of command characters

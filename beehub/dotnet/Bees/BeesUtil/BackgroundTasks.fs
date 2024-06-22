@@ -14,29 +14,31 @@ let NotActive = 0L
 
 /// Background Task
 type BgTask = {
+  BgTasks        : BackgroundTasks
   Name           : string
   Run            : CancellationTokenSource -> unit
   mutable CTS    : CancellationTokenSource
   mutable Active : int64  }
 with
 
-  static member New name runFunc =
+  static member New bgTasks name runFunc =
     let bgTask = {
-      Name   = name
-      Run    = runFunc
-      CTS    = new CancellationTokenSource()
-      Active = NotActive  }
+      BgTasks = bgTasks
+      Name    = name
+      Run     = runFunc
+      CTS     = new CancellationTokenSource()
+      Active  = NotActive  }
     bgTask.CTS.Dispose()
     bgTask
   
   /// Starts/Stops a background task.
   /// Returns true if started
-  member this.Toggle (bgTasks: BackgroundTasks)  : bool =
+  member this.Toggle()  : bool =
     if IsActive = Interlocked.CompareExchange(&this.Active, IsActive, IsActive) then
-      bgTasks.Stop this  // The bgTask will be set to InActive after bgTask.Run returns.
+      this.BgTasks.Stop this  // The bgTask will be set to InActive after bgTask.Run returns.
       false
     else
-      if not (bgTasks.Start(this)) then
+      if not (this.BgTasks.Start(this)) then
         Console.WriteLine $"{this.Name} is already running."
       true
 
@@ -93,7 +95,7 @@ and BackgroundTasks() =
   member this.Start(bgTask: BgTask) =
     match findItem bgTask.Name with
     | Some _ -> false
-    | None ->
+    | None   ->
     start bgTask
     true
 
@@ -108,13 +110,17 @@ and BackgroundTasks() =
   member this.Stop(bgTask: BgTask) =
     let bgTask = findItem bgTask.Name
     match bgTask with
-    | Some bgTask -> stop bgTask
     | None        -> ()
-  
+    | Some bgTask ->
+    stop bgTask
+
   /// <summary>
   /// Stops all running background tasks.
   /// </summary>
-  member this.StopAll() =
+  member this.StopAll verbose =
     let bgTasksCopy = bgTasks |> Seq.toArray
-    for bgTask in bgTasksCopy do
-      this.Stop bgTask
+    if bgTasksCopy.Length = 0 then
+      if verbose then printfn "No tasks running."
+    else
+      for bgTask in bgTasksCopy do
+        this.Stop bgTask

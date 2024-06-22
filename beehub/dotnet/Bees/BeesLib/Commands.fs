@@ -43,7 +43,7 @@ let printContinuously msg ctsToken =
 // usage: press q to stop all background tasks and quit
 let quit cts =
   print "stopAll and quit"
-  bgTasks.StopAll()
+  bgTasks.StopAll true
   // Tell the caller to quit.
   (cts: CancellationTokenSource).Cancel()
 
@@ -90,7 +90,7 @@ let toggleIntercom consoleRead cts =
 // usage: press ^C to stop all background tasks.
 let stopAll() =
   print "stopAll"
-  bgTasks.StopAll()
+  bgTasks.StopAll true
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press m to select channel to monitor
@@ -117,11 +117,11 @@ type Recording(bgTasks: BackgroundTasks, iS: InputStream) =
   let startRecording cts =
     let (cts: CancellationTokenSource) = cts
     SaveAudioFile.saveAudioFilePeriodically iS "mp3" (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) cts.Token
-  let bgTask = BgTask.New "Recording" startRecording
+  let bgTask = BgTask.New bgTasks "Recording" startRecording
   
   member this.Toggle() = 
     print "toggleRecording"
-    bgTask.Toggle bgTasks |> ignore
+    bgTask.Toggle() |> ignore
 
 #endif
 
@@ -151,7 +151,8 @@ type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
   let period = TimeSpan.FromSeconds (1.0 / timesPerSecond)
   let nChars = 20
 
-  let presentation portion =
+  let sawtoothValueDemo _ =
+    let portion = float (count % nChars) / float nChars
     let c = int (roundAway (portion * float nChars))
     let empty = '.'
     let full  = '█'
@@ -161,25 +162,25 @@ type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
 
   let startVuMeter cts =
     let (cts: CancellationTokenSource) = cts
-    nextTime <- DateTime.Now + period
-    let handler (_: InputStream) _ unsubscribeMe =
-  //  if count > 50 then cts.Cancel()  // Shows how to cancel early.
+    let afterCallbackHandler (_: InputStream) _ unsubscribeMe =
+  //  if count > 50 then cts.Cancel()  // A BgTask can cancel itself.
       if cts.Token.IsCancellationRequested then
         unsubscribeMe()
       elif DateTime.Now >= nextTime then
         nextTime <- nextTime + period
-        let s = presentation (float (count % nChars) / float nChars) // This is only a demo.
+        let s = sawtoothValueDemo iS.CbStateSnapshot
         Console.Write $"  %s{s}\r"
         count <- count + 1
     count <- 0
-    let s = iS.Subscribe handler
+    nextTime <- DateTime.Now + period
+    let subscription = iS.Subscribe afterCallbackHandler
     cts.Token.WaitHandle.WaitOne() |> ignore
-    iS.Unsubscribe s |> ignore
+    iS.Unsubscribe subscription |> ignore
     
-  let bgTask = BgTask.New "VuMeter" startVuMeter
+  let bgTask = BgTask.New bgTasks "VuMeter" startVuMeter
 
   member this.Toggle() = 
     print "toggleVuMeter"
-    bgTask.Toggle bgTasks |> ignore
+    bgTask.Toggle() |> ignore
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

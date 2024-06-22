@@ -35,8 +35,8 @@ let main _ =
   try
     (processKeyboardCommands beesConfig).Wait() 
   finally
-    printfn "Main task done." 
+    () // printfn "Main task done." 
 
-  terminatePortAudio() ; printfn "PortAudioSharp Terminated"
+  terminatePortAudio() // ; printfn "PortAudioSharp Terminated"
   printfn "Exiting."
   0
