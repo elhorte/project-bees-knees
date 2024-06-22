@@ -526,11 +526,13 @@ type InputStream(beesConfig: BeesConfig) =
     paTryCatchRethrow(fun() -> this.PaStream.Stop () )
 
   
-  member this.Subscribe  (subscriber: SubscriberHandler<InputStream>) = subscriberList.Subscribe subscriber
+  /// Subscribe a post-callback handler, which will be called in managed code after each callback.
+  member this.Subscribe  (subscriber: SubscriberHandler<InputStream>)  : Subscription<InputStream> =
+    subscriberList.Subscribe subscriber
 
-  member this.Unsubscribe(subscription: Subscription<InputStream>) = subscriberList.Unsubscribe subscription
-
-  member this.WaitUntilUnsubscribed(subscription: Subscription<InputStream>) = subscriberList.WaitUntilUnsubscribed subscription
+  /// Unsubscribe a post-callback handler.
+  member this.Unsubscribe(subscription: Subscription<InputStream>)  : bool =
+    subscriberList.Unsubscribe subscription
 
   
   /// Called only when Simulating, to simulate a callback.

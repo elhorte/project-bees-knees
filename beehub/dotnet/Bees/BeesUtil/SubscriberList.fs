@@ -35,8 +35,8 @@ type SubscriberList<'Event>() =
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // members
   
-  /// Handles the event by running each subscription in order subscribed.
-  /// Does nothing if a broadcast is already in progress.
+  /// Broadcasts an event, calling subscribed handlers in the order subscribed.
+  /// Does nothing if the previous broadcast is still in progress.
   member this.Broadcast(event: 'Event)  : unit =
     if NotBroadcasting = Interlocked.CompareExchange(&broadcasting, IsBroadcasting, NotBroadcasting) then
       for s in subscriptions.ToArray() do
@@ -56,10 +56,6 @@ type SubscriberList<'Event>() =
     let result = subscriptions.Remove s
     notifyOfUnsubscription()
     result
-
-  member this.WaitUntilUnsubscribed subscription =
-    while subscriptions.Contains subscription do
-      waitForUnsubscription() 
     
   /// Returns the number of subscriptions.
   member this.SubscriberCount = subscriptions.Count

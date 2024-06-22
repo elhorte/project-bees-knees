@@ -15,15 +15,15 @@ let NotActive = 0L
 /// Background Task
 type BgTask = {
   Name           : string
-  Func           : CancellationTokenSource -> unit
+  Run            : CancellationTokenSource -> unit
   mutable CTS    : CancellationTokenSource
   mutable Active : int64  }
 with
 
-  static member New name func =
+  static member New name runFunc =
     let bgTask = {
       Name   = name
-      Func   = func
+      Run    = runFunc
       CTS    = new CancellationTokenSource()
       Active = NotActive  }
     bgTask.CTS.Dispose()
@@ -33,7 +33,7 @@ with
   /// Returns true if started
   member this.Toggle (bgTasks: BackgroundTasks)  : bool =
     if IsActive = Interlocked.CompareExchange(&this.Active, IsActive, IsActive) then
-      bgTasks.Stop this  // The bgTask will be set to InActive after bgTask.Func returns.
+      bgTasks.Stop this  // The bgTask will be set to InActive after bgTask.Run returns.
       false
     else
       if not (bgTasks.Start(this)) then
@@ -58,7 +58,7 @@ and BackgroundTasks() =
     let wrapper() =
       Console.WriteLine $"  {bgTask.Name} starting"
       try
-        bgTask.Func bgTask.CTS
+        bgTask.Run bgTask.CTS
       finally
         Console.WriteLine $"  {bgTask.Name} stopped"
         bgTasks.Remove bgTask |> ignore

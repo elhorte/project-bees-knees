@@ -17,8 +17,8 @@ let printHowManySubscribedHandlers expected =
 
 // A demo subscription handler function
 
-let handler (_: InputStream) (workId: SubscriptionId) unsubscribeMe =
-  match workId with SubscriptionId id ->  printfn "WorkItem %d runs and unsubscribes itself." id
+let handler (_: InputStream) (id: SubscriptionId) unsubscribeMe =
+  match id with SubscriptionId id ->  printfn "WorkItem %d runs and unsubscribes itself." id
   unsubscribeMe()
 
 

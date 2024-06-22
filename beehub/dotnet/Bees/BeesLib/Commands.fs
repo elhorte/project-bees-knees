@@ -162,7 +162,7 @@ type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
   let startVuMeter cts =
     let (cts: CancellationTokenSource) = cts
     nextTime <- DateTime.Now + period
-    let handler (_: InputStream) (workId: SubscriptionId) unsubscribeMe =
+    let handler (_: InputStream) _ unsubscribeMe =
   //  if count > 50 then cts.Cancel()  // Shows how to cancel early.
       if cts.Token.IsCancellationRequested then
         unsubscribeMe()
@@ -171,9 +171,10 @@ type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
         let s = presentation (float (count % nChars) / float nChars) // This is only a demo.
         Console.Write $"  %s{s}\r"
         count <- count + 1
-    iS.Subscribe handler |> ignore
     count <- 0
+    let s = iS.Subscribe handler
     cts.Token.WaitHandle.WaitOne() |> ignore
+    iS.Unsubscribe s |> ignore
     
   let bgTask = BgTask.New "VuMeter" startVuMeter
 
