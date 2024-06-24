@@ -43,3 +43,11 @@ let initPortAudio() =
 
 let terminatePortAudio() =
   PortAudio.Terminate()
+
+
+/// input of 1.0 gets 1.0 output.  input of 1.0 - 70db gets 0.0 output; lower input clips to 0.0 
+let convertToDb (dbRange: float) (value: float) =
+    let dbFactor = 20.0
+    let logBase  = 10.0
+    let minValue = logBase ** (-dbRange / dbFactor)
+    (dbFactor * log10 (max minValue value) + dbRange) / dbRange 

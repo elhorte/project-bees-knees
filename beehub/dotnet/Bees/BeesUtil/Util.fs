@@ -69,3 +69,11 @@ let gc() =
   // GC.WaitForPendingFinalizers()
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––
+
+let blockChar height =
+  let blocks = [|" "; "▁"; "▂"; "▃"; "▄"; "▅"; "▆"; "▇"; "█"|]
+  let index = int (height * float blocks.Length)
+  let indexClipped = min index (blocks.Length - 1)
+  blocks[indexClipped]
+
+//–––––––––––––––––––––––––––––––––––––––––––––––––––

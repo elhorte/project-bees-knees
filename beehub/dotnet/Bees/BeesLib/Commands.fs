@@ -8,6 +8,7 @@ open ConsoleReadAsync
 
 open BeesUtil.Util
 open BeesUtil.BackgroundTasks
+open BeesUtil.PortAudioUtils
 open BeesUtil.SubscriberList
 open BeesLib.InputStream
 
@@ -31,7 +32,7 @@ let help = """
 let print name = $" -> {name}" |> printfn "%s"
 
 let bgTasks = BackgroundTasks()
-
+let mutable channel = 1
 
 let printContinuously msg ctsToken =
   while not (ctsToken: CancellationToken).IsCancellationRequested do
@@ -107,8 +108,9 @@ let triggerOscope() =
 
 #if USE_FAKE_DATE_TIME
 
-let toggleRecording() = 
-  print "toggleRecording"
+type Recording(bgTasks: BackgroundTasks, iS: InputStream) =
+
+  member this.Toggle() = () 
 
 #else
 
@@ -145,33 +147,50 @@ let listBackgroundTasks() =
 
 type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
   
-  let mutable count = 0
+  let mutable count    = 0
   let mutable nextTime = DateTime.Now
+  let mutable maxValue = 0.0f
   let timesPerSecond = 10.0
   let period = TimeSpan.FromSeconds (1.0 / timesPerSecond)
   let nChars = 20
 
-  let sawtoothValueDemo _ =
-    let portion = float (count % nChars) / float nChars
-    let c = int (roundAway (portion * float nChars))
-    let empty = '.'
-    let full  = '█'
-    let ch i = if i <= c then  full else  empty
-    // "████████████........" // for 0.6
-    String(Array.init nChars ch)
-
   let startVuMeter cts =
     let (cts: CancellationTokenSource) = cts
-    let afterCallbackHandler (_: InputStream) _ unsubscribeMe =
+    let sawtoothValue() = float (count % nChars) / float nChars
+    /// Update maxValue with samples from the most recent callback.
+    let updateMaxValue cbs =
+      let cbs = (cbs: CbState)
+      let first = cbs.LatestBlockIndex
+      let last  = first + int cbs.FrameCount - 1
+      for i in first .. last do  maxValue <- max maxValue (abs cbs.Ring[i])
+  //  Console.WriteLine $"{first} {last} {maxValue}"
+    let updateDisplay (cbs: CbState) value =
+      let stringDisplay portion =
+        let c = int (roundAway (portion * float nChars))
+        let empty = '.'
+        let full  = '█'
+        let ch i = if i <= c then  full else  empty
+        // "████████████........" // for 0.6
+        String(Array.init nChars ch)
+      let logValue = convertToDb 50.0 (float value)
+      let s = stringDisplay logValue
+      let dt = cbs.BlockAdcStartTime
+      let ts = DateTime.Now - dt 
+      Console.Write $"  %s{s}\r" //  %A{dt} %A{ts}
+  //  Console.WriteLine $"  %f{float maxValue}"
+    let afterCallbackHandler (_, cbs: CbState) _ unsubscribeMe =
   //  if count > 50 then cts.Cancel()  // A BgTask can cancel itself.
       if cts.Token.IsCancellationRequested then
         unsubscribeMe()
-      elif DateTime.Now >= nextTime then
+      else
+      updateMaxValue cbs
+      do  //if DateTime.Now >= nextTime then
         nextTime <- nextTime + period
-        let s = sawtoothValueDemo iS.CbStateSnapshot
-        Console.Write $"  %s{s}\r"
-        count <- count + 1
-    count <- 0
+    //  Console.Write $"%s{blockChar (abs (float cbs.Ring[cbs.LatestBlockIndex]))}"
+    //  updateDisplay cbs (sawtoothValue())
+        updateDisplay cbs maxValue
+        count    <- count + 1
+        maxValue <- 0.0f
     nextTime <- DateTime.Now + period
     let subscription = iS.Subscribe afterCallbackHandler
     cts.Token.WaitHandle.WaitOne() |> ignore

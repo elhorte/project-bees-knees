@@ -50,7 +50,7 @@ let prepareArgumentsForStreamCreation() =
   printfn $"outputParameters=%A{outputParameters}"
   sampleRate, inputParameters, outputParameters
 
-// n=15 ms=175 i=1 -> 1517601
+// n=15 ms=175 i=1 -> 15_176_01   n is callback number, i is 0–n within the callback
 let compose inChannelCount n ms i =
 //let ms = ms - startMs
   let iMs = i / inChannelCount
@@ -82,7 +82,7 @@ let showGC f =
   // Console.WriteLine $"gc memory: %i{ m }";
 
 let runReadTests inputStream =
-  let cbs = (inputStream: InputStream).CbState
+  let cbs = (inputStream: InputStream).CbStateSnapshot
   let testRead time (duration:_TimeSpan) msg =
     let checkDeliveredArray deliveredArray deliveredTime deliveredDuration =
       let compare i sample =
@@ -151,6 +151,15 @@ let runReadTests inputStream =
     testRead time duration "OK -  all but the first and last 1 of the current seg"
   cbs.PrintTitle()
 
+let testRingPosition (inputStream: InputStream) cbNum totalFrames =
+  let cbs = inputStream.CbStateSnapshot
+  let frameNum = cbs.NFramesTotal - uint64 cbs.FrameCount
+  let data     = cbs.Ring[cbs.LatestBlockIndex]
+  let nChan = inputStream.CbState.InChannelCount
+  let dataExpected = compose nChan cbNum (100 + int frameNum) 0
+  let sPassFail = if data = dataExpected then  "pass" else  "fail"
+  printfn $"%s{sPassFail} – access via LatestBlockIndex"
+
 /// Run the stream for a while, then stop it and terminate PortAudio.
 let run inputStream = task {
   let inputStream = (inputStream: InputStream)
@@ -171,6 +180,7 @@ let run inputStream = task {
     assert (_DateTime.Now.Millisecond = startMs)
     let ring = cbs.Ring
     for i in 0..32 do
+  //  testRingPosition inputStream i totalFrames
       let frameCount  = uint32 (if i < 25 then  initialFrameCount else  2 * initialFrameCount)
       let sampleCount = int frameCount * cbs.InChannelCount
       let durationMs  = 1000 * int frameCount / frameRate
@@ -215,6 +225,7 @@ let mutable beesConfig: BeesConfig = Unchecked.defaultof<BeesConfig>
 let main _ =
   if _DateTime.Now.ToString() <> "100" then
     printfn "This program must be run with the fake _DateTime and _TimeSpan classes.  See DateTimeShim.fs"
+    printfn "Ucomment USE_FAKE_DATE_TIME in BeesUtil.fsproj and BeesLib.fsproj"
     2
   else
   printfn "Running with the fake _DateTime and _TimeSpan classes, as required."

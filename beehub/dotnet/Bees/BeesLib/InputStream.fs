@@ -172,7 +172,7 @@ type CbState = {
   mutable State              : State
   mutable Segs               : Segs
   mutable BlockAdcStartTime  : _DateTime         // DateTime of first sample collection in this block
-  mutable LatestBlockHead    : int               // ring index where latest input block was written by a callback
+  mutable LatestBlockIndex   : int               // ring index where latest input block was written by a callback
   mutable Synchronizer       : Synchronizer
   mutable NFramesTotal       : uint64            // total number of frames produced by callbacks so far
   // more stuff
@@ -361,10 +361,10 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   let curHeadNS = cbs.Segs.Cur.Head * cbs.InChannelCount
   let nSamples  = nFrames           * cbs.InChannelCount
   UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, curHeadNS, nSamples)
-  cbs.LatestBlockHead   <- cbs.Segs.Cur.Head
+  cbs.LatestBlockIndex <- cbs.Segs.Cur.Head
   cbs.Segs.Cur.AdvanceHead nFrames
   cbs.NFramesTotal <- cbs.NFramesTotal + uint64 frameCount
-//Console.Write(".")
+//Console.Write "."
 //if cbs.Synchronizer.N1 % 20us = 0us then  Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / nFrames} %10f{timeInfo.inputBufferAdcTime - cbs.TimeInfoBase}"
   cbs.Synchronizer.LeaveUnstable()
 
@@ -448,7 +448,7 @@ type InputStream(beesConfig: BeesConfig) =
     State              = AtStart
     Segs               = segs
     BlockAdcStartTime  = dummyDateTime
-    LatestBlockHead    = 0
+    LatestBlockIndex   = 0
     Synchronizer       = Synchronizer.New()
     NFramesTotal       = 0UL
     // more stuff
@@ -486,10 +486,11 @@ type InputStream(beesConfig: BeesConfig) =
                                                                             userData        = cbState                              ) )
       cbState.PaStreamTime <- fun () -> paStream.Time
       paStream
-  let subscriberList = new SubscriberList<InputStream>()
+  let subscriberList = new SubscriberList<InputStream*CbState>()
 
   do
-    printfn $"{beesConfig.InFrameRate}"
+//  printfn $"{beesConfig.InFrameRate}"
+    ()
 
   member  this.echoEnabled   () = Volatile.Read &cbState.WithEcho
   member  this.loggingEnabled() = Volatile.Read &cbState.WithEcho
@@ -527,11 +528,11 @@ type InputStream(beesConfig: BeesConfig) =
 
   
   /// Subscribe a post-callback handler, which will be called in managed code after each callback.
-  member this.Subscribe  (subscriber: SubscriberHandler<InputStream>)  : Subscription<InputStream> =
+  member this.Subscribe  (subscriber: SubscriberHandler<InputStream*CbState>)  : Subscription<InputStream*CbState> =
     subscriberList.Subscribe subscriber
 
   /// Unsubscribe a post-callback handler.
-  member this.Unsubscribe(subscription: Subscription<InputStream>)  : bool =
+  member this.Unsubscribe(subscription: Subscription<InputStream*CbState>)  : bool =
     subscriberList.Unsubscribe subscription
 
   
@@ -544,7 +545,7 @@ type InputStream(beesConfig: BeesConfig) =
   /// </summary>
   member this.AfterCallback() =
     let cbs = this.CbStateSnapshot
-    subscriberList.Broadcast this
+    subscriberList.Broadcast (this, cbs)
     if cbs.Simulating <> NotSimulating then ()
     else
     if cbs.Segs.Cur.Head > threshold then
