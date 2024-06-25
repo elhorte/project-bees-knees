@@ -1,17 +1,13 @@
-module BeesLib.InputStream
+module BeesLib.RingBuffer
 
 open System
 open System.Runtime.InteropServices
 open System.Threading
 
-open PortAudioSharp
-
 open BeesUtil.DateTimeShim
 
 open BeesUtil.DebugGlobals
 open BeesUtil.Util
-open BeesUtil.Logger
-open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
 open BeesUtil.Synchronizer
 open BeesUtil.RangeClipper
@@ -20,6 +16,7 @@ open BeesLib.BeesConfig
 open CSharpHelpers
 
 
+let dummyData     = 9999999f  // 
 let dummyDateTime = _DateTime.MaxValue
 let dummyTimeSpan = _TimeSpan.MaxValue
 
@@ -160,24 +157,16 @@ with
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // Callback state, persists across callbacks, updated by each callback.
 
-type CbState = {
-  // callback args from PortAudioSharp
+type InputInfo = {
   mutable Input              : IntPtr  // block of incoming data 
-  mutable Output             : IntPtr  // block of outgoing data
   mutable FrameCount         : uint32
-  mutable TimeInfo           : PortAudioSharp.StreamCallbackTimeInfo
-  mutable StatusFlags        : PortAudioSharp.StreamCallbackFlags
-  // affected by callbacks
   Ring                       : float32 array     // of samples not frames
   mutable State              : State
   mutable Segs               : Segs
   mutable BlockAdcStartTime  : _DateTime         // DateTime of first sample collection in this block
-  mutable LatestBlockIndex   : int               // ring index where latest input block was written by a callback
+  mutable LatestBlockHead    : int               // ring index where latest input block was written by a callback
   mutable Synchronizer       : Synchronizer
   mutable NFramesTotal       : uint64            // total number of frames produced by callbacks so far
-  // more stuff
-  mutable WithEcho           : bool              // echo    is in effect
-  mutable WithLogging        : bool              // logging is in effect
   // constants
   NRingDataFrames            : int
   NGapFrames                 : int
@@ -185,23 +174,21 @@ type CbState = {
   InChannelCount             : int
   FrameRate                  : float             // also known as sample rate, but frame rate is clearer
   FrameSize                  : int               // in bytes
-  Logger                     : Logger            // the Logger
   Simulating                 : Simulating        // simulating callbacks for testing and debugging 
   // these are modified once, as early as possible
   mutable CallbackHandoff    : CallbackHandoff   // for handing off events for further processing in managed code
-  mutable StreamAdcStartTime : _DateTime         // DateTime of first ever sample collection
-  mutable PaStreamTime       : unit -> PaTime  } // Function to get the current date and time, in PaTime units
+  mutable StartTime          : _DateTime  }      // DateTime of first ever sample collection
 with
   
-  member cbs.Copy() = { cbs with Segs = cbs.Segs.Copy() }
+  member this.Copy() = { this with Segs = this.Segs.Copy() }
 
   // only for debugging
-  member cbs.markRingSpanAsDead srcFrameIndex nFrames =
-    let srcFrameIndexNS = srcFrameIndex * cbs.InChannelCount
-    let nSamples        = nFrames       * cbs.InChannelCount
-    Array.Fill(cbs.Ring, dummySample, srcFrameIndexNS, nSamples)
+  member this.markRingSpanAsDead srcFrameIndex nFrames =
+    let srcFrameIndexNS = srcFrameIndex * this.InChannelCount
+    let nSamples        = nFrames       * this.InChannelCount
+    Array.Fill(this.Ring, dummyData, srcFrameIndexNS, nSamples)
   
-  member cbs.PrintRing() =
+  member this.PrintRing() =
       let empty    = '.'
       let dataChar = '◾'
       let getsNum i = i % 10 = 0
@@ -209,7 +196,7 @@ with
         let num i = char ((i / 10 % 10).ToString())
         let sNumberedEmptyFrames i = if getsNum i then  num i else  empty
         // "0.........1.........2.........3.........4.........5.........6.........7.........8....."
-        Array.init cbs.NRingFrames sNumberedEmptyFrames
+        Array.init this.NRingFrames sNumberedEmptyFrames
       do // Overwrite empties with seg data.
         let showDataFor seg =
           let first = seg.Tail
@@ -217,43 +204,43 @@ with
           let getsNum i = first < i  &&  i < last  &&  getsNum i  // show only interior numbers
           let setDataFor i = if not (getsNum i) then  ring[i] <- dataChar     
           for i in first..last do  setDataFor i
-        if cbs.Segs.Old.Active then
-          assert (cbs.State = Chasing)
+        if this.Segs.Old.Active then
+          assert (this.State = Chasing)
           // "0.........1.........2.........3.........4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
-          showDataFor cbs.Segs.Old
+          showDataFor this.Segs.Old
         // "◾◾◾◾◾◾◾◾◾◾1◾◾◾◾◾◾◾◾◾2◾◾◾◾◾◾◾◾◾3◾◾◾◾.....4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
-        showDataFor cbs.Segs.Cur
+        showDataFor this.Segs.Cur
       String ring
   
-  member cbs.Print newTail newHead msg =
-    let sRing = cbs.PrintRing()
+  member this.Print newTail newHead msg =
+    let sRing = this.PrintRing()
     let sText =
-      let sSeqNum  = sprintf "%2d" cbs.Synchronizer.N1
+      let sSeqNum  = sprintf "%2d" this.Synchronizer.N1
       let sX       = if String.length msg > 0 then  "*" else  " "
       let sTime    = sprintf "%3d.%3d %3d.%3d"
-                       cbs.Segs.Cur.TailTime.Millisecond
-                       cbs.Segs.Cur.HeadTime.Millisecond
-                       cbs.Segs.Old.TailTime.Millisecond
-                       cbs.Segs.Old.HeadTime.Millisecond
-      let sDur     = let sum = cbs.Segs.Cur.Duration.Milliseconds + cbs.Segs.Old.Duration.Milliseconds
-                     $"{cbs.Segs.Cur.Duration.Milliseconds:d2}+{cbs.Segs.Old.Duration.Milliseconds:d2}={sum:d2}"
-      let sCur     = cbs.Segs.Cur.ToString()
+                       this.Segs.Cur.TailTime.Millisecond
+                       this.Segs.Cur.HeadTime.Millisecond
+                       this.Segs.Old.TailTime.Millisecond
+                       this.Segs.Old.HeadTime.Millisecond
+      let sDur     = let sum = this.Segs.Cur.Duration.Milliseconds + this.Segs.Old.Duration.Milliseconds
+                     $"{this.Segs.Cur.Duration.Milliseconds:d2}+{this.Segs.Old.Duration.Milliseconds:d2}={sum:d2}"
+      let sCur     = this.Segs.Cur.ToString()
       let sNewTail = sprintf "%3d" newTail
       let sNew     = if newHead < 0 then  "      "  else  $"{sNewTail:S3}.{newHead:d2}"
-      let sOld     = cbs.Segs.Old.ToString()
-      let sTotal   = let sum = cbs.Segs.Cur.NFrames + cbs.Segs.Old.NFrames
-                     $"{cbs.Segs.Cur.NFrames:d2}+{cbs.Segs.Old.NFrames:d2}={sum:d2}"
-      let sNFrames = cbs.FrameCount
-      let sGap     = if cbs.Segs.Old.Active then sprintf "%2d" (cbs.Segs.Old.Tail - cbs.Segs.Cur.Head) else  "  "
-      let sState   = $"{cbs.State}"
+      let sOld     = this.Segs.Old.ToString()
+      let sTotal   = let sum = this.Segs.Cur.NFrames + this.Segs.Old.NFrames
+                     $"{this.Segs.Cur.NFrames:d2}+{this.Segs.Old.NFrames:d2}={sum:d2}"
+      let sNFrames = this.FrameCount
+      let sGap     = if this.Segs.Old.Active then sprintf "%2d" (this.Segs.Old.Tail - this.Segs.Cur.Head) else  "  "
+      let sState   = $"{this.State}"
       // "24    5    164.185 185.220 35+21=56  00.35 -16.40 64.85 35+21=56  29  Chasing "
       $"%s{sSeqNum}%s{sX}%4d{sNFrames}    %s{sTime} %s{sDur}  %s{sCur} %s{sNew} %s{sOld} %s{sTotal}  {sGap:s2}  %s{sState}  %s{msg}"
     Console.WriteLine $"%s{sRing}  %s{sText}"
 
-  member cbs.PrintAfter msg =  cbs.Print 0 -1 msg
+  member this.PrintAfter msg =  this.Print 0 -1 msg
 
-  member cbs.PrintTitle() =
-    let s0 = String.init cbs.NRingFrames (fun _ -> " ")
+  member this.PrintTitle() =
+    let s0 = String.init this.NRingFrames (fun _ -> " ")
     let s1 = " seq nFrames timeCur timeOld duration      Cur    new       Old    size   gap   state"
     let s2 = " ––– ––––––– ––––––– ––––––– ––––––––  ––––––––– –––––– ––––––––– –––––––– –––  –––––––"
            //   24    5    185.220 164.185 35+21=56  000+00.35 -16.40 000+64.85 35+21=56  29  Chasing 
@@ -265,37 +252,22 @@ with
 
 let mutable threshold = 0 // for debugging, to get a printout from at reasonable intervals
 
-let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) statusFlags userDataPtr =
+let addData input frameCount userDataPtr startTime =
   let (input : IntPtr) = input
-  let (output: IntPtr) = output
   let handle   = GCHandle.FromIntPtr(userDataPtr)
-  let cbs      = handle.Target :?> CbState
+  let cbs      = handle.Target :?> InputInfo
   let nFrames = int frameCount
-
-  if cbs.WithEcho then
-    let size = uint64 (frameCount * uint32 cbs.FrameSize)
-    Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
 
   cbs.Synchronizer.EnterUnstable()
 
   // callback args from PortAudioSharp
-  cbs.Input        <- input
-  cbs.Output       <- output
-  cbs.FrameCount   <- frameCount // in the ”block“ to be copied
-  cbs.TimeInfo     <- timeInfo
-  cbs.StatusFlags  <- statusFlags
 
-  let inputBufferAdcDateTime =
-    let f = cbs.PaStreamTime()
-    let secondsSinceAdcTime = f - timeInfo.inputBufferAdcTime
-    let timeTilNow = _TimeSpan.FromSeconds secondsSinceAdcTime
-    _DateTime.Now - timeTilNow
-  cbs.BlockAdcStartTime <- inputBufferAdcDateTime
-  if cbs.StreamAdcStartTime = dummyDateTime then
+  cbs.BlockAdcStartTime <- startTime
+  if cbs.StartTime = dummyDateTime then
 //  Console.WriteLine "first callback"
-    cbs.StreamAdcStartTime <- inputBufferAdcDateTime
-    cbs.Segs.Old.StartTime <- inputBufferAdcDateTime
-    cbs.Segs.Cur.StartTime <- inputBufferAdcDateTime
+    cbs.StartTime <- startTime
+    cbs.Segs.Old.StartTime <- startTime
+    cbs.Segs.Cur.StartTime <- startTime
   
   do
     // Modify the segs so that Segs.Cur.Head points to where the data will go in the ring.
@@ -361,16 +333,14 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   let curHeadNS = cbs.Segs.Cur.Head * cbs.InChannelCount
   let nSamples  = nFrames           * cbs.InChannelCount
   UnsafeHelpers.CopyPtrToArrayAtIndex(input, cbs.Ring, curHeadNS, nSamples)
-  cbs.LatestBlockIndex <- cbs.Segs.Cur.Head
+  cbs.LatestBlockHead   <- cbs.Segs.Cur.Head
   cbs.Segs.Cur.AdvanceHead nFrames
   cbs.NFramesTotal <- cbs.NFramesTotal + uint64 frameCount
-//Console.Write "."
+//Console.Write(".")
 //if cbs.Synchronizer.N1 % 20us = 0us then  Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / nFrames} %10f{timeInfo.inputBufferAdcTime - cbs.TimeInfoBase}"
   cbs.Synchronizer.LeaveUnstable()
 
-//cbs.Logger.Add cbs.SeqNum2 cbs.TimeStamp "cb bufs=" ""
   cbs.CallbackHandoff.HandOff()
-  PortAudioSharp.StreamCallbackResult.Continue
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The InputStream class
@@ -410,13 +380,8 @@ let durationToNFrames frameRate (duration: _TimeSpan) =
   int (round nFramesApprox)
 
 
-// initPortAudio() must be called before this constructor.
-type InputStream(beesConfig: BeesConfig) =
+type RingBuffer(beesConfig: BeesConfig) =
 
-  let inputParameters  = beesConfig.InputParameters
-  let outputParameters = beesConfig.OutputParameters
-  let withEcho         = beesConfig.WithEcho
-  let withLogging      = beesConfig.WithLogging
   let sim              = beesConfig.Simulating 
   let audioDuration    = cbSimAudioDuration sim (fun () -> beesConfig.InputStreamAudioDuration                    )
   let gapDuration      = cbSimGapDuration   sim (fun () -> beesConfig.InputStreamRingGapDuration * 2.0            )
@@ -436,24 +401,17 @@ type InputStream(beesConfig: BeesConfig) =
   // in memory during the execution of that managed code.
   // This happens automatically and does not require manual pinning.
 
-  let cbState = {
-    // callback args from PortAudioSharp
+  let inputInfo = {
     Input              = IntPtr.Zero
-    Output             = IntPtr.Zero
     FrameCount         = 0u
-    TimeInfo           = PortAudioSharp.StreamCallbackTimeInfo()
-    StatusFlags        = PortAudioSharp.StreamCallbackFlags()
     // affected by callbacks
-    Ring               = Array.init<float32> nRingSamples (fun _ -> dummySample)
+    Ring               = Array.init<float32> nRingSamples (fun _ -> dummyData)
     State              = AtStart
     Segs               = segs
     BlockAdcStartTime  = dummyDateTime
-    LatestBlockIndex   = 0
+    LatestBlockHead    = 0
     Synchronizer       = Synchronizer.New()
     NFramesTotal       = 0UL
-    // more stuff
-    WithEcho           = withEcho
-    WithLogging        = withLogging
     // constants
     NRingDataFrames    = nRingDataFrames
     NGapFrames         = nGapFrames
@@ -461,47 +419,22 @@ type InputStream(beesConfig: BeesConfig) =
     InChannelCount     = beesConfig.InChannelCount
     FrameRate          = beesConfig.InFrameRate
     FrameSize          = frameSize
-    Logger             = Logger(8000, startTime)
     Simulating         = sim
     // these are modified once, as early as possible
     CallbackHandoff    = dummyInstance<CallbackHandoff>()
-    StreamAdcStartTime = dummyDateTime
-    PaStreamTime       = fun () -> PaTimeBad  }
+    StartTime = dummyDateTime  }
 
-  let paStream =
-    if cbState.Simulating <> NotSimulating then
-      cbState.PaStreamTime <- fun () -> cbState.TimeInfo.inputBufferAdcTime // seconds
-      dummyInstance<PortAudioSharp.Stream>()
-    else
-      let streamCallback = PortAudioSharp.Stream.Callback(
-        // The intermediate lambda here is required to avoid a compiler error.
-        fun        input output frameCount  timeInfo statusFlags userDataPtr ->
-          callback input output frameCount &timeInfo statusFlags userDataPtr )
-      let paStream = paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
-                                                                            outParams       = Nullable<_>(outputParameters)        ,
-                                                                            sampleRate      = beesConfig.InFrameRate               ,
-                                                                            framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
-                                                                            streamFlags     = StreamFlags.ClipOff                  ,
-                                                                            callback        = streamCallback                       ,
-                                                                            userData        = cbState                              ) )
-      cbState.PaStreamTime <- fun () -> paStream.Time
-      paStream
-  let subscriberList = new SubscriberList<InputStream*CbState>()
+  let subscriberList = SubscriberList<RingBuffer>()
 
   do
-//  printfn $"{beesConfig.InFrameRate}"
-    ()
+    printfn $"{beesConfig.InFrameRate}"
 
-  member  this.echoEnabled   () = Volatile.Read &cbState.WithEcho
-  member  this.loggingEnabled() = Volatile.Read &cbState.WithLogging
-
-  member val  PaStream          = paStream
-  member val  CbState           = cbState
-  member val  StartTime         = cbState.StreamAdcStartTime
-  member val  BeesConfig        = beesConfig
-  member val  RingDuration      = audioDuration
-  member val  GapDuration       = gapDuration
-  member val  NRingBytes        = nRingBytes
+  member val  InputInfo    = inputInfo
+  member val  StartTime    = inputInfo.StartTime
+  member val  BeesConfig   = beesConfig
+  member val  RingDuration = audioDuration
+  member val  GapDuration  = gapDuration
+  member val  NRingBytes   = nRingBytes
 
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -509,54 +442,50 @@ type InputStream(beesConfig: BeesConfig) =
   /// Starts the input stream and the PortAudio stream owned by it.
   /// </summary>
   member this.Start() =
-    this.CbState.CallbackHandoff <- CallbackHandoff.New this.AfterCallback
-    this.CbState.CallbackHandoff.Start()
-    if this.CbState.Simulating <> NotSimulating then ()
+    this.InputInfo.CallbackHandoff <- CallbackHandoff.New this.AfterCallback
+    this.InputInfo.CallbackHandoff.Start()
+    if this.InputInfo.Simulating <> NotSimulating then ()
     else
-    paTryCatchRethrow (fun() -> this.PaStream.Start() )
     printfn $"InputStream size:    {this.NRingBytes / 1_000_000} MB for {this.RingDuration}"
-    printfn $"InputStream nFrames: {this.CbState.NRingFrames}"
+    printfn $"InputStream nFrames: {this.InputInfo.NRingFrames}"
 
   /// <summary>
   /// Stops the input stream and the PortAudio stream owned by it.
   /// </summary>
   member this.Stop() =
-    this.CbState.CallbackHandoff.Stop ()
-    if this.CbState.Simulating <> NotSimulating then ()
-    else
-    paTryCatchRethrow(fun() -> this.PaStream.Stop () )
+    this.InputInfo.CallbackHandoff.Stop ()
 
   
   /// Subscribe a post-callback handler, which will be called in managed code after each callback.
-  member this.Subscribe  (subscriber: SubscriberHandler<InputStream*CbState>)  : Subscription<InputStream*CbState> =
+  member this.Subscribe  (subscriber: SubscriberHandler<RingBuffer>)  : Subscription<RingBuffer> =
     subscriberList.Subscribe subscriber
 
   /// Unsubscribe a post-callback handler.
-  member this.Unsubscribe(subscription: Subscription<InputStream*CbState>)  : bool =
+  member this.Unsubscribe(subscription: Subscription<RingBuffer>)  : bool =
     subscriberList.Unsubscribe subscription
 
   
   /// Called only when Simulating, to simulate a callback.
-  member this.Callback(input, output, frameCount, timeInfo: StreamCallbackTimeInfo byref, statusFlags, userDataPtr) =
-              callback input  output  frameCount &timeInfo                                statusFlags  userDataPtr
+  member this.AddData(input, frameCount, startTime, userDataPtr) =
+              addData input  frameCount  startTime  userDataPtr
 
   /// <summary>
   /// Called from a <c>Task</c> (managed code) as soon as possible after the callback.
   /// </summary>
   member this.AfterCallback() =
     let cbs = this.CbStateSnapshot
-    subscriberList.Broadcast (this, cbs)
+    subscriberList.Broadcast this
     if cbs.Simulating <> NotSimulating then ()
     else
     if cbs.Segs.Cur.Head > threshold then
       threshold <- threshold + int (roundAway cbs.FrameRate)
   //  let sinceStart = cbs.TimeInfo.inputBufferAdcTime - this.PaStream.Time
   //  Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / int cbs.FrameCount} %10f{sinceStart}"
-  //  if cbState.Simulating = NotSimulating then Console.Write ","
+  //  if inputInfo.Simulating = NotSimulating then Console.Write ","
       ()
     
-  member this.durationOf nFrames = durationOf this.CbState.FrameRate nFrames
-  member this.nFramesOf duration = nFramesOf  this.CbState.FrameRate duration
+  member this.durationOf nFrames = durationOf this.InputInfo.FrameRate nFrames
+  member this.nFramesOf duration = nFramesOf  this.InputInfo.FrameRate duration
 
   member this.TailTime = this.CbStateSnapshot.Segs.TailTime
   member this.HeadTime = this.CbStateSnapshot.Segs.HeadTime
@@ -575,14 +504,14 @@ type InputStream(beesConfig: BeesConfig) =
 #endif    
 
   // The `WhenStableAndEntered` function synchronizes reading by this client and writing by the callback.
-  member this.CbStateSnapshot : CbState =
-    let copyCbState() = this.CbState.Copy()
+  member this.CbStateSnapshot : InputInfo =
+    let copyCbState() = this.InputInfo.Copy()
     let timeout = TimeSpan.FromMicroseconds 1
-    match this.CbState.Synchronizer.WhenStableAndEntered timeout copyCbState with
-    | Stable cbState -> cbState
-    | TimedOut msg -> failwith $"Timed out taking a snapshot of CbState: {msg}" 
+    match this.InputInfo.Synchronizer.WhenStableAndEntered timeout copyCbState with
+    | Stable inputInfo -> inputInfo
+    | TimedOut msg -> failwith $"Timed out taking a snapshot of InputInfo: {msg}" 
 
-  member this.range() = this.CbState.Segs.TailTime, this.CbState.Segs.HeadTime
+  member this.range() = this.InputInfo.Segs.TailTime, this.InputInfo.Segs.HeadTime
     
   // The delivered range is clipped to what is available.
   // The data is delivered in 0 1 or 2 Parts, each part comprising a Ring index and a length.
@@ -598,10 +527,10 @@ type InputStream(beesConfig: BeesConfig) =
   /// <returns>A ReadResult via which the data can be accessed.</returns>
   member this.read (time: _DateTime) (duration: _TimeSpan)  : ReadResult =
     let cbs = this.CbStateSnapshot
-    let indexBeginArg = nFramesOf cbs.FrameRate (time - cbs.StreamAdcStartTime)
+    let indexBeginArg = nFramesOf cbs.FrameRate (time - cbs.StartTime)
     let nFramesArg    = nFramesOf cbs.FrameRate duration
     let rangeClip, indexBeginInAll, nFramesInAll = clipRange indexBeginArg nFramesArg cbs.Segs.TailInAll cbs.Segs.NFrames
-    let time     = cbs.StreamAdcStartTime + (durationOf cbs.FrameRate indexBeginInAll)
+    let time     = cbs.StartTime + (durationOf cbs.FrameRate indexBeginInAll)
     let duration = durationOf cbs.FrameRate nFramesInAll
     let getPart (seg: Seg) =
       let _, indexBegin, nFrames = clipRange indexBeginInAll nFramesInAll seg.TailInAll seg.NFrames
@@ -633,7 +562,7 @@ type InputStream(beesConfig: BeesConfig) =
     let copyPart (indexNS: int) (destIndexNS: int) (nSamples: int) =
       if indexNS + nSamples > Array.length result.Ring then  printfn "asking for more than is there"
       Array.Copy(result.Ring, indexNS, resultArray, destIndexNS, nSamples)
-    InputStream.DeliverReadResult result copyPart
+    RingBuffer.DeliverReadResult result copyPart
     resultArray
 
   static member DeliverReadResult (result: ReadResult) deliver =

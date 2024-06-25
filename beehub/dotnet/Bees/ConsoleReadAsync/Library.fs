@@ -10,22 +10,29 @@ open ConsoleReadAsync.ConcurrentFlag
 
 // System.ReadLine.Read() below comes from the ReadLine NuGet package.
 
-// Scenario:
+// A problematic scenario with no workaround:
 // - readAsync is in progress
 // - user types a partial line xyz on the console
 // - readAsync is canceled
 // - readAsync is called again and puts out its prompt
 // - user will probably be surprised that the line returned by readAsync
 //   starts with xyz.
+// Why there is no workaround:
 // It would probably be better if the internal buffer kept by ReadLine.Read
 // could be cleared when a new readAsync call comes in after a cancellation.
 // As of now there is no way to do that in the ReadLine library API.
 
+/// <summary>
+/// Whether the ConsoleReadAsync instance is currently polling the console to get a line or a character.
+/// </summary>
 type Mode =
   | Line = 0
   | Key  = 1
 
-
+/// <summary>
+/// The ConsoleReadAsync class provides asynchronous methods for reading a line of characters from the console
+/// or reading a key from the console.
+/// </summary>
 type ConsoleReadAsync() =
 
   let mutable mode         = Mode.Line
@@ -85,7 +92,7 @@ type ConsoleReadAsync() =
       let! ok = allowClient.WaitAsync cancellationToken
       if ok then return Some key else return None }
 
-  let readKeyFAsync prompt  : Task<ConsoleKeyInfo> =
+  let readKeyFAsync()  : Task<ConsoleKeyInfo> =
     task {
       let! x = tryReadKeyAsync CancellationToken.None
       return
@@ -95,7 +102,7 @@ type ConsoleReadAsync() =
 
   // for C# members
 
-  let TryReadAsync (prompt, cancellationToken)  : Task<string> =
+  let tryReadAsync (prompt, cancellationToken)  : Task<string> =
     let promptOption = Option.ofObj prompt
     task {
       let! result = tryReadLineAsync promptOption cancellationToken
@@ -107,20 +114,20 @@ type ConsoleReadAsync() =
 
   // For F# callers – When returning string option, None means canceled.
 
-  member this.readLineAsync(prompt: string, cancellationToken: CancellationToken)  : Task<string option> = tryReadLineAsync (Some prompt) cancellationToken
-  member this.readLineAsync(prompt: string                                      )  : Task<string       > = readLineFAsync   (Some prompt)        
-  member this.readLineAsync(                cancellationToken: CancellationToken)  : Task<string option> = tryReadLineAsync  None         cancellationToken
-  member this.readLineAsync(                                                    )  : Task<string       > = readLineFAsync    None                
+  member this.readLineAsync(prompt: string, cancellationToken: CancellationToken)  : Task<string option>         = tryReadLineAsync (Some prompt) cancellationToken
+  member this.readLineAsync(prompt: string                                      )  : Task<string       >         = readLineFAsync   (Some prompt)        
+  member this.readLineAsync(                cancellationToken: CancellationToken)  : Task<string option>         = tryReadLineAsync  None         cancellationToken
+  member this.readLineAsync(                                                    )  : Task<string       >         = readLineFAsync    None                
 
-  member this.readKeyAsync                  (cancellationToken: CancellationToken)  : Task<ConsoleKeyInfo option> = tryReadKeyAsync cancellationToken
-  member this.readKeyAsync                  (                                    )  : Task<ConsoleKeyInfo       > = readKeyFAsync()
+  member this.readKeyAsync                 (cancellationToken: CancellationToken)  : Task<ConsoleKeyInfo option> = tryReadKeyAsync cancellationToken
+  member this.readKeyAsync                 (                                    )  : Task<ConsoleKeyInfo       > = readKeyFAsync()
 
   // For C# callers – When returning string?, null means canceled.
 
-  member this.ReadAsync(prompt: string, cancellationToken: CancellationToken)  : Task<string       > = TryReadAsync  (prompt, cancellationToken  )
-  member this.ReadAsync(prompt: string                                      )  : Task<string       > = this.ReadAsync(prompt, CancellationToken())
-  member this.ReadAsync(                cancellationToken: CancellationToken)  : Task<string       > = this.ReadAsync(null  , cancellationToken  )
-  member this.ReadAsync(                                                    )  : Task<string       > = this.ReadAsync(null  , CancellationToken())
+  member this.ReadAsync    (prompt: string, cancellationToken: CancellationToken)  : Task<string       >         = tryReadAsync     (prompt     , cancellationToken  )
+  member this.ReadAsync    (prompt: string                                      )  : Task<string       >         = this.ReadAsync   (prompt     , CancellationToken())
+  member this.ReadAsync    (                cancellationToken: CancellationToken)  : Task<string       >         = this.ReadAsync   (null       , cancellationToken  )
+  member this.ReadAsync    (                                                    )  : Task<string       >         = this.ReadAsync   (null       , CancellationToken())
 
   interface IDisposable with
     member _.Dispose() =
