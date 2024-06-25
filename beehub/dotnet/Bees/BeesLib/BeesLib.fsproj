@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <Compile Include="BeesConfig.fs" />
-    <Compile Include="RingBuffer.fs" />
+    <Compile Include="AudioBuffer.fs" />
     <Compile Include="InputStream.fs" />
     <Compile Include="SaveAudioFile.fs" />
     <Compile Include="Commands.fs" />
