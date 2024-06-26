@@ -4,7 +4,7 @@
         <TargetFramework>net8.0</TargetFramework>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <RootNamespace>BeesUtil</RootNamespace>
-<!--        <DefineConstants>USE_FAKE_DATE_TIME</DefineConstants>-->
+        <DefineConstants>USE_FAKE_DATE_TIME</DefineConstants>
     </PropertyGroup>
     
     <ItemGroup>

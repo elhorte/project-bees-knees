@@ -26,6 +26,8 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestDateTimeRounding", "Tes
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Unused", "Unused\Unused.fsproj", "{2C947C5B-9443-44C1-A5E9-589B8B2E20B4}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestAudioBuffer", "TestAudioBuffer\TestAudioBuffer.fsproj", "{203508FF-A7E5-4C2B-B767-0A8FAE3813F0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -84,5 +86,9 @@ Global
 		{2C947C5B-9443-44C1-A5E9-589B8B2E20B4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2C947C5B-9443-44C1-A5E9-589B8B2E20B4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2C947C5B-9443-44C1-A5E9-589B8B2E20B4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{203508FF-A7E5-4C2B-B767-0A8FAE3813F0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{203508FF-A7E5-4C2B-B767-0A8FAE3813F0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{203508FF-A7E5-4C2B-B767-0A8FAE3813F0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{203508FF-A7E5-4C2B-B767-0A8FAE3813F0}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

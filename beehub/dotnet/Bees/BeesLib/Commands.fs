@@ -145,6 +145,14 @@ let listBackgroundTasks() =
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press v to start/stop cli vu meter
 
+#if USE_FAKE_DATE_TIME
+
+type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
+
+  member this.Toggle() = () 
+
+#else
+
 type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
   
   let mutable count    = 0
@@ -201,5 +209,7 @@ type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
   member this.Toggle() = 
     print "toggleVuMeter"
     bgTask.Toggle() |> ignore
+
+#endif
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

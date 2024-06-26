@@ -1,7 +1,6 @@
 module BeesLib.AudioBuffer
 
 open System
-open System.Runtime.InteropServices
 open System.Text
 open System.Threading
 
@@ -11,7 +10,6 @@ open BeesUtil.DebugGlobals
 open BeesUtil.Util
 open BeesUtil.Synchronizer
 open BeesUtil.RangeClipper
-open BeesUtil.SubscriberList
 open CSharpHelpers
 
 
@@ -37,7 +35,7 @@ with
 
   member this.FrameSize = this.SampleSize * this.InChannelCount
 
-let printConfig bc =
+let printBufConfig bc =
   let sb = StringBuilder()
   sb.AppendLine "BufConfig:"                                            |> ignore
   sb.AppendLine $"  AudioBufferDuration    {bc.AudioBufferDuration   }" |> ignore
@@ -107,17 +105,16 @@ type Seg = {
 // An AudioBuffer object makes recent input data available to clients via a buffer.
 // The storage capacity of the buffer is specified as a TimeSpan.
 // A client Task can call the Read method with a desired DateTime and a TimeSpan, and
-// the Read method responds with data from as much of the specified range as it has on hand.
-// A client Task can also subscribe to events fired immediately following each callback.
+// the Read method responds with data having as much as possible of the specified range.
 // The AudioBuffer class is callable from C# or F# and is written in F#.
 
 //–––––––––––––––––––––––––––––––––
 // AudioBuffer internals – the buffer
 //
 // The buffer is a ring buffer.  Another way to describe a ring buffer is as a queue of two
-// segments sharing space in a fixed array: Segs.Cur grows as data is appended to its head,
-// and Segs.Old shrinks as data is trimmed from its tail.  This implementation ensures a gap
-// of a given TimeSpan in the space between Segs.Cur.Head and Segs.Old.Tail.  This gap gives
+// segments sharing space in a fixed array: segs.Cur grows as data is appended to its head,
+// and segs.Old shrinks as data is trimmed from its tail.  This implementation ensures a gap
+// of a given TimeSpan in the space between segs.Cur.Head and segs.Old.Tail.  This gap gives
 // a client reading data from the buffer a grace period in which to access the data to which
 // it has been given access, without worry that the data could be overwritten with new data.
 // The gap thus avoids a read–write race condition without locking.
@@ -144,7 +141,7 @@ type State = // |––––––––––– ring ––––––––
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// AudioBuffer
+// Segs – current and old
 
 [<Struct>]
 type Segs = {
@@ -165,189 +162,6 @@ with
   member this.Exchange() =
     let tmp = this.Cur  in  this.Cur <- this.Old  ;  this.Old <- tmp
     assert (not this.Cur.Active)
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// Callback state, persists across callbacks, updated by each callback.
-
-type InputInfo = {
-  mutable Input              : IntPtr  // block of incoming data 
-  mutable FrameCount         : uint32
-  Ring                       : float32 array     // of samples not frames
-  mutable State              : State
-  mutable Segs               : Segs
-  mutable BlockAdcStartTime  : _DateTime         // DateTime of first sample collection in this block
-  mutable LatestBlockHead    : int               // ring index where latest input block was written by a callback
-  mutable Synchronizer       : Synchronizer
-  mutable NFramesTotal       : uint64            // total number of frames produced by callbacks so far
-  // constants
-  NRingDataFrames            : int
-  NGapFrames                 : int
-  NRingFrames                : int
-  InChannelCount             : int
-  FrameRate                  : float             // also known as sample rate, but frame rate is clearer
-  FrameSize                  : int               // in bytes
-  Simulating                 : Simulating        // simulating callbacks for testing and debugging 
-  // these are modified once, as early as possible
-  mutable StartTime          : _DateTime  }      // DateTime of first ever sample collection
-with
-  
-  member this.Copy() = { this with Segs = this.Segs.Copy() }
-
-  // only for debugging
-  member this.markRingSpanAsDead srcFrameIndex nFrames =
-    let srcFrameIndexNS = srcFrameIndex * this.InChannelCount
-    let nSamples        = nFrames       * this.InChannelCount
-    Array.Fill(this.Ring, dummyData, srcFrameIndexNS, nSamples)
-  
-  member this.PrintRing() =
-      let empty    = '.'
-      let dataChar = '◾'
-      let getsNum i = i % 10 = 0
-      let mutable ring =
-        let num i = char ((i / 10 % 10).ToString())
-        let sNumberedEmptyFrames i = if getsNum i then  num i else  empty
-        // "0.........1.........2.........3.........4.........5.........6.........7.........8....."
-        Array.init this.NRingFrames sNumberedEmptyFrames
-      do // Overwrite empties with seg data.
-        let showDataFor seg =
-          let first = seg.Tail
-          let last  = seg.Head - 1
-          let getsNum i = first < i  &&  i < last  &&  getsNum i  // show only interior numbers
-          let setDataFor i = if not (getsNum i) then  ring[i] <- dataChar     
-          for i in first..last do  setDataFor i
-        if this.Segs.Old.Active then
-          assert (this.State = Chasing)
-          // "0.........1.........2.........3.........4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
-          showDataFor this.Segs.Old
-        // "◾◾◾◾◾◾◾◾◾◾1◾◾◾◾◾◾◾◾◾2◾◾◾◾◾◾◾◾◾3◾◾◾◾.....4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
-        showDataFor this.Segs.Cur
-      String ring
-  
-  member this.Print newTail newHead msg =
-    let sRing = this.PrintRing()
-    let sText =
-      let sSeqNum  = sprintf "%2d" this.Synchronizer.N1
-      let sX       = if String.length msg > 0 then  "*" else  " "
-      let sTime    = sprintf "%3d.%3d %3d.%3d"
-                       this.Segs.Cur.TailTime.Millisecond
-                       this.Segs.Cur.HeadTime.Millisecond
-                       this.Segs.Old.TailTime.Millisecond
-                       this.Segs.Old.HeadTime.Millisecond
-      let sDur     = let sum = this.Segs.Cur.Duration.Milliseconds + this.Segs.Old.Duration.Milliseconds
-                     $"{this.Segs.Cur.Duration.Milliseconds:d2}+{this.Segs.Old.Duration.Milliseconds:d2}={sum:d2}"
-      let sCur     = this.Segs.Cur.ToString()
-      let sNewTail = sprintf "%3d" newTail
-      let sNew     = if newHead < 0 then  "      "  else  $"{sNewTail:S3}.{newHead:d2}"
-      let sOld     = this.Segs.Old.ToString()
-      let sTotal   = let sum = this.Segs.Cur.NFrames + this.Segs.Old.NFrames
-                     $"{this.Segs.Cur.NFrames:d2}+{this.Segs.Old.NFrames:d2}={sum:d2}"
-      let sNFrames = this.FrameCount
-      let sGap     = if this.Segs.Old.Active then sprintf "%2d" (this.Segs.Old.Tail - this.Segs.Cur.Head) else  "  "
-      let sState   = $"{this.State}"
-      // "24    5    164.185 185.220 35+21=56  00.35 -16.40 64.85 35+21=56  29  Chasing "
-      $"%s{sSeqNum}%s{sX}%4d{sNFrames}    %s{sTime} %s{sDur}  %s{sCur} %s{sNew} %s{sOld} %s{sTotal}  {sGap:s2}  %s{sState}  %s{msg}"
-    Console.WriteLine $"%s{sRing}  %s{sText}"
-
-  member this.PrintAfter msg =  this.Print 0 -1 msg
-
-  member this.PrintTitle() =
-    let s0 = String.init this.NRingFrames (fun _ -> " ")
-    let s1 = " seq nFrames timeCur timeOld duration      Cur    new       Old    size   gap   state"
-    let s2 = " ––– ––––––– ––––––– ––––––– ––––––––  ––––––––– –––––– ––––––––– –––––––– –––  –––––––"
-           //   24    5    185.220 164.185 35+21=56  000+00.35 -16.40 000+64.85 35+21=56  29  Chasing 
-    Console.WriteLine $"%s{s0}%s{s1}"
-    Console.WriteLine $"%s{s0}%s{s2}"
-
-//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// The callback – Copy data from the audio driver into our ring.
-
-let mutable threshold = 0 // for debugging, to get a printout from at reasonable intervals
-
-let addSystemData input frameCount userDataPtr startTime =
-  let (input : IntPtr) = input
-  let handle  = GCHandle.FromIntPtr(userDataPtr)
-  let info    = handle.Target :?> InputInfo
-  let nFrames = int frameCount
-
-  info.Synchronizer.EnterUnstable()
-
-  info.BlockAdcStartTime <- startTime
-  if info.StartTime = dummyDateTime then
-//  Console.WriteLine "first callback"
-    info.StartTime <- startTime
-    info.Segs.Old.StartTime <- startTime
-    info.Segs.Cur.StartTime <- startTime
-  
-  do
-    // Modify the segs so that Segs.Cur.Head points to where the data will go in the ring.
-    // Later, after the copy is done, Segs.Cur.Head will point after the new data.
-    let nextValues() =
-      let newHead = info.Segs.Cur.Head + nFrames
-      let newTail = newHead - info.NRingDataFrames
-      (newHead, newTail)
-    let mutable newHead, newTail = nextValues()
-    let printRing msg = if info.Simulating <> NotSimulating then  info.Print newTail newHead msg
-    let trimCurTail() =
-      if newTail > 0 then
-        info.Segs.Cur.AdvanceTail (newTail - info.Segs.Cur.Tail)
-        true
-      else
-        assert (info.Segs.Cur.Tail = 0)
-        false
-    printRing ""
-    if newHead > info.NRingFrames then
-      assert (info.State = Moving)
-      assert (not info.Segs.Old.Active)
-      info.State <- AtEnd // Briefly; quickly changes to Chasing.
-      info.Segs.Exchange() ; assert (info.Segs.Cur.Head = 0  &&  info.Segs.Cur.Tail = 0)
-      info.Segs.Cur.Offset <- info.Segs.Old.Offset + info.Segs.Old.Head
-      let h, t = nextValues() in newHead <- h ; newTail <- t
-      if info.Simulating <> NotSimulating then  info.markRingSpanAsDead info.Segs.Old.Head (info.NRingFrames - info.Segs.Old.Head) 
-      info.State <- Chasing
-      printRing "exchanged"
-    match info.State with
-    | AtStart ->
-      assert (not info.Segs.Cur.Active)
-      assert (not info.Segs.Old.Active)
-      assert (newHead = nFrames)  // The block will fit at Ring[0]
-      info.State <- AtBegin
-    | AtBegin ->
-      assert (not info.Segs.Old.Active)
-      assert (info.Segs.Cur.Tail = 0)
-      assert (info.Segs.Cur.Head + info.NGapFrames <= info.NRingFrames)  // The block will def fit after Segs.Cur.Head
-      info.State <- if trimCurTail() then  Moving else  AtBegin
-    | Moving ->
-      assert (not info.Segs.Old.Active)
-      trimCurTail() |> ignore
-      info.State <- Moving
-    | Chasing  ->
-      assert info.Segs.Old.Active
-      assert (newHead <= info.NRingFrames)  // The block will fit after Segs.Cur.Head
-      assert (info.Segs.Cur.Tail = 0)
-      // Segs.Old.Active.  Segs.Cur.Head is growing toward the Segs.Old.Tail, which retreats as Segs.Cur.Head grows.
-      assert (info.Segs.Cur.Head < info.Segs.Old.Tail)
-      trimCurTail() |> ignore
-      if info.Segs.Old.NFrames <= nFrames then
-        // Segs.Old is so small that it can’t survive.
-        info.Segs.Old.Reset()
-        info.State <- Moving
-      else
-        info.Segs.Old.AdvanceTail nFrames
-        let halfGap = info.NGapFrames / 2  // in case nFrames has just been adjusted upwards
-        assert (newHead + halfGap <= info.Segs.Old.Tail)
-        info.State <- Chasing
-    | AtEnd ->
-      failwith "Can’t happen."
-
-  let curHeadNS = info.Segs.Cur.Head * info.InChannelCount
-  let nSamples  = nFrames           * info.InChannelCount
-  UnsafeHelpers.CopyPtrToArrayAtIndex(input, info.Ring, curHeadNS, nSamples)
-  info.LatestBlockHead   <- info.Segs.Cur.Head
-  info.Segs.Cur.AdvanceHead nFrames
-  info.NFramesTotal <- info.NFramesTotal + uint64 frameCount
-//Console.Write(".")
-//if info.Synchronizer.N1 % 20us = 0us then  Console.WriteLine $"%6d{info.Segs.Cur.Head} %3d{info.Segs.Cur.Head / nFrames} %10f{timeInfo.inputBufferAdcTime - info.TimeInfoBase}"
-  info.Synchronizer.LeaveUnstable()
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // The AudioBuffer class
@@ -387,96 +201,212 @@ let durationToNFrames frameRate (duration: _TimeSpan) =
   int (round nFramesApprox)
 
 
-type RingBuffer(bufConfig: BufConfig) =
+type AudioBuffer(bufConfig: BufConfig) =
 
-  let sim              = bufConfig.Simulating 
-  let audioDuration    = cbSimAudioDuration sim (fun () -> bufConfig.AudioBufferDuration                    )
-  let gapDuration      = cbSimGapDuration   sim (fun () -> bufConfig.AudioBufferGapDuration * 2.0            )
-  let nRingDataFrames  = cbSimNDataFrames   sim (fun () -> durationToNFrames bufConfig.InFrameRate audioDuration )
-  let nGapFrames       = cbSimNGapFrames    sim (fun () -> durationToNFrames bufConfig.InFrameRate gapDuration   )
+  let simulating       = bufConfig.Simulating 
+  let inChannelCount   = bufConfig.InChannelCount
+  let frameRate        = bufConfig.InFrameRate
+  let maxDuration      = cbSimAudioDuration simulating (fun () -> bufConfig.AudioBufferDuration                    )
+  let gapDuration      = cbSimGapDuration   simulating (fun () -> bufConfig.AudioBufferGapDuration * 2.0            )
+  let nRingDataFrames  = cbSimNDataFrames   simulating (fun () -> durationToNFrames bufConfig.InFrameRate maxDuration )
+  let nGapFrames       = cbSimNGapFrames    simulating (fun () -> durationToNFrames bufConfig.InFrameRate gapDuration   )
   let nRingFrames      = nRingDataFrames + (3 * nGapFrames) / 2
   //  assert (nRingDataFrames + nRingGapFrames <= nRingFrames)
   let nRingSamples     = nRingFrames * bufConfig.InChannelCount
   let frameSize        = bufConfig.FrameSize
   let nRingBytes       = int nRingFrames * frameSize
-  let startTime        = _DateTime.Now
-  let segs             = { Cur = Seg.NewEmpty nRingFrames bufConfig.InFrameRate 
-                           Old = Seg.NewEmpty nRingFrames bufConfig.InFrameRate  }
+
+  let ring            = Array.init<float32> nRingSamples (fun _ -> dummyData)
+
+  // modified by most recent data addition
+  let mutable latestInput          = IntPtr.Zero
+  let mutable latestFrameCount     = 0u
+  let mutable latestStartTime      = dummyDateTime
+  let mutable segs                 = { Cur = Seg.NewEmpty nRingFrames bufConfig.InFrameRate 
+                                       Old = Seg.NewEmpty nRingFrames bufConfig.InFrameRate  }
+  let mutable state                = AtStart
+  let mutable latestBlockIndex     = 0
+  let mutable synchronizer         = Synchronizer.New()
+  let mutable nFramesTotal         = 0UL
+  // modified once upon first addition of data
+  let mutable ringStartTime        = dummyDateTime
   
-  // When unmanaged code calls managed code (e.g., a callback from unmanaged to managed),
-  // the .NET CLR ensures that the garbage collector will not move referenced managed objects
-  // in memory during the execution of that managed code.
-  // This happens automatically and does not require manual pinning.
+  let printRing() =
+    let empty    = '.'
+    let dataChar = '◾'
+    let getsNum i = i % 10 = 0
+    let mutable ring =
+      let num i = char ((i / 10 % 10).ToString())
+      let sNumberedEmptyFrames i = if getsNum i then  num i else  empty
+      // "0.........1.........2.........3.........4.........5.........6.........7.........8....."
+      Array.init nRingFrames sNumberedEmptyFrames
+    do // Overwrite empties with seg data.
+      let showDataFor seg =
+        let first = seg.Tail
+        let last  = seg.Head - 1
+        let getsNum i = first < i  &&  i < last  &&  getsNum i  // show only interior numbers
+        let setDataFor i = if not (getsNum i) then  ring[i] <- dataChar     
+        for i in first..last do  setDataFor i
+      if segs.Old.Active then
+        assert (state = Chasing)
+        // "0.........1.........2.........3.........4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
+        showDataFor segs.Old
+      // "◾◾◾◾◾◾◾◾◾◾1◾◾◾◾◾◾◾◾◾2◾◾◾◾◾◾◾◾◾3◾◾◾◾.....4.........5.........6...◾◾◾◾◾◾7◾◾◾◾◾◾◾◾◾8◾◾◾◾."
+      showDataFor segs.Cur
+    String ring
+  
+  let print newTail newHead msg =
+    let sRing = printRing()
+    let sText =
+      let sSeqNum  = sprintf "%2d" synchronizer.N1
+      let sX       = if String.length msg > 0 then  "*" else  " "
+      let sTime    = sprintf "%3d.%3d %3d.%3d"
+                       segs.Cur.TailTime.Millisecond
+                       segs.Cur.HeadTime.Millisecond
+                       segs.Old.TailTime.Millisecond
+                       segs.Old.HeadTime.Millisecond
+      let sDur     = let sum = segs.Cur.Duration.Milliseconds + segs.Old.Duration.Milliseconds
+                     $"{segs.Cur.Duration.Milliseconds:d2}+{segs.Old.Duration.Milliseconds:d2}={sum:d2}"
+      let sCur     = segs.Cur.ToString()
+      let sNewTail = sprintf "%3d" newTail
+      let sNew     = if newHead < 0 then  "      "  else  $"{sNewTail:S3}.{newHead:d2}"
+      let sOld     = segs.Old.ToString()
+      let sTotal   = let sum = segs.Cur.NFrames + segs.Old.NFrames
+                     $"{segs.Cur.NFrames:d2}+{segs.Old.NFrames:d2}={sum:d2}"
+      let sNFrames = latestFrameCount
+      let sGap     = if segs.Old.Active then sprintf "%2d" (segs.Old.Tail - segs.Cur.Head) else  "  "
+      let sState   = $"{state}"
+      // "24    5    164.185 185.220 35+21=56  00.35 -16.40 64.85 35+21=56  29  Chasing "
+      $"%s{sSeqNum}%s{sX}%4d{sNFrames}    %s{sTime} %s{sDur}  %s{sCur} %s{sNew} %s{sOld} %s{sTotal}  {sGap:s2}  %s{sState}  %s{msg}"
+    Console.WriteLine $"%s{sRing}  %s{sText}"
 
-  let inputInfo = {
-    Input              = IntPtr.Zero
-    FrameCount         = 0u
-    // affected by callbacks
-    Ring               = Array.init<float32> nRingSamples (fun _ -> dummyData)
-    State              = AtStart
-    Segs               = segs
-    BlockAdcStartTime  = dummyDateTime
-    LatestBlockHead    = 0
-    Synchronizer       = Synchronizer.New()
-    NFramesTotal       = 0UL
-    // constants
-    NRingDataFrames    = nRingDataFrames
-    NGapFrames         = nGapFrames
-    NRingFrames        = nRingFrames
-    InChannelCount     = bufConfig.InChannelCount
-    FrameRate          = bufConfig.InFrameRate
-    FrameSize          = frameSize
-    Simulating         = sim
-    // these are modified once, as early as possible
-    StartTime = dummyDateTime  }
+  let printAfter msg =  print 0 -1 msg
 
-  let subscriberList = SubscriberList<RingBuffer>()
+  let printTitle() =
+    let s0 = String.init nRingFrames (fun _ -> " ")
+    let s1 = " seq nFrames timeCur timeOld duration      Cur    new       Old    size   gap   state"
+    let s2 = " ––– ––––––– ––––––– ––––––– ––––––––  ––––––––– –––––– ––––––––– –––––––– –––  –––––––"
+           //   24    5    185.220 164.185 35+21=56  000+00.35 -16.40 000+64.85 35+21=56  29  Chasing 
+    Console.WriteLine $"%s{s0}%s{s1}"
+    Console.WriteLine $"%s{s0}%s{s2}"
+
+  //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+  // The callback – Copy data from the audio driver into our ring.
+
+  // only for debugging
+  let markRingSpanAsDead srcFrameIndex nFrames =
+    let srcFrameIndexNS = srcFrameIndex * inChannelCount
+    let nSamples        = nFrames       * inChannelCount
+    Array.Fill(ring, dummyData, srcFrameIndexNS, nSamples)
+
+  let mutable threshold = 0 // for debugging, to get a printout from at reasonable intervals
+
+  let addSystemData input frameCount (startTime: unit -> _DateTime) =
+    let (input : IntPtr) = input
+    let nFrames = int frameCount
+    latestInput      <- input
+    latestFrameCount <- frameCount
+
+    synchronizer.EnterUnstable()
+
+    latestStartTime <- startTime()
+    if ringStartTime = dummyDateTime then
+  //  Console.WriteLine "first callback"
+      ringStartTime      <- latestStartTime
+      segs.Old.StartTime <- latestStartTime
+      segs.Cur.StartTime <- latestStartTime
+    
+    do
+      // Modify the segs so that segs.Cur.Head points to where the data will go in the ring.
+      // Later, after the copy is done, segs.Cur.Head will point after the new data.
+      let nextValues() =
+        let newHead = segs.Cur.Head + nFrames
+        let newTail = newHead - nRingDataFrames
+        (newHead, newTail)
+      let mutable newHead, newTail = nextValues()
+      let printRing msg = if simulating <> NotSimulating then  print newTail newHead msg
+      let trimCurTail() =
+        if newTail > 0 then
+          segs.Cur.AdvanceTail (newTail - segs.Cur.Tail)
+          true
+        else
+          assert (segs.Cur.Tail = 0)
+          false
+      printRing ""
+      if newHead > nRingFrames then
+        assert (state = Moving)
+        assert (not segs.Old.Active)
+        state <- AtEnd // Briefly; quickly changes to Chasing.
+        segs.Exchange() ; assert (segs.Cur.Head = 0  &&  segs.Cur.Tail = 0)
+        segs.Cur.Offset <- segs.Old.Offset + segs.Old.Head
+        let h, t = nextValues() in newHead <- h ; newTail <- t
+        if simulating <> NotSimulating then  markRingSpanAsDead segs.Old.Head (nRingFrames - segs.Old.Head) 
+        state <- Chasing
+        printRing "exchanged"
+      match state with
+      | AtStart ->
+        assert (not segs.Cur.Active)
+        assert (not segs.Old.Active)
+        assert (newHead = nFrames)  // The block will fit at Ring[0]
+        state <- AtBegin
+      | AtBegin ->
+        assert (not segs.Old.Active)
+        assert (segs.Cur.Tail = 0)
+        assert (segs.Cur.Head + nGapFrames <= nRingFrames)  // The block will def fit after segs.Cur.Head
+        state <- if trimCurTail() then  Moving else  AtBegin
+      | Moving ->
+        assert (not segs.Old.Active)
+        trimCurTail() |> ignore
+        state <- Moving
+      | Chasing  ->
+        assert segs.Old.Active
+        assert (newHead <= nRingFrames)  // The block will fit after segs.Cur.Head
+        assert (segs.Cur.Tail = 0)
+        // segs.Old.Active.  segs.Cur.Head is growing toward the segs.Old.Tail, which retreats as segs.Cur.Head grows.
+        assert (segs.Cur.Head < segs.Old.Tail)
+        trimCurTail() |> ignore
+        if segs.Old.NFrames <= nFrames then
+          // segs.Old is so small that it can’t survive.
+          segs.Old.Reset()
+          state <- Moving
+        else
+          segs.Old.AdvanceTail nFrames
+          let halfGap = nGapFrames / 2  // in case nFrames has just been adjusted upwards
+          assert (newHead + halfGap <= segs.Old.Tail)
+          state <- Chasing
+      | AtEnd ->
+        failwith "Can’t happen."
+
+    let curHeadNS = segs.Cur.Head * inChannelCount
+    let nSamples  = nFrames       * inChannelCount
+    UnsafeHelpers.CopyPtrToArrayAtIndex(input, ring, curHeadNS, nSamples)
+    latestBlockIndex   <- segs.Cur.Head
+    segs.Cur.AdvanceHead nFrames
+    nFramesTotal <- nFramesTotal + uint64 frameCount
+  //Console.Write(".")
+  //if Synchronizer.N1 % 20us = 0us then  Console.WriteLine $"%6d{segs.Cur.Head} %3d{segs.Cur.Head / nFrames} %10f{timeInfo.inputBufferAdcTime - TimeInfoBase}"
+    synchronizer.LeaveUnstable()
 
   do
     printfn $"{bufConfig.InFrameRate}"
+  
+  member private this.SetSegs segsArg = segs <- segsArg
 
-  member val  InputInfo    = inputInfo
-  member val  StartTime    = inputInfo.StartTime
-  member val  Config       = bufConfig
-  member val  RingDuration = audioDuration
-  member val  GapDuration  = gapDuration
-  member val  NRingBytes   = nRingBytes
+  member val  Config      = bufConfig
+  member val  MaxDuration = maxDuration
+  member val  GapDuration = gapDuration
+  member val  NRingBytes  = nRingBytes
 
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   
-  /// Subscribe a post-callback handler, which will be called in managed code after each callback.
-  member this.Subscribe  (subscriber: SubscriberHandler<RingBuffer>)  : Subscription<RingBuffer> =
-    subscriberList.Subscribe subscriber
-
-  /// Unsubscribe a post-callback handler.
-  member this.Unsubscribe(subscription: Subscription<RingBuffer>)  : bool =
-    subscriberList.Unsubscribe subscription
-
-  
-  /// Called only when Simulating, to simulate a callback.
-  member this.AddSystemData(input, frameCount, startTime, userDataPtr) =
-              addSystemData input  frameCount  startTime  userDataPtr
-
-  /// <summary>
-  /// Called from a <c>Task</c> (managed code) as soon as possible after the callback.
-  /// </summary>
-  member this.AfterCallback() =
-    let info = this.CbStateSnapshot
-    subscriberList.Broadcast this
-    if info.Simulating <> NotSimulating then ()
-    else
-    if info.Segs.Cur.Head > threshold then
-      threshold <- threshold + int (roundAway info.FrameRate)
-  //  let sinceStart = info.TimeInfo.inputBufferAdcTime - this.PaStream.Time
-  //  Console.WriteLine $"%6d{info.Segs.Cur.Head} %3d{info.Segs.Cur.Head / int info.FrameCount} %10f{sinceStart}"
-  //  if inputInfo.Simulating = NotSimulating then Console.Write ","
-      ()
+  member this.AddSystemData(input, frameCount: uint32, startTimeFunc: unit -> _DateTime) =
+              addSystemData input  frameCount          startTimeFunc
     
-  member this.durationOf nFrames = durationOf this.InputInfo.FrameRate nFrames
-  member this.nFramesOf duration = nFramesOf  this.InputInfo.FrameRate duration
+  member this.durationOf nFrames = durationOf frameRate nFrames
+  member this.nFramesOf duration = nFramesOf  frameRate duration
 
-  member this.TailTime = this.CbStateSnapshot.Segs.TailTime
-  member this.HeadTime = this.CbStateSnapshot.Segs.HeadTime
+  member this.TailTime = segs.TailTime
+  member this.HeadTime = segs.HeadTime
 
 #if USE_FAKE_DATE_TIME
 #else
@@ -491,15 +421,7 @@ type RingBuffer(bufConfig: BufConfig) =
 
 #endif    
 
-  // The `WhenStableAndEntered` function synchronizes reading by this client and writing by the callback.
-  member this.CbStateSnapshot : InputInfo =
-    let copyCbState() = this.InputInfo.Copy()
-    let timeout = TimeSpan.FromMicroseconds 1
-    match this.InputInfo.Synchronizer.WhenStableAndEntered timeout copyCbState with
-    | Stable inputInfo -> inputInfo
-    | TimedOut msg -> failwith $"Timed out taking a snapshot of InputInfo: {msg}" 
-
-  member this.range() = this.InputInfo.Segs.TailTime, this.InputInfo.Segs.HeadTime
+  member this.DateTimeRange() = segs.TailTime, segs.Duration
     
   // The delivered range is clipped to what is available.
   // The data is delivered in 0 1 or 2 Parts, each part comprising a Ring index and a length.
@@ -514,44 +436,41 @@ type RingBuffer(bufConfig: BufConfig) =
   /// <param name="duration">The duration of the data to be read.</param>
   /// <returns>A ReadResult via which the data can be accessed.</returns>
   member this.read (time: _DateTime) (duration: _TimeSpan)  : ReadResult =
-    let info = this.CbStateSnapshot
-    let indexBeginArg = nFramesOf info.FrameRate (time - info.StartTime)
-    let nFramesArg    = nFramesOf info.FrameRate duration
-    let rangeClip, indexBeginInAll, nFramesInAll = clipRange indexBeginArg nFramesArg info.Segs.TailInAll info.Segs.NFrames
-    let time     = info.StartTime + (durationOf info.FrameRate indexBeginInAll)
-    let duration = durationOf info.FrameRate nFramesInAll
+    let stableSegs =
+      let copySegs() = segs.Copy()
+      let timeout = TimeSpan.FromMicroseconds 1
+      match synchronizer.WhenStableAndEntered timeout copySegs with
+      | TimedOut msg -> failwith $"Timed out taking a snapshot of audio buffer state: {msg}"
+      | Stable segs -> segs
+    let rangeClip, indexBeginInResult, nFramesInResult =
+      let indexBeginArg = nFramesOf frameRate (time - ringStartTime)
+      let nFramesArg    = nFramesOf frameRate duration
+      clipRange indexBeginArg nFramesArg stableSegs.TailInAll stableSegs.NFrames
+    let resultTime     = ringStartTime + (durationOf frameRate indexBeginInResult)
+    let resultDuration = durationOf frameRate nFramesInResult
     let getPart (seg: Seg) =
-      let _, indexBegin, nFrames = clipRange indexBeginInAll nFramesInAll seg.TailInAll seg.NFrames
+      let _, indexBegin, nFrames = clipRange indexBeginInResult nFramesInResult seg.TailInAll seg.NFrames
       { Index = indexBegin - seg.Offset; NFrames = nFrames } // Index, indexBegin, and seg.Offset are all in frames not samples
     let parts = [|
       match rangeClip with
       | RangeClip.BeforeData | RangeClip.AfterData -> ()
       | _ ->
-      if info.Segs.Old.Active then
-        getPart info.Segs.Old
-      getPart info.Segs.Cur  |]
+      if stableSegs.Old.Active then
+        getPart stableSegs.Old
+      getPart stableSegs.Cur  |]
     let result = {
-      Ring           = info.Ring
-      InChannelCount = info.InChannelCount 
-      FrameRate      = info.FrameRate 
+      Ring           = ring
+      InChannelCount = inChannelCount 
+      FrameRate      = frameRate 
       RangeClip      = rangeClip
-      NSamples       = nFramesInAll * info.InChannelCount
-      Time           = time
-      Duration       = duration
+      NSamples       = nFramesInResult * inChannelCount
+      Time           = resultTime
+      Duration       = resultDuration
       Parts          = parts  }
     result
 
   member this.Read (from: _DateTime, duration: _TimeSpan) =
     this.read from duration
-
-  static member CopyFromReadResult result =
-    let deadData = 12345678.0f
-    let resultArray = Array.create<float32> result.NSamples deadData
-    let copyPart (indexNS: int) (destIndexNS: int) (nSamples: int) =
-      if indexNS + nSamples > Array.length result.Ring then  printfn "asking for more than is there"
-      Array.Copy(result.Ring, indexNS, resultArray, destIndexNS, nSamples)
-    RingBuffer.DeliverReadResult result copyPart
-    resultArray
 
   static member DeliverReadResult (result: ReadResult) deliver =
     let copyResultPart (destIndexNS, nParts) { Index = indexNF; NFrames = nFrames } =
@@ -568,3 +487,22 @@ type RingBuffer(bufConfig: BufConfig) =
        (fun (destIndexNS, nParts) ->
          assert (destIndexNS = result.NSamples)    // We copied the total number of samples
          assert (nParts = result.Parts.Length) ) // in the given number of parts
+
+  static member CopyFromReadResult result =
+    let deadData = 12345678.0f
+    let resultArray = Array.create<float32> result.NSamples deadData
+    let copyPart (indexNS: int) (destIndexNS: int) (nSamples: int) =
+      if indexNS + nSamples > Array.length result.Ring then  printfn "asking for more than is there"
+      Array.Copy(result.Ring, indexNS, resultArray, destIndexNS, nSamples)
+    AudioBuffer.DeliverReadResult result copyPart
+    resultArray
+
+  // Mostly for testing.
+  member this.InChannelCount   = inChannelCount
+  member this.Segs             = segs
+  member this.PrintAfter msg   = printAfter msg
+  member this.PrintTitle()     = printTitle()
+  member this.NFramesTotal     = nFramesTotal
+  member this.Ring             = ring
+  member this.FrameCount       = latestFrameCount
+  member this.LatestBlockIndex = latestBlockIndex
