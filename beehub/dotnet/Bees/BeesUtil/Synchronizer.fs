@@ -23,10 +23,19 @@ with
   static member New() = Synchronizer.Make synchronizerInitValue synchronizerInitValue
 
   /// Enters the critical section on behalf of a writer.
-  member sn.EnterUnstable() =  let n1, n2 =  sn.GetPair() in sn.Set (n1 + 1us)  n2
+  /// Supports nested Enter/Leave.
+  member sn.EnterUnstable() =
+    let n1, n2 = sn.GetPair()
+    sn.Set (n1 + 1us)  n2
 
   /// Leaves the critical section on behalf of a writer
-  member sn.LeaveUnstable() =  let n1, n2 =  sn.GetPair() in sn.Set  n1        (n2 + 1us)
+  /// Supports nested Enter/Leave.
+  member sn.LeaveUnstable() =
+    let n1, n2 = sn.GetPair()
+    if n1 = n2 + 1us then
+      sn.Set n1        (n2 + 1us)
+    else
+      sn.Set (n1 - 1us) n2
 
   member sn.NeverEntered = sn.N1 = synchronizerInitValue
     
