@@ -28,9 +28,9 @@ type BufConfig = {
   AudioBufferDuration        : _TimeSpan
   AudioBufferGapDuration     : _TimeSpan // long enough for the largest automatically adjusted frameCount arg to callback
   SampleSize                 : int
-  Simulating                 : Simulating
   InChannelCount             : int
-  InFrameRate                : double  }
+  InFrameRate                : double
+  Simulating                 : Simulating  }
 with
 
   member this.FrameSize = this.SampleSize * this.InChannelCount
@@ -219,17 +219,17 @@ type AudioBuffer(bufConfig: BufConfig) =
   let ring            = Array.init<float32> nRingSamples (fun _ -> dummyData)
 
   // modified by most recent data addition
-  let mutable latestInput          = IntPtr.Zero
-  let mutable latestFrameCount     = 0u
-  let mutable latestStartTime      = dummyDateTime
-  let mutable segs                 = { Cur = Seg.NewEmpty nRingFrames bufConfig.InFrameRate 
-                                       Old = Seg.NewEmpty nRingFrames bufConfig.InFrameRate  }
-  let mutable state                = AtStart
-  let mutable latestBlockIndex     = 0
-  let mutable synchronizer         = Synchronizer.New()
-  let mutable nFramesTotal         = 0UL
+  let mutable latestInput       = IntPtr.Zero
+  let mutable latestFrameCount  = 0u
+  let mutable latestStartTime   = dummyDateTime
+  let mutable segs              = { Cur = Seg.NewEmpty nRingFrames bufConfig.InFrameRate 
+                                    Old = Seg.NewEmpty nRingFrames bufConfig.InFrameRate  }
+  let mutable state             = AtStart
+  let mutable latestBlockIndex  = 0
+  let mutable synchronizer      = Synchronizer.New()
+  let mutable nFramesTotal      = 0UL
   // modified once upon first addition of data
-  let mutable ringStartTime        = dummyDateTime
+  let mutable startTimeOfBuffer = dummyDateTime
   
   let printRing() =
     let empty    = '.'
@@ -310,9 +310,9 @@ type AudioBuffer(bufConfig: BufConfig) =
     synchronizer.EnterUnstable()
 
     latestStartTime <- startTime()
-    if ringStartTime = dummyDateTime then
+    if startTimeOfBuffer = dummyDateTime then
   //  Console.WriteLine "first callback"
-      ringStartTime      <- latestStartTime
+      startTimeOfBuffer      <- latestStartTime
       segs.Old.StartTime <- latestStartTime
       segs.Cur.StartTime <- latestStartTime
     
@@ -380,7 +380,7 @@ type AudioBuffer(bufConfig: BufConfig) =
     let curHeadNS = segs.Cur.Head * inChannelCount
     let nSamples  = nFrames       * inChannelCount
     UnsafeHelpers.CopyPtrToArrayAtIndex(input, ring, curHeadNS, nSamples)
-    latestBlockIndex   <- segs.Cur.Head
+    latestBlockIndex <- segs.Cur.Head
     segs.Cur.AdvanceHead nFrames
     nFramesTotal <- nFramesTotal + uint64 frameCount
   //Console.Write(".")
@@ -443,10 +443,10 @@ type AudioBuffer(bufConfig: BufConfig) =
       | TimedOut msg -> failwith $"Timed out taking a snapshot of audio buffer state: {msg}"
       | Stable segs -> segs
     let rangeClip, indexBeginInResult, nFramesInResult =
-      let indexBeginArg = nFramesOf frameRate (time - ringStartTime)
+      let indexBeginArg = nFramesOf frameRate (time - startTimeOfBuffer)
       let nFramesArg    = nFramesOf frameRate duration
       clipRange indexBeginArg nFramesArg stableSegs.TailInAll stableSegs.NFrames
-    let resultTime     = ringStartTime + (durationOf frameRate indexBeginInResult)
+    let resultTime     = startTimeOfBuffer + (durationOf frameRate indexBeginInResult)
     let resultDuration = durationOf frameRate nFramesInResult
     let getPart (seg: Seg) =
       let _, indexBegin, nFrames = clipRange indexBeginInResult nFramesInResult seg.TailInAll seg.NFrames
@@ -504,5 +504,10 @@ type AudioBuffer(bufConfig: BufConfig) =
   member this.PrintTitle()     = printTitle()
   member this.NFramesTotal     = nFramesTotal
   member this.Ring             = ring
+  member this.FrameRate        = frameRate
+  member this.NRingFrames      = nRingFrames
+  member this.FrameSize        = frameSize
   member this.FrameCount       = latestFrameCount
   member this.LatestBlockIndex = latestBlockIndex
+  member this.Simulating       = simulating
+  member this.StartTime        = startTimeOfBuffer
