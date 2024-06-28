@@ -8,6 +8,7 @@ open PortAudioSharp
 
 open BeesUtil.DateTimeShim
 
+open BeesUtil.Util
 open BeesUtil.DateTimeCalculations
 open BeesUtil.RangeClipper
 open BeesUtil.SaveAsMp3
@@ -50,8 +51,8 @@ let saveAudioFile ext (inputStream: InputStream) duration (dateTime: _DateTime) 
                 failwith msg
   let save readResult =
     let samplesArray = AudioBuffer.CopyFromReadResult readResult
-    let sDate = dateTime.ToString("yyyy-MM-dd_HH꞉mm꞉sszzz")  // “modifier letter colon”, not ASCII colon, so macOS accepts it.
-    let name = $"save-{sDate}.{ext}"
+    let sDate, sTz = dateTimeFormattedForLocalTimezone "yyyy-MM-dd_HH꞉mm꞉ss" dateTime // “modifier letter colon”, not ASCII colon, so macOS accepts it.
+    let name = $"save-{sDate}_{sTz}.{ext}"
     Console.WriteLine (sprintf $"  saving %s{name}")
     saveToFile saveFunction readResult.FrameRate readResult.InChannelCount name samplesArray
   let readResult = inputStream.Buffer.read dateTime duration
@@ -111,7 +112,7 @@ let prepareArgumentsForStreamCreation verbose =
 /// <param name="duration">The duration of each saved audio file.</param>
 /// <param name="ext">The file type, "mp3" etc.</param>
 /// <param name="cancellationToken">The cancellationToken.</param>
-let saveAudioFileWithWait (inputStream: InputStream) ext period duration startTime (ctsToken: CancellationToken) =
+let saveAudioFileWithWait (inputStream: InputStream) ext duration startTime (ctsToken: CancellationToken) =
   inputStream.Buffer.WaitUntil(startTime           , ctsToken) ; printf $"Recording ..."
   inputStream.Buffer.WaitUntil(startTime + duration, ctsToken) ; saveAudioFile ext inputStream duration startTime
 
@@ -137,13 +138,10 @@ let saveAudioFilePeriodically inputStream ext duration period (ctsToken: Cancell
   | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
   | Good startTime -> 
   let now = DateTime.Now in printfn $"from now %A{now.TimeOfDay}, wait %A{startTime - now}"
-  inputStream.Buffer.WaitUntil(startTime)
   let rec saveAt saveTime num =
     if ctsToken.IsCancellationRequested then ()
     else
-    saveAudioFileWithWait inputStream ext period duration startTime ctsToken
-    inputStream.Buffer.WaitUntil(saveTime           , ctsToken) ; printf $"Recording {num} ..."
-    inputStream.Buffer.WaitUntil(saveTime + duration, ctsToken) ; saveAudioFile ext inputStream duration saveTime
+    saveAudioFileWithWait inputStream ext duration saveTime ctsToken
     saveAt (saveTime + period) (num+1)
   saveAt startTime 1
 

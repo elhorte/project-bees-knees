@@ -196,8 +196,8 @@ let durationToNFrames frameRate (duration: _TimeSpan) =
   int (round nFramesApprox)
 
 
-type AudioBuffer(bufConfig: BufConfig) =
-
+type AudioBuffer(bufConfig: BufConfig, synchronizer) =
+  let (synchronizer: Synchronizer) = synchronizer
   let simulating       = bufConfig.Simulating 
   let inChannelCount   = bufConfig.InChannelCount
   let frameRate        = bufConfig.InFrameRate
@@ -221,7 +221,6 @@ type AudioBuffer(bufConfig: BufConfig) =
                                     Old = Seg.NewEmpty nRingFrames bufConfig.InFrameRate  }
   let mutable state             = AtStart
   let mutable latestBlockIndex  = 0
-  let mutable synchronizer      = Synchronizer.New()
   let mutable nFramesTotal      = 0UL
   // modified once upon first addition of data
   let mutable startTimeOfBuffer = dummyDateTime
@@ -387,13 +386,14 @@ type AudioBuffer(bufConfig: BufConfig) =
   
   member private this.SetSegs segsArg = segs <- segsArg
 
-  member val  Config          = bufConfig
-  member val  MaxDuration     = maxDuration
-  member val  GapDuration     = gapDuration
-  member val  NRingBytes      = nRingBytes
-  member val  LatestStartTime = latestStartTime
-  member val TailTime = segs.TailTime
-  member val HeadTime = segs.HeadTime
+  member val  Config      = bufConfig
+  member val  MaxDuration = maxDuration
+  member val  GapDuration = gapDuration
+  member val  NRingBytes  = nRingBytes
+
+  member this.LatestStartTime = latestStartTime
+  member this.TailTime        = segs.TailTime
+  member this.HeadTime        = segs.HeadTime
 
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   

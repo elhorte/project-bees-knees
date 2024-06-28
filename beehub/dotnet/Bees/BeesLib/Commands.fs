@@ -41,10 +41,26 @@ let printContinuously msg ctsToken =
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+
+type OurBgTask(iS: InputStream, name: string, f: InputStream -> CancellationTokenSource -> unit) =
+
+  let wrapper cts =
+    f iS cts
+
+  let bgTask = BgTask.New bgTasks name wrapper
+  
+  member this.Toggle() =
+    match bgTask with
+    | None -> printfn $@"A task by the name of ""%s{name}"" already exists."
+    | Some bgTask ->  
+    print $"Toggle %s{name}"
+    bgTask.Toggle() |> ignore
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press q to stop all background tasks and quit
 let quit cts =
   print "stopAll and quit"
-  bgTasks.StopAll true
+  bgTasks.StopAllAndWait true
   // Tell the caller to quit.
   (cts: CancellationTokenSource).Cancel()
 
@@ -89,9 +105,9 @@ let toggleIntercom consoleRead cts =
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press ^C to stop all background tasks.
-let stopAll() =
+let stopAllAndWait() =
   print "stopAll"
-  bgTasks.StopAll true
+  bgTasks.StopAllAndWait true
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press m to select channel to monitor
@@ -108,22 +124,16 @@ let triggerOscope() =
 
 #if USE_FAKE_DATE_TIME
 
-type Recording(bgTasks: BackgroundTasks, iS: InputStream) =
-
-  member this.Toggle() = () 
+let Recording iS = () 
 
 #else
 
-type Recording(bgTasks: BackgroundTasks, iS: InputStream) =
-
-  let startRecording cts =
+let Recording iS =
+  let startRecording iS cts =
+    let (iS : InputStream            ) = iS
     let (cts: CancellationTokenSource) = cts
     SaveAudioFile.saveAudioFilePeriodically iS "mp3" (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) cts.Token
-  let bgTask = BgTask.New bgTasks "Recording" startRecording
-  
-  member this.Toggle() = 
-    print "toggleRecording"
-    bgTask.Toggle() |> ignore
+  OurBgTask(iS, "Recording", startRecording)
 
 #endif
 
@@ -147,23 +157,20 @@ let listBackgroundTasks() =
 
 #if USE_FAKE_DATE_TIME
 
-type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
-
-  member this.Toggle() = () 
+let VuMeter iS = () 
 
 #else
 
-type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
-  
-  let mutable count    = 0
-  let mutable nextTime = DateTime.Now
-  let mutable maxValue = 0.0f
-  let timesPerSecond = 10.0
-  let period = TimeSpan.FromSeconds (1.0 / timesPerSecond)
-  let nChars = 20
-
-  let startVuMeter cts =
+let VuMeter iS =
+  let startVuMeter iS cts =
+    let (iS : InputStream            ) = iS
     let (cts: CancellationTokenSource) = cts
+    let mutable count    = 0
+    let mutable nextTime = DateTime.Now
+    let mutable maxValue = 0.0f
+    let timesPerSecond = 10.0
+    let period = TimeSpan.FromSeconds (1.0 / timesPerSecond)
+    let nChars = 20
     let sawtoothValue() = float (count % nChars) / float nChars
     /// Update maxValue with samples from the most recent callback.
     let updateMaxValue cbs =
@@ -203,13 +210,24 @@ type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
     let subscription = iS.Subscribe afterCallbackHandler
     cts.Token.WaitHandle.WaitOne() |> ignore
     iS.Unsubscribe subscription |> ignore
-    
-  let bgTask = BgTask.New bgTasks "VuMeter" startVuMeter
-
-  member this.Toggle() = 
-    print "toggleVuMeter"
-    bgTask.Toggle() |> ignore
+  OurBgTask(iS, "VuMeter", startVuMeter)
 
 #endif
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// usage: press x to start/stop sandbox
+
+#if USE_FAKE_DATE_TIME
+
+let Demo iS = () 
+
+#else
+
+let Demo iS =
+  let startSandbox iS cts =
+    let (cts: CancellationTokenSource) = cts
+    waitUntilWithToken (DateTime.Now + (TimeSpan.FromSeconds 5)) cts.Token
+    printfn " Delaying done"
+  OurBgTask(iS, "Recording", startSandbox) // todo this duplicate name should be handled correctly.
+
+#endif

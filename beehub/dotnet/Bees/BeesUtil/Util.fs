@@ -77,3 +77,26 @@ let blockChar height =
   blocks[indexClipped]
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––
+
+open System.Globalization
+
+// Helper function to get time zone abbreviation
+let timeZoneAbbreviation (timeZone: TimeZoneInfo) (dateTime: DateTime) =
+  let timeZoneName = 
+    if timeZone.IsDaylightSavingTime(dateTime) then
+      timeZone.DaylightName
+    else
+      timeZone.StandardName
+  // Extract first letter of each word in timeZoneName
+  timeZoneName.Split(' ')
+  |> Array.map (fun word -> word[0])
+  |> fun initials -> String.Concat initials
+
+/// Returns tuple of two trings: formatted date. local timezone abbreviation.
+let dateTimeFormattedForLocalTimezone format (dt: DateTime) =
+    let tzLocal  = TimeZoneInfo.Local
+    let tzString = timeZoneAbbreviation tzLocal dt
+    let formattedDateTime = dt.ToString(format, CultureInfo.InvariantCulture)
+    formattedDateTime, tzString
+
+//–––––––––––––––––––––––––––––––––––––––––––––––––––

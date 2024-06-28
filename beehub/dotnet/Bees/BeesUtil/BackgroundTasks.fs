@@ -22,6 +22,10 @@ type BgTask = {
 with
 
   static member New bgTasks name runFunc =
+    let (bgTasks: BackgroundTasks) = bgTasks
+    match bgTasks.FindItem name with
+    | Some x -> None
+    | None ->
     let bgTask = {
       BgTasks = bgTasks
       Name    = name
@@ -29,7 +33,7 @@ with
       CTS     = new CancellationTokenSource()
       Active  = NotActive  }
     bgTask.CTS.Dispose()
-    bgTask
+    Some bgTask
   
   /// Starts/Stops a background task.
   /// Returns true if started
@@ -45,6 +49,7 @@ with
 //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 /// Represents a collection of background tasks, each with a name and a CancellationTokenSource.
+/// Only one of each type of BgTask can be running.
 and BackgroundTasks() =
   
   let bgTasks = List<BgTask>()
@@ -89,6 +94,15 @@ and BackgroundTasks() =
     bgTasks
     |> Seq.map (fun {Name = s} -> s)
   
+  /// <summary>
+  /// Returns a BgTask by the given name.
+  /// </summary>
+  /// <returns>
+  /// <c>BgTask option</c>
+  /// </returns>
+  member this.FindItem name =
+    findItem name
+    
   /// <summary>Starts a background task if it is not already running.</summary>
   /// <param bgTask="bgTask">The <c>BgTask</c> to run.</param>
   /// <returns>A boolean, <c>true</c> if the task was started.</returns>
@@ -117,10 +131,21 @@ and BackgroundTasks() =
   /// <summary>
   /// Stops all running background tasks.
   /// </summary>
-  member this.StopAll verbose =
+  member this.StopAll verbose  : bool =
     let bgTasksCopy = bgTasks |> Seq.toArray
     if bgTasksCopy.Length = 0 then
       if verbose then printfn "No tasks running."
+      false
     else
       for bgTask in bgTasksCopy do
         this.Stop bgTask
+      true
+
+  /// <summary>
+  /// Stops all running background tasks.
+  /// </summary>
+  member this.StopAllAndWait verbose =
+    if this.StopAll verbose then
+      printfn "Waiting for one or more tasks to stop." 
+      while bgTasks.Count > 0 do (Task.Delay 1).Wait()
+      if verbose then printfn "All tasks stopped."

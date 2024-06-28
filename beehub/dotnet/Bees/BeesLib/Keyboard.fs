@@ -19,13 +19,14 @@ let processKeyboardCommands beesConfig = task {
     do // install Control-C handler
       let ctrlCEventHandler _ (args: ConsoleCancelEventArgs) =
         Console.Write "^C"
-        stopAll()
+        stopAllAndWait()
         args.Cancel <- true // Prevent the process from terminating when we return.
       Console.CancelKeyPress.AddHandler(ConsoleCancelEventHandler ctrlCEventHandler)
     use cts = new CancellationTokenSource()  // Tells our caller to stop looking for commands from the keyboard.
     use consoleReader = new ConsoleReadAsync()
-    let recording = Recording(bgTasks, inputStream)
-    let vuMeter   = VuMeter  (bgTasks, inputStream)
+    let recording = Recording inputStream
+    let vuMeter   = VuMeter   inputStream
+    let demo      = Demo      inputStream
     printfn "Reading keyboard..."
     printfn "Type a command letter, q for quit."
     while not cts.IsCancellationRequested do
@@ -46,6 +47,7 @@ let processKeyboardCommands beesConfig = task {
       | 's'  ->  triggerSpectrogram   ()     // plot spectrogram of last recording
       | 't'  ->  listBackgroundTasks  ()     // list background tasks
       | 'v'  ->  vuMeter.Toggle       ()     // start/stop cli vu meter
+      | 'x'  ->  demo.Toggle          ()     // demo background task
       | '?'  ->  printfn $"%s{help}"         // show this help message
       | '\r' ->  printfn ""
       | c    ->  printfn $" -> Unknown command: {c}" } 

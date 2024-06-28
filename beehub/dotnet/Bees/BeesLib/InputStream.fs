@@ -101,17 +101,19 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
 
 // initPortAudio() must be called before this constructor.
 type InputStream(beesConfig: BeesConfig) =
+  
   let inputParameters  = beesConfig.InputParameters
   let outputParameters = beesConfig.OutputParameters
   let withEcho         = beesConfig.WithEcho
   let withLogging      = beesConfig.WithLogging
-  let sim              = beesConfig.Simulating 
+  let sim              = beesConfig.Simulating
+  let synchronizer     = Synchronizer.New()
   let bufConfig = {
     AudioDuration  = cbSimAudioDuration sim (fun () -> beesConfig.InputStreamAudioDuration        )
     GapDuration    = cbSimGapDuration   sim (fun () -> beesConfig.InputStreamRingGapDuration * 2.0)
     Simulating     = sim
-    InChannelCount = 1 // inputParameters.channelCount
-    InFrameRate    = 1000 } 
+    InChannelCount = beesConfig.InChannelCount
+    InFrameRate    = beesConfig.InFrameRate } 
 
   // When unmanaged code calls managed code (e.g., a callback from unmanaged to managed),
   // the .NET CLR ensures that the garbage collector will not move referenced managed objects
@@ -126,8 +128,8 @@ type InputStream(beesConfig: BeesConfig) =
     TimeInfo           = PortAudioSharp.StreamCallbackTimeInfo()
     StatusFlags        = PortAudioSharp.StreamCallbackFlags()
     // affected by callbacks
-    Buffer             = AudioBuffer(bufConfig)
-    Synchronizer       = Synchronizer.New()
+    Buffer             = AudioBuffer(bufConfig, synchronizer)
+    Synchronizer       = synchronizer
     // more stuff
     WithEcho           = withEcho
     WithLogging        = withLogging
