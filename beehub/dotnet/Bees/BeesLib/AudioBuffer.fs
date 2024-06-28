@@ -25,24 +25,19 @@ let nFramesOf  frameRate duration = int (round ((duration: _TimeSpan).TotalMicro
 // Config
 
 type BufConfig = {
-  AudioBufferDuration        : _TimeSpan
-  AudioBufferGapDuration     : _TimeSpan // long enough for the largest automatically adjusted frameCount arg to callback
-  SampleSize                 : int
-  InChannelCount             : int
-  InFrameRate                : double
-  Simulating                 : Simulating  }
-with
-
-  member this.FrameSize = this.SampleSize * this.InChannelCount
+  AudioDuration  : _TimeSpan
+  GapDuration    : _TimeSpan // long enough for the largest automatically adjusted frameCount arg to callback
+  InChannelCount : int
+  InFrameRate    : double
+  Simulating     : Simulating  }
 
 let printBufConfig bc =
   let sb = StringBuilder()
-  sb.AppendLine "BufConfig:"                                            |> ignore
-  sb.AppendLine $"  AudioBufferDuration    {bc.AudioBufferDuration   }" |> ignore
-  sb.AppendLine $"  AudioBufferGapDuration {bc.AudioBufferGapDuration}" |> ignore
-  sb.AppendLine $"  SampleSize             {bc.SampleSize            }" |> ignore
-  sb.AppendLine $"  InChannelCount         {bc.InChannelCount        }" |> ignore
-  sb.AppendLine $"  InFrameRate            {bc.InFrameRate           }" |> ignore
+  sb.AppendLine "BufConfig:"                                    |> ignore
+  sb.AppendLine $"  AudioBufferDuration    {bc.AudioDuration }" |> ignore
+  sb.AppendLine $"  AudioBufferGapDuration {bc.GapDuration   }" |> ignore
+  sb.AppendLine $"  InChannelCount         {bc.InChannelCount}" |> ignore
+  sb.AppendLine $"  InFrameRate            {bc.InFrameRate   }" |> ignore
   Console.WriteLine (sb.ToString())
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -206,14 +201,14 @@ type AudioBuffer(bufConfig: BufConfig) =
   let simulating       = bufConfig.Simulating 
   let inChannelCount   = bufConfig.InChannelCount
   let frameRate        = bufConfig.InFrameRate
-  let maxDuration      = cbSimAudioDuration simulating (fun () -> bufConfig.AudioBufferDuration                    )
-  let gapDuration      = cbSimGapDuration   simulating (fun () -> bufConfig.AudioBufferGapDuration * 2.0            )
+  let maxDuration      = cbSimAudioDuration simulating (fun () -> bufConfig.AudioDuration                             )
+  let gapDuration      = cbSimGapDuration   simulating (fun () -> bufConfig.GapDuration * 2.0                         )
   let nRingDataFrames  = cbSimNDataFrames   simulating (fun () -> durationToNFrames bufConfig.InFrameRate maxDuration )
-  let nGapFrames       = cbSimNGapFrames    simulating (fun () -> durationToNFrames bufConfig.InFrameRate gapDuration   )
+  let nGapFrames       = cbSimNGapFrames    simulating (fun () -> durationToNFrames bufConfig.InFrameRate gapDuration )
   let nRingFrames      = nRingDataFrames + (3 * nGapFrames) / 2
   //  assert (nRingDataFrames + nRingGapFrames <= nRingFrames)
   let nRingSamples     = nRingFrames * bufConfig.InChannelCount
-  let frameSize        = bufConfig.FrameSize
+  let frameSize        = bufConfig.InChannelCount * sizeof<float32>
   let nRingBytes       = int nRingFrames * frameSize
 
   let ring            = Array.init<float32> nRingSamples (fun _ -> dummyData)
@@ -392,10 +387,13 @@ type AudioBuffer(bufConfig: BufConfig) =
   
   member private this.SetSegs segsArg = segs <- segsArg
 
-  member val  Config      = bufConfig
-  member val  MaxDuration = maxDuration
-  member val  GapDuration = gapDuration
-  member val  NRingBytes  = nRingBytes
+  member val  Config          = bufConfig
+  member val  MaxDuration     = maxDuration
+  member val  GapDuration     = gapDuration
+  member val  NRingBytes      = nRingBytes
+  member val  LatestStartTime = latestStartTime
+  member val TailTime = segs.TailTime
+  member val HeadTime = segs.HeadTime
 
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   
@@ -404,9 +402,6 @@ type AudioBuffer(bufConfig: BufConfig) =
     
   member this.durationOf nFrames = durationOf frameRate nFrames
   member this.nFramesOf duration = nFramesOf  frameRate duration
-
-  member this.TailTime = segs.TailTime
-  member this.HeadTime = segs.HeadTime
 
 #if USE_FAKE_DATE_TIME
 #else

@@ -8,13 +8,11 @@ open PortAudioSharp
 
 open BeesUtil.DateTimeShim
 
-open BeesUtil.DebugGlobals
 open BeesUtil.DateTimeCalculations
 open BeesUtil.RangeClipper
 open BeesUtil.SaveAsMp3
 open BeesUtil.SaveAsWave
-open BeesUtil.PortAudioUtils
-open BeesLib.BeesConfig
+open BeesLib.AudioBuffer
 open BeesLib.InputStream
 
 
@@ -51,12 +49,12 @@ let saveAudioFile ext (inputStream: InputStream) duration (dateTime: _DateTime) 
                 fprintfn Console.Error "ERROR – Can’t save audio files. %s" msg
                 failwith msg
   let save readResult =
-    let samplesArray = InputStream.CopyFromReadResult readResult
+    let samplesArray = AudioBuffer.CopyFromReadResult readResult
     let sDate = dateTime.ToString("yyyy-MM-dd_HH꞉mm꞉sszzz")  // “modifier letter colon”, not ASCII colon, so macOS accepts it.
     let name = $"save-{sDate}.{ext}"
     Console.WriteLine (sprintf $"  saving %s{name}")
     saveToFile saveFunction readResult.FrameRate readResult.InChannelCount name samplesArray
-  let readResult = inputStream.read dateTime duration
+  let readResult = inputStream.Buffer.read dateTime duration
   let print() = () // Console.Write $"adcStartTime %A{readResult.Time.TimeOfDay}  %A{readResult.Duration} %A{readResult.RangeClip}"
   match readResult.RangeClip with
   | RangeClip.BeforeData    
@@ -114,8 +112,8 @@ let prepareArgumentsForStreamCreation verbose =
 /// <param name="ext">The file type, "mp3" etc.</param>
 /// <param name="cancellationToken">The cancellationToken.</param>
 let saveAudioFileWithWait (inputStream: InputStream) ext period duration startTime (ctsToken: CancellationToken) =
-  inputStream.WaitUntil(startTime           , ctsToken) ; printf $"Recording ..."
-  inputStream.WaitUntil(startTime + duration, ctsToken) ; saveAudioFile ext inputStream duration startTime
+  inputStream.Buffer.WaitUntil(startTime           , ctsToken) ; printf $"Recording ..."
+  inputStream.Buffer.WaitUntil(startTime + duration, ctsToken) ; saveAudioFile ext inputStream duration startTime
 
 /// <summary>
 /// Periodically saves the audio stream to an MP3 file for a specified duration and period.
@@ -135,17 +133,17 @@ let saveAudioFilePeriodically inputStream ext duration period (ctsToken: Cancell
   //             saveFrom saveTime + period
   //               |<– delayUntil saveTime + duration 
   //            |––|   save file 2
-  match roundUp (inputStream: InputStream).HeadTime period with
+  match roundUp (inputStream: InputStream).Buffer.HeadTime period with
   | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
   | Good startTime -> 
   let now = DateTime.Now in printfn $"from now %A{now.TimeOfDay}, wait %A{startTime - now}"
-  inputStream.WaitUntil(startTime)
+  inputStream.Buffer.WaitUntil(startTime)
   let rec saveAt saveTime num =
     if ctsToken.IsCancellationRequested then ()
     else
     saveAudioFileWithWait inputStream ext period duration startTime ctsToken
-    inputStream.WaitUntil(saveTime           , ctsToken) ; printf $"Recording {num} ..."
-    inputStream.WaitUntil(saveTime + duration, ctsToken) ; saveAudioFile ext inputStream duration saveTime
+    inputStream.Buffer.WaitUntil(saveTime           , ctsToken) ; printf $"Recording {num} ..."
+    inputStream.Buffer.WaitUntil(saveTime + duration, ctsToken) ; saveAudioFile ext inputStream duration saveTime
     saveAt (saveTime + period) (num+1)
   saveAt startTime 1
 

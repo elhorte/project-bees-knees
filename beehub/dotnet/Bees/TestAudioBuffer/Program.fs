@@ -230,14 +230,12 @@ let main _ =
   let sim = SimTimes { AudioDuration = _TimeSpan.FromMilliseconds  56 ; GapDuration = _TimeSpan.FromMilliseconds 15 }
   initPortAudio()
   let sampleRate, inputParameters, outputParameters = prepareArgumentsForStreamCreation()
-  let sampleSize = sizeof<float32>
   audioConfig <- {
-    AudioBufferDuration    = _TimeSpan.FromMilliseconds 1000 // These are ignored when the SimTimes struct is used, as above
-    AudioBufferGapDuration = _TimeSpan.FromMilliseconds   20 // These are ignored when the SimTimes struct is used, as above
-    SampleSize             = sampleSize
-    Simulating             = sim 
-    InChannelCount         = 1 // inputParameters.channelCount
-    InFrameRate            = 1000 }
+    AudioDuration  = _TimeSpan.FromMilliseconds 1000 // These are ignored when the SimTimes struct is used, as above
+    GapDuration    = _TimeSpan.FromMilliseconds   20 // These are ignored when the SimTimes struct is used, as above
+    Simulating     = sim 
+    InChannelCount = 1 // inputParameters.channelCount
+    InFrameRate    = 1000 }
   printBufConfig audioConfig
 //keyboardInputInit()
   try

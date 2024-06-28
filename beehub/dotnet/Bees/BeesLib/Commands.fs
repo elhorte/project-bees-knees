@@ -168,9 +168,9 @@ type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
     /// Update maxValue with samples from the most recent callback.
     let updateMaxValue cbs =
       let cbs = (cbs: CbState)
-      let first = cbs.LatestBlockIndex
+      let first = cbs.Buffer.LatestBlockIndex
       let last  = first + int cbs.FrameCount - 1
-      for i in first .. last do  maxValue <- max maxValue (abs cbs.Ring[i])
+      for i in first .. last do  maxValue <- max maxValue (abs cbs.Buffer.Ring[i])
   //  Console.WriteLine $"{first} {last} {maxValue}"
     let updateDisplay (cbs: CbState) value =
       let stringDisplay portion =
@@ -182,7 +182,7 @@ type VuMeter(bgTasks: BackgroundTasks, iS: InputStream) =
         String(Array.init nChars ch)
       let logValue = convertToDb 50.0 (float value)
       let s = stringDisplay logValue
-      let dt = cbs.BlockAdcStartTime
+      let dt = cbs.Buffer.LatestStartTime
       let ts = DateTime.Now - dt 
       Console.Write $"  %s{s}\r" //  %A{dt} %A{ts}
   //  Console.WriteLine $"  %f{float maxValue}"
