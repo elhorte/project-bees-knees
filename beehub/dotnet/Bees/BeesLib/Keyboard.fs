@@ -27,6 +27,7 @@ let processKeyboardCommands beesConfig = task {
     let recording = Recording inputStream
     let vuMeter   = VuMeter   inputStream
     let demo      = Demo      inputStream
+    let demo2     = Demo2     inputStream
     printfn "Reading keyboard..."
     printfn "Type a command letter, q for quit."
     while not cts.IsCancellationRequested do
@@ -45,9 +46,10 @@ let processKeyboardCommands beesConfig = task {
       | 'o'  ->  triggerOscope        ()     // one shot process to view oscope
       | 'r'  ->  recording.Toggle     ()     // record audio
       | 's'  ->  triggerSpectrogram   ()     // plot spectrogram of last recording
-      | 't'  ->  listBackgroundTasks  ()     // list background tasks
+      | 't'  ->  listJobs             ()     // list background tasks
       | 'v'  ->  vuMeter.Toggle       ()     // start/stop cli vu meter
       | 'x'  ->  demo.Toggle          ()     // demo background task
+      | 'z'  ->  demo2.Toggle         ()     // demo background task
       | '?'  ->  printfn $"%s{help}"         // show this help message
       | '\r' ->  printfn ""
       | c    ->  printfn $" -> Unknown command: {c}" } 

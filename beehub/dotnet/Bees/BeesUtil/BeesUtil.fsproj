@@ -13,7 +13,7 @@
         <Compile Include="Util.fs"                 />
         <Compile Include="Logger.fs"               />
         <Compile Include="CancelAfterDelay.fs"     />
-        <Compile Include="BackgroundTasks.fs"      />
+        <Compile Include="JobsManager.fs"          />
         <Compile Include="CallbackHandoff.fs"      />
         <Compile Include="PortAudioUtils.fs"       />
         <Compile Include="AudioUtils.fs"           />

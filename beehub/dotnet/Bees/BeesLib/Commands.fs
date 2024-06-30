@@ -7,7 +7,7 @@ open System.Threading.Tasks
 open ConsoleReadAsync
 
 open BeesUtil.Util
-open BeesUtil.BackgroundTasks
+open BeesUtil.JobsManager
 open BeesUtil.PortAudioUtils
 open BeesUtil.SubscriberList
 open BeesLib.InputStream
@@ -29,9 +29,8 @@ let help = """
  ^C stop all background tasks"""
 
 
-let print name = $" -> {name}" |> printfn "%s"
+let printCommandName name = $" -> {name}" |> printfn "%s"
 
-let bgTasks = BackgroundTasks()
 let mutable channel = 1
 
 let printContinuously msg ctsToken =
@@ -40,44 +39,45 @@ let printContinuously msg ctsToken =
     (Task.Delay 1000).Wait()
 
 
+let jobsManager = JobsManager()
+
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
-type OurBgTask(iS: InputStream, name: string, f: InputStream -> CancellationTokenSource -> unit) =
+type OurJob(iS: InputStream, name: string, f: InputStream -> CancellationTokenSource -> Task<unit>) =
 
-  let wrapper cts =
-    f iS cts
+  let wrapper cts  : unit =  (f iS cts).Wait()
 
-  let bgTask = BgTask.New bgTasks name wrapper
+  let job = Job.New jobsManager name wrapper
   
   member this.Toggle() =
-    match bgTask with
-    | None -> printfn $@"A task by the name of ""%s{name}"" already exists."
-    | Some bgTask ->  
-    print $"Toggle %s{name}"
-    bgTask.Toggle() |> ignore
+    match job with
+    | None -> printfn $@"A job by the name of ""%s{name}"" already exists."
+    | Some job ->  
+    printCommandName $"Toggle %s{name}"
+    job.Toggle() |> ignore
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press q to stop all background tasks and quit
 let quit cts =
-  print "stopAll and quit"
-  bgTasks.StopAllAndWait true
+  printCommandName "stopAll and quit"
+  jobsManager.StopAllAndWait true
   // Tell the caller to quit.
   (cts: CancellationTokenSource).Cancel()
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press c to check audio pathway for over/underflows
 let checkStreamStatus n =
-  print "checkStreamStatus 10"
+  printCommandName "checkStreamStatus 10"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press d for one shot process to see device list
 let showAudioDeviceList() =
-  print "showAudioDeviceList"
+  printCommandName "showAudioDeviceList"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press f for one shot process to see fft
 let triggerFft() =
-  print "triggerFft"
+  printCommandName "triggerFft"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press i to start/stop listening, 0, 1, 2, or 3 to select channel
@@ -85,7 +85,7 @@ let triggerFft() =
 let toggleIntercom consoleRead cts =
   let cr = (consoleRead: ConsoleReadAsync)
   let cts = (cts: CancellationTokenSource)
-  print "toggleIntercom"
+  printCommandName "toggleIntercom"
   let rec loop() = task {
     let! keyInfo = cr.readKeyAsync cts.Token
     if cts.Token.IsCancellationRequested then
@@ -106,18 +106,18 @@ let toggleIntercom consoleRead cts =
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press ^C to stop all background tasks.
 let stopAllAndWait() =
-  print "stopAll"
-  bgTasks.StopAllAndWait true
+  printCommandName "stopAll"
+  jobsManager.StopAllAndWait true
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press m to select channel to monitor
 let changeMonitorChannel() =
-  print "changeMonitorChannel"
+  printCommandName "changeMonitorChannel"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press o to view oscope
 let triggerOscope() =
-  print "triggerOscope"
+  printCommandName "triggerOscope"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press r to start/stop record
@@ -129,28 +129,28 @@ let Recording iS = ()
 #else
 
 let Recording iS =
-  let startRecording iS cts =
+  let start iS cts = task {
     let (iS : InputStream            ) = iS
     let (cts: CancellationTokenSource) = cts
-    SaveAudioFile.saveAudioFilePeriodically iS "mp3" (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) cts.Token
-  OurBgTask(iS, "Recording", startRecording)
+    do! SaveAudioFile.saveAudioFilePeriodically iS "mp3" (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) cts.Token  }
+  OurJob(iS, "Recording", start)
 
 #endif
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press s to plot spectrogram of last recording
 let triggerSpectrogram() =
-  print "triggerSpectrogram"
+  printCommandName "triggerSpectrogram"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press t to list background tasks
-let listBackgroundTasks() =
-  print "listBackgroundTasks"
-  let list =
-    bgTasks.ListNames
-    |> Seq.map (fun s -> "  " + s)
+let listJobs() =
+  printCommandName "ListJobs"
+  let names = Seq.toArray (jobsManager.ListNames())
+  if names.Length <> 0 then
+    names
     |> String.concat "\n"
-  printf "%s" list
+    |> printfn "%s"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press v to start/stop cli vu meter
@@ -162,7 +162,7 @@ let VuMeter iS = ()
 #else
 
 let VuMeter iS =
-  let startVuMeter iS cts =
+  let start iS cts = task {
     let (iS : InputStream            ) = iS
     let (cts: CancellationTokenSource) = cts
     let mutable count    = 0
@@ -194,7 +194,7 @@ let VuMeter iS =
       Console.Write $"  %s{s}\r" //  %A{dt} %A{ts}
   //  Console.WriteLine $"  %f{float maxValue}"
     let afterCallbackHandler (_, cbs: CbState) _ unsubscribeMe =
-  //  if count > 50 then cts.Cancel()  // A BgTask can cancel itself.
+  //  if count > 50 then cts.Cancel()  // A Job can cancel itself.
       if cts.Token.IsCancellationRequested then
         unsubscribeMe()
       else
@@ -209,13 +209,13 @@ let VuMeter iS =
     nextTime <- DateTime.Now + period
     let subscription = iS.Subscribe afterCallbackHandler
     cts.Token.WaitHandle.WaitOne() |> ignore
-    iS.Unsubscribe subscription |> ignore
-  OurBgTask(iS, "VuMeter", startVuMeter)
+    iS.Unsubscribe subscription |> ignore }
+  OurJob(iS, "VuMeter", start)
 
 #endif
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// usage: press x to start/stop sandbox
+// usage: press x to start/stop Demo
 
 #if USE_FAKE_DATE_TIME
 
@@ -224,10 +224,38 @@ let Demo iS = ()
 #else
 
 let Demo iS =
-  let startSandbox iS cts =
+  let start iS cts = task {
     let (cts: CancellationTokenSource) = cts
-    waitUntilWithToken (DateTime.Now + (TimeSpan.FromSeconds 5)) cts.Token
-    printfn " Delaying done"
-  OurBgTask(iS, "Recording", startSandbox) // todo this duplicate name should be handled correctly.
+    try
+      do! waitUntilWithToken (DateTime.Now + (TimeSpan.FromSeconds 5)) cts.Token
+      printfn "  Demo delaying done"
+    with :? OperationCanceledException -> 
+      printfn "  Demo canceled" }
+  OurJob(iS, "Demo", start)
+
+#endif
+
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// usage: press z to start/stop Demo2
+
+#if USE_FAKE_DATE_TIME
+
+let Demo iS = () 
+
+#else
+
+let Demo2 iS =
+  let start iS cts = task {
+    let (cts: CancellationTokenSource) = cts
+    let rec waitUntil dt = task {
+      if DateTime.Now < dt && not cts.IsCancellationRequested then
+        try
+          do! Task.Delay(TimeSpan.FromSeconds 1, cts.Token)
+        with :? OperationCanceledException ->
+          printfn "  Demo2 canceled"
+        do! waitUntil dt }
+    do! waitUntil (DateTime.Now + (TimeSpan.FromSeconds 5))
+    printfn "  Demo2 delaying done" }
+  OurJob(iS, "Demo2", start)
 
 #endif

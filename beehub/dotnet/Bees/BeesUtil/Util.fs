@@ -52,13 +52,13 @@ let delayMs ms =
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––
 
-let waitUntil dateTime =
+let waitUntil dateTime = task {
   let duration = dateTime - DateTime.Now
-  if duration > TimeSpan.Zero then  Task.Delay(duration).Wait()
+  if duration > TimeSpan.Zero then  do! Task.Delay(duration) }
 
-let waitUntilWithToken dateTime (ctsToken: CancellationToken) =
+let waitUntilWithToken dateTime (ctsToken: CancellationToken) = task {
   let duration = dateTime - DateTime.Now
-  if duration > TimeSpan.Zero then  Task.Delay(duration, ctsToken).Wait()
+  if duration > TimeSpan.Zero then  do! Task.Delay(duration, ctsToken) }
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––
 

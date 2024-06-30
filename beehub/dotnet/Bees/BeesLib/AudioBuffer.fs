@@ -407,12 +407,14 @@ type AudioBuffer(bufConfig: BufConfig, synchronizer) =
 #else
 
   /// Wait until the buffer contains the given DateTime.
-  member this.WaitUntil dateTime =
-    while this.HeadTime < dateTime do waitUntil dateTime
+  member this.WaitUntil dateTime = task {
+    while this.HeadTime < dateTime do
+      do! waitUntil dateTime }
   
   /// Wait until the buffer contains the given DateTime.
-  member this.WaitUntil(dateTime, ctsToken: CancellationToken) =
-    while this.HeadTime < dateTime do waitUntilWithToken dateTime ctsToken
+  member this.WaitUntil(dateTime, ctsToken: CancellationToken) = task {
+    while this.HeadTime < dateTime do
+      do! waitUntilWithToken dateTime ctsToken }
 
 #endif    
 

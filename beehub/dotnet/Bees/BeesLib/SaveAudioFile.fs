@@ -112,9 +112,15 @@ let prepareArgumentsForStreamCreation verbose =
 /// <param name="duration">The duration of each saved audio file.</param>
 /// <param name="ext">The file type, "mp3" etc.</param>
 /// <param name="cancellationToken">The cancellationToken.</param>
-let saveAudioFileWithWait (inputStream: InputStream) ext duration startTime (ctsToken: CancellationToken) =
-  inputStream.Buffer.WaitUntil(startTime           , ctsToken) ; printf $"Recording ..."
-  inputStream.Buffer.WaitUntil(startTime + duration, ctsToken) ; saveAudioFile ext inputStream duration startTime
+/// <remarks>When cancelled, returns early without throwing.</remarks>
+let saveAudioFileWithWait (inputStream: InputStream) ext duration startTime (ctsToken: CancellationToken) = task {
+  try
+    do! inputStream.Buffer.WaitUntil(startTime           , ctsToken)
+    printf $"  Recording ..."
+    do! inputStream.Buffer.WaitUntil(startTime + duration, ctsToken)
+    saveAudioFile ext inputStream duration startTime
+  with :? OperationCanceledException ->
+    printf $"  Recording canceled"  }
 
 /// <summary>
 /// Periodically saves the audio stream to an MP3 file for a specified duration and period.
@@ -124,7 +130,8 @@ let saveAudioFileWithWait (inputStream: InputStream) ext duration startTime (cts
 /// <param name="duration">The duration of each saved audio file.</param>
 /// <param name="period">The interval between each save.</param>
 /// <param name="cancellationToken">The cancellationToken.</param>
-let saveAudioFilePeriodically inputStream ext duration period (ctsToken: CancellationToken) =
+/// <remarks>When cancelled, returns early without throwing.</remarks>
+let saveAudioFilePeriodically inputStream ext duration period (ctsToken: CancellationToken) = task {
   //  ....|.....|.....|....
   //   |<––––––––– Now
   //      |<– startTIme
@@ -138,11 +145,11 @@ let saveAudioFilePeriodically inputStream ext duration period (ctsToken: Cancell
   | Error s -> failwith $"%s{s} – unable to calculate start time for saving audio files"
   | Good startTime -> 
   let now = DateTime.Now in printfn $"from now %A{now.TimeOfDay}, wait %A{startTime - now}"
-  let rec saveAt saveTime num =
+  let rec saveAt saveTime num = task {
     if ctsToken.IsCancellationRequested then ()
     else
-    saveAudioFileWithWait inputStream ext duration saveTime ctsToken
-    saveAt (saveTime + period) (num+1)
-  saveAt startTime 1
+    do! saveAudioFileWithWait inputStream ext duration saveTime ctsToken
+    do! saveAt (saveTime + period) (num+1) }
+  do! saveAt startTime 1 }
 
 #endif
