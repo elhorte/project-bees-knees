@@ -120,7 +120,7 @@ let saveAudioFileWithWait (inputStream: InputStream) ext duration startTime (cts
     do! inputStream.Buffer.WaitUntil(startTime + duration, ctsToken)
     saveAudioFile ext inputStream duration startTime
   with :? OperationCanceledException ->
-    printf $"  Recording canceled"  }
+    printfn $"  Recording canceled"  }
 
 /// <summary>
 /// Periodically saves the audio stream to an MP3 file for a specified duration and period.

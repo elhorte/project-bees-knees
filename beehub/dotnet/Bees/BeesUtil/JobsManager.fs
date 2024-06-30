@@ -64,7 +64,10 @@ and JobsManager() =
     let wrapper() =
       Console.WriteLine $"  {job.Name} starting"
       try
-        job.Run job.CTS
+        try
+          job.Run job.CTS
+        with e ->
+          Console.WriteLine $"  {job.Name} %s{e.Message}" 
       finally
         Console.WriteLine $"  {job.Name} finished"
         activeJobs.Remove job |> ignore

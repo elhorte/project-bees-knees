@@ -29,7 +29,7 @@ let help = """
  ^C stop all background tasks"""
 
 
-let printCommandName name = $" -> {name}" |> printfn "%s"
+let printJobName name = $" -> {name}" |> printfn "%s"
 
 let mutable channel = 1
 
@@ -53,13 +53,13 @@ type OurJob(iS: InputStream, name: string, f: InputStream -> CancellationTokenSo
     match job with
     | None -> printfn $@"A job by the name of ""%s{name}"" already exists."
     | Some job ->  
-    printCommandName $"Toggle %s{name}"
+    printJobName $"Toggle %s{name}"
     job.Toggle() |> ignore
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press q to stop all background tasks and quit
 let quit cts =
-  printCommandName "stopAll and quit"
+  printJobName "stopAll and quit"
   jobsManager.StopAllAndWait true
   // Tell the caller to quit.
   (cts: CancellationTokenSource).Cancel()
@@ -67,17 +67,17 @@ let quit cts =
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press c to check audio pathway for over/underflows
 let checkStreamStatus n =
-  printCommandName "checkStreamStatus 10"
+  printJobName "checkStreamStatus 10"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press d for one shot process to see device list
 let showAudioDeviceList() =
-  printCommandName "showAudioDeviceList"
+  printJobName "showAudioDeviceList"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press f for one shot process to see fft
 let triggerFft() =
-  printCommandName "triggerFft"
+  printJobName "triggerFft"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press i to start/stop listening, 0, 1, 2, or 3 to select channel
@@ -85,7 +85,7 @@ let triggerFft() =
 let toggleIntercom consoleRead cts =
   let cr = (consoleRead: ConsoleReadAsync)
   let cts = (cts: CancellationTokenSource)
-  printCommandName "toggleIntercom"
+  printJobName "toggleIntercom"
   let rec loop() = task {
     let! keyInfo = cr.readKeyAsync cts.Token
     if cts.Token.IsCancellationRequested then
@@ -106,18 +106,18 @@ let toggleIntercom consoleRead cts =
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press ^C to stop all background tasks.
 let stopAllAndWait() =
-  printCommandName "stopAll"
+  printJobName "stopAll"
   jobsManager.StopAllAndWait true
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press m to select channel to monitor
 let changeMonitorChannel() =
-  printCommandName "changeMonitorChannel"
+  printJobName "changeMonitorChannel"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press o to view oscope
 let triggerOscope() =
-  printCommandName "triggerOscope"
+  printJobName "triggerOscope"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press r to start/stop record
@@ -140,12 +140,12 @@ let Recording iS =
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press s to plot spectrogram of last recording
 let triggerSpectrogram() =
-  printCommandName "triggerSpectrogram"
+  printJobName "triggerSpectrogram"
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press t to list background tasks
 let listJobs() =
-  printCommandName "ListJobs"
+  printJobName "listJobs"
   let names = Seq.toArray (jobsManager.ListNames())
   if names.Length <> 0 then
     names
