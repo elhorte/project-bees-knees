@@ -22,8 +22,7 @@ open CSharpHelpers
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // InputStream
 
-// An InputStream object makes recent input data available to clients via a buffer,
-// The InputStream class is callable from C# or F# and is written in F#.
+// An InputStream object makes recent input data available to clients via a buffer.
 //
 // The interface to the operating system’s audio I/O is provided by the PortAudio library,
 // which is written in C and made available on .NET via the PortAudioSharp library, written
@@ -32,16 +31,11 @@ open CSharpHelpers
 // but runs in managed code.  The callback function is written to be quick and not to do any
 // allocations.
 //
-// Synchronization between the interrupt-time addition of input data to the buffer and client
-// managed code that reads the buffered data is handled in a lock-free manner transparent to
-// the client.
-
-//–––––––––––––––––––––––––––––––––
-// InputStream internals – the buffer
+// A client gets data from the InputStream via the Buffer member.
 //
-// The callback (at interrupt time) hands off to a background Task for further processing in managed code.
+// The InputStream class is callable from C# or F# and is written in F#.
 
-
+/// Callback state.
 type CbState = {
   // callback args from PortAudioSharp
   mutable Input              : IntPtr  // block of incoming data 
@@ -59,7 +53,8 @@ type CbState = {
   mutable PaStreamTime       : unit -> PaTime  } // Function to get the current date and time, in PaTime units
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// The callback – Copy data from the audio driver into our ring.
+// The callback – Copies data from the audio driver into the Buffer,
+// then hands off to a background Task for further processing in managed code.
 
 let mutable threshold = 0 // for debugging, to get a printout from at reasonable intervals
 
@@ -68,31 +63,28 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
   let (output: IntPtr) = output
   let cbs     = GCHandle.FromIntPtr(userDataPtr).Target :?> CbState
   let buffer  = cbs.Buffer
-  if cbs.WithEcho then
-    let size = uint64 (frameCount * uint32 buffer.FrameSize)
-    Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
   let inputBufferAdcTime = timeInfo.inputBufferAdcTime
   let inputBufferAdcDateTime() =
     let f = cbs.PaStreamTime()
     let secondsSinceAdcTime = f - inputBufferAdcTime
     let timeTilNow = _TimeSpan.FromSeconds secondsSinceAdcTime
     _DateTime.Now - timeTilNow
+  if cbs.WithEcho then
+    let size = uint64 (frameCount * uint32 buffer.FrameSize)
+    Buffer.MemoryCopy(input.ToPointer(), output.ToPointer(), size, size)
   cbs.Synchronizer.EnterUnstable()
   // callback args from PortAudioSharp
-  cbs.Input        <- input
-  cbs.Output       <- output
-  cbs.FrameCount   <- frameCount // in the ”block“ to be copied
-  cbs.TimeInfo     <- timeInfo
-  cbs.StatusFlags  <- statusFlags
+  cbs.Input       <- input
+  cbs.Output      <- output
+  cbs.FrameCount  <- frameCount // in the ”block“ to be copied
+  cbs.TimeInfo    <- timeInfo
+  cbs.StatusFlags <- statusFlags
   buffer.AddSystemData(input, frameCount, inputBufferAdcDateTime)
   do
     let curHeadNS = buffer.LatestBlockIndex * buffer.InChannelCount
     let nSamples  = int frameCount          * buffer.InChannelCount
     UnsafeHelpers.CopyPtrToArrayAtIndex(input, buffer.Ring, curHeadNS, nSamples)
-//Console.Write "."
-//if cbs.Synchronizer.N1 % 20us = 0us then  Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / nFrames} %10f{timeInfo.inputBufferAdcTime - cbs.TimeInfoBase}"
   cbs.Synchronizer.LeaveUnstable()
-//cbs.Logger.Add cbs.SeqNum2 cbs.TimeStamp "cb bufs=" ""
   cbs.CallbackHandoff.HandOff()
   PortAudioSharp.StreamCallbackResult.Continue
 
@@ -157,19 +149,11 @@ type InputStream(beesConfig: BeesConfig) =
       paStream
   let subscriberList = new SubscriberList<InputStream*CbState>()
 
-  do
-//  printfn $"{beesConfig.InFrameRate}"
-    ()
-
   member  this.echoEnabled   () = Volatile.Read &cbState.WithEcho
   member  this.loggingEnabled() = Volatile.Read &cbState.WithLogging
 
-  member val  CbState           = cbState
-  member val  Buffer            = cbState.Buffer
-  member val  StartTime         = cbState.Buffer.StartTime
-//member val  RingDuration      = cbState.Buffer.MaxDuration
-//member val  GapDuration       = cbState.Buffer.GapDuration
-//member val  NRingBytes        = cbState.Buffer.NRingBytes
+  member val  CbState = cbState
+  member val  Buffer  = cbState.Buffer
 
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -212,16 +196,16 @@ type InputStream(beesConfig: BeesConfig) =
   /// Called from a <c>Task</c> (managed code) as soon as possible after the callback.
   /// </summary>
   member this.AfterCallback() =
-    let cbs = this.CbState
+    let cbs    = this.CbState
+    let buffer = this.Buffer
     subscriberList.Broadcast (this, cbs)
-    if cbs.Buffer.Simulating <> NotSimulating then ()
-    else
-    if cbs.Buffer.LatestBlockIndex > threshold then
-      threshold <- threshold + int (roundAway cbs.Buffer.FrameRate)
-  //  let sinceStart = cbs.TimeInfo.inputBufferAdcTime - this.PaStream.Time
-  //  Console.WriteLine $"%6d{cbs.Segs.Cur.Head} %3d{cbs.Segs.Cur.Head / int cbs.FrameCount} %10f{sinceStart}"
-  //  if cbState.Simulating = NotSimulating then Console.Write ","
-      ()
+//  if buffer.Simulating <> NotSimulating then ()
+//  else
+//  if buffer.LatestBlockIndex > threshold then
+//    threshold <- threshold + int (roundAway buffer.FrameRate)
+//    let sinceStart = cbs.TimeInfo.inputBufferAdcTime - paStream.Time
+//    Console.WriteLine $"%6d{buffer.Segs.Cur.Head} %3d{buffer.Segs.Cur.Head / int cbs.FrameCount} %10f{sinceStart}"
+//  if this.Buffer.Simulating = NotSimulating then Console.Write ","
    
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 

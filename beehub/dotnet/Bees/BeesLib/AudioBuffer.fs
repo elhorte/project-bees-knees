@@ -97,29 +97,29 @@ type Seg = {
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // AudioBuffer
 
-// An AudioBuffer object makes recent input data available to clients via a buffer.
+// An AudioBuffer holds audio data addressable by the DateTime when it was produced.
+//
 // The storage capacity of the buffer is specified as a TimeSpan.
-// A client Task can call the Read method with a desired DateTime and a TimeSpan, and
-// the Read method responds with data having as much as possible of the specified range.
-// The AudioBuffer class is callable from C# or F# and is written in F#.
+// A client Task can call the Read method with a desired DateTime and TimeSpan, and
+// the Read method responds with data containing as much as possible of the specified range.
+// The AudioBuffer class is usable from C# or F# and is written in F#.
 
 //–––––––––––––––––––––––––––––––––
 // AudioBuffer internals – the buffer
 //
 // The buffer is a ring buffer.  Another way to describe a ring buffer is as a queue of two
-// segments sharing space in a fixed array: segs.Cur grows as data is appended to its head,
-// and segs.Old shrinks as data is trimmed from its tail.  This implementation ensures a gap
-// of a given TimeSpan in the space between segs.Cur.Head and segs.Old.Tail.  This gap gives
-// a client reading data from the buffer a grace period in which to access the data to which
+// segments sharing space in a fixed array:
+// - segs.Cur grows as data is appended to its head until it is renamed to segs.Old and is replaced by a new segs.Cur.
+// - segs.Old shrinks as data is trimmed from its tail until it disappears.
+// The implementation ensures a gap of a given TimeSpan in the space between segs.Cur.Head and segs.Old.Tail.
+// This gap gives a client reading data from the buffer a grace period in which to access the data to which
 // it has been given access, without worry that the data could be overwritten with new data.
-// The gap thus avoids a read–write race condition without locking.
-//
-// The callback (at interrupt time) hands off to a background Task for further processing in managed code.
+// The gap serves to avoid a read–write race condition without locking.
 
 // Internal management of the ring is governed by a State variable.
 
 type State = // |––––––––––– ring ––––––––––––|
-  | AtStart  // |             gap             |
+  | AtStart  // |             gap             | There is no Cur segment yet.
   | AtBegin  // |  Cur  |         gap         | This initial gap is of no consequence.
   | Moving   // | gapB |  Cur  |     gapA     | Cur has grown so much that Cur.Tail is being trimmed.
   | AtEnd    // |      gapB    |  Cur  | gapA | like Moving but gapA has become too small for more Cur.Head growth.
@@ -127,12 +127,12 @@ type State = // |––––––––––– ring ––––––––
 
 // Repeating lifecycle:  Empty –> AtBegin –> Moving –> AtEnd –> Chasing –> Moving ...
 //
-//      || time –>                  R               (R = repeat)         R                                    R
-//      ||                          |                                    |                                    |
-//      || Empty     | AtBegin      | Moving     | AtEnd | Chasing       | Moving     | AtEnd | Chasing       |
-// seg0 || inactive  | Cur growing  | Cur moving         | Old shrinking | inactive           | Cur growing   |
-// seg1 || inactive  | inactive     | inactive           | Cur growing   | Cur moving         | Old shrinking |
-//      ||                                               X     (X = exchange Cur and Old)     X
+//       || time –>                  R               (R = repeat)             R                                        R
+//       ||                          |                                        |                                        |
+// state || Empty     | AtBegin      | Moving     | AtEnd     | Chasing       | Moving     | AtEnd     | Chasing       |
+// seg0  || inactive  | Cur growing  | Cur moving   Cur stuck | Old shrinking | inactive   |           | Cur growing   |
+// seg1  || inactive  | inactive     | inactive               | Cur growing   | Cur moving | Cur stuck | Old shrinking |
+//       ||                                                   X     (X = exchange Cur and Old)         X
 
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -159,7 +159,7 @@ with
     assert (not this.Cur.Active)
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// The AudioBuffer class
+// ReadResult
 
 type RingSpan = {
   Index   : int  // in frames
@@ -176,7 +176,6 @@ let partsToString (parts: Parts) =
     | 2 -> $"%A{parts[0].ToString()} %A{parts[1].ToString()}" 
     | _ -> "(bad parts)"
 
-
 type ReadResult = {
   Ring           : float32[]  // source array
   InChannelCount : int
@@ -190,27 +189,28 @@ with
 
   override t.ToString() = $"%d{t.Parts.Length} %A{t.RangeClip} %d{t.NSamples} L %s{partsToString t.Parts}"
 
+//––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+// The AudioBuffer class
 
 let durationToNFrames frameRate (duration: _TimeSpan) =
   let nFramesApprox = duration.TotalSeconds * frameRate
   int (round nFramesApprox)
 
-
+// A buffer of past input audio data, accessible by DateTime.
 type AudioBuffer(bufConfig: BufConfig, synchronizer) =
   let (synchronizer: Synchronizer) = synchronizer
-  let simulating       = bufConfig.Simulating 
-  let inChannelCount   = bufConfig.InChannelCount
-  let frameRate        = bufConfig.InFrameRate
-  let maxDuration      = cbSimAudioDuration simulating (fun () -> bufConfig.AudioDuration                             )
-  let gapDuration      = cbSimGapDuration   simulating (fun () -> bufConfig.GapDuration * 2.0                         )
-  let nRingDataFrames  = cbSimNDataFrames   simulating (fun () -> durationToNFrames bufConfig.InFrameRate maxDuration )
-  let nGapFrames       = cbSimNGapFrames    simulating (fun () -> durationToNFrames bufConfig.InFrameRate gapDuration )
-  let nRingFrames      = nRingDataFrames + (3 * nGapFrames) / 2
+  let simulating      = bufConfig.Simulating 
+  let inChannelCount  = bufConfig.InChannelCount
+  let frameRate       = bufConfig.InFrameRate
+  let maxDuration     = cbSimAudioDuration simulating (fun () -> bufConfig.AudioDuration                             )
+  let gapDuration     = cbSimGapDuration   simulating (fun () -> bufConfig.GapDuration * 2.0                         )
+  let nRingDataFrames = cbSimNDataFrames   simulating (fun () -> durationToNFrames bufConfig.InFrameRate maxDuration )
+  let nGapFrames      = cbSimNGapFrames    simulating (fun () -> durationToNFrames bufConfig.InFrameRate gapDuration )
+  let nRingFrames     = nRingDataFrames + (3 * nGapFrames) / 2
   //  assert (nRingDataFrames + nRingGapFrames <= nRingFrames)
-  let nRingSamples     = nRingFrames * bufConfig.InChannelCount
-  let frameSize        = bufConfig.InChannelCount * sizeof<float32>
-  let nRingBytes       = int nRingFrames * frameSize
-
+  let nRingSamples    = nRingFrames * bufConfig.InChannelCount
+  let frameSize       = bufConfig.InChannelCount * sizeof<float32>
+  let nRingBytes      = int nRingFrames * frameSize
   let ring            = Array.init<float32> nRingSamples (fun _ -> dummyData)
 
   // modified by most recent data addition
@@ -285,9 +285,9 @@ type AudioBuffer(bufConfig: BufConfig, synchronizer) =
     Console.WriteLine $"%s{s0}%s{s2}"
 
   //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-  // The callback – Copy data from the audio driver into our ring.
+  // Adding data to the ring buffer.
 
-  // only for debugging
+  // useful only for debugging
   let markRingSpanAsDead srcFrameIndex nFrames =
     let srcFrameIndexNS = srcFrameIndex * inChannelCount
     let nSamples        = nFrames       * inChannelCount
@@ -295,6 +295,8 @@ type AudioBuffer(bufConfig: BufConfig, synchronizer) =
 
   let mutable threshold = 0 // for debugging, to get a printout from at reasonable intervals
 
+  /// Copies a system array into the ring buffer.
+  /// Called from a PortAudio callback interrupt.
   let addSystemData input frameCount (startTime: unit -> _DateTime) =
     let (input : IntPtr) = input
     let nFrames = int frameCount
@@ -380,7 +382,7 @@ type AudioBuffer(bufConfig: BufConfig, synchronizer) =
   //Console.Write(".")
   //if Synchronizer.N1 % 20us = 0us then  Console.WriteLine $"%6d{segs.Cur.Head} %3d{segs.Cur.Head / nFrames} %10f{timeInfo.inputBufferAdcTime - TimeInfoBase}"
     synchronizer.LeaveUnstable()
-
+  
   do
     printfn $"{bufConfig.InFrameRate}"
   
