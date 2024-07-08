@@ -1,13 +1,11 @@
-module BeesLib.AudioBuffer
+module BeesUtil.AudioBuffer
 
 open System
 open System.Text
-open System.Threading
 
 open BeesUtil.DateTimeShim
 
 open BeesUtil.DebugGlobals
-open BeesUtil.Util
 open BeesUtil.Synchronizer
 open BeesUtil.RangeClipper
 open CSharpHelpers
@@ -197,8 +195,7 @@ let durationToNFrames frameRate (duration: _TimeSpan) =
   int (round nFramesApprox)
 
 // A buffer of past input audio data, accessible by DateTime.
-type AudioBuffer(bufConfig: BufConfig, synchronizer) =
-  let (synchronizer: Synchronizer) = synchronizer
+type AudioBuffer(bufConfig: BufConfig, synchronizer: Synchronizer) =
   let simulating      = bufConfig.Simulating 
   let inChannelCount  = bufConfig.InChannelCount
   let frameRate       = bufConfig.InFrameRate
@@ -252,7 +249,7 @@ type AudioBuffer(bufConfig: BufConfig, synchronizer) =
   let print newTail newHead msg =
     let sRing = printRing()
     let sText =
-      let sSeqNum  = sprintf "%2d" synchronizer.N1
+      let sSeqNum  = sprintf "%2d" synchronizer.Current
       let sX       = if String.length msg > 0 then  "*" else  " "
       let sTime    = sprintf "%3d.%3d %3d.%3d"
                        segs.Cur.TailTime.Millisecond

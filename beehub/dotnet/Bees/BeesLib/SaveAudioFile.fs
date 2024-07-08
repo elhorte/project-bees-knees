@@ -6,15 +6,13 @@ open NAudio.Lame
 
 open PortAudioSharp
 
-open BeesUtil.DateTimeShim
-
 open BeesUtil.Util
 open BeesUtil.DateTimeCalculations
 open BeesUtil.RangeClipper
 open BeesUtil.SaveAsMp3
 open BeesUtil.SaveAsWave
-open BeesLib.AudioBuffer
-open BeesLib.InputStream
+open BeesUtil.AudioBuffer
+open BeesUtil.InputStream
 
 
 /// <summary>
@@ -41,7 +39,7 @@ let saveToFile f (frameRate: float) (nChannels: int) (filePath: string) (samples
 /// <param name="inputStream">The audio input stream to save.</param>
 /// <param name="time">The starting time of the save operation.</param>
 /// <param name="duration">The duration of each saved audio file.</param>
-let saveAudioFile ext (inputStream: InputStream) duration (dateTime: _DateTime) =
+let saveAudioFile ext (inputStream: InputStream) duration (dateTime: DateTime) =
   let saveFunction =
     match ext with
     | "mp3" ->  (saveAsMp3 LAMEPreset.ABR_128)
@@ -66,7 +64,6 @@ let saveAudioFile ext (inputStream: InputStream) duration (dateTime: _DateTime) 
   | RangeClip.RangeOK         ->  print()
                                   save readResult
   | _                         ->  failwith "unkonwn result code"
-
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // PortAudio argument prep

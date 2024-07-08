@@ -1,4 +1,4 @@
-module BeesLib.InputStream
+module BeesUtil.InputStream
 
 open System
 open System.Runtime.InteropServices
@@ -14,8 +14,8 @@ open BeesUtil.PortAudioUtils
 open BeesUtil.CallbackHandoff
 open BeesUtil.Synchronizer
 open BeesUtil.SubscriberList
-open BeesLib.BeesConfig
-open BeesLib.AudioBuffer
+open BeesUtil.PortAudioConfig
+open BeesUtil.AudioBuffer
 open CSharpHelpers
 
 
@@ -92,20 +92,20 @@ let callback input output frameCount (timeInfo: StreamCallbackTimeInfo byref) st
 // The InputStream class
 
 // initPortAudio() must be called before this constructor.
-type InputStream(beesConfig: BeesConfig) =
+type InputStream(portAudioConfig: PortAudioConfig) =
   
-  let inputParameters  = beesConfig.InputParameters
-  let outputParameters = beesConfig.OutputParameters
-  let withEcho         = beesConfig.WithEcho
-  let withLogging      = beesConfig.WithLogging
-  let sim              = beesConfig.Simulating
+  let inputParameters  = portAudioConfig.InputParameters
+  let outputParameters = portAudioConfig.OutputParameters
+  let withEcho         = portAudioConfig.WithEcho
+  let withLogging      = portAudioConfig.WithLogging
+  let sim              = portAudioConfig.Simulating
   let synchronizer     = Synchronizer.New()
   let bufConfig = {
-    AudioDuration  = cbSimAudioDuration sim (fun () -> beesConfig.InputStreamAudioDuration        )
-    GapDuration    = cbSimGapDuration   sim (fun () -> beesConfig.InputStreamRingGapDuration * 2.0)
+    AudioDuration  = cbSimAudioDuration sim (fun () -> portAudioConfig.InputStreamAudioDuration        )
+    GapDuration    = cbSimGapDuration   sim (fun () -> portAudioConfig.InputStreamRingGapDuration * 2.0)
     Simulating     = sim
-    InChannelCount = beesConfig.InChannelCount
-    InFrameRate    = beesConfig.InFrameRate } 
+    InChannelCount = portAudioConfig.InChannelCount
+    InFrameRate    = portAudioConfig.InFrameRate } 
 
   // When unmanaged code calls managed code (e.g., a callback from unmanaged to managed),
   // the .NET CLR ensures that the garbage collector will not move referenced managed objects
@@ -140,7 +140,7 @@ type InputStream(beesConfig: BeesConfig) =
           callback input output frameCount &timeInfo statusFlags userDataPtr )
       let paStream = paTryCatchRethrow (fun () -> new PortAudioSharp.Stream(inParams        = Nullable<_>(inputParameters )        ,
                                                                             outParams       = Nullable<_>(outputParameters)        ,
-                                                                            sampleRate      = beesConfig.InFrameRate               ,
+                                                                            sampleRate      = portAudioConfig.InFrameRate          ,
                                                                             framesPerBuffer = PortAudio.FramesPerBufferUnspecified ,
                                                                             streamFlags     = StreamFlags.ClipOff                  ,
                                                                             callback        = streamCallback                       ,

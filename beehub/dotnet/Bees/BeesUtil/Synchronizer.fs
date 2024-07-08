@@ -20,41 +20,6 @@ type Synchronizer = {
   mutable S : uint32 }  // two int16 sequence numbers, written as a pair atomically
 with
 
-  static member New() = Synchronizer.Make synchronizerInitValue synchronizerInitValue
-
-  /// Enters the critical section on behalf of a writer.
-  /// Supports nested Enter/Leave.
-  member sn.EnterUnstable() =
-    let n1, n2 = sn.GetPair()
-    sn.Set (n1 + 1us)  n2
-
-  /// Leaves the critical section on behalf of a writer
-  /// Supports nested Enter/Leave.
-  member sn.LeaveUnstable() =
-    let n1, n2 = sn.GetPair()
-    if n1 = n2 + 1us then
-      sn.Set n1        (n2 + 1us)
-    else
-      sn.Set (n1 - 1us) n2
-
-  member sn.NeverEntered = sn.N1 = synchronizerInitValue
-    
-  /// Calls a function on behalf of a reader one or more times until the last time,
-  /// which is guaranteed to be while stable, i.e., not during the critical section.
-  member sn.WhenStable                timeout (f: unit -> 'T)                        : SynchronizerResult<'T> =
-         sn.WhenStableInternal false  timeout  f              Int32.MaxValue ignore
-
-  /// Calls a function on behalf of a reader one or more times until the last time,
-  /// which is guaranteed to be while stable, i.e., not during the critical section;
-  /// also delays until the critical section has been entered at least once.
-  member sn.WhenStableAndEntered      timeout (f: unit -> 'T)                        : SynchronizerResult<'T> =
-         sn.WhenStableInternal true   timeout  f              Int32.MaxValue ignore
-
-  /// Get the sequence number incremented when entering the critical section.
-  member sn.N1 =  sn.Get()        |> uint16
-  /// Get the sequence number incremented when leaving the critical section.
-  member sn.N2 =  sn.Get() >>> 16 |> uint16
-
   //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
   // Internals
 
@@ -95,3 +60,44 @@ with
     | TimedOut_ s -> TimedOut s
     | Trying      -> failwith "Can’t return Trying result"
 
+  //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+  // API
+
+  static member New() = Synchronizer.Make synchronizerInitValue synchronizerInitValue
+
+  /// Enters the critical section on behalf of a writer.
+  /// Supports nested Enter/Leave.
+  member sn.EnterUnstable() =
+    let n1, n2 = sn.GetPair()
+    sn.Set (n1 + 1us)  n2
+
+  /// Leaves the critical section on behalf of a writer
+  /// Supports nested Enter/Leave.
+  member sn.LeaveUnstable() =
+    let n1, n2 = sn.GetPair()
+    if n1 = n2 + 1us then
+      sn.Set n1        (n2 + 1us)
+    else
+      sn.Set (n1 - 1us) n2
+
+  member sn.NeverEntered = sn.N1 = synchronizerInitValue
+    
+  /// Calls a function on behalf of a reader one or more times until the last time,
+  /// which is guaranteed to be while stable, i.e., not during the critical section.
+  member sn.WhenStable                timeout (f: unit -> 'T)                        : SynchronizerResult<'T> =
+         sn.WhenStableInternal false  timeout  f              Int32.MaxValue ignore
+
+  /// Calls a function on behalf of a reader one or more times until the last time,
+  /// which is guaranteed to be while stable, i.e., not during the critical section;
+  /// also delays until the critical section has been entered at least once.
+  member sn.WhenStableAndEntered      timeout (f: unit -> 'T)                        : SynchronizerResult<'T> =
+         sn.WhenStableInternal true   timeout  f              Int32.MaxValue ignore
+
+  /// Get the sequence number incremented when entering the critical section.
+  member sn.N1 =  sn.Get()        |> uint16
+  /// Get the sequence number incremented when leaving the critical section.
+  member sn.N2 =  sn.Get() >>> 16 |> uint16
+  /// Get the current sequence number, not reflecting nested incrementing.
+  member sn.Current =
+    let n1, n2 = sn.GetPair()
+    if n1 >= n2 + 1us then  n2 + 1us else  n1  

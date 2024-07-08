@@ -4,13 +4,10 @@
     <TargetFramework>net8.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <RootNamespace>BeesLib</RootNamespace>
-<!--    <DefineConstants>USE_FAKE_DATE_TIME</DefineConstants>-->
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="BeesConfig.fs" />
-    <Compile Include="AudioBuffer.fs" />
-    <Compile Include="InputStream.fs" />
     <Compile Include="SaveAudioFile.fs" />
     <Compile Include="Commands.fs" />
     <Compile Include="Keyboard.fs" />

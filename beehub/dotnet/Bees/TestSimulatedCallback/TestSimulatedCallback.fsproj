@@ -7,7 +7,6 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\BeesLib\BeesLib.fsproj" />
       <ProjectReference Include="..\BeesUtil\BeesUtil.fsproj" />
     </ItemGroup>
 

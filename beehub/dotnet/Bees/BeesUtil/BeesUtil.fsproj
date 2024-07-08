@@ -19,14 +19,18 @@
         <Compile Include="AudioUtils.fs"           />
         <Compile Include="Mp3.fs"                  />
         <Compile Include="Wave.fs"                 />
+        <Compile Include="SubscriberList.fs" />
         <Compile Include="Synchronizer.fs"         />
         <Compile Include="DateTimeCalculations.fs" />
         <Compile Include="RangeClipper.fs"         />
-        <Compile Include="SubscriberList.fs"       />
+        <Compile Include="AudioBuffer.fs" />
+        <Compile Include="PortAudioConfig.fs" />
+        <Compile Include="InputStream.fs" />
     </ItemGroup>
 
     <ItemGroup>
 <!--        <ProjectReference Include="../../../../../PortAudioSharp2\PortAudioSharp\PortAudioSharp.csproj" />-->
+        <ProjectReference Include="..\CsharpHelpers\CsharpHelpers.csproj" />
         <ProjectReference Include="..\DateTimeFakes\DateTimeFakes.csproj" />
     </ItemGroup>
 

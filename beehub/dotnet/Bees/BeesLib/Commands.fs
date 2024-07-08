@@ -9,8 +9,7 @@ open ConsoleReadAsync
 open BeesUtil.Util
 open BeesUtil.JobsManager
 open BeesUtil.PortAudioUtils
-open BeesUtil.SubscriberList
-open BeesLib.InputStream
+open BeesUtil.InputStream
 
 
 let help = """
@@ -83,7 +82,7 @@ let triggerFft() =
 // usage: press i to start/stop listening, 0, 1, 2, or 3 to select channel
 #nowarn "3511" // This state machine is not statically compilable. A 'let rec' occured in the resumable code.
 let toggleIntercom consoleRead cts =
-  let cr = (consoleRead: ConsoleReadAsync)
+  let cr  = (consoleRead: ConsoleReadAsync)
   let cts = (cts: CancellationTokenSource)
   printJobName "toggleIntercom"
   let rec loop() = task {
@@ -122,20 +121,12 @@ let triggerOscope() =
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press r to start/stop record
 
-#if USE_FAKE_DATE_TIME
-
-let Recording iS = () 
-
-#else
-
 let Recording iS =
   let start iS cts = task {
     let (iS : InputStream            ) = iS
     let (cts: CancellationTokenSource) = cts
     do! SaveAudioFile.saveAudioFilePeriodically iS "mp3" (TimeSpan.FromSeconds 3)  (TimeSpan.FromSeconds 5) cts.Token  }
   OurJob(iS, "Recording", start)
-
-#endif
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press s to plot spectrogram of last recording
@@ -154,12 +145,6 @@ let listJobs() =
 
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press v to start/stop cli vu meter
-
-#if USE_FAKE_DATE_TIME
-
-let VuMeter iS = () 
-
-#else
 
 let VuMeter iS =
   let start iS cts = task {
@@ -212,16 +197,8 @@ let VuMeter iS =
     iS.Unsubscribe subscription |> ignore }
   OurJob(iS, "VuMeter", start)
 
-#endif
-
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press x to start/stop Demo
-
-#if USE_FAKE_DATE_TIME
-
-let Demo iS = () 
-
-#else
 
 let Demo iS =
   let start iS cts = task {
@@ -233,16 +210,8 @@ let Demo iS =
       printfn "  Demo canceled" }
   OurJob(iS, "Demo", start)
 
-#endif
-
 //––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // usage: press z to start/stop Demo2
-
-#if USE_FAKE_DATE_TIME
-
-let Demo iS = () 
-
-#else
 
 let Demo2 iS =
   let start iS cts = task {
@@ -257,5 +226,3 @@ let Demo2 iS =
     do! waitUntil (DateTime.Now + (TimeSpan.FromSeconds 5))
     printfn "  Demo2 delaying done" }
   OurJob(iS, "Demo2", start)
-
-#endif
