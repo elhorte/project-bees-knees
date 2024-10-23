@@ -104,9 +104,9 @@ current_time = None
 timestamp = None
 monitor_channel = 0             # '1 of n' mic to monitor by test functions
 stop_program = [False]
-buffer_size = None
+buffer_size = 0
 buffer = None
-buffer_index = None
+buffer_index = 0
 file_offset = 0
 
 # #############################################################
@@ -808,7 +808,7 @@ def plot_and_save_fft(sound_in_samplerate, channel):
 #
 
 def setup_audio_circular_buffer():
-    global buffer_size, buffer, buffer_index, buffer_wrap, blocksize, buffer_wrap_event
+    global buffer_size, buffer, buffer_index, buffer_wrap, buffer_wrap_event, blocksize
 
     # Create a buffer to hold the audio data
     buffer_size = int(BUFFER_SECONDS * sound_in_samplerate)
@@ -897,6 +897,7 @@ def callback(indata, frames, time, status):
     data_len = len(indata)
 
     # managing the circular buffer
+    print(f"buffer_index={buffer_index}, data_len={data_len}, buffer_size={buffer_size}\n")
     if buffer_index + data_len <= buffer_size:
         buffer[buffer_index:buffer_index + data_len] = indata
         buffer_wrap_event.clear()
@@ -909,7 +910,7 @@ def callback(indata, frames, time, status):
     buffer_index = (buffer_index + data_len) % buffer_size
 
 
-def audio_stream():
+def audio_stream(blocksize):
     global stop_program, sound_in_id, sound_in_chs, sound_in_samplerate, _dtype, testmode
 
     print("Start audio_stream...")
@@ -980,13 +981,23 @@ def stop_all():
 ###########################
 
 from tkinter import *
+import atexit
 
-# ... (rest of your imports and functions remain the same)
+def cleanup():
+    print("Cleaning up...")
+    if fft_periodic_plot_proc.is_alive():
+        fft_periodic_plot_proc.terminate()
+    keyboard.unhook_all()
+
+atexit.register(cleanup) 
 
 def main():
     global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel, sound_in_id, sound_in_chs
 
+    blocksize = 8196
+
     print("Beehive Multichannel Acoustic-Signal Recorder\n")
+    print(f"Saving data to: {PRIMARY_DIRECTORY}\n")
 
     set_input_device(config.MODEL_NAME, config.API_NAME)
     setup_audio_circular_buffer()
@@ -1009,11 +1020,11 @@ def main():
         fft_periodic_plot_proc.daemon = True  
         fft_periodic_plot_proc.start()
         print("started fft_periodic_plot_process")
-
+        
     try:
         if KB_or_CP == 'KB':
             # Function to create and show the popup menu
-            def show_popup_menu():
+            def show_popup_menu(event=None):
                 def execute_command(command):
                     if command == 'c':
                         check_stream_status(10)
@@ -1035,9 +1046,9 @@ def main():
                         list_all_threads()
                     elif command == 'v':
                         toggle_vu_meter()
-                    popup.destroy()  # Close the popup after executing command
+                    #popup.destroy()  # Close the popup after executing command
 
-                popup = Tk()
+                popup = Tk()  
                 popup.title("Beehive Commands")
 
                 Button(popup, text="Check Stream Status (c)", command=lambda: execute_command('c')).pack(pady=5)
@@ -1052,22 +1063,33 @@ def main():
                 Button(popup, text="Toggle VU Meter (v)", command=lambda: execute_command('v')).pack(pady=5)
 
                 # Bind Enter key to close the popup
-                popup.bind('<Return>', lambda event: popup.destroy())
+                popup.bind('<Return>', lambda event: execute_command(''))
                 popup.mainloop()
+           
+            root = Tk()
+            root.title("Beehive Main Window")                
 
             # Watch for the "ESC ESC" hotkey
-            keyboard.add_hotkey('esc esc', show_popup_menu)
+            root.bind('0', show_popup_menu)
 
-            # Start the audio stream
-            audio_stream()
+            # Start the audio stream in a separate thread
+            #import threading
+            #audio_thread = threading.Thread(target=audio_stream)
+            #audio_thread.daemon = True  # Allow main thread to exit even if audio_thread is running
+            #audio_thread.start()
+            audio_process = multiprocessing.Process(target=audio_stream, args=(blocksize,))
+            audio_process.daemon = True
+            audio_process.start()
+
+            root.mainloop()
 
     except KeyboardInterrupt:  # ctrl-c in windows
         print('\nCtrl-C: Recording process stopped by user.')
+        cleanup()  # Call cleanup in case of KeyboardInterrupt
 
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
         quit(-1) 
-
 
 if __name__ == "__main__":
     main()
