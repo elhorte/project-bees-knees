@@ -954,12 +954,7 @@ def kill_worker_threads():
 
 def stop_all():
     global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc
-
-    if KB_or_CP == 'KB':
-        # Unhook all hooks
-        keyboard.unhook_all()
-        print("Unhooked all keyboard hooks")
-
+    print("\ntrying to stop everything")
     stop_program[0] = True
     stop_recording_event.set()
 
@@ -973,7 +968,7 @@ def stop_all():
     keyboard.write('\b') 
     clear_input_buffer()
     list_all_threads()
-
+    keyboard.unhook_all()
     print("\nHopefully we have turned off all the lights...")
 
 
@@ -1032,8 +1027,20 @@ def bind_keys():
     keyboard.on_press_key("?", lambda _: show_list_of_commands(), suppress=True)
 
 def unbind_keys():
-    # Unbind all the keys when not listening
-    keyboard.unhook_all()
+    # Unbind all the command keys but keep the toggle key "^" bound
+    keyboard.unhook_key("c")
+    keyboard.unhook_key("d")
+    keyboard.unhook_key("f")
+    keyboard.unhook_key("i")
+    keyboard.unhook_key("m")
+    keyboard.unhook_key("o")
+    keyboard.unhook_key("q")
+    keyboard.unhook_key("s")
+    keyboard.unhook_key("t")
+    keyboard.unhook_key("v")
+    keyboard.unhook_key("h")
+    keyboard.unhook_key("?")
+
 
 ###########################
 ########## MAIN ###########
