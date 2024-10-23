@@ -588,13 +588,12 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
         normalized_value = int((audio_level / 1.0) * 50)  
 
         asterisks.value = '*' * normalized_value
-        ##print(f"Audio level: {audio_level}, Normalized value: {normalized_value}")
-        print(asterisks.value.ljust(50, ' '), end='\r')
+
+        print(' ' * 11 + asterisks.value.ljust(50, ' '), end='\r')
 
     with sd.InputStream(callback=callback_input, device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate):
         while not stop_vu_queue.get():
             sd.sleep(0.1)
-            ##pass
         print("Stopping vu...")
 
 
@@ -606,11 +605,14 @@ def toggle_vu_meter():
         vu_manager = multiprocessing.Manager()
         stop_vu_queue = multiprocessing.Queue()
         asterisks = vu_manager.Value(str, '*' * 50)
-        print("fullscale:",asterisks.value.ljust(50, ' '))
+
+        print("fullscale: ",asterisks.value.ljust(50, ' '))
+
         if config.MODE_EVENT:
             normalized_value = int(config.EVENT_THRESHOLD / 1000)
             asterisks.value = '*' * normalized_value
             print("threshold:",asterisks.value.ljust(50, ' '))
+            
         vu_proc = multiprocessing.Process(target=vu_meter, args=(sound_in_id, sound_in_samplerate, sound_in_chs, monitor_channel, stop_vu_queue, asterisks))
         vu_proc.start()
     else:
