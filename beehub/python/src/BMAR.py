@@ -1039,12 +1039,13 @@ def main():
             
     except KeyboardInterrupt: # ctrl-c in windows
         print('\nCtrl-C: Recording process stopped by user.')
+        keyboard.unhook_all()
         ##stop_all()
 
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
-        quit(-1) 
-
+        keyboard.unhook_all()
+        #quit(-1) 
 
 if __name__ == "__main__":
     main()

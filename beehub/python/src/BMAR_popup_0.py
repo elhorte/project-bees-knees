@@ -1056,7 +1056,7 @@ def main():
                 popup.mainloop()
 
             # Watch for the "ESC ESC" hotkey
-            keyboard.add_hotkey('esc esc', show_popup_menu)
+            keyboard.add_hotkey('esc', show_popup_menu)
 
             # Start the audio stream
             audio_stream()
