@@ -1,0 +1,1 @@
+OpenScad Helix for custom 2D profile and many thread types by zuiopl on Thingiverse: https://www.thingiverse.com/thing:1923017
