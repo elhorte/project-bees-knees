@@ -43,6 +43,8 @@ import queue
 import librosa
 import librosa.display
 import resampy
+import atexit
+
 ##import TestPyQT5
 
 import BMAR_config as config
@@ -1008,6 +1010,14 @@ def main():
         fft_periodic_plot_proc.start()
         print("started fft_periodic_plot_process")
 
+    def cleanup():
+        print("Cleaning up...")
+        if fft_periodic_plot_proc.is_alive():
+            fft_periodic_plot_proc.terminate()
+        keyboard.unhook_all()
+
+    atexit.register(cleanup) 
+
     try:
         if KB_or_CP == 'KB':
 
@@ -1039,12 +1049,10 @@ def main():
             
     except KeyboardInterrupt: # ctrl-c in windows
         print('\nCtrl-C: Recording process stopped by user.')
-        keyboard.unhook_all()
-        ##stop_all()
+        stop_all()
 
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
-        keyboard.unhook_all()
         #quit(-1) 
 
 if __name__ == "__main__":
