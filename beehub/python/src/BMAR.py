@@ -984,6 +984,7 @@ def main():
     global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel, sound_in_id, sound_in_chs
 
     print("Beehive Multichannel Acoustic-Signal Recorder\n")
+    print(f"Saving data to: {PRIMARY_DIRECTORY}\n")
 
     set_input_device(config.MODEL_NAME, config.API_NAME)
     setup_audio_circular_buffer()
