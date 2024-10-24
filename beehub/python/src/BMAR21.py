@@ -989,15 +989,15 @@ def toggle_listening():
 
 def show_list_of_commands():
     print("\nc  check audio pathway for over/underflows")
-    print("d  one shot process to see device list")
-    print("f  one shot process to see fft")
-    print("i  usage: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop")
-    print("m  usage: press m to select channel to monitor")
-    print("o  one shot process to view oscope")
-    print("q  usage: press q to stop all processes")
-    print("s  usage: press s to plot spectrogram of last recording")
-    print("t  usage: press t to see all threads")
-    print("v  usage: press v to start cli vu meter, press v again to stop\n")
+    print("d  show device list")
+    print("f  show fft")
+    print("i  intercom: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop")
+    print("m  select channel to monitor, either before or during use of vu or intercom")
+    print("o  show oscilloscope trace of each active channel")
+    print("q  stop all processes and exit")
+    print("s  plot spectrogram of last recording")
+    print("t  see list of all threads")
+    print("v  start vu meter, press 'v' again to stop\n")
     print("h or ?  show list of commands\n")
 
 def bind_keys():
