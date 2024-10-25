@@ -284,6 +284,8 @@ def show_audio_device_info_for_defaults():
 
 
 def show_audio_device_list():
+    SOUND_OUT_ID_DEFAULT = get_default_output_device()
+    print()
     print(sd.query_devices())
     show_audio_device_info_for_defaults()
     print(f"\nCurrent device in: {sound_in_id}, device out: {SOUND_OUT_ID_DEFAULT}\n")
@@ -423,6 +425,13 @@ def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
 # #############################################################
 # signal display functions
 # #############################################################
+
+def get_default_output_device():
+    devices = sd.query_devices()
+    for device in devices:
+        if device['max_output_channels'] > 0:
+            return device['name']
+    return None
 
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
 def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs): 
