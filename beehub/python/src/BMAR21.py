@@ -166,7 +166,7 @@ current_day = current_date.strftime('%d')
 # to be discovered from sounddevice.query_devices()
 sound_in_id = None                          # id of input device
 sound_in_chs = config.SOUND_IN_CHS          # number of input channels
-sound_in_samplerate = None                  # sample rate of input device
+sound_in_samplerate = 192000                  # sample rate of input device
 
 sound_out_id = config.SOUND_OUT_ID_DEFAULT
 sound_out_chs = config.SOUND_OUT_CHS_DEFAULT                        
