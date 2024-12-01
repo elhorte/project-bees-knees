@@ -166,7 +166,7 @@ current_day = current_date.strftime('%d')
 # to be discovered from sounddevice.query_devices()
 sound_in_id = None                          # id of input device
 sound_in_chs = config.SOUND_IN_CHS          # number of input channels
-sound_in_samplerate = 192000                  # sample rate of input device
+sound_in_samplerate = 192000                # sample rate of input device
 
 sound_out_id = config.SOUND_OUT_ID_DEFAULT
 sound_out_chs = config.SOUND_OUT_CHS_DEFAULT                        
@@ -238,8 +238,6 @@ def set_input_device(model_name, api_name):
     ##sound_in_chs = 4
     ##sound_in_samplerate = 192000
 
-
-
 # interruptable sleep
 def interruptable_sleep(seconds, stop_sleep_event):
     for i in range(seconds*2):
@@ -290,6 +288,36 @@ def show_audio_device_list():
     show_audio_device_info_for_defaults()
     print(f"\nCurrent device in: {sound_in_id}, device out: {SOUND_OUT_ID_DEFAULT}\n")
     show_audio_device_info_for_SOUND_IN_OUT()
+
+mic_states = [config.MIC_1, config.MIC_2, config.MIC_3, config.MIC_4]
+
+def get_enabled_mic_locations():
+    """
+    Reads microphone enable states (MIC_1 to MIC_4) and maps to their corresponding locations.
+    """
+    # Define microphone states and corresponding locations
+    mic_location_names = [config.MIC_LOCATION[i] for i, enabled in enumerate(mic_states) if enabled]
+    return mic_location_names
+
+##mic_location_names = get_enabled_mic_locations()
+def show_mic_locations():
+    print("Enabled microphone locations:", get_enabled_mic_locations())
+
+
+def is_mic_position_in_bounds(mic_list, position):
+  """
+  Checks if the mic is present in the hive and powered on.
+  Args:
+    data: A list of boolean values (True/False) or integers (1/0).
+    position: The index of the element to check.
+  Returns:
+    status of mic at position
+  """
+  try:
+    return bool(mic_list[position])
+  except IndexError:
+    print(f"Error: mic {position} is out of bounds.")
+    return False  
 
 
 def check_stream_status(stream_duration):
@@ -728,38 +756,41 @@ def toggle_intercom_m():
 # Function to switch the channel being monitored
 #
 
-def change_monitor_channel():
+def change_monitor_channel(mic_status):
     global monitor_channel, change_ch_event
     # usage: press m then press 1, 2, 3, 4
-    print(f"\nChannel {monitor_channel+1} is active, {sound_in_chs} are available: select a channel:") #, end='\r')
-
+    print(f"\nChannel {monitor_channel+1} is active, {sound_in_chs} are available: select a channel: ") #, end='\r')
     while True:
         while msvcrt.kbhit():
             key = msvcrt.getch().decode('utf-8')
+            # Clear the input buffer:
+            while msvcrt.kbhit(): 
+                msvcrt.getch() 
             if key.isdigit():
-                key_int = int(key)
-                if key_int >= 1 and key_int <= sound_in_chs:
-                    monitor_channel = key_int - 1
+                if int(key) == 0:
+                    print("exiting channel change as is\n")
+                    return
+                key_int = int(key) - 1 
+                if key_int == 0:
+                    print("exiting channel change as is\n")
+                if (is_mic_position_in_bounds(mic_status, key_int)):
                     change_ch_event.set()                         
                     print(f"Now monitoring: {monitor_channel+1}")
-
                     if intercom_proc is not None:
                         toggle_intercom_m()
                         time.sleep(0.1)
                         toggle_intercom_m()
-                        
                     if vu_proc is not None:
                         toggle_vu_meter()
                         time.sleep(0.1)
                         toggle_vu_meter()
-
-                    return        
                 else:
-                    print(f"Sound device has only {sound_in_chs} channels")
-
-            if key == '\x1b':       # escape
+                    print(f"Sound device has only {sound_in_chs} channel(s)")
+ 
+            if key == chr(27):       # escape
                 print("exiting monitor channel selection")
                 return
+
         time.sleep(1)
 
 #
@@ -988,7 +1019,8 @@ def toggle_listening():
     global listening
     listening = not listening
     if listening:
-        print("Listening for commands...")
+        print("\nListening for commands...")
+        show_list_of_commands()
         bind_keys()  # Start listening to other keys
     else:
         print("Stopped listening for commands.")
@@ -997,29 +1029,34 @@ def toggle_listening():
         unbind_keys()  # Stop listening to other keys
 
 def show_list_of_commands():
-    print("\nc  check audio pathway for over/underflows")
+    print("\na  check audio pathway for over/underflows")
+    print("c  select channel to monitor, either before or during use of vu or intercom")
     print("d  show device list")
     print("f  show fft")
-    print("i  intercom: press i then press 0, 1, 2, or 3 to listen to that channel, press 'i' again to stop")
-    print("m  select channel to monitor, either before or during use of vu or intercom")
+    print("i  toggle: intercom: press i then press 1, 2, 3, ... to listen to that channel")
+    print("m  show active mic positions")
     print("o  show oscilloscope trace of each active channel")
     print("q  stop all processes and exit")
     print("s  plot spectrogram of last recording")
     print("t  see list of all threads")
-    print("v  start vu meter, press 'v' again to stop\n")
+    print("v  toggle: show vu meter on cli\n")
+
+    print("^  stop monitoring keyboard commands\n")
     print("h or ?  show list of commands\n")
 
 def bind_keys():
     # Check audio pathway for over/underflows
-    keyboard.on_press_key("c", lambda _: check_stream_status(10), suppress=True) 
+    keyboard.on_press_key("a", lambda _: check_stream_status(10), suppress=True) 
+    # Press c to select channel to monitor
+    keyboard.on_press_key("c", lambda _: change_monitor_channel(mic_states), suppress=True)
     # One shot process to see device list
     keyboard.on_press_key("d", lambda _: show_audio_device_list(), suppress=True) 
     # One shot process to see fft
     keyboard.on_press_key("f", lambda _: trigger_fft(), suppress=True)
     # Press i to listen to a channel, press again to stop
     keyboard.on_press_key("i", lambda _: toggle_intercom_m(), suppress=True)
-    # Press m to select channel to monitor
-    keyboard.on_press_key("m", lambda _: change_monitor_channel(), suppress=True)
+    # Press m to Show enable mic positions
+    keyboard.on_press_key("m", lambda _: show_mic_locations(), suppress=True)
     # One shot process to view oscope
     keyboard.on_press_key("o", lambda _: trigger_oscope(), suppress=True) 
     # Press q to stop all processes
@@ -1036,6 +1073,7 @@ def bind_keys():
 
 def unbind_keys():
     # Unbind all the command keys but keep the toggle key "^" bound
+    keyboard.unhook_key("a")
     keyboard.unhook_key("c")
     keyboard.unhook_key("d")
     keyboard.unhook_key("f")

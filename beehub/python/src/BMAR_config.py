@@ -32,12 +32,23 @@ EVENT_END = datetime.time(22, 0, 0)
 SAVE_BEFORE_EVENT = 30                          # seconds to save before the event
 SAVE_AFTER_EVENT = 30                           # seconds to save after the event
 EVENT_THRESHOLD = 20000                         # audio level threshold to be considered an event
-MIC_LOCATION = ["lower w/queen--front", "upper--front", "upper--back", "lower w/queen--back", "upper--back"]
+
 
 data_drive = "G:"   # D is internal and limited; G is Google Drive, just FYI
 data_directory = "My Drive/en_beehive_data"
 ##data_drive = "C:"
 ##data_directory = "temp"
+
+# mic location map channel to position
+MIC_LOCATION = ['1: upper--front', '2: upper--back', '3: lower w/queen--front', '4: lower w/queen--back']
+
+# mic status
+MIC_1 = True
+MIC_2 = False
+MIC_3 = False
+MIC_4 = False
+
+SOUND_IN_CHS = MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
 
 # input device parameters:
 MAKE_NAME = "Focusrite"                         # 'Behringer' or 'Zoom or Scarlett'
@@ -46,7 +57,7 @@ DEVICE_NAME = 'UAC'                             # 'UAC' or 'USB'
 API_NAME = "WASAPI"                             # 'MME' or 'WASAPI' or 'ASIO' or 'DS'  
 HOSTAPI_NAME = "Windows"                        # 'Windows' or 'ASIO' or 'DS' or 'WDM-KS'
 HOSTAPI_INDEX = 3                               # 0 = Windows, 1 = ASIO, 2 = DS, 3 = WASAPI, 4 = WDM-KS
-SOUND_IN_CHS = 4
+
 
 # windows mme defaults, 2 ch only
 SOUND_IN_DEFAULT = 0                          # default input device id              
