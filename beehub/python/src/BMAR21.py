@@ -131,7 +131,7 @@ TRACE_DURATION = 10                             # seconds of audio to show on os
 OSCOPE_GAIN_DB = 12                             # Gain in dB of audio level for oscope 
 
 # instrumentation parms
-FFT_BINS = 900                                  # number of bins for fft
+FFT_BINS = 800                                  # number of bins for fft
 FFT_BW = 1000                                   # bandwidth of each bucket in hertz
 FFT_DURATION = 5                                # seconds of audio to show on fft
 FFT_GAIN = 20                                   # gain in dB for fft
