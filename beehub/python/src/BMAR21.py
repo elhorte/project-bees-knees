@@ -164,7 +164,7 @@ current_month = current_date.strftime('%m')
 current_day = current_date.strftime('%d')
 
 # to be discovered from sounddevice.query_devices()
-sound_in_id = None                          # id of input device
+sound_in_id = 1                          # id of input device, set as default in case none is detected
 sound_in_chs = config.SOUND_IN_CHS          # number of input channels
 sound_in_samplerate = 192000                # sample rate of input device
 
@@ -264,7 +264,7 @@ def clear_input_buffer():
 
 
 def show_audio_device_info_for_SOUND_IN_OUT():
-    device_info = sd.query_devices(sound_in_id)  
+    device_info = sd.query_devices(sound_in_id)    
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Input Channels: {}'.format(device_info['max_input_channels']))
     device_info = sd.query_devices(sound_out_id)  
@@ -768,12 +768,12 @@ def change_monitor_channel(mic_status):
                 msvcrt.getch() 
             if key.isdigit():
                 if int(key) == 0:
-                    print("exiting channel change as is\n")
+                    print("exiting channel change\n")
                     return
-                key_int = int(key) - 1 
-                if key_int == 0:
-                    print("exiting channel change as is\n")
+                else:
+                    key_int = int(key) - 1
                 if (is_mic_position_in_bounds(mic_status, key_int)):
+                    monitor_channel = key_int
                     change_ch_event.set()                         
                     print(f"Now monitoring: {monitor_channel+1}")
                     if intercom_proc is not None:
@@ -1030,7 +1030,7 @@ def toggle_listening():
 
 def show_list_of_commands():
     print("\na  check audio pathway for over/underflows")
-    print("c  select channel to monitor, either before or during use of vu or intercom")
+    print("c  select channel to monitor, either before or during use of vu or intercom, '0' to exit")
     print("d  show device list")
     print("f  show fft")
     print("i  toggle: intercom: press i then press 1, 2, 3, ... to listen to that channel")
