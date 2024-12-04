@@ -27,3 +27,37 @@ if active_usb_device_name is not None:
     print("Active USB audio device:", active_usb_device_name)
 else:
     print("No active USB audio device found.")
+
+###############################################################
+
+from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+
+def get_active_usb_audio_device_name():
+    """
+    Queries Windows 11 to find the name of the currently active audio device
+    connected to the computer's USB port.
+
+    Returns:
+        str: The name of the active USB audio device, or None if not found.
+    """
+    try:
+        devices = AudioUtilities.GetSpeakers()
+        interface = devices.Activate(IAudioEndpointVolume._iid_, 0, None)
+        volume = interface.QueryInterface(IAudioEndpointVolume)
+        device_name = volume.GetDeviceID()
+
+        # Check if the device name/ID contains "USB"
+        if "USB" in device_name:
+            return device_name
+        else:
+            return None
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
+# Call the function and print the result
+active_usb_device_name = get_active_usb_audio_device_name()
+if active_usb_device_name:
+    print("Active USB audio device:", active_usb_device_name)
+else:
+    print("No active USB audio device found.")
