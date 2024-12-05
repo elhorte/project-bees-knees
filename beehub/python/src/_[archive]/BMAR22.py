@@ -3,6 +3,8 @@
 
 # Code definition: 
 
+# using curses for command line interface
+
 # Using sounddevice and soundfile libraries, record audio from a device ID and save it to a FLAC file.
 # Input audio from a device ID at a defineable sample rate, bit depth, and channel count. 
 # Write incoming audio into a circular buffer that is of a definable length. 

@@ -3,6 +3,9 @@
 
 # Code definition: 
 
+# uses pop up menu windows for control in place of cli commands
+# only value is pop up menu code, all other functions behind current rev
+
 # Using sounddevice and soundfile libraries, record audio from a device ID and save it to a FLAC file.
 # Input audio from a device ID at a defineable sample rate, bit depth, and channel count. 
 # Write incoming audio into a circular buffer that is of a definable length. 
@@ -164,7 +167,7 @@ current_day = current_date.strftime('%d')
 # to be discovered from sounddevice.query_devices()
 sound_in_id = None                          # id of input device
 sound_in_chs = config.SOUND_IN_CHS          # number of input channels
-sound_in_samplerate = None                  # sample rate of input device
+sound_in_samplerate = 192000                  # sample rate of input device
 
 sound_out_id = config.SOUND_OUT_ID_DEFAULT
 sound_out_chs = config.SOUND_OUT_CHS_DEFAULT                        
@@ -1035,7 +1038,7 @@ def main():
                         list_all_threads()
                     elif command == 'v':
                         toggle_vu_meter()
-                    popup.destroy()  # Close the popup after executing command
+                    ##popup.destroy()  # Close the popup after executing command
 
                 popup = Tk()
                 popup.title("Beehive Commands")
