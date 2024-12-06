@@ -1044,6 +1044,7 @@ def show_list_of_commands():
     print("v  toggle: show vu meter on cli\n")
 
     print("^  stop monitoring keyboard commands\n")
+
     print("h or ?  show list of commands\n")
 
 def bind_keys():
@@ -1070,8 +1071,7 @@ def bind_keys():
     # Press v to start CLI VU meter, press again to stop
     keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
     # Press h or ? to show list of commands
-    keyboard.on_press_key("h", lambda _: show_list_of_commands(), suppress=True)
-    keyboard.on_press_key("?", lambda _: show_list_of_commands(), suppress=True)
+    keyboard.on_press_key(("h","?"), lambda _: show_list_of_commands(), suppress=True)
 
 def unbind_keys():
     # Unbind all the command keys but keep the toggle key "^" bound
@@ -1103,7 +1103,7 @@ def main():
     set_input_device(config.MODEL_NAME, config.API_NAME)
     setup_audio_circular_buffer()
 
-    print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
+    print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/500000:.2f} megabytes")
     print(f"Sample Rate: {sound_in_samplerate}; File Format: {PRIMARY_FILE_FORMAT}; Channels: {sound_in_chs}")
 
     # Create the output directory if it doesn't exist
