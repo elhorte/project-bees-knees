@@ -44,11 +44,11 @@ MIC_LOCATION = ['1: upper--front', '2: upper--back', '3: lower w/queen--front', 
 
 # mic status
 MIC_1 = True
-MIC_2 = True
+MIC_2 = False
 MIC_3 = False
 MIC_4 = False
 
-SOUND_IN_CHS = MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
+SOUND_IN_CHS = 4 ##MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
 
 # input device parameters:
 MAKE_NAME = "Focusrite"                         # 'Behringer' or 'Zoom or Scarlett'
@@ -58,10 +58,20 @@ API_NAME = "WASAPI"                             # 'MME' or 'WASAPI' or 'ASIO' or
 HOSTAPI_NAME = "Windows"                        # 'Windows' or 'ASIO' or 'DS' or 'WDM-KS'
 HOSTAPI_INDEX = 3                               # 0 = Windows, 1 = ASIO, 2 = DS, 3 = WASAPI, 4 = WDM-KS
 
+# audio parameters:
+PRIMARY_SAMPLERATE = 192000                     # Audio sample rate
+PRIMARY_BITDEPTH = 16                           # Audio bit depth
+PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
-# windows mme defaults, 2 ch only
+AUDIO_MONITOR_SAMPLERATE = 48000                # For continuous audio
+AUDIO_MONITOR_BITDEPTH = 16                     # Audio bit depthv
+AUDIO_MONITOR_CHANNELS = 2                      # Number of channels
+AUDIO_MONITOR_QUALITY = 0                       # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
+AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
+
+# Windows mme defaults, 2 ch only
 SOUND_IN_DEFAULT = 0                          # default input device id              
 SOUND_OUT_ID_DEFAULT = 3                        # default output device id
-SOUND_OUT_CHS_DEFAULT = 2                       # default number of output channels
+SOUND_OUT_CHS_DEFAULT = 1                       # default number of output channels
 SOUND_OUT_SR_DEFAULT = 48000                    # default sample rate
 

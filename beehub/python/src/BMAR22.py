@@ -116,16 +116,7 @@ file_offset = 0
 # #### Control Panel ##########################################
 # #############################################################
 
-# audio parameters:
-PRIMARY_SAMPLERATE = 192000                     # Audio sample rate
-PRIMARY_BITDEPTH = 16                           # Audio bit depth
-PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
-AUDIO_MONITOR_SAMPLERATE = 44100                # For continuous audio
-AUDIO_MONITOR_BITDEPTH = 16                     # Audio bit depthv
-AUDIO_MONITOR_CHANNELS = 2                      # Number of channels
-AUDIO_MONITOR_QUALITY = 0                       # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
-AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
 
 MONITOR_CH = 0                                  # channel to monitor for event (if > number of chs, all channels are monitored)
 TRACE_DURATION = 10                             # seconds of audio to show on oscope
@@ -145,17 +136,17 @@ FULL_SCALE = 2 ** 16                            # just for cli vu meter level re
 BUFFER_SECONDS = 1000                           # time length of circular buffer 
 
 # translate human to machine
-if PRIMARY_BITDEPTH == 16:
+if  config.PRIMARY_BITDEPTH == 16:
     _dtype = 'int16'
     _subtype = 'PCM_16'
-elif PRIMARY_BITDEPTH == 24:
+elif config.PRIMARY_BITDEPTH == 24:
     _dtype = 'int24'
     _subtype = 'PCM_24'
-elif PRIMARY_BITDEPTH == 32:
+elif config.PRIMARY_BITDEPTH == 32:
     _dtype = 'int32' 
     _subtype = 'PCM_32'
 else:
-    print("The bit depth is not supported: ", PRIMARY_BITDEPTH)
+    print("The bit depth is not supported: ", config.PRIMARY_BITDEPTH)
     quit(-1)
 
 # Date and time stuff for file naming
@@ -165,9 +156,9 @@ current_month = current_date.strftime('%m')
 current_day = current_date.strftime('%d')
 
 # to be discovered from sounddevice.query_devices()
-sound_in_id = 1                          # id of input device, set as default in case none is detected
+sound_in_id = 1                             # id of input device, set as default in case none is detected
 sound_in_chs = config.SOUND_IN_CHS          # number of input channels
-sound_in_samplerate = 192000                # sample rate of input device
+sound_in_samplerate = config.PRIMARY_SAMPLERATE    # sample rate of input device
 
 sound_out_id = config.SOUND_OUT_ID_DEFAULT
 sound_out_chs = config.SOUND_OUT_CHS_DEFAULT                        
@@ -290,6 +281,7 @@ def show_audio_device_list():
     print(f"\nCurrent device in: {sound_in_id}, device out: {SOUND_OUT_ID_DEFAULT}\n")
     show_audio_device_info_for_SOUND_IN_OUT()
 
+# mic present or not at each position
 mic_states = [config.MIC_1, config.MIC_2, config.MIC_3, config.MIC_4]
 
 def get_enabled_mic_locations():
@@ -347,7 +339,7 @@ def check_stream_status(stream_duration):
 
 
 # fetch the most recent audio file in the directory
-def find_file_of_type_with_offset_1(directory=PRIMARY_DIRECTORY, file_type=PRIMARY_FILE_FORMAT, offset=0):
+def find_file_of_type_with_offset_1(directory=PRIMARY_DIRECTORY, file_type=config.PRIMARY_FILE_FORMAT, offset=0):
     matching_files = [os.path.join(directory, f) for f in os.listdir(directory) \
                       if os.path.isfile(os.path.join(directory, f)) and f.endswith(f".{file_type.lower()}")]
     if offset < len(matching_files):
@@ -356,7 +348,7 @@ def find_file_of_type_with_offset_1(directory=PRIMARY_DIRECTORY, file_type=PRIMA
     return None
 
 # return the most recent audio file in the directory minus offset (next most recent, etc.)
-def find_file_of_type_with_offset(offset, directory=PRIMARY_DIRECTORY, file_type=PRIMARY_FILE_FORMAT):
+def find_file_of_type_with_offset(offset, directory=PRIMARY_DIRECTORY, file_type=config.PRIMARY_FILE_FORMAT):
     # List all files of the specified type in the directory
     files_of_type = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f)) and f.endswith(f".{file_type.lower()}")]
     # Sort files alphabetically
@@ -406,16 +398,16 @@ def pcm_to_mp3_write(np_array, full_path):
     audio_segment = AudioSegment(
         data=byte_array,
         sample_width=2,
-        frame_rate=AUDIO_MONITOR_SAMPLERATE,
-        channels=AUDIO_MONITOR_CHANNELS
+        frame_rate=config.AUDIO_MONITOR_SAMPLERATE,
+        channels=config.AUDIO_MONITOR_CHANNELS
     )
-    if AUDIO_MONITOR_QUALITY >= 64 and AUDIO_MONITOR_QUALITY <= 320:    # use constant bitrate, 64k would be the min, 320k the best
-        cbr = str(AUDIO_MONITOR_QUALITY) + "k"
+    if config.AUDIO_MONITOR_QUALITY >= 64 and config.AUDIO_MONITOR_QUALITY <= 320:    # use constant bitrate, 64k would be the min, 320k the best
+        cbr = str(config.AUDIO_MONITOR_QUALITY) + "k"
         audio_segment.export(full_path, format="mp3", bitrate=cbr)
-    elif AUDIO_MONITOR_QUALITY < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
+    elif config.AUDIO_MONITOR_QUALITY < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
         audio_segment.export(full_path, format="mp3", parameters=["-q:a", "0"])
     else:
-        print("Don't know of a mp3 mode with parameter:", AUDIO_MONITOR_QUALITY)
+        print("Don't know of a mp3 mode with parameter:", config.AUDIO_MONITOR_QUALITY)
         quit(-1)
 
 # downsample audio to a lower sample rate
@@ -860,7 +852,7 @@ def setup_audio_circular_buffer():
     buffer_wrap = False
     blocksize = 8196
     buffer_wrap_event = threading.Event()
-
+    print(f"\naudio buffer size: {sys.getsizeof(buffer)}\n")
 # 
 # ### WORKER THREAD ########################################################
 #
@@ -964,15 +956,15 @@ def audio_stream():
         # NOTE: replace <name>_START with None to disable time of day recording
         if config.MODE_AUDIO_MONITOR:
             print("starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
-            threading.Thread(target=recording_worker_thread, args=(config.AUDIO_MONITOR_RECORD, config.AUDIO_MONITOR_INTERVAL, "Audio_monitor", AUDIO_MONITOR_FORMAT, AUDIO_MONITOR_SAMPLERATE, config.AUDIO_MONITOR_START, config.AUDIO_MONITOR_END)).start()
+            threading.Thread(target=recording_worker_thread, args=(config.AUDIO_MONITOR_RECORD, config.AUDIO_MONITOR_INTERVAL, "Audio_monitor", config.AUDIO_MONITOR_FORMAT, config.AUDIO_MONITOR_SAMPLERATE, config.AUDIO_MONITOR_START, config.AUDIO_MONITOR_END)).start()
 
         if config.MODE_PERIOD and not testmode:
             print("starting recording_worker_thread for saving period audio at primary sample rate and all channels...")
-            threading.Thread(target=recording_worker_thread, args=(config.PERIOD_RECORD, config.PERIOD_INTERVAL, "Period_recording", PRIMARY_FILE_FORMAT, sound_in_samplerate, config.PERIOD_START, config.PERIOD_END)).start()
+            threading.Thread(target=recording_worker_thread, args=(config.PERIOD_RECORD, config.PERIOD_INTERVAL, "Period_recording", config.PRIMARY_FILE_FORMAT, sound_in_samplerate, config.PERIOD_START, config.PERIOD_END)).start()
 
         if config.MODE_EVENT and not testmode:  # *** UNDER CONSTRUCTION, NOT READY FOR PRIME TIME ***
             print("starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...")
-            threading.Thread(target=recording_worker_thread, args=(config.SAVE_BEFORE_EVENT, config.SAVE_AFTER_EVENT, "Event_recording", PRIMARY_FILE_FORMAT, sound_in_samplerate, config.EVENT_START, config.EVENT_END)).start()
+            threading.Thread(target=recording_worker_thread, args=(config.SAVE_BEFORE_EVENT, config.SAVE_AFTER_EVENT, "Event_recording", config.PRIMARY_FILE_FORMAT, sound_in_samplerate, config.EVENT_START, config.EVENT_END)).start()
 
         while stream.active and not stop_program[0]:
             time.sleep(1)
@@ -1130,7 +1122,7 @@ def main():
     setup_audio_circular_buffer()
 
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
-    print(f"Sample Rate: {sound_in_samplerate}; File Format: {PRIMARY_FILE_FORMAT}; Channels: {sound_in_chs}")
+    print(f"Sample Rate: {sound_in_samplerate}; File Format: {config.PRIMARY_FILE_FORMAT}; Channels: {sound_in_chs}")
 
     # Create the output directory if it doesn't exist
     try:
