@@ -3,6 +3,8 @@
 
 # Code definition: 
 
+# currently active script
+
 # Using sounddevice and soundfile libraries, record audio from a device ID and save it to a FLAC file.
 # Input audio from a device ID at a defineable sample rate, bit depth, and channel count. 
 # Write incoming audio into a circular buffer that is of a definable length. 
@@ -21,6 +23,7 @@ import time
 import threading
 import multiprocessing
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 from scipy.io.wavfile import write
 from scipy.signal import resample
@@ -43,6 +46,8 @@ import queue
 import librosa
 import librosa.display
 import resampy
+import atexit
+
 ##import TestPyQT5
 
 import BMAR_config as config
@@ -104,9 +109,9 @@ current_time = None
 timestamp = None
 monitor_channel = 0             # '1 of n' mic to monitor by test functions
 stop_program = [False]
-buffer_size = 0
+buffer_size = None
 buffer = None
-buffer_index = 0
+buffer_index = None
 file_offset = 0
 
 # #############################################################
@@ -129,7 +134,7 @@ TRACE_DURATION = 10                             # seconds of audio to show on os
 OSCOPE_GAIN_DB = 12                             # Gain in dB of audio level for oscope 
 
 # instrumentation parms
-FFT_BINS = 900                                  # number of bins for fft
+FFT_BINS = 800                                  # number of bins for fft
 FFT_BW = 1000                                   # bandwidth of each bucket in hertz
 FFT_DURATION = 5                                # seconds of audio to show on fft
 FFT_GAIN = 20                                   # gain in dB for fft
@@ -162,9 +167,9 @@ current_month = current_date.strftime('%m')
 current_day = current_date.strftime('%d')
 
 # to be discovered from sounddevice.query_devices()
-sound_in_id = None                          # id of input device
+sound_in_id = 1                          # id of input device, set as default in case none is detected
 sound_in_chs = config.SOUND_IN_CHS          # number of input channels
-sound_in_samplerate = None                  # sample rate of input device
+sound_in_samplerate = 192000                # sample rate of input device
 
 sound_out_id = config.SOUND_OUT_ID_DEFAULT
 sound_out_chs = config.SOUND_OUT_CHS_DEFAULT                        
@@ -236,8 +241,6 @@ def set_input_device(model_name, api_name):
     ##sound_in_chs = 4
     ##sound_in_samplerate = 192000
 
-
-
 # interruptable sleep
 def interruptable_sleep(seconds, stop_sleep_event):
     for i in range(seconds*2):
@@ -264,7 +267,7 @@ def clear_input_buffer():
 
 
 def show_audio_device_info_for_SOUND_IN_OUT():
-    device_info = sd.query_devices(sound_in_id)  
+    device_info = sd.query_devices(sound_in_id)    
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Input Channels: {}'.format(device_info['max_input_channels']))
     device_info = sd.query_devices(sound_out_id)  
@@ -282,10 +285,42 @@ def show_audio_device_info_for_defaults():
 
 
 def show_audio_device_list():
+    SOUND_OUT_ID_DEFAULT = get_default_output_device()
+    print()
     print(sd.query_devices())
     show_audio_device_info_for_defaults()
     print(f"\nCurrent device in: {sound_in_id}, device out: {SOUND_OUT_ID_DEFAULT}\n")
     show_audio_device_info_for_SOUND_IN_OUT()
+
+mic_states = [config.MIC_1, config.MIC_2, config.MIC_3, config.MIC_4]
+
+def get_enabled_mic_locations():
+    """
+    Reads microphone enable states (MIC_1 to MIC_4) and maps to their corresponding locations.
+    """
+    # Define microphone states and corresponding locations
+    mic_location_names = [config.MIC_LOCATION[i] for i, enabled in enumerate(mic_states) if enabled]
+    return mic_location_names
+
+##mic_location_names = get_enabled_mic_locations()
+def show_mic_locations():
+    print("Enabled microphone locations:", get_enabled_mic_locations())
+
+
+def is_mic_position_in_bounds(mic_list, position):
+  """
+  Checks if the mic is present in the hive and powered on.
+  Args:
+    data: A list of boolean values (True/False) or integers (1/0).
+    position: The index of the element to check.
+  Returns:
+    status of mic at position
+  """
+  try:
+    return bool(mic_list[position])
+  except IndexError:
+    print(f"Error: mic {position} is out of bounds.")
+    return False  
 
 
 def check_stream_status(stream_duration):
@@ -422,6 +457,13 @@ def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
 # signal display functions
 # #############################################################
 
+def get_default_output_device():
+    devices = sd.query_devices()
+    for device in devices:
+        if device['max_output_channels'] > 0:
+            return device['name']
+    return None
+
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
 def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs): 
     # Record audio
@@ -454,9 +496,12 @@ def trigger_oscope():
     oscope_proc.join()
     print("exit oscope")
 
+##matplotlib.use('QT5Agg')
+print(f"Using backend: {matplotlib.get_backend()}")\
+
 # single-shot fft plot of audio
 def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel):
-
+    ##def worker():
     N = sound_in_samplerate * FFT_DURATION  # Number of samples
     # Convert gain from dB to linear scale
     gain = 10 ** (FFT_GAIN / 20)
@@ -487,9 +532,10 @@ def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel):
     plt.title('FFT Plot monitoring ch: ' + str(channel + 1) + ' of ' + str(sound_in_chs) + ' channels')
     plt.grid(True)
     plt.show()
-
+    ##threading.Thread(target=worker, daemon=True).start()
 
 def trigger_fft():
+    print("Recording audio for FFT one shot") ## on channel:", monitor_channel + 1)
     one_shot_fft_proc = multiprocessing.Process(target=plot_fft, args=(sound_in_samplerate, sound_in_id, sound_in_chs, monitor_channel))
     one_shot_fft_proc.start()
     clear_input_buffer()        
@@ -586,15 +632,13 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
         normalized_value = int((audio_level / 1.0) * 50)  
 
         asterisks.value = '*' * normalized_value
-        ##print(f"Audio level: {audio_level}, Normalized value: {normalized_value}")
-        print(asterisks.value.ljust(50, ' '), end='\r')
+
+        print(' ' * 11 + asterisks.value.ljust(50, ' '), end='\r')
 
     with sd.InputStream(callback=callback_input, device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate):
         while not stop_vu_queue.get():
             sd.sleep(0.1)
-            ##pass
         print("Stopping vu...")
-
 
 def toggle_vu_meter():
     global vu_proc, monitor_channel, asterisks, stop_vu_queue
@@ -604,16 +648,18 @@ def toggle_vu_meter():
         vu_manager = multiprocessing.Manager()
         stop_vu_queue = multiprocessing.Queue()
         asterisks = vu_manager.Value(str, '*' * 50)
+
         print("fullscale:",asterisks.value.ljust(50, ' '))
+
         if config.MODE_EVENT:
             normalized_value = int(config.EVENT_THRESHOLD / 1000)
             asterisks.value = '*' * normalized_value
             print("threshold:",asterisks.value.ljust(50, ' '))
+            
         vu_proc = multiprocessing.Process(target=vu_meter, args=(sound_in_id, sound_in_samplerate, sound_in_chs, monitor_channel, stop_vu_queue, asterisks))
         vu_proc.start()
     else:
         stop_vu()
-
 
 def stop_vu():
     global vu_proc, stop_vu_event, stop_vu_queue
@@ -717,38 +763,41 @@ def toggle_intercom_m():
 # Function to switch the channel being monitored
 #
 
-def change_monitor_channel():
+def change_monitor_channel(mic_status):
     global monitor_channel, change_ch_event
     # usage: press m then press 1, 2, 3, 4
-    print(f"\nChannel {monitor_channel+1} is active, {sound_in_chs} are available: select a channel:") #, end='\r')
-
+    print(f"\nChannel {monitor_channel+1} is active, {sound_in_chs} are available: select a channel: ") #, end='\r')
     while True:
         while msvcrt.kbhit():
             key = msvcrt.getch().decode('utf-8')
+            # Clear the input buffer:
+            while msvcrt.kbhit(): 
+                msvcrt.getch() 
             if key.isdigit():
-                key_int = int(key)
-                if key_int >= 1 and key_int <= sound_in_chs:
-                    monitor_channel = key_int - 1
+                if int(key) == 0:
+                    print("exiting channel change\n")
+                    return
+                else:
+                    key_int = int(key) - 1
+                if (is_mic_position_in_bounds(mic_status, key_int)):
+                    monitor_channel = key_int
                     change_ch_event.set()                         
                     print(f"Now monitoring: {monitor_channel+1}")
-
                     if intercom_proc is not None:
                         toggle_intercom_m()
                         time.sleep(0.1)
                         toggle_intercom_m()
-                        
                     if vu_proc is not None:
                         toggle_vu_meter()
                         time.sleep(0.1)
                         toggle_vu_meter()
-
-                    return        
                 else:
-                    print(f"Sound device has only {sound_in_chs} channels")
-
-            if key == '\x1b':       # escape
+                    print(f"Sound device has only {sound_in_chs} channel(s)")
+ 
+            if key == chr(27):       # escape
                 print("exiting monitor channel selection")
                 return
+
         time.sleep(1)
 
 #
@@ -808,7 +857,7 @@ def plot_and_save_fft(sound_in_samplerate, channel):
 #
 
 def setup_audio_circular_buffer():
-    global buffer_size, buffer, buffer_index, buffer_wrap, buffer_wrap_event, blocksize
+    global buffer_size, buffer, buffer_index, buffer_wrap, blocksize, buffer_wrap_event
 
     # Create a buffer to hold the audio data
     buffer_size = int(BUFFER_SECONDS * sound_in_samplerate)
@@ -897,7 +946,6 @@ def callback(indata, frames, time, status):
     data_len = len(indata)
 
     # managing the circular buffer
-    print(f"buffer_index={buffer_index}, data_len={data_len}, buffer_size={buffer_size}\n")
     if buffer_index + data_len <= buffer_size:
         buffer[buffer_index:buffer_index + data_len] = indata
         buffer_wrap_event.clear()
@@ -910,7 +958,7 @@ def callback(indata, frames, time, status):
     buffer_index = (buffer_index + data_len) % buffer_size
 
 
-def audio_stream(blocksize):
+def audio_stream():
     global stop_program, sound_in_id, sound_in_chs, sound_in_samplerate, _dtype, testmode
 
     print("Start audio_stream...")
@@ -953,16 +1001,12 @@ def kill_worker_threads():
 
 def stop_all():
     global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc
-
-    if KB_or_CP == 'KB':
-        # Unhook all hooks
-        keyboard.unhook_all()
-        print("Unhooked all keyboard hooks")
-
+    print("\ntrying to stop everything")
+    keyboard.unhook_all()
     stop_program[0] = True
     stop_recording_event.set()
-
     stop_fft_periodic_plot_event.set()
+
     if fft_periodic_plot_proc is not None:
         fft_periodic_plot_proc.join()
         print("fft_periodic_plot_proc stopped ***")
@@ -976,25 +1020,88 @@ def stop_all():
     print("\nHopefully we have turned off all the lights...")
 
 
+# Global flag to track listening state
+listening = False
+
+def toggle_listening():
+    global listening
+    listening = not listening
+    if listening:
+        print("\n\nListening for commands...")
+        show_list_of_commands()
+        bind_keys()  # Start listening to other keys
+    else:
+        print("Stopped listening for commands.")
+        stop_vu()
+        stop_intercom_m()
+        unbind_keys()  # Stop listening to other keys
+
+def show_list_of_commands():
+    print("\na  check audio pathway for over/underflows")
+    print("c  select channel to monitor, either before or during use of vu or intercom, '0' to exit")
+    print("d  show device list")
+    print("f  show fft")
+    print("i  toggle: intercom: press i then press 1, 2, 3, ... to listen to that channel")
+    print("m  show active mic positions")
+    print("o  show oscilloscope trace of each active channel")
+    print("q  stop all processes and exit")
+    print("s  plot spectrogram of last recording")
+    print("t  see list of all threads")
+    print("v  toggle: show vu meter on cli\n")
+
+    print("^  stop monitoring keyboard commands\n")
+    print("h or ?  show list of commands\n")
+
+def bind_keys():
+    # Check audio pathway for over/underflows
+    keyboard.on_press_key("a", lambda _: check_stream_status(10), suppress=True) 
+    # Press c to select channel to monitor
+    keyboard.on_press_key("c", lambda _: change_monitor_channel(mic_states), suppress=True)
+    # One shot process to see device list
+    keyboard.on_press_key("d", lambda _: show_audio_device_list(), suppress=True) 
+    # One shot process to see fft
+    keyboard.on_press_key("f", lambda _: trigger_fft(), suppress=True)
+    # Press i to listen to a channel, press again to stop
+    keyboard.on_press_key("i", lambda _: toggle_intercom_m(), suppress=True)
+    # Press m to Show enable mic positions
+    keyboard.on_press_key("m", lambda _: show_mic_locations(), suppress=True)
+    # One shot process to view oscope
+    keyboard.on_press_key("o", lambda _: trigger_oscope(), suppress=True) 
+    # Press q to stop all processes
+    keyboard.on_press_key("q", lambda _: stop_all(), suppress=True)
+    # Press s to plot spectrogram of last recording
+    keyboard.on_press_key("s", lambda _: trigger_spectrogram(), suppress=True)            
+    # Press t to see all threads
+    keyboard.on_press_key("t", lambda _: list_all_threads(), suppress=True)
+    # Press v to start CLI VU meter, press again to stop
+    keyboard.on_press_key("v", lambda _: toggle_vu_meter(), suppress=True)
+    # Press h or ? to show list of commands
+    keyboard.on_press_key("h", lambda _: show_list_of_commands(), suppress=True)
+    keyboard.on_press_key("?", lambda _: show_list_of_commands(), suppress=True)
+
+def unbind_keys():
+    # Unbind all the command keys but keep the toggle key "^" bound
+    keyboard.unhook_key("a")
+    keyboard.unhook_key("c")
+    keyboard.unhook_key("d")
+    keyboard.unhook_key("f")
+    keyboard.unhook_key("i")
+    keyboard.unhook_key("m")
+    keyboard.unhook_key("o")
+    keyboard.unhook_key("q")
+    keyboard.unhook_key("s")
+    keyboard.unhook_key("t")
+    keyboard.unhook_key("v")
+    keyboard.unhook_key("h")
+    keyboard.unhook_key("?")
+
+
 ###########################
 ########## MAIN ###########
 ###########################
 
-from tkinter import *
-import atexit
-
-def cleanup():
-    print("Cleaning up...")
-    if fft_periodic_plot_proc.is_alive():
-        fft_periodic_plot_proc.terminate()
-    keyboard.unhook_all()
-
-atexit.register(cleanup) 
-
 def main():
     global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel, sound_in_id, sound_in_chs
-
-    blocksize = 8196
 
     print("Beehive Multichannel Acoustic-Signal Recorder\n")
     print(f"Saving data to: {PRIMARY_DIRECTORY}\n")
@@ -1020,76 +1127,31 @@ def main():
         fft_periodic_plot_proc.daemon = True  
         fft_periodic_plot_proc.start()
         print("started fft_periodic_plot_process")
-        
+
+    def cleanup():
+        print("Cleaning up...")
+        if fft_periodic_plot_proc.is_alive():
+            fft_periodic_plot_proc.terminate()
+        keyboard.unhook_all()
+
+    atexit.register(cleanup) 
+
     try:
         if KB_or_CP == 'KB':
-            # Function to create and show the popup menu
-            def show_popup_menu(event=None):
-                def execute_command(command):
-                    if command == 'c':
-                        check_stream_status(10)
-                    elif command == 'd':
-                        show_audio_device_list()
-                    elif command == 'f':
-                        trigger_fft()
-                    elif command == 'i':
-                        toggle_intercom_m()
-                    elif command == 'm':
-                        change_monitor_channel()
-                    elif command == 'o':
-                        trigger_oscope()
-                    elif command == 'q':
-                        stop_all()
-                    elif command == 's':
-                        trigger_spectrogram()
-                    elif command == 't':
-                        list_all_threads()
-                    elif command == 'v':
-                        toggle_vu_meter()
-                    #popup.destroy()  # Close the popup after executing command
+            # Bind the toggle key '^' to enable or disable listening mode
+            keyboard.on_press_key("^", lambda _: toggle_listening(), suppress=True)
 
-                popup = Tk()  
-                popup.title("Beehive Commands")
-
-                Button(popup, text="Check Stream Status (c)", command=lambda: execute_command('c')).pack(pady=5)
-                Button(popup, text="Show Audio Device List (d)", command=lambda: execute_command('d')).pack(pady=5)
-                Button(popup, text="Trigger FFT (f)", command=lambda: execute_command('f')).pack(pady=5)
-                Button(popup, text="Toggle Intercom (i)", command=lambda: execute_command('i')).pack(pady=5)
-                Button(popup, text="Change Monitor Channel (m)", command=lambda: execute_command('m')).pack(pady=5)
-                Button(popup, text="Trigger Oscilloscope (o)", command=lambda: execute_command('o')).pack(pady=5)
-                Button(popup, text="Stop All (q)", command=lambda: execute_command('q')).pack(pady=5)
-                Button(popup, text="Trigger Spectrogram (s)", command=lambda: execute_command('s')).pack(pady=5)
-                Button(popup, text="List All Threads (t)", command=lambda: execute_command('t')).pack(pady=5)
-                Button(popup, text="Toggle VU Meter (v)", command=lambda: execute_command('v')).pack(pady=5)
-
-                # Bind Enter key to close the popup
-                popup.bind('<Return>', lambda event: execute_command(''))
-                popup.mainloop()
-           
-            root = Tk()
-            root.title("Beehive Main Window")                
-
-            # Watch for the "ESC ESC" hotkey
-            root.bind('0', show_popup_menu)
-
-            # Start the audio stream in a separate thread
-            #import threading
-            #audio_thread = threading.Thread(target=audio_stream)
-            #audio_thread.daemon = True  # Allow main thread to exit even if audio_thread is running
-            #audio_thread.start()
-            audio_process = multiprocessing.Process(target=audio_stream, args=(blocksize,))
-            audio_process.daemon = True
-            audio_process.start()
-
-            root.mainloop()
-
-    except KeyboardInterrupt:  # ctrl-c in windows
+        # Start the audio stream
+        audio_stream()
+            
+    except KeyboardInterrupt: # ctrl-c in windows
         print('\nCtrl-C: Recording process stopped by user.')
-        cleanup()  # Call cleanup in case of KeyboardInterrupt
+        stop_all()
 
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
-        quit(-1) 
+        cleanup()
+        #quit(-1) 
 
 if __name__ == "__main__":
     main()

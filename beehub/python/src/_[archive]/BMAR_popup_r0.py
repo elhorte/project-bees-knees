@@ -3,7 +3,8 @@
 
 # Code definition: 
 
-# using curses for command line interface
+# uses pop up menu windows for control in place of cli commands
+# only value is pop up menu code, all other functions behind current rev
 
 # Using sounddevice and soundfile libraries, record audio from a device ID and save it to a FLAC file.
 # Input audio from a device ID at a defineable sample rate, bit depth, and channel count. 
@@ -34,7 +35,6 @@ from pydub import AudioSegment
 
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 import keyboard
-import curses
 import atexit
 import msvcrt
 import signal
@@ -46,8 +46,6 @@ import queue
 import librosa
 import librosa.display
 import resampy
-import atexit
-
 ##import TestPyQT5
 
 import BMAR_config as config
@@ -109,23 +107,32 @@ current_time = None
 timestamp = None
 monitor_channel = 0             # '1 of n' mic to monitor by test functions
 stop_program = [False]
-buffer_size = None
+buffer_size = 0
 buffer = None
-buffer_index = None
+buffer_index = 0
 file_offset = 0
 
 # #############################################################
 # #### Control Panel ##########################################
 # #############################################################
 
+# audio parameters:
+PRIMARY_SAMPLERATE = 192000                     # Audio sample rate
+PRIMARY_BITDEPTH = 16                           # Audio bit depth
+PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
+AUDIO_MONITOR_SAMPLERATE = 44100                # For continuous audio
+AUDIO_MONITOR_BITDEPTH = 16                     # Audio bit depthv
+AUDIO_MONITOR_CHANNELS = 2                      # Number of channels
+AUDIO_MONITOR_QUALITY = 0                       # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
+AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
 
 MONITOR_CH = 0                                  # channel to monitor for event (if > number of chs, all channels are monitored)
 TRACE_DURATION = 10                             # seconds of audio to show on oscope
 OSCOPE_GAIN_DB = 12                             # Gain in dB of audio level for oscope 
 
 # instrumentation parms
-FFT_BINS = 800                                  # number of bins for fft
+FFT_BINS = 900                                  # number of bins for fft
 FFT_BW = 1000                                   # bandwidth of each bucket in hertz
 FFT_DURATION = 5                                # seconds of audio to show on fft
 FFT_GAIN = 20                                   # gain in dB for fft
@@ -138,17 +145,17 @@ FULL_SCALE = 2 ** 16                            # just for cli vu meter level re
 BUFFER_SECONDS = 1000                           # time length of circular buffer 
 
 # translate human to machine
-if  config.PRIMARY_BITDEPTH == 16:
+if PRIMARY_BITDEPTH == 16:
     _dtype = 'int16'
     _subtype = 'PCM_16'
-elif config.PRIMARY_BITDEPTH == 24:
+elif PRIMARY_BITDEPTH == 24:
     _dtype = 'int24'
     _subtype = 'PCM_24'
-elif config.PRIMARY_BITDEPTH == 32:
+elif PRIMARY_BITDEPTH == 32:
     _dtype = 'int32' 
     _subtype = 'PCM_32'
 else:
-    print("The bit depth is not supported: ", config.PRIMARY_BITDEPTH)
+    print("The bit depth is not supported: ", PRIMARY_BITDEPTH)
     quit(-1)
 
 # Date and time stuff for file naming
@@ -158,9 +165,9 @@ current_month = current_date.strftime('%m')
 current_day = current_date.strftime('%d')
 
 # to be discovered from sounddevice.query_devices()
-sound_in_id = 1                             # id of input device, set as default in case none is detected
+sound_in_id = None                          # id of input device
 sound_in_chs = config.SOUND_IN_CHS          # number of input channels
-sound_in_samplerate = config.PRIMARY_SAMPLERATE    # sample rate of input device
+sound_in_samplerate = None                  # sample rate of input device
 
 sound_out_id = config.SOUND_OUT_ID_DEFAULT
 sound_out_chs = config.SOUND_OUT_CHS_DEFAULT                        
@@ -232,6 +239,8 @@ def set_input_device(model_name, api_name):
     ##sound_in_chs = 4
     ##sound_in_samplerate = 192000
 
+
+
 # interruptable sleep
 def interruptable_sleep(seconds, stop_sleep_event):
     for i in range(seconds*2):
@@ -258,7 +267,7 @@ def clear_input_buffer():
 
 
 def show_audio_device_info_for_SOUND_IN_OUT():
-    device_info = sd.query_devices(sound_in_id)    
+    device_info = sd.query_devices(sound_in_id)  
     print('Default Sample Rate: {}'.format(device_info['default_samplerate']))
     print('Max Input Channels: {}'.format(device_info['max_input_channels']))
     device_info = sd.query_devices(sound_out_id)  
@@ -276,43 +285,10 @@ def show_audio_device_info_for_defaults():
 
 
 def show_audio_device_list():
-    SOUND_OUT_ID_DEFAULT = get_default_output_device()
-    print()
     print(sd.query_devices())
     show_audio_device_info_for_defaults()
     print(f"\nCurrent device in: {sound_in_id}, device out: {SOUND_OUT_ID_DEFAULT}\n")
     show_audio_device_info_for_SOUND_IN_OUT()
-
-# mic present or not at each position
-mic_states = [config.MIC_1, config.MIC_2, config.MIC_3, config.MIC_4]
-
-def get_enabled_mic_locations():
-    """
-    Reads microphone enable states (MIC_1 to MIC_4) and maps to their corresponding locations.
-    """
-    # Define microphone states and corresponding locations
-    mic_location_names = [config.MIC_LOCATION[i] for i, enabled in enumerate(mic_states) if enabled]
-    return mic_location_names
-
-##mic_location_names = get_enabled_mic_locations()
-def show_mic_locations():
-    print("Enabled microphone locations:", get_enabled_mic_locations())
-
-
-def is_mic_position_in_bounds(mic_list, position):
-  """
-  Checks if the mic is present in the hive and powered on.
-  Args:
-    data: A list of boolean values (True/False) or integers (1/0).
-    position: The index of the element to check.
-  Returns:
-    status of mic at position
-  """
-  try:
-    return bool(mic_list[position])
-  except IndexError:
-    print(f"Error: mic {position} is out of bounds.")
-    return False  
 
 
 def check_stream_status(stream_duration):
@@ -341,7 +317,7 @@ def check_stream_status(stream_duration):
 
 
 # fetch the most recent audio file in the directory
-def find_file_of_type_with_offset_1(directory=PRIMARY_DIRECTORY, file_type=config.PRIMARY_FILE_FORMAT, offset=0):
+def find_file_of_type_with_offset_1(directory=PRIMARY_DIRECTORY, file_type=PRIMARY_FILE_FORMAT, offset=0):
     matching_files = [os.path.join(directory, f) for f in os.listdir(directory) \
                       if os.path.isfile(os.path.join(directory, f)) and f.endswith(f".{file_type.lower()}")]
     if offset < len(matching_files):
@@ -350,7 +326,7 @@ def find_file_of_type_with_offset_1(directory=PRIMARY_DIRECTORY, file_type=confi
     return None
 
 # return the most recent audio file in the directory minus offset (next most recent, etc.)
-def find_file_of_type_with_offset(offset, directory=PRIMARY_DIRECTORY, file_type=config.PRIMARY_FILE_FORMAT):
+def find_file_of_type_with_offset(offset, directory=PRIMARY_DIRECTORY, file_type=PRIMARY_FILE_FORMAT):
     # List all files of the specified type in the directory
     files_of_type = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f)) and f.endswith(f".{file_type.lower()}")]
     # Sort files alphabetically
@@ -400,16 +376,16 @@ def pcm_to_mp3_write(np_array, full_path):
     audio_segment = AudioSegment(
         data=byte_array,
         sample_width=2,
-        frame_rate=config.AUDIO_MONITOR_SAMPLERATE,
-        channels=config.AUDIO_MONITOR_CHANNELS
+        frame_rate=AUDIO_MONITOR_SAMPLERATE,
+        channels=AUDIO_MONITOR_CHANNELS
     )
-    if config.AUDIO_MONITOR_QUALITY >= 64 and config.AUDIO_MONITOR_QUALITY <= 320:    # use constant bitrate, 64k would be the min, 320k the best
-        cbr = str(config.AUDIO_MONITOR_QUALITY) + "k"
+    if AUDIO_MONITOR_QUALITY >= 64 and AUDIO_MONITOR_QUALITY <= 320:    # use constant bitrate, 64k would be the min, 320k the best
+        cbr = str(AUDIO_MONITOR_QUALITY) + "k"
         audio_segment.export(full_path, format="mp3", bitrate=cbr)
-    elif config.AUDIO_MONITOR_QUALITY < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
+    elif AUDIO_MONITOR_QUALITY < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
         audio_segment.export(full_path, format="mp3", parameters=["-q:a", "0"])
     else:
-        print("Don't know of a mp3 mode with parameter:", config.AUDIO_MONITOR_QUALITY)
+        print("Don't know of a mp3 mode with parameter:", AUDIO_MONITOR_QUALITY)
         quit(-1)
 
 # downsample audio to a lower sample rate
@@ -448,13 +424,6 @@ def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
 # #############################################################
 # signal display functions
 # #############################################################
-
-def get_default_output_device():
-    devices = sd.query_devices()
-    for device in devices:
-        if device['max_output_channels'] > 0:
-            return device['name']
-    return None
 
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
 def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs): 
@@ -620,13 +589,15 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
         normalized_value = int((audio_level / 1.0) * 50)  
 
         asterisks.value = '*' * normalized_value
-
-        print(' ' * 11 + asterisks.value.ljust(50, ' '), end='\r')
+        ##print(f"Audio level: {audio_level}, Normalized value: {normalized_value}")
+        print(asterisks.value.ljust(50, ' '), end='\r')
 
     with sd.InputStream(callback=callback_input, device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate):
         while not stop_vu_queue.get():
             sd.sleep(0.1)
+            ##pass
         print("Stopping vu...")
+
 
 def toggle_vu_meter():
     global vu_proc, monitor_channel, asterisks, stop_vu_queue
@@ -636,18 +607,16 @@ def toggle_vu_meter():
         vu_manager = multiprocessing.Manager()
         stop_vu_queue = multiprocessing.Queue()
         asterisks = vu_manager.Value(str, '*' * 50)
-
         print("fullscale:",asterisks.value.ljust(50, ' '))
-
         if config.MODE_EVENT:
             normalized_value = int(config.EVENT_THRESHOLD / 1000)
             asterisks.value = '*' * normalized_value
             print("threshold:",asterisks.value.ljust(50, ' '))
-            
         vu_proc = multiprocessing.Process(target=vu_meter, args=(sound_in_id, sound_in_samplerate, sound_in_chs, monitor_channel, stop_vu_queue, asterisks))
         vu_proc.start()
     else:
         stop_vu()
+
 
 def stop_vu():
     global vu_proc, stop_vu_event, stop_vu_queue
@@ -751,41 +720,38 @@ def toggle_intercom_m():
 # Function to switch the channel being monitored
 #
 
-def change_monitor_channel(mic_status):
+def change_monitor_channel():
     global monitor_channel, change_ch_event
     # usage: press m then press 1, 2, 3, 4
-    print(f"\nChannel {monitor_channel+1} is active, {sound_in_chs} are available: select a channel: ") #, end='\r')
+    print(f"\nChannel {monitor_channel+1} is active, {sound_in_chs} are available: select a channel:") #, end='\r')
+
     while True:
         while msvcrt.kbhit():
             key = msvcrt.getch().decode('utf-8')
-            # Clear the input buffer:
-            while msvcrt.kbhit(): 
-                msvcrt.getch() 
             if key.isdigit():
-                if int(key) == 0:
-                    print("exiting channel change\n")
-                    return
-                else:
-                    key_int = int(key) - 1
-                if (is_mic_position_in_bounds(mic_status, key_int)):
-                    monitor_channel = key_int
+                key_int = int(key)
+                if key_int >= 1 and key_int <= sound_in_chs:
+                    monitor_channel = key_int - 1
                     change_ch_event.set()                         
                     print(f"Now monitoring: {monitor_channel+1}")
+
                     if intercom_proc is not None:
                         toggle_intercom_m()
                         time.sleep(0.1)
                         toggle_intercom_m()
+                        
                     if vu_proc is not None:
                         toggle_vu_meter()
                         time.sleep(0.1)
                         toggle_vu_meter()
+
+                    return        
                 else:
-                    print(f"Sound device has only {sound_in_chs} channel(s)")
- 
-            if key == chr(27):       # escape
+                    print(f"Sound device has only {sound_in_chs} channels")
+
+            if key == '\x1b':       # escape
                 print("exiting monitor channel selection")
                 return
-
         time.sleep(1)
 
 #
@@ -845,7 +811,7 @@ def plot_and_save_fft(sound_in_samplerate, channel):
 #
 
 def setup_audio_circular_buffer():
-    global buffer_size, buffer, buffer_index, buffer_wrap, blocksize, buffer_wrap_event
+    global buffer_size, buffer, buffer_index, buffer_wrap, buffer_wrap_event, blocksize
 
     # Create a buffer to hold the audio data
     buffer_size = int(BUFFER_SECONDS * sound_in_samplerate)
@@ -854,7 +820,7 @@ def setup_audio_circular_buffer():
     buffer_wrap = False
     blocksize = 8196
     buffer_wrap_event = threading.Event()
-    print(f"\naudio buffer size: {sys.getsizeof(buffer)}\n")
+
 # 
 # ### WORKER THREAD ########################################################
 #
@@ -934,6 +900,7 @@ def callback(indata, frames, time, status):
     data_len = len(indata)
 
     # managing the circular buffer
+    print(f"buffer_index={buffer_index}, data_len={data_len}, buffer_size={buffer_size}\n")
     if buffer_index + data_len <= buffer_size:
         buffer[buffer_index:buffer_index + data_len] = indata
         buffer_wrap_event.clear()
@@ -946,7 +913,7 @@ def callback(indata, frames, time, status):
     buffer_index = (buffer_index + data_len) % buffer_size
 
 
-def audio_stream():
+def audio_stream(blocksize):
     global stop_program, sound_in_id, sound_in_chs, sound_in_samplerate, _dtype, testmode
 
     print("Start audio_stream...")
@@ -958,15 +925,15 @@ def audio_stream():
         # NOTE: replace <name>_START with None to disable time of day recording
         if config.MODE_AUDIO_MONITOR:
             print("starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
-            threading.Thread(target=recording_worker_thread, args=(config.AUDIO_MONITOR_RECORD, config.AUDIO_MONITOR_INTERVAL, "Audio_monitor", config.AUDIO_MONITOR_FORMAT, config.AUDIO_MONITOR_SAMPLERATE, config.AUDIO_MONITOR_START, config.AUDIO_MONITOR_END)).start()
+            threading.Thread(target=recording_worker_thread, args=(config.AUDIO_MONITOR_RECORD, config.AUDIO_MONITOR_INTERVAL, "Audio_monitor", AUDIO_MONITOR_FORMAT, AUDIO_MONITOR_SAMPLERATE, config.AUDIO_MONITOR_START, config.AUDIO_MONITOR_END)).start()
 
         if config.MODE_PERIOD and not testmode:
             print("starting recording_worker_thread for saving period audio at primary sample rate and all channels...")
-            threading.Thread(target=recording_worker_thread, args=(config.PERIOD_RECORD, config.PERIOD_INTERVAL, "Period_recording", config.PRIMARY_FILE_FORMAT, sound_in_samplerate, config.PERIOD_START, config.PERIOD_END)).start()
+            threading.Thread(target=recording_worker_thread, args=(config.PERIOD_RECORD, config.PERIOD_INTERVAL, "Period_recording", PRIMARY_FILE_FORMAT, sound_in_samplerate, config.PERIOD_START, config.PERIOD_END)).start()
 
         if config.MODE_EVENT and not testmode:  # *** UNDER CONSTRUCTION, NOT READY FOR PRIME TIME ***
             print("starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...")
-            threading.Thread(target=recording_worker_thread, args=(config.SAVE_BEFORE_EVENT, config.SAVE_AFTER_EVENT, "Event_recording", config.PRIMARY_FILE_FORMAT, sound_in_samplerate, config.EVENT_START, config.EVENT_END)).start()
+            threading.Thread(target=recording_worker_thread, args=(config.SAVE_BEFORE_EVENT, config.SAVE_AFTER_EVENT, "Event_recording", PRIMARY_FILE_FORMAT, sound_in_samplerate, config.EVENT_START, config.EVENT_END)).start()
 
         while stream.active and not stop_program[0]:
             time.sleep(1)
@@ -989,7 +956,12 @@ def kill_worker_threads():
 
 def stop_all():
     global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc
-    print("\ntrying to stop everything")
+
+    if KB_or_CP == 'KB':
+        # Unhook all hooks
+        keyboard.unhook_all()
+        print("Unhooked all keyboard hooks")
+
     stop_program[0] = True
     stop_recording_event.set()
 
@@ -1003,128 +975,38 @@ def stop_all():
     keyboard.write('\b') 
     clear_input_buffer()
     list_all_threads()
-    keyboard.unhook_all()
+
     print("\nHopefully we have turned off all the lights...")
-
-
-##import curses
-
-def show_list_of_commands(stdscr):
-    commands = """
-    a  check audio pathway for over/underflows
-    c  select channel to monitor, either before or during use of vu or intercom, '0' to exit
-    d  show device list
-    f  show fft
-    i  toggle: intercom: press i then press 1, 2, 3, ... to listen to that channel
-    m  show active mic positions
-    o  show oscilloscope trace of each active channel
-    q  stop all processes and exit
-    s  plot spectrogram of last recording
-    t  see list of all threads
-    v  toggle: show vu meter on cli
-
-    ^  stop monitoring keyboard commands
-    h or ?  show list of commands
-    """
-
-# Flag to track curses mode
-curses_active = False
-
-# Function to toggle curses mode
-def toggle_listening():
-    global curses_active
-    curses_active = not curses_active
-    if curses_active:
-        print("\nCurses mode activated. Press '^' again to exit.")
-        curses.wrapper(curses_mode)  # Start curses mode
-    else:
-        print("Curses mode deactivated. Back to normal terminal activity.")
-
-# Function to handle curses mode
-def curses_mode(stdscr):
-    global curses_active
-
-    curses.noecho()
-    curses.cbreak()
-    stdscr.keypad(True)
-    stdscr.clear()
-    stdscr.addstr("Curses mode active. Press '^' to deactivate.\n")
-    stdscr.refresh()
-
-    while curses_active:
-        key = stdscr.getch()
-        if key == ord('a'):
-            check_stream_status(10)
-        elif key == ord('c'):
-            change_monitor_channel(mic_states)
-        elif key == ord('d'):
-            show_audio_device_list()
-        elif key == ord('f'):
-            trigger_fft()
-        elif key == ord('i'):
-            toggle_intercom_m()
-        elif key == ord('m'):
-            show_mic_locations()
-        elif key == ord('o'):
-            trigger_oscope()
-        elif key == ord('q'):
-            stop_all()
-            curses_active = False
-            break
-        elif key == ord('s'):
-            trigger_spectrogram()
-        elif key == ord('t'):
-            list_all_threads()
-        elif key == ord('v'):
-            toggle_vu_meter()
-        elif key == ord('h') or key == ord('?'):
-            stdscr.addstr("\nCommands:\n")
-            show_list_of_commands(stdscr)
-
-    curses.nocbreak()
-    stdscr.keypad(False)
-    curses.echo()
-
-# Function to show the command list in curses
-def show_list_of_commands(stdscr):
-    commands = """
-    a - check audio pathway for over/underflows
-    c - select channel to monitor
-    d - show device list
-    f - show fft
-    i - toggle intercom
-    m - show active mic positions
-    o - show oscilloscope
-    q - quit
-    s - plot spectrogram
-    t - list threads
-    v - toggle VU meter
-    h/? - show help
-    ^ - toggle curses mode
-    """
-    stdscr.addstr(commands)
-    stdscr.refresh()
-
-# Start the key listener in a background thread
-threading.Thread(target=lambda: keyboard.wait('^') or toggle_listening(), daemon=True).start()
 
 
 ###########################
 ########## MAIN ###########
 ###########################
 
+from tkinter import *
+import atexit
+
+def cleanup():
+    print("Cleaning up...")
+    if fft_periodic_plot_proc.is_alive():
+        fft_periodic_plot_proc.terminate()
+    keyboard.unhook_all()
+
+atexit.register(cleanup) 
+
 def main():
     global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel, sound_in_id, sound_in_chs
+
+    blocksize = 8196
 
     print("Beehive Multichannel Acoustic-Signal Recorder\n")
     print(f"Saving data to: {PRIMARY_DIRECTORY}\n")
 
     set_input_device(config.MODEL_NAME, config.API_NAME)
-    # get the ball rolling (get it?)
     setup_audio_circular_buffer()
 
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/1000000:.2f} megabytes")
-    print(f"Sample Rate: {sound_in_samplerate}; File Format: {config.PRIMARY_FILE_FORMAT}; Channels: {sound_in_chs}")
+    print(f"Sample Rate: {sound_in_samplerate}; File Format: {PRIMARY_FILE_FORMAT}; Channels: {sound_in_chs}")
 
     # Create the output directory if it doesn't exist
     try:
@@ -1141,31 +1023,76 @@ def main():
         fft_periodic_plot_proc.daemon = True  
         fft_periodic_plot_proc.start()
         print("started fft_periodic_plot_process")
-
-    def cleanup():
-        print("Cleaning up...")
-        if fft_periodic_plot_proc.is_alive():
-            fft_periodic_plot_proc.terminate()
-        keyboard.unhook_all()
-
-    atexit.register(cleanup) 
-
+        
     try:
         if KB_or_CP == 'KB':
-            # Bind the toggle key '^' to enable or disable listening mode
-            keyboard.on_press_key("^", lambda _: toggle_listening(), suppress=True)
+            # Function to create and show the popup menu
+            def show_popup_menu(event=None):
+                def execute_command(command):
+                    if command == 'c':
+                        check_stream_status(10)
+                    elif command == 'd':
+                        show_audio_device_list()
+                    elif command == 'f':
+                        trigger_fft()
+                    elif command == 'i':
+                        toggle_intercom_m()
+                    elif command == 'm':
+                        change_monitor_channel()
+                    elif command == 'o':
+                        trigger_oscope()
+                    elif command == 'q':
+                        stop_all()
+                    elif command == 's':
+                        trigger_spectrogram()
+                    elif command == 't':
+                        list_all_threads()
+                    elif command == 'v':
+                        toggle_vu_meter()
+                    #popup.destroy()  # Close the popup after executing command
 
-        # Start the audio stream
-        audio_stream()
-            
-    except KeyboardInterrupt: # ctrl-c in windows
+                popup = Tk()  
+                popup.title("Beehive Commands")
+
+                Button(popup, text="Check Stream Status (c)", command=lambda: execute_command('c')).pack(pady=5)
+                Button(popup, text="Show Audio Device List (d)", command=lambda: execute_command('d')).pack(pady=5)
+                Button(popup, text="Trigger FFT (f)", command=lambda: execute_command('f')).pack(pady=5)
+                Button(popup, text="Toggle Intercom (i)", command=lambda: execute_command('i')).pack(pady=5)
+                Button(popup, text="Change Monitor Channel (m)", command=lambda: execute_command('m')).pack(pady=5)
+                Button(popup, text="Trigger Oscilloscope (o)", command=lambda: execute_command('o')).pack(pady=5)
+                Button(popup, text="Stop All (q)", command=lambda: execute_command('q')).pack(pady=5)
+                Button(popup, text="Trigger Spectrogram (s)", command=lambda: execute_command('s')).pack(pady=5)
+                Button(popup, text="List All Threads (t)", command=lambda: execute_command('t')).pack(pady=5)
+                Button(popup, text="Toggle VU Meter (v)", command=lambda: execute_command('v')).pack(pady=5)
+
+                # Bind Enter key to close the popup
+                popup.bind('<Return>', lambda event: execute_command(''))
+                popup.mainloop()
+           
+            root = Tk()
+            root.title("Beehive Main Window")                
+
+            # Watch for the "ESC ESC" hotkey
+            root.bind('0', show_popup_menu)
+
+            # Start the audio stream in a separate thread
+            #import threading
+            #audio_thread = threading.Thread(target=audio_stream)
+            #audio_thread.daemon = True  # Allow main thread to exit even if audio_thread is running
+            #audio_thread.start()
+            audio_process = multiprocessing.Process(target=audio_stream, args=(blocksize,))
+            audio_process.daemon = True
+            audio_process.start()
+
+            root.mainloop()
+
+    except KeyboardInterrupt:  # ctrl-c in windows
         print('\nCtrl-C: Recording process stopped by user.')
-        stop_all()
+        cleanup()  # Call cleanup in case of KeyboardInterrupt
 
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
-        cleanup()
-        #quit(-1) 
+        quit(-1) 
 
 if __name__ == "__main__":
     main()
