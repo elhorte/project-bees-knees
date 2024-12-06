@@ -130,7 +130,6 @@ FFT_BW = 1000                                   # bandwidth of each bucket in he
 FFT_DURATION = 5                                # seconds of audio to show on fft
 FFT_GAIN = 20                                   # gain in dB for fft
 FFT_INTERVAL = 30                               # minutes between ffts
-
 OSCOPE_DURATION = 10                            # seconds of audio to show on oscope
 OSCOPE_GAIN_DB = 12                             # gain in dB for oscope
 

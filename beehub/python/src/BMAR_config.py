@@ -48,7 +48,7 @@ MIC_2 = False
 MIC_3 = False
 MIC_4 = False
 
-SOUND_IN_CHS = 4 ##MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
+SOUND_IN_CHS = MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
 
 # input device parameters:
 MAKE_NAME = "Focusrite"                         # 'Behringer' or 'Zoom or Scarlett'
