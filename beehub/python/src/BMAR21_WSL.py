@@ -29,6 +29,7 @@ from scipy.signal import resample_poly
 from scipy.signal import decimate
 from scipy.signal import butter, filtfilt
 from pydub import AudioSegment
+import msvcrt  # Add this import for Windows keyboard handling
 
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 #import keyboard
@@ -188,51 +189,81 @@ def get_api_name_for_device(device_id):
 def set_input_device(model_name, api_name):
     global sound_in_id, sound_in_chs, testmode, sound_in_samplerate
 
-    # Purpose is to find connected audio device and set the sound_in_id
-    # to the device that matches the MODEL_NAME and HOSTAPI_NAME
-    # If no device is found, then it is set to any device that uses WASAPI (in Windows) 
-    # and sets the sound_in_samplerate to the default sample rate of the device.
-    # If the default device cannot manage 192k, then the system operated in the testmode.
-    # The device_id is used to set the input device for the sounddevice module
-    # and to set the input device for the pyaudio module.
-    # Output device is unimportant and uses the default device.
+    print("\nScanning for audio input devices...")
+    sys.stdout.flush()
 
-    # Redirect stdout to a string buffer
-    original_stdout = sys.stdout
-    sys.stdout = buffer = io.StringIO()
-    # Call the function that prints to stdout
-    print(sd.query_devices())
-    # Reset stdout to its original value
-    sys.stdout = original_stdout
-    # Get the string value from the buffer and split by lines to get the array
-    devices_str = buffer.getvalue().splitlines()
+    try:
+        # Get list of all devices
+        devices = sd.query_devices()
+        input_devices = []
+        
+        # First, list all available input devices
+        print("\nAvailable input devices:")
+        for i, device in enumerate(devices):
+            if device['max_input_channels'] > 0:
+                input_devices.append((i, device))
+                print(f"  {i}: {device['name']} ({device['max_input_channels']} input channels)")
+        sys.stdout.flush()
 
-    # loop through known MODEL_NAME
-    for i in range(len(devices_str)):
-        if (str(sound_in_chs)+" in" in devices_str[i] and api_name in devices_str[i]):
-            print("Looking at device: ", devices_str[i])
-            device = sd.query_devices(i)
-            sound_in_id = i
-            ##sound_in_chs = device['max_input_channels']
-            sound_in_samplerate = int(device['default_samplerate'])
-            try:    # found an input device and of type WASAPI, do we know about it?
-                for j in range(len(model_name)):
-                    if (model_name[j] in devices_str[i]):
-                        print("Found device: ", devices_str[i])
-                        time.sleep(3)      # in case a human is looking at the screen
-                        return
-            except:
-                # if input device model not found, use default device
-                if sound_in_samplerate < 192000:
-                    print("Default device not fast enought to do the job.", sd.query_devices(i))
-                    print("Caution: running in testmode with lower than needed sample rate")
-                    testmode = True
-                print(f"Known devices not found, using default {i}\n", sd.query_devices(i))
-                
-    # wlh - force sound in device parms
-    ##sound_in_id = 16
-    ##sound_in_chs = 4
-    ##sound_in_samplerate = 192000
+        if not input_devices:
+            print("\nNo input devices found! Please check your audio device connections.")
+            print("Make sure your microphone or audio interface is properly connected and enabled.")
+            print("\nTroubleshooting steps:")
+            print("1. Check if your microphone is properly connected")
+            print("2. Make sure it's enabled in Windows sound settings")
+            print("3. Check if it's set as the default input device")
+            print("4. Try unplugging and replugging the microphone")
+            print("5. Check if the microphone works in other applications (like Windows Voice Recorder)")
+            sys.stdout.flush()
+            return False
+
+        # Try to find a device that matches our model name
+        print(f"\nLooking for preferred device models: {model_name}")
+        sys.stdout.flush()
+        
+        for device_id, device in input_devices:
+            for model in model_name:
+                if model.lower() in device['name'].lower():
+                    if device['max_input_channels'] >= sound_in_chs:
+                        sound_in_id = device_id
+                        sound_in_samplerate = int(device['default_samplerate'])
+                        print(f"\nFound preferred device: {device['name']}")
+                        print(f"Using {sound_in_chs} channel(s) at {sound_in_samplerate} Hz")
+                        sys.stdout.flush()
+                        return True
+                    else:
+                        print(f"Device {device['name']} doesn't support enough channels (needs {sound_in_chs}, has {device['max_input_channels']})")
+                        sys.stdout.flush()
+
+        # If no preferred device found, use the first available input device
+        print("\nNo preferred device found, using first available input device")
+        sys.stdout.flush()
+        
+        device_id, device = input_devices[0]
+        sound_in_id = device_id
+        sound_in_samplerate = int(device['default_samplerate'])
+        
+        # If the device has fewer channels than requested, adjust our channel count
+        if device['max_input_channels'] < sound_in_chs:
+            print(f"\nWarning: Device only supports {device['max_input_channels']} channels, adjusting channel count")
+            sound_in_chs = device['max_input_channels']
+        
+        print(f"\nUsing device: {device['name']}")
+        print(f"Using {sound_in_chs} channel(s) at {sound_in_samplerate} Hz")
+        
+        if sound_in_samplerate < 192000:
+            print("\nWarning: Device sample rate is lower than required")
+            print("Running in test mode with reduced sample rate")
+            testmode = True
+        
+        sys.stdout.flush()
+        return True
+
+    except Exception as e:
+        print(f"\nError during device selection: {str(e)}")
+        print("Please check your audio device configuration and ensure it supports the required settings")
+        sys.stdout.flush()
+        return False
 
 # interruptable sleep
 def interruptable_sleep(seconds, stop_sleep_event):
@@ -255,8 +286,13 @@ def list_all_threads():
 
 
 def clear_input_buffer():
-    while msvcrt.kbhit():
-        msvcrt.getch()
+    """Clear the keyboard input buffer. Handles both Windows and non-Windows platforms."""
+    try:
+        while msvcrt.kbhit():
+            msvcrt.getch()
+    except (NameError, AttributeError):
+        # If msvcrt is not available (non-Windows platform), just pass
+        pass
 
 
 def show_audio_device_info_for_SOUND_IN_OUT():
@@ -392,25 +428,42 @@ time_diff = time_between()
 
 # convert audio to mp3 and save to file using downsampled data
 def pcm_to_mp3_write(np_array, full_path):
+    try:
+        int_array = np_array.astype(np.int16)
+        byte_array = int_array.tobytes()
 
-    int_array = np_array.astype(np.int16)
-    byte_array = int_array.tobytes()
-
-    # Create an AudioSegment instance from the byte array
-    audio_segment = AudioSegment(
-        data=byte_array,
-        sample_width=2,
-        frame_rate=config.AUDIO_MONITOR_SAMPLERATE,
-        channels=config.AUDIO_MONITOR_CHANNELS
-    )
-    if config.AUDIO_MONITOR_QUALITY >= 64 and config.AUDIO_MONITOR_QUALITY <= 320:    # use constant bitrate, 64k would be the min, 320k the best
-        cbr = str(config.AUDIO_MONITOR_QUALITY) + "k"
-        audio_segment.export(full_path, format="mp3", bitrate=cbr)
-    elif config.AUDIO_MONITOR_QUALITY < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
-        audio_segment.export(full_path, format="mp3", parameters=["-q:a", "0"])
-    else:
-        print("Don't know of a mp3 mode with parameter:", config.AUDIO_MONITOR_QUALITY)
-        quit(-1)
+        # Create an AudioSegment instance from the byte array
+        audio_segment = AudioSegment(
+            data=byte_array,
+            sample_width=2,
+            frame_rate=config.AUDIO_MONITOR_SAMPLERATE,
+            channels=config.AUDIO_MONITOR_CHANNELS
+        )
+        
+        # Try to export with ffmpeg first
+        try:
+            if config.AUDIO_MONITOR_QUALITY >= 64 and config.AUDIO_MONITOR_QUALITY <= 320:    # use constant bitrate, 64k would be the min, 320k the best
+                cbr = str(config.AUDIO_MONITOR_QUALITY) + "k"
+                audio_segment.export(full_path, format="mp3", bitrate=cbr)
+            elif config.AUDIO_MONITOR_QUALITY < 10:                      # use variable bitrate, 0 to 9, 0 is highest quality
+                audio_segment.export(full_path, format="mp3", parameters=["-q:a", "0"])
+            else:
+                print("Don't know of a mp3 mode with parameter:", config.AUDIO_MONITOR_QUALITY)
+                quit(-1)
+        except Exception as e:
+            if "ffmpeg" in str(e).lower():
+                print("\nError: ffmpeg not found. Please install ffmpeg:")
+                print("1. Download ffmpeg from https://www.gyan.dev/ffmpeg/builds/")
+                print("2. Extract the zip file")
+                print("3. Add the bin folder to your system PATH")
+                print("\nOr install using pip:")
+                print("pip install ffmpeg-python")
+                raise
+            else:
+                raise
+    except Exception as e:
+        print(f"Error converting audio to MP3: {str(e)}")
+        raise
 
 # downsample audio to a lower sample rate
 def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
@@ -949,31 +1002,63 @@ def callback(indata, frames, time, status):
 def audio_stream():
     global stop_program, sound_in_id, sound_in_chs, sound_in_samplerate, _dtype, testmode
 
-    print("Start audio_stream...")
-    stream = sd.InputStream(device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate, dtype=_dtype, blocksize=blocksize, callback=callback)
+    print("\nInitializing audio stream...")
+    print(f"Device ID: {sound_in_id}")
+    print(f"Channels: {sound_in_chs}")
+    print(f"Sample Rate: {sound_in_samplerate}")
+    print(f"Data Type: {_dtype}")
+    sys.stdout.flush()
 
-    with stream:
-        # start the recording worker threads
-        # NOTE: these threads will run until the program is stopped, it will not stop when the stream is stopped
-        # NOTE: replace <name>_START with None to disable time of day recording
-        if config.MODE_AUDIO_MONITOR:
-            print("starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
-            threading.Thread(target=recording_worker_thread, args=(config.AUDIO_MONITOR_RECORD, config.AUDIO_MONITOR_INTERVAL, "Audio_monitor", config.AUDIO_MONITOR_FORMAT, config.AUDIO_MONITOR_SAMPLERATE, config.AUDIO_MONITOR_START, config.AUDIO_MONITOR_END)).start()
+    try:
+        # First verify the device configuration
+        device_info = sd.query_devices(sound_in_id)
+        print(f"\nSelected device info:")
+        print(f"Name: {device_info['name']}")
+        print(f"Max Input Channels: {device_info['max_input_channels']}")
+        print(f"Default Sample Rate: {device_info['default_samplerate']}")
+        sys.stdout.flush()
 
-        if config.MODE_PERIOD and not testmode:
-            print("starting recording_worker_thread for saving period audio at primary sample rate and all channels...")
-            threading.Thread(target=recording_worker_thread, args=(config.PERIOD_RECORD, config.PERIOD_INTERVAL, "Period_recording", config.PRIMARY_FILE_FORMAT, sound_in_samplerate, config.PERIOD_START, config.PERIOD_END)).start()
+        if device_info['max_input_channels'] < sound_in_chs:
+            raise RuntimeError(f"Device only supports {device_info['max_input_channels']} channels, but {sound_in_chs} channels are required")
 
-        if config.MODE_EVENT and not testmode:  # *** UNDER CONSTRUCTION, NOT READY FOR PRIME TIME ***
-            print("starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...")
-            threading.Thread(target=recording_worker_thread, args=(config.SAVE_BEFORE_EVENT, config.SAVE_AFTER_EVENT, "Event_recording", config.PRIMARY_FILE_FORMAT, sound_in_samplerate, config.EVENT_START, config.EVENT_END)).start()
+        # Initialize the stream with explicit channel count
+        stream = sd.InputStream(
+            device=sound_in_id,
+            channels=sound_in_chs,
+            samplerate=sound_in_samplerate,
+            dtype=_dtype,
+            blocksize=blocksize,
+            callback=callback
+        )
 
-        while stream.active and not stop_program[0]:
-            time.sleep(1)
-        
-        stream.stop()
+        print("\nAudio stream initialized successfully")
+        sys.stdout.flush()
 
-        print("Stopped audio_stream...")
+        with stream:
+            # start the recording worker threads
+            if config.MODE_AUDIO_MONITOR:
+                print("Starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
+                threading.Thread(target=recording_worker_thread, args=(config.AUDIO_MONITOR_RECORD, config.AUDIO_MONITOR_INTERVAL, "Audio_monitor", config.AUDIO_MONITOR_FORMAT, config.AUDIO_MONITOR_SAMPLERATE, config.AUDIO_MONITOR_START, config.AUDIO_MONITOR_END)).start()
+
+            if config.MODE_PERIOD and not testmode:
+                print("Starting recording_worker_thread for saving period audio at primary sample rate and all channels...")
+                threading.Thread(target=recording_worker_thread, args=(config.PERIOD_RECORD, config.PERIOD_INTERVAL, "Period_recording", config.PRIMARY_FILE_FORMAT, sound_in_samplerate, config.PERIOD_START, config.PERIOD_END)).start()
+
+            if config.MODE_EVENT and not testmode:
+                print("Starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...")
+                threading.Thread(target=recording_worker_thread, args=(config.SAVE_BEFORE_EVENT, config.SAVE_AFTER_EVENT, "Event_recording", config.PRIMARY_FILE_FORMAT, sound_in_samplerate, config.EVENT_START, config.EVENT_END)).start()
+
+            while stream.active and not stop_program[0]:
+                time.sleep(1)
+            
+            stream.stop()
+            print("Audio stream stopped")
+
+    except Exception as e:
+        print(f"\nError initializing audio stream: {str(e)}")
+        print("Please check your audio device configuration and ensure it supports the required settings")
+        sys.stdout.flush()
+        raise
 
 
 def kill_worker_threads():
@@ -987,61 +1072,33 @@ def kill_worker_threads():
                 print("recording_worker_thread stopped ***")  
 
 
-def stop_all():
-    global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc
-    print("\ntrying to stop everything")
-    stop_program[0] = True
-    stop_recording_event.set()
-
-    stop_fft_periodic_plot_event.set()
-    if fft_periodic_plot_proc is not None:
-        fft_periodic_plot_proc.join()
-        print("fft_periodic_plot_proc stopped ***")
-
-    stop_vu()
-    stop_intercom_m()
-    #keyboard.write('\b') 
-    clear_input_buffer()
-    list_all_threads()
-    #keyboard.unhook_all()
-    print("\nHopefully we have turned off all the lights...")
-
-
-# Global flag to track listening state
-listening = False
+# Add this near the top with other global variables
+keyboard_listener_running = True
+keyboard_listener_active = True  # New variable to track if keyboard listener is active
 
 def toggle_listening():
-    global listening
-    listening = not listening
-    if listening:
-        print("\nListening for commands...")
+    global keyboard_listener_active
+    keyboard_listener_active = not keyboard_listener_active
+    if keyboard_listener_active:
+        print("\nKeyboard listener activated. Listening for commands...")
         show_list_of_commands()
-        #bind_keys()  # Start listening to other keys
     else:
-        print("Stopped listening for commands.")
+        print("\nKeyboard listener deactivated. Press '^' to reactivate.")
         stop_vu()
         stop_intercom_m()
-        #unbind_keys()  # Stop listening to other keys
 
-def show_list_of_commands():
-    print("\na  check audio pathway for over/underflows")
-    print("c  select channel to monitor, either before or during use of vu or intercom, '0' to exit")
-    print("d  show device list")
-    print("f  show fft")
-    print("i  toggle: intercom: press i then press 1, 2, 3, ... to listen to that channel")
-    print("m  show active mic positions")
-    print("o  show oscilloscope trace of each active channel")
-    print("q  stop all processes and exit")
-    print("s  plot spectrogram of last recording")
-    print("t  see list of all threads")
-    print("v  toggle: show vu meter on cli\n")
-
-    print("^  stop monitoring keyboard commands\n")
-
-    print("h or ?  show list of commands\n")
-
-# monitoring keyboard commands from user
 def press(key):
+    global keyboard_listener_running, keyboard_listener_active
+    if not keyboard_listener_running:
+        return
+        
+    if key == "^":  # Tilda key
+        toggle_listening()
+        return
+        
+    if not keyboard_listener_active:
+        return
+        
     if key == "a": 
         check_stream_status(10)
     if key == "c":  
@@ -1067,24 +1124,44 @@ def press(key):
     if key == "h" or key =="?":  
         show_list_of_commands()
 
-listen_keyboard(on_press=press)
-
+def show_list_of_commands():
+    print("\na  audio pathway--check for over/underflows")
+    print("c  channel--select channel to monitor, either before or during use of vu or intercom, '0' to exit")
+    print("d  device list--show list of devices")
+    print("f  fft--show plot")
+    print("i  intercom: press i then press 1, 2, 3, ... to listen to that channel")
+    print("m  mic--show active positions")
+    print("o  oscilloscope--show trace of each active channel")
+    print("q  quit--stop all processes and exit")
+    print("s  spectrogram--plot of last recording")
+    print("t  threads--see list of all threads")
+    print("v  vu meter--toggle--show vu meter on cli")
+    print("^  toggle keyboard listener on/off")
+    print("h or ?  show list of commands\n")
 
 ###########################
 ########## MAIN ###########
 ###########################
 
 def main():
-    global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel, sound_in_id, sound_in_chs, MICS_ACTIVE
+    global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel, sound_in_id, sound_in_chs, MICS_ACTIVE, keyboard_listener_running
 
-    print("Beehive Multichannel Acoustic-Signal Recorder\n")
+    print("\n\nBeehive Multichannel Acoustic-Signal Recorder\n")
+    sys.stdout.flush()
     print(f"Saving data to: {PRIMARY_DIRECTORY}\n")
+    sys.stdout.flush()
 
-    set_input_device(config.MODEL_NAME, config.API_NAME)
+    # Try to set up the input device
+    if not set_input_device(config.MODEL_NAME, config.API_NAME):
+        print("\nExiting due to no suitable audio input device found.")
+        sys.exit(1)
+
     setup_audio_circular_buffer()
 
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/500000:.2f} megabytes")
+    sys.stdout.flush()
     print(f"Sample Rate: {sound_in_samplerate}; File Format: { config.PRIMARY_FILE_FORMAT}; Channels: {sound_in_chs}")
+    sys.stdout.flush()
 
     # Create the output directory if it doesn't exist
     try:
@@ -1093,7 +1170,8 @@ def main():
         os.makedirs(PLOT_DIRECTORY, exist_ok=True)
     except Exception as e:
         print(f"An error occurred while trying to make or find output directory: {e}")
-        quit(-1)
+        sys.stdout.flush()
+        sys.exit(1)
 
     # Create and start the process, note: using mp because matplotlib wants in be in the mainprocess threqad
     if config.MODE_FFT_PERIODIC_RECORD:
@@ -1101,31 +1179,98 @@ def main():
         fft_periodic_plot_proc.daemon = True  
         fft_periodic_plot_proc.start()
         print("started fft_periodic_plot_process")
+        sys.stdout.flush()
 
-    def cleanup():
-        print("Cleaning up...")
-        if fft_periodic_plot_proc.is_alive():
-            fft_periodic_plot_proc.terminate()
-        #keyboard.unhook_all()
-
-    atexit.register(cleanup) 
+    # Register cleanup handler before starting any threads
+    atexit.register(cleanup)
 
     try:
         if KB_or_CP == 'KB':
-            # Bind the toggle key '^' to enable or disable listening mode
-            #keyboard.on_press_key("^", lambda _: toggle_listening(), suppress=True)
-            pass
+            # Give a small delay to ensure prints are visible before starting keyboard listener
+            time.sleep(1)
+            # Start keyboard listener in a separate thread
+            keyboard_thread = threading.Thread(target=listen_keyboard, args=(press,))
+            keyboard_thread.daemon = True
+            keyboard_thread.start()
+            
         # Start the audio stream
         audio_stream()
             
     except KeyboardInterrupt: # ctrl-c in windows
         print('\nCtrl-C: Recording process stopped by user.')
-        stop_all()
+        sys.stdout.flush()
+        cleanup()
 
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
+        sys.stdout.flush()
         cleanup()
-        #quit(-1) 
+
+def stop_all():
+    global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc, keyboard_listener_running
+    print("\ntrying to stop everything")
+    sys.stdout.flush()
+    
+    # Set all stop events
+    stop_program[0] = True
+    stop_recording_event.set()
+    stop_fft_periodic_plot_event.set()
+    stop_vu_event.set()
+    stop_intercom_event.set()
+    stop_tod_event.set()
+    keyboard_listener_running = False  # Signal keyboard listener to stop
+
+    # Stop the FFT periodic plot process
+    if fft_periodic_plot_proc is not None and fft_periodic_plot_proc.is_alive():
+        print("Stopping FFT periodic plot process...")
+        fft_periodic_plot_proc.terminate()
+        fft_periodic_plot_proc.join(timeout=2)
+        if fft_periodic_plot_proc.is_alive():
+            fft_periodic_plot_proc.kill()
+        print("FFT periodic plot process stopped")
+
+    # Stop VU meter
+    stop_vu()
+
+    # Stop intercom
+    stop_intercom_m()
+
+    # Clear input buffer
+    clear_input_buffer()
+
+    # List and stop all worker threads
+    print("\nStopping worker threads...")
+    current_thread = threading.current_thread()
+    for thread in threading.enumerate():
+        if thread != threading.main_thread() and thread != current_thread:
+            print(f"Stopping thread: {thread.name}")
+            if thread.is_alive():
+                try:
+                    thread.join(timeout=1)
+                except RuntimeError:
+                    # Skip if we can't join the thread
+                    pass
+
+    print("\nAll processes and threads stopped")
+    sys.stdout.flush()
+
+def cleanup():
+    print("\nCleaning up...")
+    sys.stdout.flush()
+    
+    try:
+        # Stop all processes and threads
+        stop_all()
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+    
+    # Give threads a moment to clean up
+    time.sleep(0.5)
+    
+    # Force exit after cleanup
+    print("Exiting...")
+    sys.stdout.flush()
+    os._exit(0)  # Force exit without waiting for other threads
 
 if __name__ == "__main__":
     main()
