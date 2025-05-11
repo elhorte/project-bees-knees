@@ -1188,11 +1188,77 @@ def show_list_of_commands():
 ########## MAIN ###########
 ###########################
 
+def check_dependencies():
+    """Check for required Python libraries and their versions."""
+    required_packages = {
+        'sounddevice': '0.4.6',
+        'soundfile': '0.12.1',
+        'numpy': '1.24.0',
+        'matplotlib': '3.7.0',
+        'scipy': '1.10.0',
+        'pydub': '0.25.1',
+        'librosa': '0.10.0',
+        'resampy': '0.4.2'
+    }
+    
+    missing_packages = []
+    outdated_packages = []
+    
+    print("\nChecking Python dependencies:")
+    print("-" * 50)
+    
+    for package, min_version in required_packages.items():
+        try:
+            # Try to import the package
+            module = __import__(package)
+            # Get the version
+            version = getattr(module, '__version__', 'unknown')
+            print(f"✓ {package:<15} found (version {version})")
+            
+            # Check if version meets minimum requirement
+            if version != 'unknown':
+                from packaging import version as pkg_version
+                if pkg_version.parse(version) < pkg_version.parse(min_version):
+                    outdated_packages.append(f"{package} (current: {version}, required: {min_version})")
+        except ImportError:
+            missing_packages.append(package)
+            print(f"✗ {package:<15} not found")
+    
+    print("-" * 50)
+    
+    if missing_packages:
+        print("\nMissing required packages:")
+        for package in missing_packages:
+            print(f"  - {package}")
+        print("\nTo install missing packages, run:")
+        print("pip install " + " ".join(missing_packages))
+    
+    if outdated_packages:
+        print("\nOutdated packages:")
+        for package in outdated_packages:
+            print(f"  - {package}")
+        print("\nTo update packages, run:")
+        print("pip install --upgrade " + " ".join(pkg.split()[0] for pkg in outdated_packages))
+    
+    if not missing_packages and not outdated_packages:
+        print("\nAll required packages are installed and up to date!\n")
+    
+    return len(missing_packages) == 0 and len(outdated_packages) == 0
+
 def main():
     global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel, sound_in_id, sound_in_chs, MICS_ACTIVE, keyboard_listener_running
 
     print("\n\nBeehive Multichannel Acoustic-Signal Recorder\n")
     sys.stdout.flush()
+    
+    # Check dependencies
+    if not check_dependencies():
+        print("\nWarning: Some required packages are missing or outdated.")
+        print("The script may not function correctly.")
+        response = input("Do you want to continue anyway? (y/n): ")
+        if response.lower() != 'y':
+            sys.exit(1)
+    
     print(f"Saving data to: {PRIMARY_DIRECTORY}\n")
     sys.stdout.flush()
 
