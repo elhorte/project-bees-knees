@@ -32,10 +32,30 @@ from pydub import AudioSegment
 import sys
 import platform
 
+# Near the top of the file, after the imports and before the first function
+def get_windows_version():
+    if sys.platform == 'win32':
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
+            build_number = int(winreg.QueryValueEx(key, "CurrentBuildNumber")[0])
+            product_name = winreg.QueryValueEx(key, "ProductName")[0]
+            
+            # Windows 11 has build number 22000 or higher
+            if build_number >= 22000:
+                return "Windows 11 Pro"
+            else:
+                return product_name
+        except Exception:
+            return f"Windows {platform.release()}"
+    else:
+        return f"{platform.system()} {platform.release()}"
+
+print(f"\nDetected operating system: {get_windows_version()}\n")
+
 # Conditionally import msvcrt only on Windows
 if sys.platform == 'win32':
     import msvcrt
-    print("\nmsvcrt is available\n")
 else:
     msvcrt = None
 
