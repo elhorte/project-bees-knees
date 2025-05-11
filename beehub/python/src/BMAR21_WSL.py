@@ -32,9 +32,20 @@ from pydub import AudioSegment
 import sys
 import platform
 
-# Near the top of the file, after the imports and before the first function
-def get_windows_version():
+# Near the top of the file, after the imports
+def is_wsl():
+    """Check if running in WSL"""
+    try:
+        with open('/proc/version', 'r') as f:
+            return 'microsoft' in f.read().lower()
+    except:
+        return False
+
+def get_os_info():
+    """Get detailed OS information including WSL status"""
     if sys.platform == 'win32':
+        if is_wsl():
+            return "Windows Subsystem for Linux (WSL)"
         try:
             import winreg
             key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
@@ -51,13 +62,16 @@ def get_windows_version():
     else:
         return f"{platform.system()} {platform.release()}"
 
-print(f"\nDetected operating system: {get_windows_version()}\n")
+# Print OS information
+print(f"\nDetected operating system: {get_os_info()}\n")
 
-# Conditionally import msvcrt only on Windows
-if sys.platform == 'win32':
+# Conditionally import platform-specific modules
+if sys.platform == 'win32' and not is_wsl():
     import msvcrt
+    print("Using Windows keyboard handling (msvcrt)")
 else:
     msvcrt = None
+    print("Using Linux keyboard handling")
 
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 #import keyboard
@@ -315,14 +329,14 @@ def list_all_threads():
 
 def clear_input_buffer():
     """Clear the keyboard input buffer. Handles both Windows and non-Windows platforms."""
-    if sys.platform == 'win32' and msvcrt is not None:
+    if sys.platform == 'win32' and not is_wsl() and msvcrt is not None:
         try:
             while msvcrt.kbhit():
                 msvcrt.getch()
         except Exception as e:
             print(f"Warning: Could not clear input buffer: {e}")
     else:
-        # For non-Windows platforms, we could implement alternative methods if needed
+        # For Linux/WSL, we could implement alternative methods if needed
         pass
 
 
