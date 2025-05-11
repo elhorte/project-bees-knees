@@ -29,7 +29,15 @@ from scipy.signal import resample_poly
 from scipy.signal import decimate
 from scipy.signal import butter, filtfilt
 from pydub import AudioSegment
-import msvcrt  # Add this import for Windows keyboard handling
+import sys
+import platform
+
+# Conditionally import msvcrt only on Windows
+if sys.platform == 'win32':
+    import msvcrt
+    print("\nmsvcrt is available\n")
+else:
+    msvcrt = None
 
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 #import keyboard
@@ -287,11 +295,14 @@ def list_all_threads():
 
 def clear_input_buffer():
     """Clear the keyboard input buffer. Handles both Windows and non-Windows platforms."""
-    try:
-        while msvcrt.kbhit():
-            msvcrt.getch()
-    except (NameError, AttributeError):
-        # If msvcrt is not available (non-Windows platform), just pass
+    if sys.platform == 'win32' and msvcrt is not None:
+        try:
+            while msvcrt.kbhit():
+                msvcrt.getch()
+        except Exception as e:
+            print(f"Warning: Could not clear input buffer: {e}")
+    else:
+        # For non-Windows platforms, we could implement alternative methods if needed
         pass
 
 
