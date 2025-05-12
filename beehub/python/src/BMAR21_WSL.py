@@ -311,7 +311,7 @@ current_day = current_date.strftime('%d')
 # to be discovered from sounddevice.query_devices()
 sound_in_id = 1                             # id of input device, set as default in case none is detected
 sound_in_chs = config.SOUND_IN_CHS          # number of input channels
-sound_in_samplerate = config.PRIMARY_SAMPLERATE    # sample rate of input device
+sound_in_samplerate = None                   # will be set to actual device rate in set_input_device
 
 sound_out_id = config.SOUND_OUT_ID_DEFAULT
 sound_out_chs = config.SOUND_OUT_CHS_DEFAULT                        
@@ -333,36 +333,127 @@ def get_api_name_for_device(device_id):
     hostapi_info = sd.query_hostapis(index=device['hostapi'])
     return hostapi_info['name']
 
-# find the device id that matches the model name and hostapi name
-def set_input_device(model_name, api_name):
+def get_windows_sample_rate(device_name):
+    """Get the actual sample rate from Windows using PyAudio."""
+    try:
+        import pyaudio
+        p = pyaudio.PyAudio()
+        
+        # Find the device index that matches our device name
+        for i in range(p.get_device_count()):
+            info = p.get_device_info_by_index(i)
+            if info["maxInputChannels"] > 0:  # Only input devices
+                if device_name.lower() in info["name"].lower():
+                    sample_rate = info["defaultSampleRate"]
+                    p.terminate()
+                    return sample_rate
+        
+        p.terminate()
+        return None
+    except Exception as e:
+        print(f"Error getting Windows sample rate: {e}")
+        return None
+
+def get_current_device_sample_rate(device_id):
+    """Query the current sample rate of the device from the operating system."""
+    try:
+        # Get the current device configuration
+        device_info = sd.query_devices(device_id, 'input')
+        print(f"\nQuerying device {device_id} current sample rate...")
+        print(f"Device name: {device_info['name']}")
+        
+        # Get the host API info
+        if 'hostapi' in device_info:
+            hostapi_info = sd.query_hostapis(index=device_info['hostapi'])
+            print(f"Audio API: {hostapi_info['name']}")
+        
+        # First try to get the rate from Windows using PyAudio
+        if not platform_manager.is_wsl():
+            windows_rate = get_windows_sample_rate(device_info['name'])
+            if windows_rate:
+                print(f"Windows reported rate: {windows_rate} Hz")
+                return windows_rate
+        
+        # Fallback to sounddevice if PyAudio method fails
+        try:
+            with sd.InputStream(device=device_id, channels=1, samplerate=None) as test_stream:
+                current_rate = test_stream.samplerate
+                print(f"Stream reported rate: {current_rate} Hz")
+                if current_rate:
+                    return current_rate
+        except Exception as e:
+            print(f"Stream creation failed: {e}")
+        
+        return None
+        
+    except Exception as e:
+        print(f"Error querying device sample rate: {e}")
+        return None
+
+def print_all_input_devices():
+    print("\nFull input device list (from sounddevice):")
+    devices = sd.query_devices()
+    for i, device in enumerate(devices):
+        if device['max_input_channels'] > 0:
+            hostapi_info = sd.query_hostapis(index=device['hostapi'])
+            api_name = hostapi_info['name']
+            print(f"  {i}: {device['name']} (API: {api_name}) | MaxCh: {device['max_input_channels']} | Default SR: {device['default_samplerate']} Hz")
+    print()
+    sys.stdout.flush()
+
+
+def set_input_device(model_name, api_name_preference):
     global sound_in_id, sound_in_chs, testmode, sound_in_samplerate
 
     print("\nScanning for audio input devices...")
     sys.stdout.flush()
 
+    print_all_input_devices()
+
     try:
-        # Get list of all devices
         devices = sd.query_devices()
-        input_devices = []
-        
-        # First, list all available input devices
-        print("\nAvailable input devices:")
+        candidate_devices = []
+
+        print("\nAvailable non-MME input devices with sample rate > 44100 Hz:")
         for i, device in enumerate(devices):
             if device['max_input_channels'] > 0:
-                input_devices.append((i, device))
-                print(f"  {i}: {device['name']} ({device['max_input_channels']} input channels)")
-                print(f"     Default Sample Rate: {device['default_samplerate']} Hz")
-                # Try to get supported sample rates
+                hostapi_info = sd.query_hostapis(index=device['hostapi'])
+                current_api_name = hostapi_info['name']
+
+                if current_api_name == 'MME':
+                    continue  # Skip MME devices
+
+                # Try to get the current sample rate
+                current_rate = None
                 try:
-                    device_info = sd.query_devices(i, 'input')
-                    if 'default_samplerate' in device_info:
-                        print(f"     Supported Sample Rate: {device_info['default_samplerate']} Hz")
-                except:
-                    pass
+                    current_rate = get_current_device_sample_rate(i)
+                except Exception as e:
+                    print(f"Error getting sample rate for {device['name']}: {e}")
+                
+                # Fallback: if stream test fails, use default_samplerate if > 44100
+                if not current_rate or float(current_rate) <= 44100:
+                    if float(device['default_samplerate']) > 44100:
+                        print(f"Using fallback default sample rate for {device['name']}: {device['default_samplerate']} Hz")
+                        current_rate = float(device['default_samplerate'])
+                    else:
+                        print(f"Skipping {device['name']} (API: {current_api_name}) with sample rate {current_rate}")
+                        continue
+                
+                print(f"\n  {i}: {device['name']}")
+                print(f"     Input Channels: {device['max_input_channels']}")
+                print(f"     Audio API: {current_api_name}")
+                print(f"     Current Sample Rate: {current_rate} Hz")
+                candidate_devices.append({
+                    'id': i,
+                    'name': device['name'],
+                    'channels': device['max_input_channels'],
+                    'api_name': current_api_name,
+                    'sample_rate': float(current_rate)
+                })
         sys.stdout.flush()
 
-        if not input_devices:
-            print("\nNo input devices found! Please check your audio device connections.")
+        if not candidate_devices:
+            print("\nNo suitable non-MME input devices with sample rate above 44100 Hz found! Please check your audio device connections.")
             print("Make sure your microphone or audio interface is properly connected and enabled.")
             print("\nTroubleshooting steps:")
             print("1. Check if your microphone is properly connected")
@@ -373,51 +464,40 @@ def set_input_device(model_name, api_name):
             sys.stdout.flush()
             return False
 
-        # Try to find a device that matches our model name
-        print(f"\nLooking for preferred device models: {model_name}")
-        sys.stdout.flush()
-        
-        for device_id, device in input_devices:
-            for model in model_name:
-                if model.lower() in device['name'].lower():
-                    if device['max_input_channels'] >= sound_in_chs:
-                        sound_in_id = device_id
-                        # Force the sample rate to 192000 Hz
-                        sound_in_samplerate = 192000
-                        print(f"\nFound preferred device: {device['name']}")
-                        print(f"Using {sound_in_chs} channel(s) at {sound_in_samplerate} Hz")
-                        print(f"Device's default sample rate: {device['default_samplerate']} Hz")
-                        print(f"Setting sample rate to: {sound_in_samplerate} Hz")
-                        sys.stdout.flush()
-                        return True
-                    else:
-                        print(f"Device {device['name']} doesn't support enough channels (needs {sound_in_chs}, has {device['max_input_channels']})")
-                        sys.stdout.flush()
+        # Sort candidate devices by sample rate (descending), then by preferred API, then by preferred model name
+        def sort_key(d):
+            is_preferred_model = any(model.lower() in d['name'].lower() for model in model_name)
+            is_preferred_api = d['api_name'] == api_name_preference
+            # Prioritize: highest sample rate, then preferred API, then preferred model
+            return (-d['sample_rate'], not is_preferred_api, not is_preferred_model)
 
-        # If no preferred device found, use the first available input device
-        print("\nNo preferred device found, using first available input device")
-        sys.stdout.flush()
+        candidate_devices.sort(key=sort_key)
+
+        # Select the best candidate
+        best_device = candidate_devices[0]
+        sound_in_id = best_device['id']
+        sound_in_samplerate = best_device['sample_rate']
         
-        device_id, device = input_devices[0]
-        sound_in_id = device_id
-        # Force the sample rate to 192000 Hz
-        sound_in_samplerate = 192000
+        print(f"\nSelected device: {best_device['name']} (API: {best_device['api_name']})")
+        print(f"Device Configuration:")
+        print(f"  Current Sample Rate: {sound_in_samplerate} Hz")
         
-        # If the device has fewer channels than requested, adjust our channel count
-        if device['max_input_channels'] < sound_in_chs:
-            print(f"\nWarning: Device only supports {device['max_input_channels']} channels, adjusting channel count")
-            sound_in_chs = device['max_input_channels']
+        # Adjust channel count if necessary
+        if best_device['channels'] < sound_in_chs:
+            print(f"\nWarning: Device only supports {best_device['channels']} channels, adjusting channel count to {best_device['channels']}")
+            sound_in_chs = best_device['channels']
+        print(f"  Channels: {sound_in_chs}")
         
-        print(f"\nUsing device: {device['name']}")
-        print(f"Using {sound_in_chs} channel(s) at {sound_in_samplerate} Hz")
-        print(f"Device's default sample rate: {device['default_samplerate']} Hz")
-        print(f"Setting sample rate to: {sound_in_samplerate} Hz")
-        
-        if sound_in_samplerate < 192000:
-            print("\nWarning: Device sample rate is lower than required")
-            print("Running in test mode with reduced sample rate")
-            testmode = True
-        
+        if sound_in_samplerate < 192000 and sound_in_samplerate != 0: # Check for 0 in case of error
+            print("\nWarning: Device sample rate is lower than the ideal 192kHz.")
+            if sound_in_samplerate < 48000:
+                 print("Running in test mode with significantly reduced sample rate.")
+                 testmode = True
+            else:
+                 testmode = False
+        else:
+            testmode = False
+
         sys.stdout.flush()
         return True
 
@@ -1286,7 +1366,7 @@ def audio_stream():
     print("\nInitializing audio stream...")
     print(f"Device ID: {sound_in_id}")
     print(f"Channels: {sound_in_chs}")
-    print(f"Sample Rate: {sound_in_samplerate}")
+    print(f"Sample Rate: {sound_in_samplerate} Hz")
     print(f"Data Type: {_dtype}")
     sys.stdout.flush()
 
@@ -1296,25 +1376,24 @@ def audio_stream():
         print("\nSelected device info:")
         print(f"Name: {device_info['name']}")
         print(f"Max Input Channels: {device_info['max_input_channels']}")
-        print(f"Default Sample Rate: {device_info['default_samplerate']} Hz")
-        print(f"Target Sample Rate: {sound_in_samplerate} Hz")
+        print(f"Device Sample Rate: {device_info['default_samplerate']} Hz")
         sys.stdout.flush()
 
         if device_info['max_input_channels'] < sound_in_chs:
             raise RuntimeError(f"Device only supports {device_info['max_input_channels']} channels, but {sound_in_chs} channels are required")
 
-        # Initialize the stream with explicit channel count and sample rate
+        # Initialize the stream with the device's configured sample rate
         stream = sd.InputStream(
             device=sound_in_id,
             channels=sound_in_chs,
-            samplerate=sound_in_samplerate,  # Force 192000 Hz
+            samplerate=sound_in_samplerate,  # Use device's configured rate
             dtype=_dtype,
             blocksize=blocksize,
             callback=callback
         )
 
         print("\nAudio stream initialized successfully")
-        print(f"Actual stream sample rate: {stream.samplerate} Hz")
+        print(f"Stream sample rate: {stream.samplerate} Hz")
         sys.stdout.flush()
 
         with stream:
@@ -1479,7 +1558,8 @@ def check_dependencies():
         'scipy': '1.10.0',
         'pydub': '0.25.1',
         'librosa': '0.10.0',
-        'resampy': '0.4.2'
+        'resampy': '0.4.2',
+        'pyaudio': '0.2.13'  # Added PyAudio requirement
     }
     
     missing_packages = []

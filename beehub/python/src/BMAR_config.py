@@ -44,7 +44,7 @@ MIC_LOCATION = ['1: upper--front', '2: upper--back', '3: lower w/queen--front', 
 
 # mic status
 MIC_1 = True
-MIC_2 = False
+MIC_2 = True
 MIC_3 = False
 MIC_4 = False
 
