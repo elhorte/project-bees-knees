@@ -351,6 +351,9 @@ def set_input_device(model_name, api_name):
             if device['max_input_channels'] > 0:
                 input_devices.append((i, device))
                 print(f"  {i}: {device['name']} ({device['max_input_channels']} input channels)")
+                print(f"     Default Sample Rate: {device['default_samplerate']} Hz")
+                if 'default_samplerate' in device:
+                    print(f"     Supported Sample Rates: {device.get('default_samplerate', 'Unknown')} Hz")
         sys.stdout.flush()
 
         if not input_devices:
@@ -398,9 +401,11 @@ def set_input_device(model_name, api_name):
                 if model.lower() in device['name'].lower():
                     if device['max_input_channels'] >= sound_in_chs:
                         sound_in_id = device_id
+                        # Use the device's actual default sample rate
                         sound_in_samplerate = int(device['default_samplerate'])
                         print(f"\nFound preferred device: {device['name']}")
                         print(f"Using {sound_in_chs} channel(s) at {sound_in_samplerate} Hz")
+                        print(f"Device's actual sample rate: {device['default_samplerate']} Hz")
                         sys.stdout.flush()
                         return True
                     else:
@@ -413,6 +418,7 @@ def set_input_device(model_name, api_name):
         
         device_id, device = input_devices[0]
         sound_in_id = device_id
+        # Use the device's actual default sample rate
         sound_in_samplerate = int(device['default_samplerate'])
         
         # If the device has fewer channels than requested, adjust our channel count
@@ -422,6 +428,7 @@ def set_input_device(model_name, api_name):
         
         print(f"\nUsing device: {device['name']}")
         print(f"Using {sound_in_chs} channel(s) at {sound_in_samplerate} Hz")
+        print(f"Device's actual sample rate: {device['default_samplerate']} Hz")
         
         if sound_in_samplerate < 192000:
             print("\nWarning: Device sample rate is lower than required")
