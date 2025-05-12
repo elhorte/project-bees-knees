@@ -1,0 +1,10 @@
+# System Dependencies (install using apt-get)
+portaudio19-dev
+python3-pyaudio
+libasound2-dev
+libportaudio2
+libportaudiocpp0
+
+# Installation command:
+# sudo apt-get update
+# sudo apt-get install -y portaudio19-dev python3-pyaudio libasound2-dev libportaudio2 libportaudiocpp0 
