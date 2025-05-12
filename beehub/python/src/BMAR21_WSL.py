@@ -29,10 +29,26 @@ from scipy.signal import resample_poly
 from scipy.signal import decimate
 from scipy.signal import butter, filtfilt
 from pydub import AudioSegment
+from sshkeyboard import listen_keyboard
 import sys
 import platform
 import select
 import os
+import curses
+import atexit
+import signal
+import sys
+import io
+import warnings
+import queue
+import librosa
+import librosa.display
+import resampy
+import atexit
+##import TestPyQT5
+
+import BMAR_config as config
+##os.environ['NUMBA_NUM_THREADS'] = '1'
 
 # Near the top of the file, after the imports
 class PlatformManager:
@@ -148,25 +164,7 @@ def get_key():
 # Initialize platform at startup
 platform_manager.initialize()
 
-##os.environ['NUMBA_NUM_THREADS'] = '1'
-#import keyboard
-from sshkeyboard import listen_keyboard
-import curses
-import atexit
-#import msvcrt
-import signal
-import sys
-import io
-import warnings
-import queue
-import librosa
-import librosa.display
-import resampy
-import atexit
 
-##import TestPyQT5
-
-import BMAR_config as config
 
 lock = threading.Lock()
 
@@ -1331,7 +1329,7 @@ def plot_and_save_fft(sound_in_samplerate, channel):
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         # Save plot to disk with a unique filename based on current time
-        output_filename = f"{timestamp}_fft_{sound_in_samplerate/1000:.0F}_{PRIMARY_BITDEPTH}_{channel}_{config.LOCATION_ID}_{config.HIVE_ID}.png"
+        output_filename = f"{timestamp}_fft_{sound_in_samplerate/1000:.0F}_{config.PRIMARY_BITDEPTH}_{channel}_{config.LOCATION_ID}_{config.HIVE_ID}.png"
         full_path_name = os.path.join(PLOT_DIRECTORY, output_filename)
         plt.savefig(full_path_name)
 
@@ -1750,6 +1748,8 @@ def main():
 
     print("\n\nBeehive Multichannel Acoustic-Signal Recorder\n")
     sys.stdout.flush()
+
+    print(f"PRIMARY_BITDEPTH: {config.PRIMARY_BITDEPTH}")
     
     # Check dependencies
     if not check_dependencies():
