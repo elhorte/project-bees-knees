@@ -31,47 +31,122 @@ from scipy.signal import butter, filtfilt
 from pydub import AudioSegment
 import sys
 import platform
+import select
+import os
 
 # Near the top of the file, after the imports
-def is_wsl():
-    """Check if running in WSL"""
-    try:
-        with open('/proc/version', 'r') as f:
-            return 'microsoft' in f.read().lower()
-    except:
-        return False
-
-def get_os_info():
-    """Get detailed OS information including WSL status"""
-    if sys.platform == 'win32':
-        if is_wsl():
-            return "Windows Subsystem for Linux (WSL)"
+class PlatformManager:
+    _instance = None
+    _initialized = False
+    _os_info = None
+    _keyboard_info = None
+    _msvcrt = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(PlatformManager, cls).__new__(cls)
+        return cls._instance
+    
+    def __init__(self):
+        if not self._initialized:
+            self._initialized = True
+            self.initialize()
+    
+    def is_wsl(self):
         try:
-            import winreg
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
-            build_number = int(winreg.QueryValueEx(key, "CurrentBuildNumber")[0])
-            product_name = winreg.QueryValueEx(key, "ProductName")[0]
+            with open('/proc/version', 'r') as f:
+                return 'microsoft' in f.read().lower()
+        except:
+            return False
+    
+    def get_os_info(self):
+        if self._os_info is not None:
+            return self._os_info
             
-            # Windows 11 has build number 22000 or higher
-            if build_number >= 22000:
-                return "Windows 11 Pro"
+        if sys.platform == 'win32':
+            if self.is_wsl():
+                self._os_info = "Windows Subsystem for Linux (WSL)"
             else:
-                return product_name
-        except Exception:
-            return f"Windows {platform.release()}"
+                try:
+                    import winreg
+                    key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
+                    build_number = int(winreg.QueryValueEx(key, "CurrentBuildNumber")[0])
+                    product_name = winreg.QueryValueEx(key, "ProductName")[0]
+                    
+                    if build_number >= 22000:
+                        self._os_info = "Windows 11 Pro"
+                    else:
+                        self._os_info = product_name
+                except Exception:
+                    self._os_info = f"Windows {platform.release()}"
+        else:
+            self._os_info = f"{platform.system()} {platform.release()}"
+        
+        return self._os_info
+    
+    def initialize(self):
+        if not self._initialized:
+            print(f"\nDetected operating system: {self.get_os_info()}\n")
+            
+            if sys.platform == 'win32' and not self.is_wsl():
+                import msvcrt
+                self._msvcrt = msvcrt
+                print("Using Windows keyboard handling (msvcrt)")
+                self._keyboard_info = "Windows"
+            else:
+                self._msvcrt = None
+                print("Using Linux keyboard handling")
+                self._keyboard_info = "Linux"
+    
+    @property
+    def msvcrt(self):
+        return self._msvcrt
+
+# Create global platform manager instance
+platform_manager = PlatformManager()
+
+def get_key():
+    """Get a single keypress from the user."""
+    if platform_manager.msvcrt is not None:
+        try:
+            return platform_manager.msvcrt.getch().decode('utf-8')
+        except Exception as e:
+            print(f"Error reading key in Windows: {e}")
+            return None
     else:
-        return f"{platform.system()} {platform.release()}"
+        try:
+            if sys.platform == 'win32':
+                # If we're on Windows but msvcrt failed, try alternative method
+                import msvcrt
+                if msvcrt.kbhit():
+                    return msvcrt.getch().decode('utf-8')
+                return None
+            else:
+                # Only try termios on non-Windows platforms
+                import termios
+                import tty
+                old_settings = termios.tcgetattr(sys.stdin)
+                try:
+                    tty.setraw(sys.stdin.fileno())
+                    if select.select([sys.stdin], [], [], 0.1)[0]:
+                        key = sys.stdin.read(1)
+                        return key
+                    return None
+                finally:
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+        except Exception as e:
+            if "termios" in str(e):
+                # If termios fails, try alternative method
+                try:
+                    import msvcrt
+                    if msvcrt.kbhit():
+                        return msvcrt.getch().decode('utf-8')
+                except:
+                    pass
+            return None
 
-# Print OS information
-print(f"\nDetected operating system: {get_os_info()}\n")
-
-# Conditionally import platform-specific modules
-if sys.platform == 'win32' and not is_wsl():
-    import msvcrt
-    print("Using Windows keyboard handling (msvcrt)")
-else:
-    msvcrt = None
-    print("Using Linux keyboard handling")
+# Initialize platform at startup
+platform_manager.initialize()
 
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 #import keyboard
@@ -81,7 +156,6 @@ import atexit
 #import msvcrt
 import signal
 import sys
-import os
 import io
 import warnings
 import queue
@@ -99,8 +173,40 @@ lock = threading.Lock()
 # Ignore this specific warning
 warnings.filterwarnings("ignore", category=UserWarning)
 
+def reset_terminal():
+    """Reset terminal settings to default state."""
+    try:
+        import termios
+        import tty
+        import sys
+        import os
+        
+        # Reset terminal settings
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, termios.tcgetattr(sys.stdin))
+        
+        # Reset terminal modes
+        os.system('stty sane')
+        
+        # Clear screen and reset cursor
+        print('\033[2J\033[H', end='')
+        
+        # Reset keyboard mode
+        os.system('stty -raw -echo')
+        
+        # Flush stdout to ensure all output is displayed
+        sys.stdout.flush()
+        
+    except Exception as e:
+        print(f"Warning: Could not reset terminal: {e}")
+        # Try alternative reset method
+        try:
+            os.system('reset')
+        except:
+            pass
+
 def signal_handler(sig, frame):
-    print('Stopping all threads...')
+    print('\nStopping all threads...')
+    reset_terminal()  # Reset terminal before stopping
     stop_all()
     sys.exit(0)
 
@@ -248,16 +354,40 @@ def set_input_device(model_name, api_name):
         sys.stdout.flush()
 
         if not input_devices:
-            print("\nNo input devices found! Please check your audio device connections.")
-            print("Make sure your microphone or audio interface is properly connected and enabled.")
-            print("\nTroubleshooting steps:")
-            print("1. Check if your microphone is properly connected")
-            print("2. Make sure it's enabled in Windows sound settings")
-            print("3. Check if it's set as the default input device")
-            print("4. Try unplugging and replugging the microphone")
-            print("5. Check if the microphone works in other applications (like Windows Voice Recorder)")
-            sys.stdout.flush()
-            return False
+            if platform_manager.is_wsl():
+                print("\nNo input devices found in WSL. Attempting to use Windows audio devices...")
+                print("\nPlease ensure your WSL audio is properly configured:")
+                print("1. Install required packages:")
+                print("   sudo apt-get update")
+                print("   sudo apt-get install -y pulseaudio libasound2-plugins")
+                print("\n2. Configure PulseAudio:")
+                print("   echo 'export PULSE_SERVER=tcp:localhost' >> ~/.bashrc")
+                print("   source ~/.bashrc")
+                print("\n3. Create PulseAudio configuration:")
+                print("   mkdir -p ~/.config/pulse")
+                print("   echo 'load-module module-native-protocol-tcp auth-ip-acl=127.0.0.1' > ~/.config/pulse/default.pa")
+                print("\n4. Start PulseAudio:")
+                print("   pulseaudio --start")
+                print("\n5. Check Windows audio settings:")
+                print("   - Open Windows Sound Settings")
+                print("   - Ensure your microphone is enabled and set as default")
+                print("   - Check that the microphone works in Windows Voice Recorder")
+                print("\n6. Restart WSL:")
+                print("   - Close your WSL terminal")
+                print("   - Open a new WSL terminal")
+                print("   - Try running the script again")
+                return False
+            else:
+                print("\nNo input devices found! Please check your audio device connections.")
+                print("Make sure your microphone or audio interface is properly connected and enabled.")
+                print("\nTroubleshooting steps:")
+                print("1. Check if your microphone is properly connected")
+                print("2. Make sure it's enabled in Windows sound settings")
+                print("3. Check if it's set as the default input device")
+                print("4. Try unplugging and replugging the microphone")
+                print("5. Check if the microphone works in other applications (like Windows Voice Recorder)")
+                sys.stdout.flush()
+                return False
 
         # Try to find a device that matches our model name
         print(f"\nLooking for preferred device models: {model_name}")
@@ -329,10 +459,10 @@ def list_all_threads():
 
 def clear_input_buffer():
     """Clear the keyboard input buffer. Handles both Windows and non-Windows platforms."""
-    if sys.platform == 'win32' and not is_wsl() and msvcrt is not None:
+    if sys.platform == 'win32' and not platform_manager.is_wsl() and platform_manager.msvcrt is not None:
         try:
-            while msvcrt.kbhit():
-                msvcrt.getch()
+            while platform_manager.msvcrt.kbhit():
+                platform_manager.msvcrt.getch()
         except Exception as e:
             print(f"Warning: Could not clear input buffer: {e}")
     else:
@@ -578,12 +708,31 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs):
     plt.show()
 
 
+# Add near the top with other global variables
+active_processes = {
+    'v': None,
+    'o': None,
+    's': None
+}
+
+def cleanup_process(command):
+    """Clean up a specific command's process."""
+    if active_processes[command] is not None:
+        if active_processes[command].is_alive():
+            active_processes[command].terminate()
+            active_processes[command].join(timeout=1)
+            if active_processes[command].is_alive():
+                active_processes[command].kill()
+        active_processes[command] = None
+
 def trigger_oscope():
+    cleanup_process('o')  # Clean up any existing process
     clear_input_buffer()
-    oscope_proc = multiprocessing.Process(target=plot_oscope, args=(sound_in_samplerate, sound_in_id, sound_in_chs))
-    oscope_proc.start()
+    active_processes['o'] = multiprocessing.Process(target=plot_oscope, args=(sound_in_samplerate, sound_in_id, sound_in_chs))
+    active_processes['o'].start()
     clear_input_buffer()  
-    oscope_proc.join()
+    active_processes['o'].join()
+    cleanup_process('o')
     print("exit oscope")
 
 # single-shot fft plot of audio
@@ -688,6 +837,7 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
 
 
 def trigger_spectrogram():
+    cleanup_process('s')  # Clean up any existing process
     global file_offset, monitor_channel, time_diff
 
     diff = time_diff()       # time since last file was read
@@ -695,21 +845,70 @@ def trigger_spectrogram():
         file_offset +=1
     else:
         file_offset = 1 
-    one_shot_spectrogram_proc = multiprocessing.Process(target=plot_spectrogram, args=(monitor_channel, 'lin', file_offset-1))
-    one_shot_spectrogram_proc.start()
+    active_processes['s'] = multiprocessing.Process(target=plot_spectrogram, args=(monitor_channel, 'lin', file_offset-1))
+    active_processes['s'].start()
     print("Plotting spectrogram...")
     clear_input_buffer()
-    one_shot_spectrogram_proc.join()
+    active_processes['s'].join()
+    cleanup_process('s')
     print("exit spectrogram")
     
 # called from a thread
 # Print a string of asterisks, ending with only a carriage return to overwrite the line
 # value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
-def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_queue, asterisks):
+def check_wsl_audio():
+    """Check WSL audio configuration and provide setup instructions."""
+    try:
+        import subprocess
+        import os
+        
+        # Set PulseAudio server to use TCP
+        os.environ['PULSE_SERVER'] = 'tcp:localhost'
+        
+        # Check if PulseAudio is running
+        result = subprocess.run(['pulseaudio', '--check'], capture_output=True, text=True)
+        if result.returncode != 0:
+            print("\nPulseAudio is not running. Starting it...")
+            subprocess.run(['pulseaudio', '--start'], capture_output=True)
+        
+        # Check if ALSA is configured
+        result = subprocess.run(['aplay', '-l'], capture_output=True, text=True)
+        print("\nALSA devices:")
+        print(result.stdout)
+        
+        # Check if PulseAudio is configured
+        result = subprocess.run(['pactl', 'info'], capture_output=True, text=True)
+        print("\nPulseAudio info:")
+        print(result.stdout)
+        
+        # Check if we can list audio devices through PulseAudio
+        result = subprocess.run(['pactl', 'list', 'sources'], capture_output=True, text=True)
+        print("\nPulseAudio sources:")
+        print(result.stdout)
+        
+        return True
+    except Exception as e:
+        print(f"\nError checking audio configuration: {e}")
+        print("\nPlease ensure your WSL audio is properly configured:")
+        print("1. Install required packages:")
+        print("   sudo apt-get update")
+        print("   sudo apt-get install -y pulseaudio libasound2-plugins")
+        print("\n2. Configure PulseAudio:")
+        print("   echo 'export PULSE_SERVER=tcp:localhost' >> ~/.bashrc")
+        print("   source ~/.bashrc")
+        print("\n3. Create PulseAudio configuration:")
+        print("   mkdir -p ~/.config/pulse")
+        print("   echo 'load-module module-native-protocol-tcp auth-ip-acl=127.0.0.1' > ~/.config/pulse/default.pa")
+        print("\n4. Start PulseAudio:")
+        print("   pulseaudio --start")
+        return False
 
+def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_queue, asterisks):
     buffer = np.zeros((sound_in_samplerate,))
+    last_print = ""
 
     def callback_input(indata, frames, time, status):
+        nonlocal last_print
         # Only process audio from the designated channel
         channel_data = indata[:, channel]
         buffer[:frames] = channel_data
@@ -718,31 +917,78 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
         normalized_value = int((audio_level / 1.0) * 50)  
 
         asterisks.value = '*' * normalized_value
+        current_print = ' ' * 11 + asterisks.value.ljust(50, ' ')
+        
+        # Only print if the value has changed
+        if current_print != last_print:
+            print(current_print, end='\r')
+            last_print = current_print
 
-        print(' ' * 11 + asterisks.value.ljust(50, ' '), end='\r')
-
-    with sd.InputStream(callback=callback_input, device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate):
-        while not stop_vu_queue.get():
-            sd.sleep(0.1)
-        print("Stopping vu...")
+    try:
+        # In WSL, we need to use different stream parameters
+        if platform_manager.is_wsl():
+            # Check audio configuration first
+            if not check_wsl_audio():
+                raise Exception("Audio configuration check failed")
+            
+            # Try with minimal configuration
+            try:
+                with sd.InputStream(callback=callback_input,
+                                  device=None,  # Use system default
+                                  channels=1,   # Use mono
+                                  samplerate=44100,  # Use standard rate
+                                  blocksize=1024,    # Use smaller block size
+                                  latency='low'):    # Use low latency
+                    while not stop_vu_queue.get():
+                        sd.sleep(0.1)
+            except Exception as e:
+                print(f"\nError with default configuration: {e}")
+                print("\nPlease ensure your WSL audio is properly configured:")
+                print("1. Install required packages:")
+                print("   sudo apt-get update")
+                print("   sudo apt-get install -y pulseaudio libasound2-plugins")
+                print("\n2. Configure PulseAudio:")
+                print("   echo 'export PULSE_SERVER=tcp:localhost' >> ~/.bashrc")
+                print("   source ~/.bashrc")
+                print("\n3. Create PulseAudio configuration:")
+                print("   mkdir -p ~/.config/pulse")
+                print("   echo 'load-module module-native-protocol-tcp auth-ip-acl=127.0.0.1' > ~/.config/pulse/default.pa")
+                print("\n4. Start PulseAudio:")
+                print("   pulseaudio --start")
+                raise
+        else:
+            # Windows behavior remains unchanged
+            with sd.InputStream(callback=callback_input,
+                              device=sound_in_id,
+                              channels=sound_in_chs,
+                              samplerate=sound_in_samplerate):
+                while not stop_vu_queue.get():
+                    sd.sleep(0.1)
+    except Exception as e:
+        print(f"\nError in VU meter: {e}")
+    finally:
+        print("\nStopping VU meter...")
 
 def toggle_vu_meter():
     global vu_proc, monitor_channel, asterisks, stop_vu_queue
 
     if vu_proc is None:
+        cleanup_process('v')  # Clean up any existing process
         print("\nVU meter monitoring channel:", monitor_channel+1)
         vu_manager = multiprocessing.Manager()
         stop_vu_queue = multiprocessing.Queue()
         asterisks = vu_manager.Value(str, '*' * 50)
 
-        print("fullscale:",asterisks.value.ljust(50, ' '))
+        # Print initial state once
+        print("fullscale:", asterisks.value.ljust(50, ' '))
 
         if config.MODE_EVENT:
             normalized_value = int(config.EVENT_THRESHOLD / 1000)
             asterisks.value = '*' * normalized_value
-            print("threshold:",asterisks.value.ljust(50, ' '))
+            print("threshold:", asterisks.value.ljust(50, ' '))
             
         vu_proc = multiprocessing.Process(target=vu_meter, args=(sound_in_id, sound_in_samplerate, sound_in_chs, monitor_channel, stop_vu_queue, asterisks))
+        active_processes['v'] = vu_proc
         vu_proc.start()
     else:
         stop_vu()
@@ -757,6 +1003,7 @@ def stop_vu():
             vu_proc.join()            # make sure its stopped, hate zombies
             print("\nvu stopped")
         vu_proc = None
+        cleanup_process('v')
         clear_input_buffer()
 
 #
@@ -854,11 +1101,11 @@ def change_monitor_channel():
     # usage: press m then press 1, 2, 3, 4
     print(f"\nChannel {monitor_channel+1} is active, {sound_in_chs} are available: select a channel (0 to quit): ") #, end='\r')
     while True:
-        while msvcrt.kbhit():
-            key = msvcrt.getch().decode('utf-8')
+        while platform_manager.msvcrt.kbhit():
+            key = platform_manager.msvcrt.getch().decode('utf-8')
             # Clear the input buffer:
-            while msvcrt.kbhit(): 
-                msvcrt.getch() 
+            while platform_manager.msvcrt.kbhit(): 
+                platform_manager.msvcrt.getch() 
             if key.isdigit():
                 if int(key) == 0:
                     print("exiting channel change\n")
@@ -942,7 +1189,42 @@ def plot_and_save_fft(sound_in_samplerate, channel):
 # ############################################################
 #
 
+def reset_terminal_settings():
+    """Reset terminal settings to ensure proper output formatting."""
+    if not platform_manager.is_wsl():
+        return
+        
+    try:
+        import termios
+        import tty
+        import sys
+        
+        # Get current terminal settings
+        old_settings = termios.tcgetattr(sys.stdin)
+        
+        # Set terminal to raw mode temporarily
+        tty.setraw(sys.stdin.fileno())
+        
+        # Reset terminal settings
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+        
+        # Reset terminal modes
+        os.system('stty sane')
+        
+        # Clear screen and reset cursor
+        print('\033[2J\033[H', end='')
+        
+        # Reset keyboard mode
+        os.system('stty -raw -echo')
+        
+        # Flush stdout
+        sys.stdout.flush()
+        
+    except Exception as e:
+        print(f"Warning: Could not reset terminal settings: {e}")
+
 def setup_audio_circular_buffer():
+    """Set up the circular buffer for audio recording."""
     global buffer_size, buffer, buffer_index, buffer_wrap, blocksize, buffer_wrap_event
 
     # Create a buffer to hold the audio data
@@ -953,77 +1235,11 @@ def setup_audio_circular_buffer():
     blocksize = 8196
     buffer_wrap_event = threading.Event()
     print(f"\naudio buffer size: {sys.getsizeof(buffer)}\n")
-# 
-# ### WORKER THREAD ########################################################
-#
-
-def recording_worker_thread(record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
-    #
-    # recording_period is the length of time to record in seconds
-    # interval is the time between recordings in seconds if > 0
-    # thread_id is a string to label the thread
-    # file_format is the format in which to save the audio file
-    # target_sample_rate is the sample rate in which to save the audio file
-    # start_tod is the time of day to start recording, if 'None', record continuously
-    # end_tod is the time of day to stop recording, if start_tod == None, ignore & record continuously
-    #
-    global buffer, buffer_size, buffer_index, stop_recording_event
-
-    if start_tod is None:
-        print(f"{thread_id} is recording continuously")
-
-    samplerate = sound_in_samplerate
-
-    while not stop_recording_event.is_set():
-
-        current_time = datetime.datetime.now().time()
-
-        if start_tod is None or (start_tod <= current_time <= end_tod):        
-            print(f"{thread_id} recording started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec")
-
-            period_start_index = buffer_index 
-            # wait PERIOD seconds to accumulate audio
-            interruptable_sleep(record_period, stop_recording_event)
-
-            period_end_index = buffer_index 
-            ##print(f"Recording length in worker thread: {period_end_index - period_start_index}, after {record_period} seconds")
-            save_start_index = period_start_index % buffer_size
-            save_end_index = period_end_index % buffer_size
-
-            # saving from a circular buffer so segments aren't necessarily contiguous
-            if save_end_index > save_start_index:   # indexing is contiguous
-                audio_data = buffer[save_start_index:save_end_index]
-            else:                                   # ain't contiguous so concatenate to make it contiguous
-                audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
-
-            if target_sample_rate < sound_in_samplerate:
-                # resample to lower sample rate
-                audio_data = downsample_audio(audio_data, sound_in_samplerate, target_sample_rate)
-
-            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            output_filename = f"{timestamp}_{thread_id}_{record_period}_{interval}_{config.LOCATION_ID}_{config.HIVE_ID}.{file_format.lower()}"
-
-
-            if file_format.upper() == 'MP3':
-                if target_sample_rate == 44100 or target_sample_rate == 48000:
-                    full_path_name = os.path.join(MONITOR_DIRECTORY, output_filename)
-                    pcm_to_mp3_write(audio_data, full_path_name)
-                else:
-                    print("mp3 only supports 44.1k and 48k sample rates")
-                    quit(-1)
-            else:
-                full_path_name = os.path.join(PRIMARY_DIRECTORY, output_filename)
-                sf.write(full_path_name, audio_data, target_sample_rate, format=file_format.upper())
-
-            if not stop_recording_event.is_set():
-                print(f"Saved {thread_id} audio to {full_path_name}, period: {record_period}, interval {interval} seconds")
-            # wait "interval" seconds before starting recording again
-            interruptable_sleep(interval, stop_recording_event)
-
+    sys.stdout.flush()
 
 def callback(indata, frames, time, status):
+    """Callback function for audio input stream."""
     global buffer, buffer_index
-    ##print("callback", indata.shape, frames, time, status)
     if status:
         print("Callback status:", status)
         if status.input_overflow:
@@ -1043,10 +1259,13 @@ def callback(indata, frames, time, status):
 
     buffer_index = (buffer_index + data_len) % buffer_size
 
-
 def audio_stream():
     global stop_program, sound_in_id, sound_in_chs, sound_in_samplerate, _dtype, testmode
 
+    # Reset terminal settings before printing
+    reset_terminal_settings()
+
+    # Print initialization info
     print("\nInitializing audio stream...")
     print(f"Device ID: {sound_in_id}")
     print(f"Channels: {sound_in_chs}")
@@ -1057,7 +1276,7 @@ def audio_stream():
     try:
         # First verify the device configuration
         device_info = sd.query_devices(sound_in_id)
-        print(f"\nSelected device info:")
+        print("\nSelected device info:")
         print(f"Name: {device_info['name']}")
         print(f"Max Input Channels: {device_info['max_input_channels']}")
         print(f"Default Sample Rate: {device_info['default_samplerate']}")
@@ -1083,14 +1302,17 @@ def audio_stream():
             # start the recording worker threads
             if config.MODE_AUDIO_MONITOR:
                 print("Starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
+                sys.stdout.flush()
                 threading.Thread(target=recording_worker_thread, args=(config.AUDIO_MONITOR_RECORD, config.AUDIO_MONITOR_INTERVAL, "Audio_monitor", config.AUDIO_MONITOR_FORMAT, config.AUDIO_MONITOR_SAMPLERATE, config.AUDIO_MONITOR_START, config.AUDIO_MONITOR_END)).start()
 
             if config.MODE_PERIOD and not testmode:
                 print("Starting recording_worker_thread for saving period audio at primary sample rate and all channels...")
+                sys.stdout.flush()
                 threading.Thread(target=recording_worker_thread, args=(config.PERIOD_RECORD, config.PERIOD_INTERVAL, "Period_recording", config.PRIMARY_FILE_FORMAT, sound_in_samplerate, config.PERIOD_START, config.PERIOD_END)).start()
 
             if config.MODE_EVENT and not testmode:
                 print("Starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...")
+                sys.stdout.flush()
                 threading.Thread(target=recording_worker_thread, args=(config.SAVE_BEFORE_EVENT, config.SAVE_AFTER_EVENT, "Event_recording", config.PRIMARY_FILE_FORMAT, sound_in_samplerate, config.EVENT_START, config.EVENT_END)).start()
 
             while stream.active and not stop_program[0]:
@@ -1098,6 +1320,7 @@ def audio_stream():
             
             stream.stop()
             print("Audio stream stopped")
+            sys.stdout.flush()
 
     except Exception as e:
         print(f"\nError initializing audio stream: {str(e)}")
@@ -1132,42 +1355,81 @@ def toggle_listening():
         stop_vu()
         stop_intercom_m()
 
-def press(key):
+def stop_keyboard_listener():
+    """Stop the keyboard listener and restore terminal settings."""
+    global keyboard_listener_running
+    keyboard_listener_running = False
+    
+    # Force terminal reset
+    os.system('stty sane')
+    os.system('stty -raw -echo')
+    
+    # Clear any pending input
+    import termios
+    import tty
+    import sys
+    try:
+        # Get current terminal settings
+        old_settings = termios.tcgetattr(sys.stdin)
+        # Set terminal to raw mode temporarily
+        tty.setraw(sys.stdin.fileno())
+        # Read any pending input
+        while sys.stdin.read(1):
+            pass
+        # Restore terminal settings
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+    except Exception as e:
+        print(f"Warning: Could not clear input buffer: {e}")
+    
+    # Final terminal reset
+    os.system('reset')
+
+def keyboard_listener():
+    """Main keyboard listener loop."""
     global keyboard_listener_running, keyboard_listener_active
-    if not keyboard_listener_running:
-        return
-        
-    if key == "^":  # Tilda key
-        toggle_listening()
-        return
-        
-    if not keyboard_listener_active:
-        return
-        
-    if key == "a": 
-        check_stream_status(10)
-    if key == "c":  
-        change_monitor_channel()
-    if key == "d":  
-        show_audio_device_list()
-    if key == "f":  
-        trigger_fft()
-    if key == "i":  
-        toggle_intercom_m()
-    if key == "m":  
-        show_mic_locations()
-    if key == "o":  
-        trigger_oscope()        
-    if key == "q":  
-        stop_all()
-    if key == "s":  
-        trigger_spectrogram()
-    if key == "t":  
-        list_all_threads()        
-    if key == "v":  
-        toggle_vu_meter()      
-    if key == "h" or key =="?":  
-        show_list_of_commands()
+    
+    print("\nKeyboard listener started. Press 'h' for help.")
+    
+    while keyboard_listener_running:
+        try:
+            key = get_key()
+            if key is not None:
+                if key == "^":  # Tilda key
+                    toggle_listening()
+                elif keyboard_listener_active:
+                    if key == "a": 
+                        check_stream_status(10)
+                    elif key == "c":  
+                        change_monitor_channel()
+                    elif key == "d":  
+                        show_audio_device_list()
+                    elif key == "f":  
+                        trigger_fft()
+                    elif key == "i":  
+                        toggle_intercom_m()
+                    elif key == "m":  
+                        show_mic_locations()
+                    elif key == "o":  
+                        trigger_oscope()        
+                    elif key == "q":  
+                        print("\nQuitting...")
+                        keyboard_listener_running = False
+                        stop_all()
+                    elif key == "s":  
+                        trigger_spectrogram()
+                    elif key == "t":  
+                        list_all_threads()        
+                    elif key == "v":  
+                        toggle_vu_meter()      
+                    elif key == "h" or key =="?":  
+                        show_list_of_commands()
+                
+        except Exception as e:
+            print(f"Error in keyboard listener: {e}")
+            keyboard_listener_running = False
+            break
+            
+        time.sleep(0.01)  # Small delay to prevent high CPU usage
 
 def show_list_of_commands():
     print("\na  audio pathway--check for over/underflows")
@@ -1203,10 +1465,12 @@ def check_dependencies():
     
     missing_packages = []
     outdated_packages = []
+    missing_system_deps = []
     
     print("\nChecking Python dependencies:")
     print("-" * 50)
     
+    # Check Python packages
     for package, min_version in required_packages.items():
         try:
             # Try to import the package
@@ -1226,8 +1490,49 @@ def check_dependencies():
     
     print("-" * 50)
     
+    # Check for ffmpeg
+    try:
+        import subprocess
+        if sys.platform == 'win32':
+            # Try multiple possible ffmpeg locations in Windows
+            ffmpeg_paths = [
+                'ffmpeg',  # If it's in PATH
+                'C:\\ffmpeg\\bin\\ffmpeg.exe',  # Common installation path
+                'C:\\ffmpeg\\ffmpeg.exe',  # Alternative path
+                os.path.join(os.environ.get('PROGRAMFILES', 'C:\\Program Files'), 'ffmpeg\\bin\\ffmpeg.exe'),
+                os.path.join(os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)'), 'ffmpeg\\bin\\ffmpeg.exe')
+            ]
+            
+            ffmpeg_found = False
+            for path in ffmpeg_paths:
+                try:
+                    result = subprocess.run([path, '-version'], capture_output=True, text=True)
+                    if result.returncode == 0:
+                        print(f"\n✓ ffmpeg found at: {path}")
+                        ffmpeg_found = True
+                        break
+                except:
+                    continue
+            
+            if not ffmpeg_found:
+                missing_system_deps.append('ffmpeg')
+                print("\n✗ ffmpeg not found in common locations")
+        else:
+            # For Linux/WSL, use which command
+            result = subprocess.run(['which', 'ffmpeg'], capture_output=True, text=True)
+            if result.returncode == 0:
+                print("\n✓ ffmpeg found")
+            else:
+                missing_system_deps.append('ffmpeg')
+                print("\n✗ ffmpeg not found")
+    except Exception as e:
+        missing_system_deps.append('ffmpeg')
+        print(f"\n✗ Error checking for ffmpeg: {e}")
+    
+    print("-" * 50)
+    
     if missing_packages:
-        print("\nMissing required packages:")
+        print("\nMissing required Python packages:")
         for package in missing_packages:
             print(f"  - {package}")
         print("\nTo install missing packages, run:")
@@ -1240,10 +1545,26 @@ def check_dependencies():
         print("\nTo update packages, run:")
         print("pip install --upgrade " + " ".join(pkg.split()[0] for pkg in outdated_packages))
     
-    if not missing_packages and not outdated_packages:
-        print("\nAll required packages are installed and up to date!\n")
+    if missing_system_deps:
+        print("\nMissing system dependencies:")
+        for dep in missing_system_deps:
+            print(f"  - {dep}")
+        print("\nTo install system dependencies:")
+        if platform_manager.is_wsl():
+            print("Run these commands in WSL:")
+            print("sudo apt-get update")
+            print("sudo apt-get install ffmpeg")
+        else:
+            print("For Windows:")
+            print("1. Download ffmpeg from https://www.gyan.dev/ffmpeg/builds/")
+            print("2. Extract the zip file")
+            print("3. Add the bin folder to your system PATH")
+            print("   (e.g., add 'C:\\ffmpeg\\bin' to your PATH environment variable)")
     
-    return len(missing_packages) == 0 and len(outdated_packages) == 0
+    if not missing_packages and not outdated_packages and not missing_system_deps:
+        print("\nAll required packages and dependencies are installed and up to date!\n")
+    
+    return len(missing_packages) == 0 and len(outdated_packages) == 0 and len(missing_system_deps) == 0
 
 def main():
     global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel, sound_in_id, sound_in_chs, MICS_ACTIVE, keyboard_listener_running
@@ -1284,7 +1605,7 @@ def main():
         sys.stdout.flush()
         sys.exit(1)
 
-    # Create and start the process, note: using mp because matplotlib wants in be in the mainprocess threqad
+    # Create and start the process
     if config.MODE_FFT_PERIODIC_RECORD:
         fft_periodic_plot_proc = multiprocessing.Process(target=plot_and_save_fft, args=(sound_in_samplerate, monitor_channel,)) 
         fft_periodic_plot_proc.daemon = True  
@@ -1300,7 +1621,7 @@ def main():
             # Give a small delay to ensure prints are visible before starting keyboard listener
             time.sleep(1)
             # Start keyboard listener in a separate thread
-            keyboard_thread = threading.Thread(target=listen_keyboard, args=(press,))
+            keyboard_thread = threading.Thread(target=keyboard_listener)
             keyboard_thread.daemon = True
             keyboard_thread.start()
             
@@ -1318,8 +1639,9 @@ def main():
         cleanup()
 
 def stop_all():
+    """Stop all processes and threads."""
     global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc, keyboard_listener_running
-    print("\ntrying to stop everything")
+    print("\nStopping all processes...")
     sys.stdout.flush()
     
     # Set all stop events
@@ -1329,7 +1651,11 @@ def stop_all():
     stop_vu_event.set()
     stop_intercom_event.set()
     stop_tod_event.set()
-    keyboard_listener_running = False  # Signal keyboard listener to stop
+    keyboard_listener_running = False
+
+    # Clean up all active processes
+    for command in active_processes:
+        cleanup_process(command)
 
     # Stop the FFT periodic plot process
     if fft_periodic_plot_proc is not None and fft_periodic_plot_proc.is_alive():
@@ -1346,9 +1672,6 @@ def stop_all():
     # Stop intercom
     stop_intercom_m()
 
-    # Clear input buffer
-    clear_input_buffer()
-
     # List and stop all worker threads
     print("\nStopping worker threads...")
     current_thread = threading.current_thread()
@@ -1359,18 +1682,17 @@ def stop_all():
                 try:
                     thread.join(timeout=1)
                 except RuntimeError:
-                    # Skip if we can't join the thread
                     pass
 
     print("\nAll processes and threads stopped")
     sys.stdout.flush()
 
 def cleanup():
+    """Clean up and exit."""
     print("\nCleaning up...")
     sys.stdout.flush()
     
     try:
-        # Stop all processes and threads
         stop_all()
     except Exception as e:
         print(f"Error during cleanup: {e}")
@@ -1381,7 +1703,7 @@ def cleanup():
     # Force exit after cleanup
     print("Exiting...")
     sys.stdout.flush()
-    os._exit(0)  # Force exit without waiting for other threads
+    os._exit(0)
 
 if __name__ == "__main__":
     main()
