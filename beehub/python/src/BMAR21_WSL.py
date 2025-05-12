@@ -487,7 +487,7 @@ def set_input_device(model_name, api_name_preference):
         print(f"  Channels: {sound_in_chs}")
         
         if sound_in_samplerate < 192000 and sound_in_samplerate != 0: # Check for 0 in case of error
-            print("\nWarning: Device sample rate is lower than the ideal 192kHz.")
+            #print("\nWarning: Device sample rate is lower than the ideal 192kHz.")
             if sound_in_samplerate < 48000:
                  print("Running in test mode with significantly reduced sample rate.")
                  testmode = True
@@ -1435,7 +1435,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
         print(f"{thread_id} is recording continuously")
 
     samplerate = sound_in_samplerate
-    print(f"Debug: target_sample_rate type: {type(target_sample_rate)}, value: {target_sample_rate}")
+    #print(f"Debug: target_sample_rate type: {type(target_sample_rate)}, value: {target_sample_rate}")
 
     while not stop_recording_event.is_set():
 
@@ -1466,7 +1466,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
             timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             output_filename = f"{timestamp}_{thread_id}_{record_period}_{interval}_{config.LOCATION_ID}_{config.HIVE_ID}.{file_format.lower()}"
 
-            print(f"Debug: Before sf.write - target_sample_rate type: {type(target_sample_rate)}, value: {target_sample_rate}")
+            #print(f"Debug: Before sf.write - target_sample_rate type: {type(target_sample_rate)}, value: {target_sample_rate}")
 
             if file_format.upper() == 'MP3':
                 if target_sample_rate == 44100 or target_sample_rate == 48000:
@@ -1479,7 +1479,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
                 full_path_name = os.path.join(PRIMARY_DIRECTORY, output_filename)
                 # Ensure target_sample_rate is an integer
                 target_sample_rate = int(target_sample_rate)
-                print(f"Debug: After conversion - target_sample_rate type: {type(target_sample_rate)}, value: {target_sample_rate}")
+                #print(f"Debug: After conversion - target_sample_rate type: {type(target_sample_rate)}, value: {target_sample_rate}")
                 sf.write(full_path_name, audio_data, target_sample_rate, format=file_format.upper())
 
             if not stop_recording_event.is_set():
