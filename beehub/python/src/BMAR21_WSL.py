@@ -342,7 +342,7 @@ def get_windows_sample_rate(device_name):
             info = p.get_device_info_by_index(i)
             if info["maxInputChannels"] > 0:  # Only input devices
                 if device_name.lower() in info["name"].lower():
-                    sample_rate = info["defaultSampleRate"]
+                    sample_rate = int(info["defaultSampleRate"])  # Convert to integer
                     p.terminate()
                     return sample_rate
         
@@ -446,7 +446,7 @@ def set_input_device(model_name, api_name_preference):
                     'name': device['name'],
                     'channels': device['max_input_channels'],
                     'api_name': current_api_name,
-                    'sample_rate': float(current_rate)
+                    'sample_rate': int(float(current_rate))  # Convert to integer
                 })
         sys.stdout.flush()
 
@@ -474,7 +474,7 @@ def set_input_device(model_name, api_name_preference):
         # Select the best candidate
         best_device = candidate_devices[0]
         sound_in_id = best_device['id']
-        sound_in_samplerate = best_device['sample_rate']
+        sound_in_samplerate = best_device['sample_rate']  # This is now an integer
         
         print(f"\nSelected device: {best_device['name']} (API: {best_device['api_name']})")
         print(f"Device Configuration:")
@@ -1106,6 +1106,36 @@ def stop_vu():
 # ############ intercom using multiprocessing #############
 #
 
+def intercom_m_downsampled(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel):
+
+    # Create a buffer to hold the audio data
+    buffer_size = sound_in_samplerate // 4      # For 48,000 samples per second
+    buffer = np.zeros((buffer_size,))
+    channel = monitor_channel
+
+    # Callback function to handle audio input
+    def callback_input(indata, frames, time, status):
+        # Only process audio from the designated channel
+        channel_data = indata[:, channel]
+        # Downsample the audio using resampy
+        downsampled_data = resampy.resample(channel_data, sound_in_samplerate, 44100)
+        buffer[:len(downsampled_data)] = downsampled_data
+
+    # Callback function to handle audio output
+    def callback_output(outdata, frames, time, status):
+        # Play back the audio from the buffer
+        outdata[:, 0] = buffer[:frames]         # Play back on the first channel
+        ##outdata[:, 1] = buffer[:frames]         # Play back on the second channel
+
+    # Open an input stream and an output stream with the callback function
+    with sd.InputStream(callback=callback_input, device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate), \
+        sd.OutputStream(callback=callback_output, device=sound_out_id, channels=sound_out_chs, samplerate=sound_out_samplerate): 
+        # The streams are now open and the callback function will be called every time there is audio input and output
+        while not stop_intercom_event.is_set():
+            sd.sleep(1)
+        print("Stopping intercom...")
+
+
 def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel):
     print(f"[Intercom] Monitoring channel: {monitor_channel+1}")
     # Create a buffer to hold the audio data at input sample rate
@@ -1389,6 +1419,75 @@ def setup_audio_circular_buffer():
     print(f"\naudio buffer size: {sys.getsizeof(buffer)}\n")
     sys.stdout.flush()
 
+def recording_worker_thread(record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
+    #
+    # recording_period is the length of time to record in seconds
+    # interval is the time between recordings in seconds if > 0
+    # thread_id is a string to label the thread
+    # file_format is the format in which to save the audio file
+    # target_sample_rate is the sample rate in which to save the audio file
+    # start_tod is the time of day to start recording, if 'None', record continuously
+    # end_tod is the time of day to stop recording, if start_tod == None, ignore & record continuously
+    #
+    global buffer, buffer_size, buffer_index, stop_recording_event
+
+    if start_tod is None:
+        print(f"{thread_id} is recording continuously")
+
+    samplerate = sound_in_samplerate
+    print(f"Debug: target_sample_rate type: {type(target_sample_rate)}, value: {target_sample_rate}")
+
+    while not stop_recording_event.is_set():
+
+        current_time = datetime.datetime.now().time()
+
+        if start_tod is None or (start_tod <= current_time <= end_tod):        
+            print(f"{thread_id} recording started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec")
+
+            period_start_index = buffer_index 
+            # wait PERIOD seconds to accumulate audio
+            interruptable_sleep(record_period, stop_recording_event)
+
+            period_end_index = buffer_index 
+            ##print(f"Recording length in worker thread: {period_end_index - period_start_index}, after {record_period} seconds")
+            save_start_index = period_start_index % buffer_size
+            save_end_index = period_end_index % buffer_size
+
+            # saving from a circular buffer so segments aren't necessarily contiguous
+            if save_end_index > save_start_index:   # indexing is contiguous
+                audio_data = buffer[save_start_index:save_end_index]
+            else:                                   # ain't contiguous so concatenate to make it contiguous
+                audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+
+            if target_sample_rate < sound_in_samplerate:
+                # resample to lower sample rate
+                audio_data = downsample_audio(audio_data, sound_in_samplerate, target_sample_rate)
+
+            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            output_filename = f"{timestamp}_{thread_id}_{record_period}_{interval}_{config.LOCATION_ID}_{config.HIVE_ID}.{file_format.lower()}"
+
+            print(f"Debug: Before sf.write - target_sample_rate type: {type(target_sample_rate)}, value: {target_sample_rate}")
+
+            if file_format.upper() == 'MP3':
+                if target_sample_rate == 44100 or target_sample_rate == 48000:
+                    full_path_name = os.path.join(MONITOR_DIRECTORY, output_filename)
+                    pcm_to_mp3_write(audio_data, full_path_name)
+                else:
+                    print("mp3 only supports 44.1k and 48k sample rates")
+                    quit(-1)
+            else:
+                full_path_name = os.path.join(PRIMARY_DIRECTORY, output_filename)
+                # Ensure target_sample_rate is an integer
+                target_sample_rate = int(target_sample_rate)
+                print(f"Debug: After conversion - target_sample_rate type: {type(target_sample_rate)}, value: {target_sample_rate}")
+                sf.write(full_path_name, audio_data, target_sample_rate, format=file_format.upper())
+
+            if not stop_recording_event.is_set():
+                print(f"Saved {thread_id} audio to {full_path_name}, period: {record_period}, interval {interval} seconds")
+            # wait "interval" seconds before starting recording again
+            interruptable_sleep(interval, stop_recording_event)
+
+
 def callback(indata, frames, time, status):
     """Callback function for audio input stream."""
     global buffer, buffer_index
@@ -1422,6 +1521,7 @@ def audio_stream():
     print(f"Device ID: {sound_in_id}")
     print(f"Channels: {sound_in_chs}")
     print(f"Sample Rate: {sound_in_samplerate} Hz")
+    print(f"Sample Rate Type: {type(sound_in_samplerate)}")
     print(f"Data Type: {_dtype}")
     sys.stdout.flush()
 
@@ -1456,17 +1556,35 @@ def audio_stream():
             if config.MODE_AUDIO_MONITOR:
                 print("Starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
                 sys.stdout.flush()
-                threading.Thread(target=recording_worker_thread, args=(config.AUDIO_MONITOR_RECORD, config.AUDIO_MONITOR_INTERVAL, "Audio_monitor", config.AUDIO_MONITOR_FORMAT, config.AUDIO_MONITOR_SAMPLERATE, config.AUDIO_MONITOR_START, config.AUDIO_MONITOR_END)).start()
+                threading.Thread(target=recording_worker_thread, args=( config.AUDIO_MONITOR_RECORD, \
+                                                                        config.AUDIO_MONITOR_INTERVAL, \
+                                                                        "Audio_monitor", \
+                                                                        config.AUDIO_MONITOR_FORMAT, \
+                                                                        config.AUDIO_MONITOR_SAMPLERATE, \
+                                                                        config.AUDIO_MONITOR_START, \
+                                                                        config.AUDIO_MONITOR_END)).start()
 
             if config.MODE_PERIOD and not testmode:
-                print("Starting recording_worker_thread for saving period audio at primary sample rate and all channels...")
+                print("\nStarting recording_worker_thread for saving period audio at primary sample rate and all channels...")
                 sys.stdout.flush()
-                threading.Thread(target=recording_worker_thread, args=(config.PERIOD_RECORD, config.PERIOD_INTERVAL, "Period_recording", config.PRIMARY_FILE_FORMAT, sound_in_samplerate, config.PERIOD_START, config.PERIOD_END)).start()
+                threading.Thread(target=recording_worker_thread, args=( config.PERIOD_RECORD, \
+                                                                        config.PERIOD_INTERVAL, \
+                                                                        "Period_recording", \
+                                                                        config.PRIMARY_FILE_FORMAT, \
+                                                                        sound_in_samplerate, \
+                                                                        config.PERIOD_START, \
+                                                                        config.PERIOD_END)).start()
 
             if config.MODE_EVENT and not testmode:
                 print("Starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...")
                 sys.stdout.flush()
-                threading.Thread(target=recording_worker_thread, args=(config.SAVE_BEFORE_EVENT, config.SAVE_AFTER_EVENT, "Event_recording", config.PRIMARY_FILE_FORMAT, sound_in_samplerate, config.EVENT_START, config.EVENT_END)).start()
+                threading.Thread(target=recording_worker_thread, args=( config.SAVE_BEFORE_EVENT, \
+                                                                        config.SAVE_AFTER_EVENT, \
+                                                                        "Event_recording", \
+                                                                        config.PRIMARY_FILE_FORMAT, \
+                                                                        sound_in_samplerate, \
+                                                                        config.EVENT_START, \
+                                                                        config.EVENT_END)).start()
 
             while stream.active and not stop_program[0]:
                 time.sleep(1)
