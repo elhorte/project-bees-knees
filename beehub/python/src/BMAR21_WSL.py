@@ -866,116 +866,50 @@ def trigger_oscope():
 
 # single-shot fft plot of audio
 def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel):
-
-    N = sound_in_samplerate * FFT_DURATION  # Number of samples
-    # Convert gain from dB to linear scale
-    gain = 10 ** (FFT_GAIN / 20)
-    # Record audio
-    print("Recording audio for fft one shot on channel:", channel+1)
-    all_channels_audio = sd.rec(int(N), samplerate=sound_in_samplerate, channels=sound_in_chs, device=sound_in_id)
-    sd.wait()  # Wait until recording is finished
-    single_channel_audio = all_channels_audio[:, channel]
-    single_channel_audio *= gain
-    print("Recording fft finished.")
-
-    # Perform FFT
-    yf = rfft(single_channel_audio.flatten())
-    xf = rfftfreq(N, 1 / sound_in_samplerate)
-
-    # Define bucket width
-    bucket_width = FFT_BW  # Hz
-    bucket_size = int(bucket_width * N / sound_in_samplerate)  # Number of indices per bucket
-
-    # Average buckets
-    buckets = np.array([yf[i:i + bucket_size].mean() for i in range(0, len(yf), bucket_size)])
-    bucket_freqs = np.array([xf[i:i + bucket_size].mean() for i in range(0, len(xf), bucket_size)])
-
-    # Plot results
-    plt.plot(bucket_freqs, np.abs(buckets))
-    plt.xlabel('Frequency (Hz)')
-    plt.ylabel('Amplitude')
-    plt.title('FFT Plot monitoring ch: ' + str(channel + 1) + ' of ' + str(sound_in_chs) + ' channels')
-    plt.grid(True)
-    plt.show()
-
-
-def trigger_fft():
-    one_shot_fft_proc = multiprocessing.Process(target=plot_fft, args=(sound_in_samplerate, sound_in_id, sound_in_chs, monitor_channel))
-    one_shot_fft_proc.start()
-    clear_input_buffer()        
-    one_shot_fft_proc.join()
-    print("exit fft")
-
-# one-shot spectrogram plot of audio in a separate process
-def plot_spectrogram(channel, y_axis_type, file_offset):
-    """
-    Generate a spectrogram from an audio file and display/save it as an image.
-    Parameters:
-    - audio_path: Path to the audio file (FLAC format).
-    - output_image_path: Path to save the spectrogram image.
-    - y_axis_type: Type of Y axis for the spectrogram. Can be 'log' or 'linear'.
-    - y_decimal_places: Number of decimal places for the Y axis (note: preset in statements below).
-    - channel: Channel to use for multi-channel audio files (default is 0 for left channel).
-
-    - in librosa.load() function, sr=None means no resampling, mono=True means all channels are averaged into mono
-    """
-    next_spectrogram = find_file_of_type_with_offset(file_offset) 
-    ##print("preparing spectrogram of:", next_spectrogram)
-
-    if next_spectrogram == None:
-        print("No data available to see?")
-        return
-    else: 
-        full_audio_path = PRIMARY_DIRECTORY + next_spectrogram    # quick hack to eval code
-        print("Spectrogram source:", full_audio_path)
-
-    # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
-    y, sr = librosa.load(full_audio_path, sr=sound_in_samplerate, duration=config.PERIOD_RECORD, mono=False)
-    # If multi-channel audio, select the specified channel
-    if len(y.shape) > 1: y = y[channel]
-    # Compute the spectrogram
-    D = librosa.amplitude_to_db(abs(librosa.stft(y)), ref=np.max)
-    # Plot the spectrogram
-    plt.figure(figsize=(10, 4))
-
-    if y_axis_type == 'log':
-        librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='log')
-        y_decimal_places = 3
-    elif y_axis_type == 'lin':
-        librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='linear')
-        y_decimal_places = 0
-    else:
-        raise ValueError("y_axis_type must be 'log' or 'linear'")
-    
-    # Adjust y-ticks to be in kilohertz and have the specified number of decimal places
-    y_ticks = plt.gca().get_yticks()
-    plt.gca().set_yticklabels(['{:.{}f} kHz'.format(tick/1000, y_decimal_places) for tick in y_ticks])
-    
-    # Extract filename from the audio path
-    filename = os.path.basename(full_audio_path)
-    root, _ = os.path.splitext(filename)
-    plotname = os.path.join(PLOT_DIRECTORY, f"{root}_spectrogram.png")
-
-    # Set title to include filename and channel
-    plt.title(f'Spectrogram from {config.LOCATION_ID}, hive:{config.HIVE_ID}, Mic Loc:{config.MIC_LOCATION[channel]}\nfile:{filename}, Ch:{channel+1}')
-    plt.colorbar(format='%+2.0f dB')
-    plt.tight_layout()
-    print("\nSaving spectrogram to:", plotname)
-    
     try:
+        N = sound_in_samplerate * FFT_DURATION  # Number of samples
+        # Convert gain from dB to linear scale
+        gain = 10 ** (FFT_GAIN / 20)
+        # Record audio
+        print("Recording audio for fft one shot on channel:", channel+1)
+        all_channels_audio = sd.rec(int(N), samplerate=sound_in_samplerate, channels=sound_in_chs, device=sound_in_id)
+        sd.wait()  # Wait until recording is finished
+        single_channel_audio = all_channels_audio[:, channel]
+        single_channel_audio *= gain
+        print("Recording fft finished.")
+
+        # Perform FFT
+        yf = rfft(single_channel_audio.flatten())
+        xf = rfftfreq(N, 1 / sound_in_samplerate)
+
+        # Define bucket width
+        bucket_width = FFT_BW  # Hz
+        bucket_size = int(bucket_width * N / sound_in_samplerate)  # Number of indices per bucket
+
+        # Average buckets
+        buckets = np.array([yf[i:i + bucket_size].mean() for i in range(0, len(yf), bucket_size)])
+        bucket_freqs = np.array([xf[i:i + bucket_size].mean() for i in range(0, len(xf), bucket_size)])
+
+        # Plot results
+        plt.figure(figsize=(10, 6))
+        plt.plot(bucket_freqs, np.abs(buckets))
+        plt.xlabel('Frequency (Hz)')
+        plt.ylabel('Amplitude')
+        plt.title('FFT Plot monitoring ch: ' + str(channel + 1) + ' of ' + str(sound_in_chs) + ' channels')
+        plt.grid(True)
+
+        # Save the plot
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_fft_{sound_in_samplerate/1000:.0F}_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
+        print("\nSaving FFT plot to:", plotname)
+        
         plt.savefig(plotname, dpi=150)
         print("Plot saved successfully")
-    except Exception as e:
-        print(f"Error saving plot: {e}")
-        return
-        
-    plt.close()  # Close the figure instead of showing it
+        plt.close()  # Close the figure instead of showing it
 
-    # Open the saved image in the system's default image viewer
-    try:
+        # Open the saved image in the system's default image viewer
         if platform_manager.is_wsl():
             print("Attempting to open image in WSL...")
-            # For WSL, use xdg-open if available, otherwise use wslview
             try:
                 print("Trying xdg-open...")
                 subprocess.Popen(['xdg-open', plotname])
@@ -984,13 +918,51 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
                 subprocess.Popen(['wslview', plotname])
         else:
             print("Attempting to open image in Windows...")
-            # For Windows
             os.startfile(plotname)
         print("Image viewer command executed")
+        
     except Exception as e:
-        print(f"Could not open image viewer: {e}")
-        print(f"Image saved at: {plotname}")
-        print(f"Please check if the file exists: {os.path.exists(plotname)}")
+        print(f"Error in plot_fft: {e}")
+    finally:
+        plt.close('all')  # Ensure all plots are closed
+
+def trigger_fft():
+    """Trigger FFT plot generation."""
+    try:
+        # Clean up any existing FFT process
+        if 'f' in active_processes and active_processes['f'] is not None:
+            cleanup_process('f')
+        
+        # Create new process
+        fft_process = multiprocessing.Process(
+            target=plot_fft,
+            args=(sound_in_samplerate, sound_in_id, sound_in_chs, monitor_channel)
+        )
+        
+        # Store process reference
+        active_processes['f'] = fft_process
+        
+        # Start process
+        fft_process.start()
+        
+        # Wait for completion with timeout
+        fft_process.join(timeout=30)
+        
+        # Cleanup if process is still running
+        if fft_process.is_alive():
+            print("FFT process taking too long, terminating...")
+            fft_process.terminate()
+            fft_process.join(timeout=1)
+            if fft_process.is_alive():
+                fft_process.kill()
+        
+    except Exception as e:
+        print(f"Error in trigger_fft: {e}")
+    finally:
+        # Always clean up
+        cleanup_process('f')
+        clear_input_buffer()
+        print("FFT process completed")
 
 def trigger_spectrogram():
     cleanup_process('s')  # Clean up any existing process
@@ -1759,7 +1731,12 @@ def keyboard_listener():
                     elif key == "d":  
                         show_audio_device_list()
                     elif key == "f":  
-                        trigger_fft()
+                        try:
+                            trigger_fft()
+                        except Exception as e:
+                            print(f"Error in FFT trigger: {e}")
+                            # Ensure we clean up any stuck processes
+                            cleanup_process('f')
                     elif key == "i":  
                         toggle_intercom_m()
                     elif key == "m":  
@@ -1781,8 +1758,8 @@ def keyboard_listener():
                 
         except Exception as e:
             print(f"Error in keyboard listener: {e}")
-            keyboard_listener_running = False
-            break
+            # Don't exit the keyboard listener on error, just continue
+            continue
             
         time.sleep(0.01)  # Small delay to prevent high CPU usage
 
@@ -2062,6 +2039,85 @@ def cleanup():
     print("Exiting...")
     sys.stdout.flush()
     os._exit(0)
+
+def plot_spectrogram(channel, y_axis_type, file_offset):
+    """
+    Generate a spectrogram from an audio file and display/save it as an image.
+    Parameters:
+    - audio_path: Path to the audio file (FLAC format).
+    - output_image_path: Path to save the spectrogram image.
+    - y_axis_type: Type of Y axis for the spectrogram. Can be 'log' or 'linear'.
+    - y_decimal_places: Number of decimal places for the Y axis (note: preset in statements below).
+    - channel: Channel to use for multi-channel audio files (default is 0 for left channel).
+
+    - in librosa.load() function, sr=None means no resampling, mono=True means all channels are averaged into mono
+    """
+    try:
+        next_spectrogram = find_file_of_type_with_offset(file_offset) 
+        ##print("preparing spectrogram of:", next_spectrogram)
+
+        if next_spectrogram == None:
+            print("No data available to see?")
+            return
+        else: 
+            full_audio_path = PRIMARY_DIRECTORY + next_spectrogram    # quick hack to eval code
+            print("Spectrogram source:", full_audio_path)
+
+        # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
+        y, sr = librosa.load(full_audio_path, sr=sound_in_samplerate, duration=config.PERIOD_RECORD, mono=False)
+        # If multi-channel audio, select the specified channel
+        if len(y.shape) > 1: y = y[channel]
+        # Compute the spectrogram
+        D = librosa.amplitude_to_db(abs(librosa.stft(y)), ref=np.max)
+        # Plot the spectrogram
+        plt.figure(figsize=(10, 4))
+
+        if y_axis_type == 'log':
+            librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='log')
+            y_decimal_places = 3
+        elif y_axis_type == 'lin':
+            librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='linear')
+            y_decimal_places = 0
+        else:
+            raise ValueError("y_axis_type must be 'log' or 'linear'")
+        
+        # Adjust y-ticks to be in kilohertz and have the specified number of decimal places
+        y_ticks = plt.gca().get_yticks()
+        plt.gca().set_yticklabels(['{:.{}f} kHz'.format(tick/1000, y_decimal_places) for tick in y_ticks])
+        
+        # Extract filename from the audio path
+        filename = os.path.basename(full_audio_path)
+        root, _ = os.path.splitext(filename)
+        plotname = os.path.join(PLOT_DIRECTORY, f"{root}_spectrogram.png")
+
+        # Set title to include filename and channel
+        plt.title(f'Spectrogram from {config.LOCATION_ID}, hive:{config.HIVE_ID}, Mic Loc:{config.MIC_LOCATION[channel]}\nfile:{filename}, Ch:{channel+1}')
+        plt.colorbar(format='%+2.0f dB')
+        plt.tight_layout()
+        print("\nSaving spectrogram to:", plotname)
+        
+        plt.savefig(plotname, dpi=150)
+        print("Plot saved successfully")
+        plt.close()  # Close the figure instead of showing it
+
+        # Open the saved image in the system's default image viewer
+        if platform_manager.is_wsl():
+            print("Attempting to open image in WSL...")
+            try:
+                print("Trying xdg-open...")
+                subprocess.Popen(['xdg-open', plotname])
+            except FileNotFoundError:
+                print("xdg-open not found, trying wslview...")
+                subprocess.Popen(['wslview', plotname])
+        else:
+            print("Attempting to open image in Windows...")
+            os.startfile(plotname)
+        print("Image viewer command executed")
+        
+    except Exception as e:
+        print(f"Error in plot_spectrogram: {e}")
+    finally:
+        plt.close('all')  # Ensure all plots are closed
 
 if __name__ == "__main__":
     main()
