@@ -1032,7 +1032,7 @@ def check_wsl_audio():
         return False
 
 def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_queue, asterisks):
-    print(f"[VU Meter] Monitoring channel: {channel+1}")
+    #print(f"[VU Meter] Monitoring channel: {channel+1}")
     buffer = np.zeros((int(sound_in_samplerate),))
     last_print = ""
 
