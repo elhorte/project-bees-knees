@@ -45,6 +45,7 @@ import librosa
 import librosa.display
 import resampy
 import atexit
+import subprocess  # Add this import
 ##import TestPyQT5
 
 import BMAR_config as config
@@ -800,8 +801,41 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs):
         plt.title(f"Oscilloscope Traces w/{OSCOPE_GAIN_DB}dB Gain--Ch{i+1}")
         plt.ylim(-1.0, 1.0)
     plt.tight_layout()
-    plt.show()
 
+    # Save the plot
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_oscope_{sound_in_samplerate/1000:.0F}_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
+    print("\nSaving oscilloscope plot to:", plotname)
+    
+    try:
+        plt.savefig(plotname, dpi=150)
+        print("Plot saved successfully")
+    except Exception as e:
+        print(f"Error saving plot: {e}")
+        return
+        
+    plt.close()  # Close the figure instead of showing it
+
+    # Open the saved image in the system's default image viewer
+    try:
+        if platform_manager.is_wsl():
+            print("Attempting to open image in WSL...")
+            # For WSL, use xdg-open if available, otherwise use wslview
+            try:
+                print("Trying xdg-open...")
+                subprocess.Popen(['xdg-open', plotname])
+            except FileNotFoundError:
+                print("xdg-open not found, trying wslview...")
+                subprocess.Popen(['wslview', plotname])
+        else:
+            print("Attempting to open image in Windows...")
+            # For Windows
+            os.startfile(plotname)
+        print("Image viewer command executed")
+    except Exception as e:
+        print(f"Could not open image viewer: {e}")
+        print(f"Image saved at: {plotname}")
+        print(f"Please check if the file exists: {os.path.exists(plotname)}")
 
 # Add near the top with other global variables
 active_processes = {
@@ -920,16 +954,43 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
     # Extract filename from the audio path
     filename = os.path.basename(full_audio_path)
     root, _ = os.path.splitext(filename)
-    plotname = PLOT_DIRECTORY + root + '_spectrogram' + '.png'
+    plotname = os.path.join(PLOT_DIRECTORY, f"{root}_spectrogram.png")
 
     # Set title to include filename and channel
     plt.title(f'Spectrogram from {config.LOCATION_ID}, hive:{config.HIVE_ID}, Mic Loc:{config.MIC_LOCATION[channel]}\nfile:{filename}, Ch:{channel+1}')
     plt.colorbar(format='%+2.0f dB')
     plt.tight_layout()
     print("\nSaving spectrogram to:", plotname)
-    plt.savefig(plotname, dpi=150)
-    plt.show()
+    
+    try:
+        plt.savefig(plotname, dpi=150)
+        print("Plot saved successfully")
+    except Exception as e:
+        print(f"Error saving plot: {e}")
+        return
+        
+    plt.close()  # Close the figure instead of showing it
 
+    # Open the saved image in the system's default image viewer
+    try:
+        if platform_manager.is_wsl():
+            print("Attempting to open image in WSL...")
+            # For WSL, use xdg-open if available, otherwise use wslview
+            try:
+                print("Trying xdg-open...")
+                subprocess.Popen(['xdg-open', plotname])
+            except FileNotFoundError:
+                print("xdg-open not found, trying wslview...")
+                subprocess.Popen(['wslview', plotname])
+        else:
+            print("Attempting to open image in Windows...")
+            # For Windows
+            os.startfile(plotname)
+        print("Image viewer command executed")
+    except Exception as e:
+        print(f"Could not open image viewer: {e}")
+        print(f"Image saved at: {plotname}")
+        print(f"Please check if the file exists: {os.path.exists(plotname)}")
 
 def trigger_spectrogram():
     cleanup_process('s')  # Clean up any existing process
