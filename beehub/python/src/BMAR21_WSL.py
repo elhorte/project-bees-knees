@@ -1551,21 +1551,19 @@ def audio_stream():
 
     # Print initialization info
     print("\nInitializing audio stream...")
-    print(f"\nDevice ID: {sound_in_id}")
-    print(f"\nChannels: {sound_in_chs}")
-    print(f"\nSample Rate: {sound_in_samplerate} Hz")
-    print(f"\nSample Rate Type: {type(sound_in_samplerate)}")
-    print(f"\nData Type: {_dtype}")
-    #sys.stdout.flush()
+    print(f"Device ID: {sound_in_id}")
+    print(f"Channels: {sound_in_chs}")
+    print(f"Sample Rate: {sound_in_samplerate} Hz")
+    print(f"Sample Rate Type: {type(sound_in_samplerate)}")
+    print(f"Data Type: {_dtype}")
 
     try:
         # First verify the device configuration
         device_info = sd.query_devices(sound_in_id)
         print("\nSelected device info:")
-        print(f"\nName: {device_info['name']}")
-        print(f"\nMax Input Channels: {device_info['max_input_channels']}")
-        print(f"\nDevice Sample Rate: {device_info['default_samplerate']} Hz")
-        #sys.stdout.flush()
+        print(f"Name: {device_info['name']}")
+        print(f"Max Input Channels: {device_info['max_input_channels']}")
+        print(f"Device Sample Rate: {device_info['default_samplerate']} Hz")
 
         if device_info['max_input_channels'] < sound_in_chs:
             raise RuntimeError(f"Device only supports {device_info['max_input_channels']} channels, but {sound_in_chs} channels are required")
@@ -1581,8 +1579,7 @@ def audio_stream():
         )
 
         print("\nAudio stream initialized successfully")
-        print(f"\nStream sample rate: {stream.samplerate} Hz")
-        #sys.stdout.flush()
+        print(f"Stream sample rate: {stream.samplerate} Hz")
 
         with stream:
             # start the recording worker threads
