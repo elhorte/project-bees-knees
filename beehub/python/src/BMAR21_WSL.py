@@ -1551,12 +1551,12 @@ def audio_stream():
 
     # Print initialization info
     print("\nInitializing audio stream...")
-    print(f"Device ID: {sound_in_id}")
-    print(f"Channels: {sound_in_chs}")
-    print(f"Sample Rate: {sound_in_samplerate} Hz")
-    print(f"Sample Rate Type: {type(sound_in_samplerate)}")
-    print(f"Data Type: {_dtype}")
-    sys.stdout.flush()
+    print(f"\nDevice ID: {sound_in_id}")
+    print(f"\nChannels: {sound_in_chs}")
+    print(f"\nSample Rate: {sound_in_samplerate} Hz")
+    print(f"\nSample Rate Type: {type(sound_in_samplerate)}")
+    print(f"\nData Type: {_dtype}")
+    #sys.stdout.flush()
 
     try:
         # First verify the device configuration
@@ -1565,7 +1565,7 @@ def audio_stream():
         print(f"Name: {device_info['name']}")
         print(f"Max Input Channels: {device_info['max_input_channels']}")
         print(f"Device Sample Rate: {device_info['default_samplerate']} Hz")
-        sys.stdout.flush()
+        #sys.stdout.flush()
 
         if device_info['max_input_channels'] < sound_in_chs:
             raise RuntimeError(f"Device only supports {device_info['max_input_channels']} channels, but {sound_in_chs} channels are required")
@@ -1582,13 +1582,13 @@ def audio_stream():
 
         print("\nAudio stream initialized successfully")
         print(f"Stream sample rate: {stream.samplerate} Hz")
-        sys.stdout.flush()
+        #sys.stdout.flush()
 
         with stream:
             # start the recording worker threads
             if config.MODE_AUDIO_MONITOR:
                 print("Starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
-                sys.stdout.flush()
+                #sys.stdout.flush()
                 threading.Thread(target=recording_worker_thread, args=( config.AUDIO_MONITOR_RECORD, \
                                                                         config.AUDIO_MONITOR_INTERVAL, \
                                                                         "Audio_monitor", \
@@ -1599,7 +1599,7 @@ def audio_stream():
 
             if config.MODE_PERIOD and not testmode:
                 print("\nStarting recording_worker_thread for saving period audio at primary sample rate and all channels...")
-                sys.stdout.flush()
+                #sys.stdout.flush()
                 threading.Thread(target=recording_worker_thread, args=( config.PERIOD_RECORD, \
                                                                         config.PERIOD_INTERVAL, \
                                                                         "Period_recording", \
@@ -1610,7 +1610,7 @@ def audio_stream():
 
             if config.MODE_EVENT and not testmode:
                 print("Starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...")
-                sys.stdout.flush()
+                #sys.stdout.flush()
                 threading.Thread(target=recording_worker_thread, args=( config.SAVE_BEFORE_EVENT, \
                                                                         config.SAVE_AFTER_EVENT, \
                                                                         "Event_recording", \
@@ -1624,12 +1624,12 @@ def audio_stream():
             
             stream.stop()
             print("Audio stream stopped")
-            sys.stdout.flush()
+            #sys.stdout.flush()
 
     except Exception as e:
         print(f"\nError initializing audio stream: {str(e)}")
         print("Please check your audio device configuration and ensure it supports the required settings")
-        sys.stdout.flush()
+        #sys.stdout.flush()
         raise
 
 
