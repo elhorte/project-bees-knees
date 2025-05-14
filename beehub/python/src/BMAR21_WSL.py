@@ -1899,14 +1899,14 @@ def check_dependencies():
     
     return len(missing_packages) == 0 and len(outdated_packages) == 0 and len(missing_system_deps) == 0
 
+#=== Main() ============================================================
+
 def main():
     global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel, sound_in_id, sound_in_chs, MICS_ACTIVE, keyboard_listener_running
 
     print("\n\nBeehive Multichannel Acoustic-Signal Recorder\n")
-    sys.stdout.flush()
-
-    print(f"PRIMARY_BITDEPTH: {config.PRIMARY_BITDEPTH}")
-    
+    #sys.stdout.flush()
+   
     # Check dependencies
     if not check_dependencies():
         print("\nWarning: Some required packages are missing or outdated.")
@@ -1916,7 +1916,7 @@ def main():
             sys.exit(1)
     
     print(f"Saving data to: {PRIMARY_DIRECTORY}\n")
-    sys.stdout.flush()
+    #sys.stdout.flush()
 
     # Try to set up the input device
     if not set_input_device(config.MODEL_NAME, config.API_NAME):
@@ -1926,9 +1926,9 @@ def main():
     setup_audio_circular_buffer()
 
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/500000:.2f} megabytes")
-    sys.stdout.flush()
+    #sys.stdout.flush()
     print(f"Sample Rate: {sound_in_samplerate}; File Format: { config.PRIMARY_FILE_FORMAT}; Channels: {sound_in_chs}")
-    sys.stdout.flush()
+    #sys.stdout.flush()
 
     # Create the output directory if it doesn't exist
     try:
@@ -1937,7 +1937,7 @@ def main():
         os.makedirs(PLOT_DIRECTORY, exist_ok=True)
     except Exception as e:
         print(f"An error occurred while trying to make or find output directory: {e}")
-        sys.stdout.flush()
+        #sys.stdout.flush()
         sys.exit(1)
 
     # Create and start the process
@@ -1946,7 +1946,7 @@ def main():
         fft_periodic_plot_proc.daemon = True  
         fft_periodic_plot_proc.start()
         print("started fft_periodic_plot_process")
-        sys.stdout.flush()
+        #sys.stdout.flush()
 
     # Register cleanup handler before starting any threads
     atexit.register(cleanup)
@@ -1965,19 +1965,19 @@ def main():
             
     except KeyboardInterrupt: # ctrl-c in windows
         print('\nCtrl-C: Recording process stopped by user.')
-        sys.stdout.flush()
+        #sys.stdout.flush()
         cleanup()
 
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
-        sys.stdout.flush()
+        #sys.stdout.flush()
         cleanup()
 
 def stop_all():
     """Stop all processes and threads."""
     global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc, keyboard_listener_running
     print("\nStopping all processes...")
-    sys.stdout.flush()
+    #sys.stdout.flush()
     
     # Set all stop events
     stop_program[0] = True
@@ -2020,12 +2020,12 @@ def stop_all():
                     pass
 
     print("\nAll processes and threads stopped")
-    sys.stdout.flush()
+    #sys.stdout.flush()
 
 def cleanup():
     """Clean up and exit."""
     print("\nCleaning up...")
-    sys.stdout.flush()
+    #sys.stdout.flush()
     
     try:
         stop_all()
@@ -2037,7 +2037,7 @@ def cleanup():
     
     # Force exit after cleanup
     print("Exiting...")
-    sys.stdout.flush()
+    #sys.stdout.flush()
     os._exit(0)
 
 def plot_spectrogram(channel, y_axis_type, file_offset):
