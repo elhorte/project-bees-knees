@@ -1562,9 +1562,9 @@ def audio_stream():
         # First verify the device configuration
         device_info = sd.query_devices(sound_in_id)
         print("\nSelected device info:")
-        print(f"Name: {device_info['name']}")
-        print(f"Max Input Channels: {device_info['max_input_channels']}")
-        print(f"Device Sample Rate: {device_info['default_samplerate']} Hz")
+        print(f"\nName: {device_info['name']}")
+        print(f"\nMax Input Channels: {device_info['max_input_channels']}")
+        print(f"\nDevice Sample Rate: {device_info['default_samplerate']} Hz")
         #sys.stdout.flush()
 
         if device_info['max_input_channels'] < sound_in_chs:
@@ -1581,7 +1581,7 @@ def audio_stream():
         )
 
         print("\nAudio stream initialized successfully")
-        print(f"Stream sample rate: {stream.samplerate} Hz")
+        print(f"\nStream sample rate: {stream.samplerate} Hz")
         #sys.stdout.flush()
 
         with stream:
