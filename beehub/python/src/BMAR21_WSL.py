@@ -1549,21 +1549,21 @@ def audio_stream():
     # Reset terminal settings before printing
     reset_terminal_settings()
 
-    # Print initialization info
-    print("\nInitializing audio stream...")
-    print(f"Device ID: {sound_in_id}")
-    print(f"Channels: {sound_in_chs}")
-    print(f"Sample Rate: {sound_in_samplerate} Hz")
-    print(f"Sample Rate Type: {type(sound_in_samplerate)}")
-    print(f"Data Type: {_dtype}")
+    # Print initialization info with forced output
+    print("Initializing audio stream...", flush=True)
+    print(f"Device ID: {sound_in_id}", end='\n', flush=True)
+    print(f"Channels: {sound_in_chs}", end='\n', flush=True)
+    print(f"Sample Rate: {sound_in_samplerate} Hz", end='\n', flush=True)
+    print(f"Sample Rate Type: {type(sound_in_samplerate)}", end='\n', flush=True)
+    print(f"Data Type: {_dtype}", end='\n', flush=True)
 
     try:
         # First verify the device configuration
         device_info = sd.query_devices(sound_in_id)
-        print("\nSelected device info:")
-        print(f"Name: {device_info['name']}")
-        print(f"Max Input Channels: {device_info['max_input_channels']}")
-        print(f"Device Sample Rate: {device_info['default_samplerate']} Hz")
+        print("\nSelected device info:", flush=True)
+        print(f"Name: {device_info['name']}", end='\n', flush=True)
+        print(f"Max Input Channels: {device_info['max_input_channels']}", end='\n', flush=True)
+        print(f"Device Sample Rate: {device_info['default_samplerate']} Hz", end='\n', flush=True)
 
         if device_info['max_input_channels'] < sound_in_chs:
             raise RuntimeError(f"Device only supports {device_info['max_input_channels']} channels, but {sound_in_chs} channels are required")
@@ -1578,8 +1578,8 @@ def audio_stream():
             callback=callback
         )
 
-        print("\nAudio stream initialized successfully")
-        print(f"Stream sample rate: {stream.samplerate} Hz")
+        print("\nAudio stream initialized successfully", flush=True)
+        print(f"Stream sample rate: {stream.samplerate} Hz", end='\n', flush=True)
 
         with stream:
             # start the recording worker threads
