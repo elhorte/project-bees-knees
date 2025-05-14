@@ -1692,7 +1692,7 @@ def keyboard_listener():
     # Reset terminal settings before starting
     reset_terminal_settings()
     
-    print("\nKeyboard listener started. Press 'h' for help.", end='\n', flush=True)
+    print("\nstarted. Press 'h' for help.", end='\n', flush=True)
     
     while keyboard_listener_running:
         try:
@@ -1994,12 +1994,12 @@ def stop_all():
 
     # Stop the FFT periodic plot process
     if fft_periodic_plot_proc is not None and fft_periodic_plot_proc.is_alive():
-        print("Stopping FFT periodic plot process...")
+        print("Stopping FFT periodic plot process...\n")
         fft_periodic_plot_proc.terminate()
         fft_periodic_plot_proc.join(timeout=2)
         if fft_periodic_plot_proc.is_alive():
             fft_periodic_plot_proc.kill()
-        print("FFT periodic plot process stopped")
+        print("FFT periodic plot process stopped\n")
 
     # Stop VU meter
     stop_vu()
