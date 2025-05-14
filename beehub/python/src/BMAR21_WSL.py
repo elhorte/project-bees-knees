@@ -1406,9 +1406,6 @@ def plot_and_save_fft(sound_in_samplerate, channel):
 
 def reset_terminal_settings():
     """Reset terminal settings to ensure proper output formatting."""
-    if not platform_manager.is_wsl():
-        return
-        
     try:
         import termios
         import tty
@@ -1427,7 +1424,7 @@ def reset_terminal_settings():
         os.system('stty sane')
         
         # Clear screen and reset cursor
-        print('\033[2J\033[H', end='')
+        print('\033[2J\033[H', end='', flush=True)
         
         # Reset keyboard mode
         os.system('stty -raw -echo')
@@ -1435,8 +1432,11 @@ def reset_terminal_settings():
         # Flush stdout
         sys.stdout.flush()
         
+        # Force line buffering
+        sys.stdout.reconfigure(line_buffering=True)
+        
     except Exception as e:
-        print(f"Warning: Could not reset terminal settings: {e}")
+        print(f"Warning: Could not reset terminal settings: {e}", end='\n', flush=True)
 
 def setup_audio_circular_buffer():
     """Set up the circular buffer for audio recording."""
@@ -1689,7 +1689,10 @@ def keyboard_listener():
     """Main keyboard listener loop."""
     global keyboard_listener_running, keyboard_listener_active, monitor_channel, change_ch_event, vu_proc, intercom_proc
     
-    print("\nKeyboard listener started. Press 'h' for help.")
+    # Reset terminal settings before starting
+    reset_terminal_settings()
+    
+    print("\nKeyboard listener started. Press 'h' for help.", end='\n', flush=True)
     
     while keyboard_listener_running:
         try:
@@ -1706,21 +1709,21 @@ def keyboard_listener():
                                 monitor_channel = key_int
                                 if intercom_proc is not None:
                                     change_ch_event.set()
-                                print(f"\nNow monitoring channel: {monitor_channel+1} (of {sound_in_chs})")
+                                print(f"\nNow monitoring channel: {monitor_channel+1} (of {sound_in_chs})", end='\n', flush=True)
                                 # Restart VU meter if running
                                 if vu_proc is not None:
-                                    print(f"Restarting VU meter on channel: {monitor_channel+1}")
+                                    print(f"Restarting VU meter on channel: {monitor_channel+1}", end='\n', flush=True)
                                     toggle_vu_meter()
                                     time.sleep(0.1)
                                     toggle_vu_meter()
                             else:
-                                print(f"Sound device has only {sound_in_chs} channel(s)")
+                                print(f"Sound device has only {sound_in_chs} channel(s)", end='\n', flush=True)
                         else:
                             # If not in VU meter or Intercom mode, handle other digit commands
                             if key == "0":
-                                print("Exiting channel change")
+                                print("Exiting channel change", end='\n', flush=True)
                             else:
-                                print(f"Unknown command: {key}")
+                                print(f"Unknown command: {key}", end='\n', flush=True)
                     elif key == "a": 
                         check_stream_status(10)
                     elif key == "c":  
@@ -1731,7 +1734,7 @@ def keyboard_listener():
                         try:
                             trigger_fft()
                         except Exception as e:
-                            print(f"Error in FFT trigger: {e}")
+                            print(f"Error in FFT trigger: {e}", end='\n', flush=True)
                             # Ensure we clean up any stuck processes
                             cleanup_process('f')
                     elif key == "i":  
@@ -1741,7 +1744,7 @@ def keyboard_listener():
                     elif key == "o":  
                         trigger_oscope()        
                     elif key == "q":  
-                        print("\nQuitting...")
+                        print("\nQuitting...", end='\n', flush=True)
                         keyboard_listener_running = False
                         stop_all()
                     elif key == "s":  
@@ -1754,7 +1757,7 @@ def keyboard_listener():
                         show_list_of_commands()
                 
         except Exception as e:
-            print(f"Error in keyboard listener: {e}")
+            print(f"Error in keyboard listener: {e}", end='\n', flush=True)
             # Don't exit the keyboard listener on error, just continue
             continue
             
