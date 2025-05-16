@@ -1465,7 +1465,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
     global buffer, buffer_size, buffer_index, stop_recording_event
 
     if start_tod is None:
-        print(f"{thread_id} is recording continuously")
+        print(f"{thread_id} is recording continuously\r")
 
     samplerate = sound_in_samplerate
     #print(f"Debug: target_sample_rate type: {type(target_sample_rate)}, value: {target_sample_rate}")
@@ -1584,7 +1584,7 @@ def audio_stream():
         with stream:
             # start the recording worker threads
             if config.MODE_AUDIO_MONITOR:
-                print("Starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
+                print("Starting recording_worker_thread for down sampling audio to 48k and saving mp3...\r")
                 #sys.stdout.flush()
                 threading.Thread(target=recording_worker_thread, args=( config.AUDIO_MONITOR_RECORD, \
                                                                         config.AUDIO_MONITOR_INTERVAL, \
@@ -1595,7 +1595,7 @@ def audio_stream():
                                                                         config.AUDIO_MONITOR_END)).start()
 
             if config.MODE_PERIOD and not testmode:
-                print("\nStarting recording_worker_thread for saving period audio at primary sample rate and all channels...")
+                print("Starting recording_worker_thread for saving period audio at primary sample rate and all channels...\r")
                 #sys.stdout.flush()
                 threading.Thread(target=recording_worker_thread, args=( config.PERIOD_RECORD, \
                                                                         config.PERIOD_INTERVAL, \
@@ -1606,7 +1606,7 @@ def audio_stream():
                                                                         config.PERIOD_END)).start()
 
             if config.MODE_EVENT and not testmode:
-                print("Starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...")
+                print("Starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...\r")
                 #sys.stdout.flush()
                 threading.Thread(target=recording_worker_thread, args=( config.SAVE_BEFORE_EVENT, \
                                                                         config.SAVE_AFTER_EVENT, \
@@ -1976,7 +1976,7 @@ def main():
 def stop_all():
     """Stop all processes and threads."""
     global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc, keyboard_listener_running
-    print("\nStopping all processes...")
+    print("Stopping all processes...\r")
     #sys.stdout.flush()
     
     # Set all stop events
@@ -1994,12 +1994,12 @@ def stop_all():
 
     # Stop the FFT periodic plot process
     if fft_periodic_plot_proc is not None and fft_periodic_plot_proc.is_alive():
-        print("Stopping FFT periodic plot process...\n")
+        print("Stopping FFT periodic plot process...\r")
         fft_periodic_plot_proc.terminate()
         fft_periodic_plot_proc.join(timeout=2)
         if fft_periodic_plot_proc.is_alive():
             fft_periodic_plot_proc.kill()
-        print("FFT periodic plot process stopped\n")
+        print("FFT periodic plot process stopped\r")
 
     # Stop VU meter
     stop_vu()
@@ -2008,7 +2008,7 @@ def stop_all():
     stop_intercom_m()
 
     # List and stop all worker threads
-    print("\nStopping worker threads...")
+    print("Stopping worker threads...\r")
     current_thread = threading.current_thread()
     for thread in threading.enumerate():
         if thread != threading.main_thread() and thread != current_thread:
@@ -2019,7 +2019,7 @@ def stop_all():
                 except RuntimeError:
                     pass
 
-    print("\nAll processes and threads stopped")
+    print("\nAll processes and threads stopped\r")
     #sys.stdout.flush()
 
 def cleanup():
