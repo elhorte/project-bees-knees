@@ -37,7 +37,6 @@ import os
 import curses
 import atexit
 import signal
-import sys
 import io
 import warnings
 import queue
@@ -46,7 +45,8 @@ import librosa.display
 import resampy
 import atexit
 import subprocess  # Add this import
-##import TestPyQT5
+import termios
+import tty
 
 import BMAR_config as config
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
@@ -1116,7 +1116,8 @@ def toggle_vu_meter():
             asterisks.value = '*' * normalized_value
             print("threshold:", asterisks.value.ljust(50, ' '))
             
-        vu_proc = multiprocessing.Process(target=vu_meter, args=(sound_in_id, sound_in_samplerate, sound_in_chs, monitor_channel, stop_vu_queue, asterisks))
+        vu_proc = multiprocessing.Process(target=vu_meter, args=(sound_in_id, sound_in_samplerate, \
+                                                                 sound_in_chs, monitor_channel, stop_vu_queue, asterisks))
         active_processes['v'] = vu_proc
         vu_proc.start()
     else:
@@ -1475,7 +1476,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
         current_time = datetime.datetime.now().time()
 
         if start_tod is None or (start_tod <= current_time <= end_tod):        
-            print(f"{thread_id} recording started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec")
+            print(f"{thread_id} started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec\r")
 
             period_start_index = buffer_index 
             # wait PERIOD seconds to accumulate audio
@@ -1516,7 +1517,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
                 sf.write(full_path_name, audio_data, target_sample_rate, format=file_format.upper())
 
             if not stop_recording_event.is_set():
-                print(f"Saved {thread_id} audio to {full_path_name}, period: {record_period}, interval {interval} seconds")
+                print(f"Saved {thread_id} audio to {full_path_name}, period: {record_period}, interval {interval} seconds\r")
             # wait "interval" seconds before starting recording again
             interruptable_sleep(interval, stop_recording_event)
 
@@ -1551,19 +1552,19 @@ def audio_stream():
 
     # Print initialization info with forced output
     print("Initializing audio stream...", flush=True)
-    print(f"Device ID: {sound_in_id}", end='\n', flush=True)
-    print(f"Channels: {sound_in_chs}", end='\n', flush=True)
-    print(f"Sample Rate: {sound_in_samplerate} Hz", end='\n', flush=True)
-    print(f"Sample Rate Type: {type(sound_in_samplerate)}", end='\n', flush=True)
-    print(f"Data Type: {_dtype}", end='\n', flush=True)
+    print(f"Device ID: {sound_in_id}", end='\r', flush=True)
+    print(f"Channels: {sound_in_chs}", end='\r', flush=True)
+    print(f"Sample Rate: {sound_in_samplerate} Hz", end='\r', flush=True)
+    print(f"Sample Rate Type: {type(sound_in_samplerate)}", end='\r', flush=True)
+    print(f"Data Type: {_dtype}", end='\r', flush=True)
 
     try:
         # First verify the device configuration
         device_info = sd.query_devices(sound_in_id)
         print("\nSelected device info:", flush=True)
-        print(f"Name: {device_info['name']}", end='\n', flush=True)
-        print(f"Max Input Channels: {device_info['max_input_channels']}", end='\n', flush=True)
-        print(f"Device Sample Rate: {device_info['default_samplerate']} Hz", end='\n', flush=True)
+        print(f"Name: {device_info['name']}", end='\r', flush=True)
+        print(f"Max Input Channels: {device_info['max_input_channels']}", end='\r', flush=True)
+        print(f"Device Sample Rate: {device_info['default_samplerate']} Hz", end='\r', flush=True)
 
         if device_info['max_input_channels'] < sound_in_chs:
             raise RuntimeError(f"Device only supports {device_info['max_input_channels']} channels, but {sound_in_chs} channels are required")
@@ -1620,7 +1621,7 @@ def audio_stream():
                 time.sleep(1)
             
             stream.stop()
-            print("Audio stream stopped")
+            print("Audio stream stopped\r")
             #sys.stdout.flush()
 
     except Exception as e:
@@ -1666,9 +1667,7 @@ def stop_keyboard_listener():
     os.system('stty -raw -echo')
     
     # Clear any pending input
-    import termios
-    import tty
-    import sys
+
     try:
         # Get current terminal settings
         old_settings = termios.tcgetattr(sys.stdin)
@@ -2012,7 +2011,7 @@ def stop_all():
     current_thread = threading.current_thread()
     for thread in threading.enumerate():
         if thread != threading.main_thread() and thread != current_thread:
-            print(f"Stopping thread: {thread.name}")
+            print(f"Stopping thread: {thread.name}\r")
             if thread.is_alive():
                 try:
                     thread.join(timeout=1)
@@ -2024,7 +2023,7 @@ def stop_all():
 
 def cleanup():
     """Clean up and exit."""
-    print("\nCleaning up...")
+    print("Cleaning up...\r")
     #sys.stdout.flush()
     
     try:
