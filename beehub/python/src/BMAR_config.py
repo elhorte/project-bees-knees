@@ -33,11 +33,18 @@ SAVE_BEFORE_EVENT = 30                          # seconds to save before the eve
 SAVE_AFTER_EVENT = 30                           # seconds to save after the event
 EVENT_THRESHOLD = 20000                         # audio level threshold to be considered an event
 
-
-data_drive = "G:"   # D is internal and limited; G is Google Drive, just FYI
-data_directory = "My Drive/en_beehive_data"
-##data_drive = "C:"
-##data_directory = "temp"
+# Windows
+win_data_drive = "G:"   # D is internal and limited; G is Google Drive, just FYI
+win_data_path = "My Drive/eb_beehive_data"
+win_data_folders = ["audio", "plots"]  # Fixed syntax - use commas not semicolons
+#Macos
+mac_data_drive = "~"  
+mac_data_path = "data/eb_beehive_data"
+mac_data_folders = ["audio", "plots"]  # Fixed syntax - use commas not semicolons
+#Linux
+linux_data_drive = "/mnt/beedata" 
+linux_data_path = "eb_beehive_data"
+linux_data_folders = ["audio", "plots"]  # Fixed syntax - use commas not semicolons
 
 # mic location map channel to position
 MIC_LOCATION = ['1: upper--front', '2: upper--back', '3: lower w/queen--front', '4: lower w/queen--back']
