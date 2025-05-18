@@ -219,15 +219,6 @@ buffer = None
 buffer_index = None
 file_offset = 0
 
-# Dictionary to track active processes by key
-active_processes = {
-    'v': None,  # VU meter
-    'o': None,  # Oscilloscope
-    's': None,  # Spectrogram 
-    'f': None,  # FFT
-    'i': None   # Intercom
-}
-
 # #############################################################
 # #### Control Panel ##########################################
 # #############################################################
@@ -685,40 +676,8 @@ def clear_input_buffer():
         except Exception as e:
             print(f"Warning: Could not clear input buffer: {e}")
     else:
-        # For macOS and Linux/WSL
-        try:
-            # Using select and tty for Unix-like systems
-            import termios, tty, select
-            
-            fd = sys.stdin.fileno()
-            try:
-                # Save old terminal settings
-                old_settings = termios.tcgetattr(fd)
-                
-                # Set non-blocking mode
-                tty.setraw(fd, termios.TCSANOW)
-                
-                # Read all pending input
-                while select.select([sys.stdin], [], [], 0)[0]:
-                    sys.stdin.read(1)
-                    
-                # One more time with a short timeout
-                rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
-                if rlist:
-                    sys.stdin.read(len(rlist))
-            finally:
-                # Restore settings
-                try:
-                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-                except Exception as e:
-                    print(f"Warning during terminal reset: {e}")
-        except Exception as e:
-            # Silent fail or fallback
-            try:
-                # Last resort for Unix-like systems
-                os.system('stty -raw echo')
-            except:
-                pass
+        # For Linux/WSL, we could implement alternative methods if needed
+        pass
 
 
 def show_audio_device_info_for_SOUND_IN_OUT():
@@ -1082,36 +1041,20 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs):
 
 # Add near the top with other global variables
 active_processes = {
-    'v': None,  # VU meter
-    'o': None,  # Oscilloscope
-    's': None,  # Spectrogram 
-    'f': None,  # FFT
-    'i': None   # Intercom
+    'v': None,
+    'o': None,
+    's': None
 }
 
 def cleanup_process(command):
     """Clean up a specific command's process."""
-    try:
-        # Check if the command key exists in active_processes
-        if command in active_processes:
-            process = active_processes[command]
-            if process is not None and process.is_alive():
-                try:
-                    process.terminate()
-                    process.join(timeout=1)
-                    if process.is_alive():
-                        process.kill()
-                except Exception as e:
-                    print(f"Error terminating process for command '{command}': {e}")
-                
-                # Reset the process reference
-                active_processes[command] = None
-                print(f"Process for command '{command}' has been cleaned up")
-        else:
-            # The command doesn't exist in our tracking dictionary
-            print(f"Warning: No process tracking for command '{command}'")
-    except Exception as e:
-        print(f"Error in cleanup_process for command '{command}': {e}")
+    if active_processes[command] is not None:
+        if active_processes[command].is_alive():
+            active_processes[command].terminate()
+            active_processes[command].join(timeout=1)
+            if active_processes[command].is_alive():
+                active_processes[command].kill()
+        active_processes[command] = None
 
 def trigger_oscope():
     cleanup_process('o')  # Clean up any existing process
@@ -1322,41 +1265,26 @@ def check_wsl_audio():
         return False
 
 def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_queue, asterisks):
+    #print(f"[VU Meter] Monitoring channel: {channel+1}")
     buffer = np.zeros((int(sound_in_samplerate),))
     last_print = ""
-    
-    # Validate the channel is valid for the device
-    if channel >= sound_in_chs:
-        print(f"\nError: Selected channel {channel+1} exceeds available channels ({sound_in_chs})", end='\r\n')
-        print(f"Defaulting to channel 1", end='\r\n')
-        channel = 0  # Default to first channel
 
     def callback_input(indata, frames, time, status):
         nonlocal last_print
-        try:
-            # Safely access the requested channel, handle potential IndexError
-            if channel < indata.shape[1]:
-                channel_data = indata[:, channel]
-                
-                buffer[:frames] = channel_data
-                audio_level = np.max(np.abs(channel_data))
-                normalized_value = int((audio_level / 1.0) * 50)
-                
-                asterisks.value = '*' * normalized_value
-                current_print = ' ' * 11 + asterisks.value.ljust(50, ' ')
-                
-                # Only print if the value has changed
-                if current_print != last_print:
-                    print(current_print, end='\r')
-                    last_print = current_print
-            else:
-                # Handle case where channel is out of bounds
-                print(f"\rChannel {channel+1} not available. Device has {indata.shape[1]} channels.", end='\r')
-                time.sleep(1)  # Prevent too many messages
-        except Exception as e:
-            # Log the error but don't crash
-            print(f"\rVU meter error: {e}", end='\r')
-            time.sleep(1)  # Prevent too many messages
+        # Only process audio from the designated channel
+        channel_data = indata[:, channel]
+        buffer[:frames] = channel_data
+
+        audio_level = np.max(np.abs(channel_data))
+        normalized_value = int((audio_level / 1.0) * 50)  
+
+        asterisks.value = '*' * normalized_value
+        current_print = ' ' * 11 + asterisks.value.ljust(50, ' ')
+        
+        # Only print if the value has changed
+        if current_print != last_print:
+            print(current_print, end='\r')
+            last_print = current_print
 
     try:
         # In WSL, we need to use different stream parameters
@@ -1406,9 +1334,6 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
 def toggle_vu_meter():
     global vu_proc, monitor_channel, asterisks, stop_vu_queue
 
-    # Clear any buffered input before toggling
-    clear_input_buffer()
-
     if vu_proc is None:
         cleanup_process('v')  # Clean up any existing process
         print("\nVU meter monitoring channel:", monitor_channel+1)
@@ -1438,9 +1363,6 @@ def toggle_vu_meter():
         vu_proc.start()
     else:
         stop_vu()
-    
-    # Clear input buffer after toggling
-    clear_input_buffer()
 
 def stop_vu():
     global vu_proc, stop_vu_event, stop_vu_queue
@@ -1488,20 +1410,11 @@ def intercom_m_downsampled(sound_in_id, sound_in_samplerate, sound_in_chs, sound
             sd.sleep(1)
         print("Stopping intercom...")
 
-
 def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel):
-    print(f"[Intercom] Monitoring channel: {monitor_channel+1}", end='\r\n')
+    print(f"[Intercom] Monitoring channel: {monitor_channel+1}")
     # Create a buffer to hold the audio data at input sample rate
     buffer = np.zeros((int(sound_in_samplerate),))
-    
-    # Validate the channel is valid for the device
-    if monitor_channel >= sound_in_chs:
-        print(f"\nError: Selected channel {monitor_channel+1} exceeds available channels ({sound_in_chs})", end='\r\n')
-        print(f"Defaulting to channel 1", end='\r\n')
-        channel = 0  # Default to first channel
-    else:
-        channel = monitor_channel
-        
+    channel = monitor_channel
     last_error_time = 0
     error_count = 0
 
@@ -1518,20 +1431,27 @@ def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sou
                     raise RuntimeError("Too many audio input errors")
 
         try:
-            # Safely check if channel is in bounds
+            # Check array bounds before accessing
             if channel < indata.shape[1]:
                 channel_data = indata[:, channel]
-                buffer[:frames] = channel_data
+                if len(buffer) >= frames:
+                    buffer[:frames] = channel_data
+                else:
+                    print(f"Buffer too small: buffer={len(buffer)}, frames={frames}")
             else:
-                # Handle case where channel is out of bounds
-                print(f"Channel {channel+1} not available. Device has {indata.shape[1]} channels.")
-                # Use the first channel as fallback
-                buffer[:frames] = indata[:, 0]
+                print(f"Channel index out of range: channel={channel}, shape={indata.shape}")
+                # Fall back to first channel
+                channel = 0
+                channel_data = indata[:, 0]
+                buffer[:frames] = channel_data
         except Exception as e:
             print(f"Error in callback_input: {e}")
             print(f"Channel: {channel}, Frames: {frames}, Buffer shape: {buffer.shape}, Input shape: {indata.shape}")
-            # Attempt graceful recovery without raising
-            buffer[:frames] = 0  # Fill with silence
+            # Try to continue with first channel
+            try:
+                buffer[:frames] = indata[:, 0]
+            except:
+                pass
 
     # Callback function to handle audio output
     def callback_output(outdata, frames, time, status):
@@ -1546,18 +1466,30 @@ def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sou
             if len(input_samples) > 0:
                 # Resample the audio data to match output sample rate
                 output_samples = resample(input_samples, frames)
-                outdata[:, 0] = output_samples  # Play back on the first channel
-                if outdata.shape[1] > 1:
-                    outdata[:, 1] = output_samples  # Play back on the second channel if available
+                
+                # Apply a safety check for NaN or infinite values
+                if np.isnan(output_samples).any() or np.isinf(output_samples).any():
+                    print("Warning: Invalid values in audio output, replacing with zeros")
+                    output_samples = np.zeros_like(output_samples)
+                
+                # Apply to all available channels
+                for ch in range(min(outdata.shape[1], 2)):  # Limit to 2 channels max
+                    outdata[:, ch] = output_samples
             else:
                 outdata.fill(0)  # Fill with silence if no input data
         except Exception as e:
             print(f"Error in callback_output: {e}")
             print(f"Frames: {frames}, Buffer shape: {buffer.shape}, Output shape: {outdata.shape}")
-            raise
+            outdata.fill(0)  # Fill with silence on error
 
-    print("Starting audio streams...", end='\r\n')
+    print(f"Starting audio streams with device_in={sound_in_id}, device_out={sound_out_id}...")
     try:
+        # Platform-specific setup
+        if platform_manager.is_wsl():
+            print("WSL detected, using special audio configuration...")
+            if not check_wsl_audio():
+                print("WSL audio configuration check failed, but trying anyway")
+            
         # Open an input stream and an output stream with the callback function
         with sd.InputStream(callback=callback_input, 
                           device=sound_in_id, 
@@ -1571,29 +1503,55 @@ def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sou
                            samplerate=sound_out_samplerate,
                            blocksize=1024,
                            latency='low'):
-            print("Audio streams opened successfully", end='\r\n')
+            print("Audio streams opened successfully")
             
             # Only show device information in the main process
             if is_main_process():
-                print(f"Input device: {sd.query_devices(sound_in_id)['name']} ({sound_in_samplerate} Hz)")
-                print(f"Output device: {sd.query_devices(sound_out_id)['name']} ({sound_out_samplerate} Hz)")
+                in_device_info = sd.query_devices(sound_in_id)
+                out_device_info = sd.query_devices(sound_out_id)
+                print(f"Input device: {in_device_info['name']} ({sound_in_samplerate} Hz)")
+                print(f"Output device: {out_device_info['name']} ({sound_out_samplerate} Hz)")
             
             # The streams are now open and the callback function will be called every time there is audio input and output
+            print(f"Intercom active - monitoring channel {monitor_channel+1}")
             while not stop_intercom_event.is_set():
                 if change_ch_event.is_set():
                     channel = monitor_channel
-                    print(f"\nIntercom changing to channel: {monitor_channel+1}", end='\r\n')
+                    print(f"\nIntercom changing to channel: {monitor_channel+1}")
                     # Clear the buffer when changing channels to avoid audio artifacts
                     buffer.fill(0)
                     change_ch_event.clear()
-                sd.sleep(10)  # Reduced sleep time for better responsiveness
+                sd.sleep(0.1)  # Reduced sleep time for better responsiveness
             print("Stopping intercom...")
     except Exception as e:
         print(f"Error in intercom_m: {e}")
-        print("Device configuration:")
-        print(f"Input device: {sd.query_devices(sound_in_id)}")
-        print(f"Output device: {sd.query_devices(sound_out_id)}")
-        raise
+        if "Invalid input device" in str(e):
+            print(f"The selected input device (ID: {sound_in_id}) is not available.")
+            print("Available input devices:")
+            for i, device in enumerate(sd.query_devices()):
+                if device['max_input_channels'] > 0:
+                    print(f"  {i}: {device['name']}")
+        elif "Invalid output device" in str(e):
+            print(f"The selected output device (ID: {sound_out_id}) is not available.")
+            print("Available output devices:")
+            for i, device in enumerate(sd.query_devices()):
+                if device['max_output_channels'] > 0:
+                    print(f"  {i}: {device['name']}")
+        else:
+            print("Device configuration:")
+            try:
+                print(f"Input device: {sd.query_devices(sound_in_id)}")
+            except:
+                print("Could not query input device")
+            try:
+                print(f"Output device: {sd.query_devices(sound_out_id)}")
+            except:
+                print("Could not query output device")
+        print("\nTroubleshooting tips:")
+        print("1. Make sure your audio devices are properly connected")
+        print("2. Try different input/output devices")
+        print("3. Restart the application")
+        print("4. Check if another application is using the audio devices")
 
 def stop_intercom_m():
     global intercom_proc, stop_intercom_event
@@ -1604,35 +1562,49 @@ def stop_intercom_m():
         if intercom_proc.is_alive():
             intercom_proc.join(timeout=2)  # Wait up to 2 seconds for clean shutdown
             if intercom_proc.is_alive():
+                print("Intercom not responding, force terminating...")
                 intercom_proc.terminate()  # Force terminate if still running
                 intercom_proc.join(timeout=1)
+                if intercom_proc.is_alive():
+                    print("Intercom still not responding, killing process...")
+                    intercom_proc.kill()  # Last resort
         intercom_proc = None
         stop_intercom_event.clear()  # Reset the event for next use
         print("Intercom stopped")
+    else:
+        print("No intercom process running")
 
 def toggle_intercom_m():
-    global intercom_proc, sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel, change_ch_event
+    global intercom_proc, sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel, change_ch_event, active_processes
 
-    if intercom_proc is None:
+    if intercom_proc is None or not intercom_proc.is_alive():
         print("Starting intercom on channel:", monitor_channel + 1)
         try:
+            # Cleanup any existing process first
+            if 'i' in active_processes and active_processes['i'] is not None:
+                cleanup_process('i')
+            
             # Initialize the change channel event if it doesn't exist
             if not hasattr(change_ch_event, 'set'):
                 change_ch_event = multiprocessing.Event()
             
             # Verify device configuration before starting
-            input_device = sd.query_devices(sound_in_id)
-            output_device = sd.query_devices(sound_out_id)
-            
-            # Only show device configuration in the main process
-            if is_main_process():
-                print("\nDevice configuration:")
-                print(f"Input device: {input_device['name']}")
-                print(f"Input channels: {input_device['max_input_channels']}")
-                print(f"Input sample rate: {sound_in_samplerate} Hz")
-                print(f"Output device: {output_device['name']}")
-                print(f"Output channels: {output_device['max_output_channels']}")
-                print(f"Output sample rate: {sound_out_samplerate} Hz")
+            try:
+                input_device = sd.query_devices(sound_in_id)
+                output_device = sd.query_devices(sound_out_id)
+                
+                # Only show device configuration in the main process
+                if is_main_process():
+                    print("\nDevice configuration:")
+                    print(f"Input device: {input_device['name']}")
+                    print(f"Input channels: {input_device['max_input_channels']}")
+                    print(f"Input sample rate: {sound_in_samplerate} Hz")
+                    print(f"Output device: {output_device['name']}")
+                    print(f"Output channels: {output_device['max_output_channels']}")
+                    print(f"Output sample rate: {sound_out_samplerate} Hz")
+            except Exception as e:
+                print(f"Warning: Could not verify device configuration: {e}")
+                print("Proceeding with configured device IDs anyway")
             
             # Create the process with daemon setting to ensure proper cleanup
             intercom_proc = multiprocessing.Process(
@@ -1642,6 +1614,7 @@ def toggle_intercom_m():
                      monitor_channel)
             )
             intercom_proc.daemon = True  # Make the process a daemon so it exits when the main program exits
+            active_processes['i'] = intercom_proc
             intercom_proc.start()
             print("Intercom process started successfully")
         except Exception as e:
@@ -1649,8 +1622,8 @@ def toggle_intercom_m():
             intercom_proc = None
     else:
         stop_intercom_m()
-        print("\nIntercom stopped")
-        intercom_proc = None
+        cleanup_process('i')
+        clear_input_buffer()
 
 #
 # Function to switch the channel being monitored
@@ -1659,38 +1632,25 @@ def toggle_intercom_m():
 def change_monitor_channel():
     global monitor_channel, change_ch_event, vu_proc, intercom_proc
 
-    # Clear input buffer before starting to ensure no leftover keystrokes
-    clear_input_buffer()
-    
     print("\nPress channel number (1-9) to monitor, or 0/q to exit:")
     while True:
         try:
             key = get_key()
             if key is None:
-                time.sleep(0.01)  # Small delay to prevent high CPU usage
+                time.sleep(0.1)  # Small delay to prevent high CPU usage
                 continue
                 
-            # First, check for exit conditions and handle them immediately
-            if key == '0' or key.lower() == 'q':
-                print("\nExiting channel change")
-                # Clear the input buffer before returning to prevent stray keystrokes
-                clear_input_buffer()
-                return
-                
-            # Handle digit keys for channel selection
-            if key.isdigit() and int(key) > 0:
-                # Convert the key to 0-indexed channel number
-                key_int = int(key) - 1
-                
-                # Check if the channel is within the valid range (less than sound_in_chs)
-                if key_int < sound_in_chs:
+            if key.isdigit():
+                if int(key) == 0:
+                    print("Exiting channel change")
+                    return
+                else:
+                    key_int = int(key) - 1
+                if (is_mic_position_in_bounds(MICS_ACTIVE, key_int)):
                     monitor_channel = key_int
-                    print(f"\nNow monitoring channel: {monitor_channel+1} (of {sound_in_chs})")
-                    
-                    # Handle intercom channel change if active
                     if intercom_proc is not None:
                         change_ch_event.set()
-                    
+                        print(f"\nNow monitoring channel: {monitor_channel+1} (of {sound_in_chs})")
                     # Only restart VU meter if running
                     if vu_proc is not None:
                         print(f"Restarting VU meter on channel: {monitor_channel+1}")
@@ -1698,14 +1658,12 @@ def change_monitor_channel():
                         time.sleep(0.1)
                         toggle_vu_meter()
                 else:
-                    print(f"\nInvalid channel selection: Device has only {sound_in_chs} channel(s) (1-{sound_in_chs})")
-            else:
-                # Handle non-numeric, non-exit keys
-                if key.isprintable() and key != '0' and key.lower() != 'q':
-                    print(f"\nInvalid input: '{key}'. Use 1-{sound_in_chs} for channels or 0/q to exit.")
-                    
+                    print(f"Sound device has only {sound_in_chs} channel(s)")
+            elif key.lower() == 'q':
+                print("Exiting channel change")
+                return
         except Exception as e:
-            print(f"\nError reading input: {e}")
+            print(f"Error reading input: {e}")
             continue
 
 #

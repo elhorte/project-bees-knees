@@ -780,6 +780,109 @@ def _enhance_stop_all():
     # Make sure we flush stdout
     sys.stdout.flush()
 
+# Function to get keyboard input without requiring Enter
+def get_key():
+    """Get a single keypress from the user."""
+    if platform_manager.msvcrt is not None:
+        try:
+            # Windows implementation
+            return platform_manager.msvcrt.getch().decode('utf-8')
+        except Exception as e:
+            print(f"Error reading key in Windows: {e}")
+            return None
+    else:
+        try:
+            if sys.platform == 'win32':
+                # Alternative Windows method
+                import msvcrt
+                if msvcrt.kbhit():
+                    return msvcrt.getch().decode('utf-8')
+                return None
+            elif platform_manager.is_macos() or sys.platform.startswith('linux'):
+                # Unix-like systems implementation
+                import termios, tty, select
+                old_settings = termios.tcgetattr(sys.stdin)
+                try:
+                    tty.setraw(sys.stdin.fileno())
+                    if select.select([sys.stdin], [], [], 0.1)[0]:
+                        key = sys.stdin.read(1)
+                        return key
+                    return None
+                finally:
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+            else:
+                # Fallback for other platforms
+                if select.select([sys.stdin], [], [], 0.1)[0]:
+                    return sys.stdin.read(1)
+                return None
+        except Exception as e:
+            if "termios" in str(e):
+                # Try alternative method if termios fails
+                try:
+                    import msvcrt
+                    if msvcrt.kbhit():
+                        return msvcrt.getch().decode('utf-8')
+                except:
+                    pass
+            print(f"Error reading key: {e}")
+            return None
+
+# Function to check if a mic position is valid
+def is_mic_position_in_bounds(mic_list, position):
+    """Check if the given mic position is within bounds."""
+    if not mic_list:
+        return position < sound_in_chs
+    else:
+        return position < len(mic_list) and position < sound_in_chs
+
+# Function to process digit key input for various commands
+def process_digit_key(key):
+    """Process digit key input."""
+    # This function can be expanded for digit key commands
+    # Currently, it doesn't need to do anything as change_monitor_channel handles its own input
+    pass
+
+# Function to switch the channel being monitored
+def change_monitor_channel():
+    """Change the channel to monitor."""
+    global monitor_channel, change_ch_event, vu_proc, intercom_proc
+
+    print("\nPress channel number (1-9) to monitor, or 0/q to exit:")
+    while True:
+        try:
+            key = get_key()
+            if key is None:
+                time.sleep(0.1)  # Small delay to prevent high CPU usage
+                continue
+                
+            if key.isdigit():
+                if int(key) == 0:
+                    print("\nExiting channel change")
+                    return
+                else:
+                    key_int = int(key) - 1
+                if (is_mic_position_in_bounds(MICS_ACTIVE, key_int)):
+                    monitor_channel = key_int
+                    if intercom_proc is not None:
+                        change_ch_event.set()
+                        print(f"\nNow monitoring channel: {monitor_channel+1} (of {sound_in_chs})")
+                    # Only restart VU meter if running
+                    if vu_proc is not None:
+                        print(f"\nRestarting VU meter on channel: {monitor_channel+1}")
+                        toggle_vu_meter()
+                        time.sleep(0.1)
+                        toggle_vu_meter()
+                    else:
+                        print(f"\nChanged to channel: {monitor_channel+1} (of {sound_in_chs})")
+                else:
+                    print(f"\nSound device has only {sound_in_chs} channel(s)")
+            elif key.lower() == 'q':
+                print("\nExiting channel change")
+                return
+        except Exception as e:
+            print(f"\nError reading input: {e}")
+            continue
+
 # Add a proper check_dependencies function
 def check_dependencies():
     """Check for required Python libraries and their versions."""
