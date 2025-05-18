@@ -19,12 +19,12 @@ MODE_FFT_PERIODIC_RECORD = True                 # record fft periodically
 # recording types controls:
 AUDIO_MONITOR_START = None  ##datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec; None = continuous recording
 AUDIO_MONITOR_END = datetime.time(23, 0, 0)     # time of day to stop recording hr, min, sec
-AUDIO_MONITOR_RECORD = 35                     # file size in seconds of continuous recording (default 1800 sec)
+AUDIO_MONITOR_RECORD = 1800                     # file size in seconds of continuous recording (default 1800 sec)
 AUDIO_MONITOR_INTERVAL = 0                      # seconds between recordings
 
 PERIOD_START = None  ##datetime.time(4, 0, 0)   # 'None' = continuous recording
 PERIOD_END = datetime.time(20, 0, 0)
-PERIOD_RECORD = 30                             # seconds of recording (default 900 sec)
+PERIOD_RECORD = 900                             # seconds of recording (default 900 sec)
 PERIOD_INTERVAL = 0                             # seconds between start of period, must be > period, of course
 
 EVENT_START = datetime.time(4, 0, 0)
