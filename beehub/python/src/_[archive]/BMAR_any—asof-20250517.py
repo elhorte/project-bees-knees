@@ -13,6 +13,15 @@
 # Save audio in the circular buffer from the start of a defineable time period before the event to the end of the defineable time period after the event.
 # Reset the audio threshold level flag and event_start_time after saving audio.
 
+# This flag prevents config values from being printed multiple times in subprocesses
+_CONFIG_PRINTED = False
+
+# Check if we're running in the main process or a subprocess
+# Subprocesses will have a different parent process ID
+def is_main_process():
+    import os
+    return os.getppid() == 1 or os.getpid() == os.getppid()
+
 import sounddevice as sd
 import soundfile as sf
 import datetime
@@ -277,12 +286,6 @@ sound_out_id = config.SOUND_OUT_ID_DEFAULT
 sound_out_chs = config.SOUND_OUT_CHS_DEFAULT                        
 sound_out_samplerate = config.SOUND_OUT_SR_DEFAULT    
 
-# Log the config values for debugging
-print(f"\nConfig values:")
-print(f"  data_drive: '{data_drive}'")
-print(f"  data_path: '{data_path}'")
-print(f"  folders: {folders}")
-
 # Create date components in the correct format
 # For folder structure we need YY (2-digit year), MM, DD format
 yy = current_date.strftime('%y')  # 2-digit year (e.g., '23' for 2023)
@@ -290,7 +293,14 @@ mm = current_date.strftime('%m')  # Month (01-12)
 dd = current_date.strftime('%d')  # Day (01-31)
 date_folder = f"{yy}{mm}{dd}"     # Format YYMMDD (e.g., '230516')
 
-print(f"  Date folder format: '{date_folder}' (YYMMDD)")
+# Only print config values in the main process, not in subprocesses
+# This ensures they don't show up when starting the VU meter or intercom
+if is_main_process():
+    print(f"\nConfig values:")
+    print(f"  data_drive: '{data_drive}'")
+    print(f"  data_path: '{data_path}'")
+    print(f"  folders: {folders}")
+    print(f"  Date folder format: '{date_folder}' (YYMMDD)")
 
 # Construct directory paths using the folders list and including the date subfolder
 # Ensure we have proper path joining by using os.path.join
@@ -1339,8 +1349,16 @@ def toggle_vu_meter():
             asterisks.value = '*' * normalized_value
             print("threshold:", asterisks.value.ljust(50, ' '))
             
-        vu_proc = multiprocessing.Process(target=vu_meter, args=(sound_in_id, sound_in_samplerate, \
-                                                                 sound_in_chs, monitor_channel, stop_vu_queue, asterisks))
+        # Create the VU meter process with environment variables to suppress output
+        # This is more reliable than using a global flag with multiprocessing
+        vu_proc = multiprocessing.Process(
+            target=vu_meter, 
+            args=(sound_in_id, sound_in_samplerate, sound_in_chs, monitor_channel, stop_vu_queue, asterisks)
+        )
+        
+        # Set the process to start in a clean environment
+        vu_proc.daemon = True
+            
         active_processes['v'] = vu_proc
         vu_proc.start()
     else:
@@ -1460,8 +1478,11 @@ def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sou
                            blocksize=1024,
                            latency='low'):
             print("Audio streams opened successfully")
-            print(f"Input device: {sd.query_devices(sound_in_id)['name']} ({sound_in_samplerate} Hz)")
-            print(f"Output device: {sd.query_devices(sound_out_id)['name']} ({sound_out_samplerate} Hz)")
+            
+            # Only show device information in the main process
+            if is_main_process():
+                print(f"Input device: {sd.query_devices(sound_in_id)['name']} ({sound_in_samplerate} Hz)")
+                print(f"Output device: {sd.query_devices(sound_out_id)['name']} ({sound_out_samplerate} Hz)")
             
             # The streams are now open and the callback function will be called every time there is audio input and output
             while not stop_intercom_event.is_set():
@@ -1509,18 +1530,23 @@ def toggle_intercom_m():
             input_device = sd.query_devices(sound_in_id)
             output_device = sd.query_devices(sound_out_id)
             
-            print("\nDevice configuration:")
-            print(f"Input device: {input_device['name']}")
-            print(f"Input channels: {input_device['max_input_channels']}")
-            print(f"Input sample rate: {sound_in_samplerate} Hz")
-            print(f"Output device: {output_device['name']}")
-            print(f"Output channels: {output_device['max_output_channels']}")
-            print(f"Output sample rate: {sound_out_samplerate} Hz")
+            # Only show device configuration in the main process
+            if is_main_process():
+                print("\nDevice configuration:")
+                print(f"Input device: {input_device['name']}")
+                print(f"Input channels: {input_device['max_input_channels']}")
+                print(f"Input sample rate: {sound_in_samplerate} Hz")
+                print(f"Output device: {output_device['name']}")
+                print(f"Output channels: {output_device['max_output_channels']}")
+                print(f"Output sample rate: {sound_out_samplerate} Hz")
             
-            intercom_proc = multiprocessing.Process(target=intercom_m, 
-                                                  args=(sound_in_id, sound_in_samplerate, sound_in_chs, 
-                                                       sound_out_id, sound_out_samplerate, sound_out_chs, 
-                                                       monitor_channel))
+            # Create the process with daemon setting to ensure proper cleanup
+            intercom_proc = multiprocessing.Process(
+                target=intercom_m, 
+                args=(sound_in_id, sound_in_samplerate, sound_in_chs, 
+                     sound_out_id, sound_out_samplerate, sound_out_chs, 
+                     monitor_channel)
+            )
             intercom_proc.daemon = True  # Make the process a daemon so it exits when the main program exits
             intercom_proc.start()
             print("Intercom process started successfully")
