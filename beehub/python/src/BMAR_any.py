@@ -13,7 +13,6 @@
 # Save audio in the circular buffer from the start of a defineable time period before the event to the end of the defineable time period after the event.
 # Reset the audio threshold level flag and event_start_time after saving audio.
 
-
 import sounddevice as sd
 import soundfile as sf
 import datetime
@@ -34,19 +33,19 @@ import sys
 import platform
 import select
 import os
-import curses
 import atexit
 import signal
-import io
 import warnings
-import queue
 import librosa
 import librosa.display
 import resampy
 import atexit
 import subprocess  # Add this import
-import termios
-import tty
+#import curses
+#import io
+#import queue
+
+# Platform-specific modules will be imported after platform detection
 
 import BMAR_config as config
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
@@ -152,6 +151,15 @@ class PlatformManager:
 platform_manager = PlatformManager()
 # Initialize platform at startup
 platform_manager.initialize()
+
+# Now that we've properly detected the platform, import platform-specific modules
+if platform_manager.is_macos() or (sys.platform != 'win32' and not platform_manager.is_wsl()):
+    # For macOS and Linux systems
+    import termios
+    import tty
+elif sys.platform == 'win32' and not platform_manager.is_wsl():
+    # Windows-specific imports (if any needed in the future)
+    pass
 
 # init recording varibles
 continuous_start_index = None
@@ -287,10 +295,10 @@ print(f"  Date folder format: '{date_folder}' (YYMMDD)")
 # Construct directory paths using the folders list and including the date subfolder
 # Ensure we have proper path joining by using os.path.join
 PRIMARY_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
-                                folders[0], date_folder)
-MONITOR_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID,
-                                folders[0], date_folder)
-PLOT_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID,
+                                folders[0], "raw", date_folder)
+MONITOR_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
+                                folders[0], "mp3", date_folder)
+PLOT_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
                              folders[1], date_folder)
 
 # Ensure paths end with a separator for consistency
@@ -379,16 +387,16 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 def reset_terminal():
-    """Reset terminal settings to default state."""
+    """Reset terminal settings to default state without clearing the screen."""
     try:
         # Reset terminal settings
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, termios.tcgetattr(sys.stdin))
         
-        # Reset terminal modes
+        # Reset terminal modes, but keep output
         os.system('stty sane')
         
-        # Clear screen and reset cursor
-        print('\033[2J\033[H', end='')
+        # Do NOT clear screen - removed the clear screen command
+        # print('\033[2J\033[H', end='')
         
         # Reset keyboard mode
         os.system('stty -raw -echo')
@@ -396,11 +404,14 @@ def reset_terminal():
         # Flush stdout to ensure all output is displayed
         sys.stdout.flush()
         
+        print("\n[Terminal input mode reset]")
+        
     except Exception as e:
         print(f"Warning: Could not reset terminal: {e}")
-        # Try alternative reset method
+        # Try alternative reset method WITHOUT clearing screen
         try:
-            os.system('reset')
+            # Using stty directly instead of full reset
+            os.system('stty sane')
         except:
             pass
 
@@ -422,8 +433,6 @@ def get_key():
                 return None
             elif platform_manager.is_macos() or sys.platform.startswith('linux'):
                 # Use termios for macOS and Linux
-                import termios
-                import tty
                 old_settings = termios.tcgetattr(sys.stdin)
                 try:
                     tty.setraw(sys.stdin.fileno())
@@ -927,11 +936,37 @@ def get_default_output_device():
 
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
 def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs): 
-    # Record audio
-    print("Recording audio for o-scope traces for channel count of", sound_in_chs)
-    o_recording = sd.rec(int(sound_in_samplerate * TRACE_DURATION), samplerate=sound_in_samplerate, channels=sound_in_chs, device=sound_in_id)
-    sd.wait()  # Wait until recording is finished
-    print("Recording oscope finished.")
+    try:
+        # Verify device and channel configuration
+        device_info = sd.query_devices(sound_in_id)
+        max_channels = device_info['max_input_channels']
+        
+        # If requested channels exceed device capabilities, adjust
+        if sound_in_chs > max_channels:
+            print(f"Warning: Device only supports {max_channels} channels, adjusting from {sound_in_chs}")
+            actual_channels = max_channels
+        else:
+            actual_channels = sound_in_chs
+            
+        # Ensure at least 1 channel
+        actual_channels = max(1, actual_channels)
+        
+        # Record audio
+        print(f"Recording audio for o-scope traces using {actual_channels} channel(s)")
+        o_recording = sd.rec(int(sound_in_samplerate * TRACE_DURATION), 
+                           samplerate=sound_in_samplerate, 
+                           channels=actual_channels, 
+                           device=sound_in_id)
+        sd.wait()  # Wait until recording is finished
+        print("Recording oscope finished.")
+    
+    except Exception as e:
+        print(f"Error in oscilloscope recording: {e}")
+        # Create dummy data if recording fails
+        print("Creating dummy data for visualization")
+        sample_count = int(sound_in_samplerate * TRACE_DURATION)
+        o_recording = np.zeros((sample_count, max(1, min(sound_in_chs, 2))))
+        return
 
     if OSCOPE_GAIN_DB > 0:
         gain = 10 ** (OSCOPE_GAIN_DB / 20)      
@@ -1027,11 +1062,32 @@ def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel):
         N = sound_in_samplerate * FFT_DURATION  # Number of samples
         # Convert gain from dB to linear scale
         gain = 10 ** (FFT_GAIN / 20)
+        
+        # Verify device and channel configuration
+        device_info = sd.query_devices(sound_in_id)
+        max_channels = device_info['max_input_channels']
+        
+        # If requested channels exceed device capabilities, adjust
+        if sound_in_chs > max_channels:
+            print(f"Warning: Device only supports {max_channels} channels, adjusting from {sound_in_chs}")
+            actual_channels = max_channels
+        else:
+            actual_channels = sound_in_chs
+            
+        # Ensure channel index is valid
+        if channel >= actual_channels:
+            print(f"Warning: Channel {channel+1} not available, using channel 1")
+            monitor_channel = 0
+        else:
+            monitor_channel = channel
+            
         # Record audio
-        print("Recording audio for fft one shot on channel:", channel+1)
-        all_channels_audio = sd.rec(int(N), samplerate=sound_in_samplerate, channels=sound_in_chs, device=sound_in_id)
+        print(f"Recording audio for FFT on channel {monitor_channel+1} of {actual_channels}")
+        all_channels_audio = sd.rec(int(N), samplerate=sound_in_samplerate, channels=actual_channels, device=sound_in_id)
         sd.wait()  # Wait until recording is finished
-        single_channel_audio = all_channels_audio[:, channel]
+        
+        # Extract the requested channel
+        single_channel_audio = all_channels_audio[:, monitor_channel]
         single_channel_audio *= gain
         print("Recording fft finished.")
 
@@ -1573,7 +1629,7 @@ def plot_and_save_fft(sound_in_samplerate, channel):
 #
 
 def reset_terminal_settings():
-    """Reset terminal settings to ensure proper output formatting."""
+    """Reset terminal settings to ensure proper output formatting without clearing screen."""
     try:
         import termios
         import tty
@@ -1588,11 +1644,11 @@ def reset_terminal_settings():
         # Reset terminal settings
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         
-        # Reset terminal modes
+        # Reset terminal modes without clearing screen
         os.system('stty sane')
         
-        # Clear screen and reset cursor
-        print('\033[2J\033[H', end='', flush=True)
+        # DO NOT clear screen and reset cursor
+        # print('\033[2J\033[H', end='', flush=True)
         
         # Reset keyboard mode
         os.system('stty -raw -echo')
@@ -1602,6 +1658,8 @@ def reset_terminal_settings():
         
         # Force line buffering
         sys.stdout.reconfigure(line_buffering=True)
+        
+        print("\n[Terminal formatting reset]")
         
     except Exception as e:
         print(f"Warning: Could not reset terminal settings: {e}", end='\n', flush=True)
@@ -1838,16 +1896,15 @@ def toggle_listening():
         stop_intercom_m()
 
 def stop_keyboard_listener():
-    """Stop the keyboard listener and restore terminal settings."""
+    """Stop the keyboard listener and restore terminal settings without clearing screen."""
     global keyboard_listener_running
     keyboard_listener_running = False
     
-    # Force terminal reset
+    # Reset terminal settings without clearing screen
     os.system('stty sane')
     os.system('stty -raw -echo')
     
     # Clear any pending input
-
     try:
         # Get current terminal settings
         old_settings = termios.tcgetattr(sys.stdin)
@@ -1861,8 +1918,8 @@ def stop_keyboard_listener():
     except Exception as e:
         print(f"Warning: Could not clear input buffer: {e}")
     
-    # Final terminal reset
-    os.system('reset')
+    # Print a message instead of resetting the terminal
+    print("\n[Keyboard listener stopped]")
 
 def keyboard_listener():
     """Main keyboard listener loop."""
