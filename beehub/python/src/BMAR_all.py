@@ -1364,25 +1364,21 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
     def callback_input(indata, frames, time, status):
         nonlocal last_print
         try:
-            # Safely access the requested channel, handle potential IndexError
-            if channel < indata.shape[1]:
-                channel_data = indata[:, channel]
-                
-                buffer[:frames] = channel_data
-                audio_level = np.max(np.abs(channel_data))
-                normalized_value = int((audio_level / 1.0) * 50)
-                
-                asterisks.value = '*' * normalized_value
-                current_print = ' ' * 11 + asterisks.value.ljust(50, ' ')
-                
-                # Only print if the value has changed
-                if current_print != last_print:
-                    print(current_print, end='\r')
-                    last_print = current_print
-            else:
-                # Handle case where channel is out of bounds
-                print(f"\rChannel {channel+1} not available. Device has {indata.shape[1]} channels.", end='\r')
-                time.sleep(1)  # Prevent too many messages
+            # Always validate channel before accessing the data
+            selected_channel = min(channel, indata.shape[1] - 1)
+            
+            channel_data = indata[:, selected_channel]
+            buffer[:frames] = channel_data
+            audio_level = np.max(np.abs(channel_data))
+            normalized_value = int((audio_level / 1.0) * 50)
+            
+            asterisks.value = '*' * normalized_value
+            current_print = ' ' * 11 + asterisks.value.ljust(50, ' ')
+            
+            # Only print if the value has changed
+            if current_print != last_print:
+                print(current_print, end='\r')
+                last_print = current_print
         except Exception as e:
             # Log the error but don't crash
             print(f"\rVU meter error: {e}", end='\r')
@@ -1421,7 +1417,7 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
                 print("   pulseaudio --start")
                 raise
         else:
-            # Windows behavior remains unchanged
+            # Make sure we request at least as many channels as our selected channel
             with sd.InputStream(callback=callback_input,
                               device=sound_in_id,
                               channels=sound_in_chs,
@@ -1434,13 +1430,20 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
         print("\nStopping VU meter...")
 
 def toggle_vu_meter():
-    global vu_proc, monitor_channel, asterisks, stop_vu_queue
+    global vu_proc, monitor_channel, asterisks, stop_vu_queue, sound_in_chs
 
     # Clear any buffered input before toggling
     clear_input_buffer()
 
     if vu_proc is None:
         cleanup_process('v')  # Clean up any existing process
+        
+        # Validate channel before starting process
+        if monitor_channel >= sound_in_chs:
+            print(f"\nError: Selected channel {monitor_channel+1} exceeds available channels ({sound_in_chs})")
+            print(f"Defaulting to channel 1")
+            monitor_channel = 0  # Default to first channel
+            
         print("\nVU meter monitoring channel:", monitor_channel+1)
         vu_manager = multiprocessing.Manager()
         stop_vu_queue = multiprocessing.Queue()
@@ -1644,6 +1647,12 @@ def toggle_intercom_m():
     global intercom_proc, sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel, change_ch_event
 
     if intercom_proc is None:
+        # Validate channel before starting
+        if monitor_channel >= sound_in_chs:
+            print(f"\nError: Selected channel {monitor_channel+1} exceeds available channels ({sound_in_chs})")
+            print(f"Defaulting to channel 1")
+            monitor_channel = 0  # Default to first channel
+            
         print("Starting intercom on channel:", monitor_channel + 1)
         try:
             # Initialize the change channel event if it doesn't exist
@@ -1687,12 +1696,15 @@ def toggle_intercom_m():
 #
 
 def change_monitor_channel():
-    global monitor_channel, change_ch_event, vu_proc, intercom_proc
+    global monitor_channel, change_ch_event, vu_proc, intercom_proc, sound_in_chs
 
     # Clear input buffer before starting to ensure no leftover keystrokes
     clear_input_buffer()
     
-    print("\nPress channel number (1-9) to monitor, or 0/q to exit:")
+    # Print available channels
+    print(f"\nAvailable channels: 1-{sound_in_chs}")
+    print("Press channel number (1-9) to monitor, or 0/q to exit:")
+    
     while True:
         try:
             key = get_key()
@@ -1727,6 +1739,10 @@ def change_monitor_channel():
                         toggle_vu_meter()
                         time.sleep(0.1)
                         toggle_vu_meter()
+                    
+                    # Exit after successful channel change
+                    clear_input_buffer()
+                    return
                 else:
                     print(f"\nInvalid channel selection: Device has only {sound_in_chs} channel(s) (1-{sound_in_chs})")
             else:
@@ -2112,7 +2128,7 @@ def stop_keyboard_listener():
 
 def keyboard_listener():
     """Main keyboard listener loop."""
-    global keyboard_listener_running, keyboard_listener_active, monitor_channel, change_ch_event, vu_proc, intercom_proc
+    global keyboard_listener_running, keyboard_listener_active, monitor_channel, change_ch_event, vu_proc, intercom_proc, sound_in_chs
     
     # Reset terminal settings before starting
     reset_terminal_settings()
@@ -2130,6 +2146,12 @@ def keyboard_listener():
                         # Handle direct channel changes when in VU meter or Intercom mode
                         if vu_proc is not None or intercom_proc is not None:
                             key_int = int(key) - 1
+                            
+                            # Validate channel number is within range
+                            if key_int < 0 or key_int >= sound_in_chs:
+                                print(f"\nInvalid channel selection: Device has only {sound_in_chs} channel(s) (1-{sound_in_chs})", end='\n', flush=True)
+                                continue
+                                
                             if is_mic_position_in_bounds(MICS_ACTIVE, key_int):
                                 monitor_channel = key_int
                                 if intercom_proc is not None:
