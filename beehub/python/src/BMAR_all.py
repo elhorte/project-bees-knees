@@ -164,8 +164,11 @@ platform_manager.initialize()
 # Now that we've properly detected the platform, import platform-specific modules
 if platform_manager.is_macos() or (sys.platform != 'win32' and not platform_manager.is_wsl()):
     # For macOS and Linux systems
-    import termios
-    import tty
+    try:
+        import termios
+        import tty
+    except ImportError:
+        print("Warning: termios module not available. Some keyboard functionality may be limited.", end='\r\n', flush=True)
 elif sys.platform == 'win32' and not platform_manager.is_wsl():
     # Windows-specific imports (if any needed in the future)
     pass
@@ -408,25 +411,39 @@ signal.signal(signal.SIGTERM, signal_handler)
 def reset_terminal():
     """Reset terminal settings to default state without clearing the screen."""
     try:
-        # Reset terminal settings
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, termios.tcgetattr(sys.stdin))
-        
-        # Reset terminal modes, but keep output
-        os.system('stty sane')
-        
-        # Do NOT clear screen - removed the clear screen command
-        # print('\033[2J\033[H', end='')
-        
-        # Reset keyboard mode
-        os.system('stty -raw -echo')
-        
+        # Check if we're on Windows
+        if sys.platform == 'win32' and not platform_manager.is_wsl():
+            # Windows-specific terminal reset (no termios needed)
+            # Just flush the output
+            sys.stdout.flush()
+            print("\n[Terminal input mode reset (Windows)]", end='\r\n', flush=True)
+            return
+            
+        # For Unix-like systems (macOS and Linux)
+        try:
+            import termios
+            # Reset terminal settings
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, termios.tcgetattr(sys.stdin))
+            
+            # Reset terminal modes, but keep output
+            os.system('stty sane')
+            
+            # Do NOT clear screen - removed the clear screen command
+            # print('\033[2J\033[H', end='')
+            
+            # Reset keyboard mode
+            os.system('stty -raw -echo')
+        except ImportError:
+            # Fallback if termios isn't available
+            pass
+            
         # Flush stdout to ensure all output is displayed
         sys.stdout.flush()
         
-        print("\n[Terminal input mode reset]")
+        print("\n[Terminal input mode reset]", end='\r\n', flush=True)
         
     except Exception as e:
-        print(f"Warning: Could not reset terminal: {e}")
+        print(f"Warning: Could not reset terminal: {e}", end='\r\n', flush=True)
         # Try alternative reset method WITHOUT clearing screen
         try:
             # Using stty directly instead of full reset
@@ -446,21 +463,33 @@ def get_key():
         try:
             if sys.platform == 'win32':
                 # If we're on Windows but msvcrt failed, try alternative method
-                import msvcrt
-                if msvcrt.kbhit():
-                    return msvcrt.getch().decode('utf-8')
+                try:
+                    import msvcrt
+                    if msvcrt.kbhit():
+                        return msvcrt.getch().decode('utf-8')
+                except ImportError:
+                    print("Warning: msvcrt module not available on this Windows system", end='\r\n', flush=True)
                 return None
             elif platform_manager.is_macos() or sys.platform.startswith('linux'):
                 # Use termios for macOS and Linux
-                old_settings = termios.tcgetattr(sys.stdin)
                 try:
-                    tty.setraw(sys.stdin.fileno())
+                    import termios
+                    import tty
+                    
+                    old_settings = termios.tcgetattr(sys.stdin)
+                    try:
+                        tty.setraw(sys.stdin.fileno())
+                        if select.select([sys.stdin], [], [], 0.1)[0]:
+                            key = sys.stdin.read(1)
+                            return key
+                        return None
+                    finally:
+                        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                except ImportError:
+                    # Fallback if termios is not available
                     if select.select([sys.stdin], [], [], 0.1)[0]:
-                        key = sys.stdin.read(1)
-                        return key
+                        return sys.stdin.read(1)
                     return None
-                finally:
-                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
             else:
                 # Fallback for other platforms
                 if select.select([sys.stdin], [], [], 0.1)[0]:
@@ -475,7 +504,7 @@ def get_key():
                         return msvcrt.getch().decode('utf-8')
                 except:
                     pass
-            print(f"Error reading key: {e}")
+            print(f"Error reading key: {e}", end='\r\n', flush=True)
             return None
 
 def get_api_name_for_device(device_id):
@@ -1766,6 +1795,15 @@ def plot_and_save_fft(sound_in_samplerate, channel):
 def reset_terminal_settings():
     """Reset terminal settings to ensure proper output formatting without clearing screen."""
     try:
+        # Check if we're on Windows
+        if sys.platform == 'win32' and not platform_manager.is_wsl():
+            # Windows-specific terminal reset
+            os.system('cls')
+            sys.stdout.flush()
+            print("\n[Terminal formatting reset (Windows)]")
+            return
+            
+        # For Unix-like systems (macOS/Linux)
         import termios
         import tty
         import sys
@@ -1797,7 +1835,7 @@ def reset_terminal_settings():
         print("\n[Terminal formatting reset]")
         
     except Exception as e:
-        print(f"Warning: Could not reset terminal settings: {e}", end='\n', flush=True)
+        print(f"Warning: Could not reset terminal settings: {e}", end='\r\n', flush=True)
 
 def setup_audio_circular_buffer():
     """Set up the circular buffer for audio recording."""
@@ -2307,6 +2345,11 @@ def main():
     print("\n\nBeehive Multichannel Acoustic-Signal Recorder\n")
     #sys.stdout.flush()
    
+    # Display platform-specific messages
+    if sys.platform == 'win32' and not platform_manager.is_wsl():
+        print("Running on Windows - some terminal features will be limited.")
+        print("Note: You can safely ignore the 'No module named termios' warning.\n")
+   
     # Check dependencies
     if not check_dependencies():
         print("\nWarning: Some required packages are missing or outdated.")
@@ -2433,8 +2476,17 @@ def cleanup():
     
     try:
         stop_all()
+        
+        # Platform-specific terminal cleanup
+        if not (sys.platform == 'win32' and not platform_manager.is_wsl()):
+            # For Unix-like systems (macOS, Linux)
+            try:
+                # Try to reset terminal settings
+                os.system('stty sane')
+            except Exception as e:
+                print(f"Error resetting terminal: {e}", end='\r\n', flush=True)
     except Exception as e:
-        print(f"Error during cleanup: {e}")
+        print(f"Error during cleanup: {e}", end='\r\n', flush=True)
     
     # Give threads a moment to clean up
     time.sleep(0.5)
