@@ -425,14 +425,14 @@ def reset_terminal():
             # Reset terminal settings
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, termios.tcgetattr(sys.stdin))
             
-            # Reset terminal modes, but keep output
-            os.system('stty sane')
+            # Reset terminal modes without clearing screen
+            safe_stty('sane')
             
-            # Do NOT clear screen - removed the clear screen command
+            # DO NOT clear screen and reset cursor
             # print('\033[2J\033[H', end='')
             
             # Reset keyboard mode
-            os.system('stty -raw -echo')
+            safe_stty('-raw -echo')
         except ImportError:
             # Fallback if termios isn't available
             pass
@@ -447,7 +447,7 @@ def reset_terminal():
         # Try alternative reset method WITHOUT clearing screen
         try:
             # Using stty directly instead of full reset
-            os.system('stty sane')
+            safe_stty('sane')
         except:
             pass
 
@@ -707,9 +707,9 @@ def list_all_threads():
 
 def clear_input_buffer():
     """Clear the keyboard input buffer. Handles both Windows and non-Windows platforms."""
-    if sys.platform == 'win32' and not platform_manager.is_wsl() and platform_manager.msvcrt is not None:
+    if sys.platform == 'win32' and not platform_manager.is_wsl():
         try:
-            while platform_manager.msvcrt.kbhit():
+            while platform_manager.msvcrt is not None and platform_manager.msvcrt.kbhit():
                 platform_manager.msvcrt.getch()
         except Exception as e:
             print(f"Warning: Could not clear input buffer: {e}")
@@ -742,12 +742,13 @@ def clear_input_buffer():
                 except Exception as e:
                     print(f"Warning during terminal reset: {e}")
         except Exception as e:
-            # Silent fail or fallback
-            try:
-                # Last resort for Unix-like systems
-                os.system('stty -raw echo')
-            except:
-                pass
+            # Silent fail or fallback - do NOT use stty on Windows
+            if not sys.platform == 'win32':
+                try:
+                    # Last resort for Unix-like systems
+                    safe_stty('-raw echo')
+                except:
+                    pass
 
 
 def show_audio_device_info_for_SOUND_IN_OUT():
@@ -1800,39 +1801,38 @@ def reset_terminal_settings():
             # Windows-specific terminal reset
             os.system('cls')
             sys.stdout.flush()
-            print("\n[Terminal formatting reset (Windows)]")
+            print("\n[Terminal formatting reset (Windows)]", end='\r\n', flush=True)
             return
             
         # For Unix-like systems (macOS/Linux)
-        import termios
-        import tty
-        import sys
-        
-        # Get current terminal settings
-        old_settings = termios.tcgetattr(sys.stdin)
-        
-        # Set terminal to raw mode temporarily
-        tty.setraw(sys.stdin.fileno())
-        
-        # Reset terminal settings
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-        
-        # Reset terminal modes without clearing screen
-        os.system('stty sane')
-        
-        # DO NOT clear screen and reset cursor
-        # print('\033[2J\033[H', end='', flush=True)
-        
-        # Reset keyboard mode
-        os.system('stty -raw -echo')
-        
-        # Flush stdout
+        try:
+            import termios
+            # Reset terminal settings
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, termios.tcgetattr(sys.stdin))
+            
+            # Reset terminal modes without clearing screen
+            safe_stty('sane')
+            
+            # DO NOT clear screen and reset cursor
+            # print('\033[2J\033[H', end='', flush=True)
+            
+            # Reset keyboard mode
+            safe_stty('-raw -echo')
+        except ImportError:
+            # Fallback if termios isn't available
+            pass
+            
+        # Flush stdout to ensure all output is displayed
         sys.stdout.flush()
         
-        # Force line buffering
-        sys.stdout.reconfigure(line_buffering=True)
+        # Force line buffering - but only if supported on this platform/Python version
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+        except (AttributeError, TypeError):
+            # Older Python versions or Windows may not support reconfigure
+            pass
         
-        print("\n[Terminal formatting reset]")
+        print("\n[Terminal formatting reset]", end='\r\n', flush=True)
         
     except Exception as e:
         print(f"Warning: Could not reset terminal settings: {e}", end='\r\n', flush=True)
@@ -2073,23 +2073,39 @@ def stop_keyboard_listener():
     global keyboard_listener_running
     keyboard_listener_running = False
     
-    # Reset terminal settings without clearing screen
-    os.system('stty sane')
-    os.system('stty -raw -echo')
-    
-    # Clear any pending input
-    try:
-        # Get current terminal settings
-        old_settings = termios.tcgetattr(sys.stdin)
-        # Set terminal to raw mode temporarily
-        tty.setraw(sys.stdin.fileno())
-        # Read any pending input
-        while sys.stdin.read(1):
-            pass
-        # Restore terminal settings
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-    except Exception as e:
-        print(f"Warning: Could not clear input buffer: {e}")
+    if sys.platform == 'win32' and not platform_manager.is_wsl():
+        # Windows-specific cleanup
+        try:
+            # Clear any pending input
+            if platform_manager.msvcrt is not None:
+                while platform_manager.msvcrt.kbhit():
+                    platform_manager.msvcrt.getch()
+            sys.stdout.flush()
+        except Exception as e:
+            print(f"Warning: Error during Windows keyboard cleanup: {e}")
+    else:
+        # Unix/macOS terminal reset
+        try:
+            # Reset terminal settings without clearing screen
+            safe_stty('sane')
+            safe_stty('-raw -echo')
+            
+            # Clear any pending input
+            try:
+                # Get current terminal settings
+                import termios, tty
+                old_settings = termios.tcgetattr(sys.stdin)
+                # Set terminal to raw mode temporarily
+                tty.setraw(sys.stdin.fileno())
+                # Read any pending input
+                while sys.stdin.read(1):
+                    pass
+                # Restore terminal settings
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+            except Exception as e:
+                print(f"Warning: Could not clear input buffer: {e}")
+        except Exception as e:
+            print(f"Warning: Could not reset terminal settings: {e}")
     
     # Print a message instead of resetting the terminal
     print("\n[Keyboard listener stopped]")
@@ -2477,14 +2493,12 @@ def cleanup():
     try:
         stop_all()
         
-        # Platform-specific terminal cleanup
-        if not (sys.platform == 'win32' and not platform_manager.is_wsl()):
-            # For Unix-like systems (macOS, Linux)
-            try:
-                # Try to reset terminal settings
-                os.system('stty sane')
-            except Exception as e:
-                print(f"Error resetting terminal: {e}", end='\r\n', flush=True)
+        # Platform-specific terminal cleanup - works on all platforms now
+        try:
+            # Reset terminal settings safely
+            safe_stty('sane')
+        except Exception as e:
+            print(f"Error resetting terminal: {e}", end='\r\n', flush=True)
     except Exception as e:
         print(f"Error during cleanup: {e}", end='\r\n', flush=True)
     
@@ -2492,7 +2506,7 @@ def cleanup():
     time.sleep(0.5)
     
     # Force exit after cleanup
-    print("Exiting...")
+    print("Exiting...", end='\r\n', flush=True)
     #sys.stdout.flush()
     os._exit(0)
 
@@ -2584,6 +2598,18 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
         print(f"Error in plot_spectrogram: {e}")
     finally:
         plt.close('all')  # Ensure all plots are closed
+
+def safe_stty(command):
+    """
+    Safely execute stty command only on platforms that support it.
+    Will silently do nothing on Windows.
+    """
+    if sys.platform != 'win32' or platform_manager.is_wsl():
+        try:
+            os.system(f'stty {command}')
+        except Exception as e:
+            # Silent fail - this is OK on platforms where stty fails
+            pass
 
 if __name__ == "__main__":
     main()
