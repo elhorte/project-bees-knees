@@ -35,7 +35,7 @@ EVENT_THRESHOLD = 20000                         # audio level threshold to be co
 
 # Windows
 win_data_drive = "G:"   # D is internal and limited; G is Google Drive, just FYI
-win_data_path = "My Drive/eb_beehive_data"
+win_data_path = "My Drive\eb_beehive_data"
 win_data_folders = ["audio", "plots"]  # Fixed syntax - use commas not semicolons
 #Macos
 mac_data_drive = "~"  
