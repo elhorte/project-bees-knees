@@ -256,7 +256,7 @@ BUFFER_SECONDS = 1000                           # time length of circular buffer
 MICS_ACTIVE = [config.MIC_1, config.MIC_2, config.MIC_3, config.MIC_4]
 
 # translate human to machine
-if  config.PRIMARY_BITDEPTH == 16:
+if config.PRIMARY_BITDEPTH == 16:
     _dtype = 'int16'
     _subtype = 'PCM_16'
 elif config.PRIMARY_BITDEPTH == 24:
@@ -268,6 +268,16 @@ elif config.PRIMARY_BITDEPTH == 32:
 else:
     print("The bit depth is not supported: ", config.PRIMARY_BITDEPTH)
     quit(-1)
+
+# Set sound input parameters from config
+sound_in_samplerate = config.PRIMARY_SAMPLERATE
+sound_in_bitdepth = config.PRIMARY_BITDEPTH
+sound_in_format = config.PRIMARY_FILE_FORMAT
+
+# Set monitor parameters from config
+monitor_samplerate = config.AUDIO_MONITOR_SAMPLERATE
+monitor_bitdepth = config.AUDIO_MONITOR_BITDEPTH
+monitor_format = config.AUDIO_MONITOR_FORMAT
 
 # Date and time stuff for file naming
 current_date = datetime.datetime.now()
@@ -292,8 +302,6 @@ else:  # Linux or other Unix-like
 # to be discovered from sounddevice.query_devices()
 sound_in_id = 1                             # id of input device, set as default in case none is detected
 sound_in_chs = config.SOUND_IN_CHS          # number of input channels
-sound_in_samplerate = None                   # will be set to actual device rate in set_input_device
-
 sound_out_id = config.SOUND_OUT_ID_DEFAULT
 sound_out_chs = config.SOUND_OUT_CHS_DEFAULT                        
 sound_out_samplerate = config.SOUND_OUT_SR_DEFAULT    
@@ -654,11 +662,13 @@ def set_input_device(model_name, api_name_preference):
         # Select the best candidate
         best_device = candidate_devices[0]
         sound_in_id = best_device['id']
-        sound_in_samplerate = best_device['sample_rate']  # This is now an integer
+        
+        # Use the configured sample rate from BMAR_config.py
+        sound_in_samplerate = config.PRIMARY_SAMPLERATE
         
         print(f"\nSelected device: {best_device['name']} (API: {best_device['api_name']})")
         print(f"Device Configuration:")
-        print(f"  Current Sample Rate: {sound_in_samplerate} Hz")
+        print(f"  Configured Sample Rate: {sound_in_samplerate} Hz")
         
         # Adjust channel count if necessary
         if best_device['channels'] < sound_in_chs:
@@ -666,13 +676,15 @@ def set_input_device(model_name, api_name_preference):
             sound_in_chs = best_device['channels']
         print(f"  Channels: {sound_in_chs}")
         
-        if sound_in_samplerate < 192000 and sound_in_samplerate != 0: # Check for 0 in case of error
-            #print("\nWarning: Device sample rate is lower than the ideal 192kHz.")
-            if sound_in_samplerate < 48000:
-                 print("Running in test mode with significantly reduced sample rate.")
-                 testmode = True
-            else:
-                 testmode = False
+        # Check if device supports the configured sample rate
+        if best_device['sample_rate'] < sound_in_samplerate:
+            print(f"\nWarning: Device's maximum sample rate ({best_device['sample_rate']} Hz) is lower than configured rate ({sound_in_samplerate} Hz)")
+            print("Using device's maximum sample rate instead")
+            sound_in_samplerate = best_device['sample_rate']
+            
+        if sound_in_samplerate < 48000:
+            print("Running in test mode with significantly reduced sample rate.")
+            testmode = True
         else:
             testmode = False
 
@@ -761,9 +773,10 @@ def show_audio_device_info_for_SOUND_IN_OUT():
         input_info = sd.query_devices(sound_in_id)
         print("\nInput Device:")
         print(f"Name: {input_info['name']}")
-        print(f"Default Sample Rate: {input_info['default_samplerate']} Hz")
+        print(f"Default Sample Rate: {int(input_info['default_samplerate'])} Hz")
+        print(f"Bit Depth: {config.PRIMARY_BITDEPTH} bits")
         print(f"Max Input Channels: {input_info['max_input_channels']}")
-        print(f"Current Sample Rate: {sound_in_samplerate} Hz")
+        print(f"Current Sample Rate: {int(sound_in_samplerate)} Hz")
         print(f"Current Channels: {sound_in_chs}")
         if 'hostapi' in input_info:
             hostapi_info = sd.query_hostapis(index=input_info['hostapi'])
@@ -776,7 +789,7 @@ def show_audio_device_info_for_SOUND_IN_OUT():
         output_info = sd.query_devices(sound_out_id)
         print("\nOutput Device:")
         print(f"Name: {output_info['name']}")
-        print(f"Default Sample Rate: {output_info['default_samplerate']} Hz")
+        print(f"Default Sample Rate: {int(output_info['default_samplerate'])} Hz")
         print(f"Max Output Channels: {output_info['max_output_channels']}")
         if 'hostapi' in output_info:
             hostapi_info = sd.query_hostapis(index=output_info['hostapi'])
@@ -801,7 +814,9 @@ def show_audio_device_list():
     print()
     print(sd.query_devices())
     show_audio_device_info_for_defaults()
-    print(f"\nCurrent device in: {sound_in_id}, device out: {SOUND_OUT_ID_DEFAULT}\n")
+    print(f"\nCurrent device in: {sound_in_id}, device out: {SOUND_OUT_ID_DEFAULT}")
+    print(f"Current bit depth: {config.PRIMARY_BITDEPTH} bits")
+    print()
     show_audio_device_info_for_SOUND_IN_OUT()
 
 
@@ -1877,16 +1892,14 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
     # start_tod is the time of day to start recording, if 'None', record continuously
     # end_tod is the time of day to stop recording, if start_tod == None, ignore & record continuously
     #
-    global buffer, buffer_size, buffer_index, stop_recording_event
+    global buffer, buffer_size, buffer_index, stop_recording_event, _subtype
 
     if start_tod is None:
         print(f"{thread_id} is recording continuously\r")
 
     samplerate = sound_in_samplerate
-    #print(f"Debug: target_sample_rate type: {type(target_sample_rate)}, value: {target_sample_rate}")
 
     while not stop_recording_event.is_set():
-
         current_time = datetime.datetime.now().time()
 
         if start_tod is None or (start_tod <= current_time <= end_tod):        
@@ -1897,7 +1910,6 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
             interruptable_sleep(record_period, stop_recording_event)
 
             period_end_index = buffer_index 
-            ##print(f"Recording length in worker thread: {period_end_index - period_start_index}, after {record_period} seconds")
             save_start_index = period_start_index % buffer_size
             save_end_index = period_end_index % buffer_size
 
@@ -1914,8 +1926,7 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
             timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             output_filename = f"{timestamp}_{thread_id}_{record_period}_{interval}_{config.LOCATION_ID}_{config.HIVE_ID}.{file_format.lower()}"
 
-            #print(f"Debug: Before sf.write - target_sample_rate type: {type(target_sample_rate)}, value: {target_sample_rate}")
-
+            # Handle different file formats
             if file_format.upper() == 'MP3':
                 if target_sample_rate == 44100 or target_sample_rate == 48000:
                     full_path_name = os.path.join(MONITOR_DIRECTORY, output_filename)
@@ -1928,9 +1939,9 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
                     except Exception as e:
                         print(f"Error saving MP3 file: {e}")
                 else:
-                    print("mp3 only supports 44.1k and 48k sample rates")
+                    print("MP3 only supports 44.1k and 48k sample rates")
                     quit(-1)
-            else:
+            elif file_format.upper() in ['FLAC', 'WAV']:
                 full_path_name = os.path.join(PRIMARY_DIRECTORY, output_filename)
                 print(f"\nAttempting to save {file_format.upper()} file: {full_path_name}")
                 # Make sure parent directory exists
@@ -1938,10 +1949,16 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
                 # Ensure target_sample_rate is an integer
                 target_sample_rate = int(target_sample_rate)
                 try:
-                    sf.write(full_path_name, audio_data, target_sample_rate, format=file_format.upper())
+                    sf.write(full_path_name, audio_data, target_sample_rate, 
+                            format=file_format.upper(), 
+                            subtype=_subtype)
                     print(f"Successfully saved: {full_path_name}")
                 except Exception as e:
                     print(f"Error saving {file_format.upper()} file: {e}")
+            else:
+                print(f"Unsupported file format: {file_format}")
+                print("Supported formats are: MP3, FLAC, WAV")
+                quit(-1)
 
             if not stop_recording_event.is_set():
                 print(f"Saved {thread_id} audio to {full_path_name}, period: {record_period}, interval {interval} seconds\r")
@@ -1982,7 +1999,7 @@ def audio_stream():
     print(f"Device ID: {sound_in_id}", end='\r', flush=True)
     print(f"Channels: {sound_in_chs}", end='\r', flush=True)
     print(f"Sample Rate: {sound_in_samplerate} Hz", end='\r', flush=True)
-    print(f"Sample Rate Type: {type(sound_in_samplerate)}", end='\r', flush=True)
+    print(f"Bit Depth: {config.PRIMARY_BITDEPTH} bits", end='\r', flush=True)
     print(f"Data Type: {_dtype}", end='\r', flush=True)
 
     try:
@@ -1996,18 +2013,19 @@ def audio_stream():
         if device_info['max_input_channels'] < sound_in_chs:
             raise RuntimeError(f"Device only supports {device_info['max_input_channels']} channels, but {sound_in_chs} channels are required")
 
-        # Initialize the stream with the device's configured sample rate
+        # Initialize the stream with the configured sample rate and bit depth
         stream = sd.InputStream(
             device=sound_in_id,
             channels=sound_in_chs,
-            samplerate=sound_in_samplerate,  # Use device's configured rate
-            dtype=_dtype,
+            samplerate=sound_in_samplerate,  # Use configured rate
+            dtype=_dtype,  # Use configured bit depth
             blocksize=blocksize,
             callback=callback
         )
 
         print("\nAudio stream initialized successfully\r", flush=True)
         print(f"Stream sample rate: {stream.samplerate} Hz", end='\r', flush=True)
+        print(f"Stream bit depth: {config.PRIMARY_BITDEPTH} bits", end='\r', flush=True)
 
         with stream:
             # start the recording worker threads
@@ -2044,19 +2062,17 @@ def audio_stream():
                                                                         config.EVENT_START, \
                                                                         config.EVENT_END)).start()
 
-            while stream.active and not stop_program[0]:
-                time.sleep(1)
-            
-            stream.stop()
-            print("Audio stream stopped\r")
-            #sys.stdout.flush()
+            # Wait for keyboard input to stop
+            while not stop_program[0]:
+                time.sleep(0.1)
 
     except Exception as e:
         print(f"\nError initializing audio stream: {str(e)}")
         print("Please check your audio device configuration and ensure it supports the required settings")
-        #sys.stdout.flush()
-        raise
+        sys.stdout.flush()
+        return False
 
+    return True
 
 def kill_worker_threads():
     for t in threading.enumerate():
@@ -2379,6 +2395,16 @@ def check_dependencies():
 
 def main():
     global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel, sound_in_id, sound_in_chs, MICS_ACTIVE, keyboard_listener_running
+
+    # --- Audio format validation ---
+    allowed_primary_formats = ["FLAC", "WAV"]
+    allowed_monitor_formats = ["MP3", "FLAC", "WAV"]
+    if config.PRIMARY_FILE_FORMAT.upper() not in allowed_primary_formats:
+        print(f"WARNING: PRIMARY_FILE_FORMAT '{config.PRIMARY_FILE_FORMAT}' is not allowed. Must be one of: {allowed_primary_formats}")
+        # sys.exit(1)  # Commented out to allow user to fix without abrupt exit
+    if config.AUDIO_MONITOR_FORMAT.upper() not in allowed_monitor_formats:
+        print(f"WARNING: AUDIO_MONITOR_FORMAT '{config.AUDIO_MONITOR_FORMAT}' is not allowed. Must be one of: {allowed_monitor_formats}")
+        # sys.exit(1)  # Commented out to allow user to fix without abrupt exit
 
     print("\n\nBeehive Multichannel Acoustic-Signal Recorder\n")
     #sys.stdout.flush()
