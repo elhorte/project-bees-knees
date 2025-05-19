@@ -429,7 +429,7 @@ def reset_terminal():
             safe_stty('sane')
             
             # DO NOT clear screen and reset cursor
-            # print('\033[2J\033[H', end='')
+            # print('\033[2J\033[H', end='')  # Commented out to preserve terminal history
             
             # Reset keyboard mode
             safe_stty('-raw -echo')
@@ -1815,7 +1815,7 @@ def reset_terminal_settings():
         # Check if we're on Windows
         if sys.platform == 'win32' and not platform_manager.is_wsl():
             # Windows-specific terminal reset
-            os.system('cls')
+            # os.system('cls')  # Commented out to preserve terminal history
             sys.stdout.flush()
             print("\n[Terminal formatting reset (Windows)]", end='\r\n', flush=True)
             return
@@ -1830,7 +1830,7 @@ def reset_terminal_settings():
             safe_stty('sane')
             
             # DO NOT clear screen and reset cursor
-            # print('\033[2J\033[H', end='', flush=True)
+            # print('\033[2J\033[H', end='')  # Commented out to preserve terminal history
             
             # Reset keyboard mode
             safe_stty('-raw -echo')
@@ -2635,3 +2635,4 @@ def safe_stty(command):
 
 if __name__ == "__main__":
     main()
+
