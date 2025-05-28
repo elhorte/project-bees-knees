@@ -49,7 +49,9 @@ import librosa
 import librosa.display
 import resampy
 import atexit
-import subprocess  # Add this import
+import subprocess 
+import platform
+import pyaudio
 #import curses
 #import io
 #import queue
@@ -1818,12 +1820,6 @@ def plot_and_save_fft(sound_in_samplerate, channel):
 
     print("Exiting fft periodic")
 
-#
-# #############################################################
-# audio stream & callback functions
-# ############################################################
-#
-
 def reset_terminal_settings():
     """Reset terminal settings to ensure proper output formatting without clearing screen."""
     try:
@@ -1867,6 +1863,12 @@ def reset_terminal_settings():
         
     except Exception as e:
         print(f"Warning: Could not reset terminal settings: {e}", end='\r\n', flush=True)
+
+#
+# #############################################################
+# audio stream & callback functions
+# ############################################################
+#
 
 def setup_audio_circular_buffer():
     """Set up the circular buffer for audio recording."""
