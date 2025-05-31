@@ -617,7 +617,45 @@ def set_input_device(model_name, api_name_preference):
         
         print("\nTrying devices in descending order of ID...")
         
-        # Try each device until we find one that works
+        # If make_name is specified, try those devices first
+        if make_name and make_name.strip():
+            print(f"\nLooking for devices matching make name: {make_name}")
+            matching_devices = [(i, device) for i, device in input_devices 
+                              if make_name.lower() in device['name'].lower()]
+            
+            if matching_devices:
+                print(f"Found {len(matching_devices)} devices matching make name")
+                # Try matching devices first
+                for device_id, device in matching_devices:
+                    print(f"\nTrying device [{device_id}]: {device['name']}")
+                    print(f"  API: {sd.query_hostapis(index=device['hostapi'])['name']}")
+                    print(f"  Max Channels: {device['max_input_channels']}")
+                    print(f"  Default Sample Rate: {device['default_samplerate']} Hz")
+                    
+                    try:
+                        # Try to open a stream with our desired settings
+                        with sd.InputStream(device=device_id, 
+                                          channels=sound_in_chs,
+                                          samplerate=sound_in_samplerate,
+                                          dtype=_dtype) as stream:
+                            # If we get here, the device works with our settings
+                            sound_in_id = device_id
+                            print(f"\nSuccessfully configured device [{device_id}]")
+                            print(f"Device Configuration:")
+                            print(f"  Sample Rate: {sound_in_samplerate} Hz")
+                            print(f"  Bit Depth: {config.PRIMARY_BITDEPTH} bits")
+                            print(f"  Channels: {sound_in_chs}")
+                            testmode = False
+                            return True
+                            
+                    except Exception as e:
+                        print(f"  Failed to configure device: {str(e)}")
+                        continue
+            else:
+                print(f"No devices found matching make name: {make_name}")
+                print("Falling back to trying all devices...")
+        
+        # Try all devices if no matching devices were found or if make_name was empty
         for device_id, device in input_devices:
             print(f"\nTrying device [{device_id}]: {device['name']}")
             print(f"  API: {sd.query_hostapis(index=device['hostapi'])['name']}")
