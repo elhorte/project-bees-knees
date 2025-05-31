@@ -56,6 +56,7 @@ import pyaudio
 #import io
 #import queue
 import Setup_Pyaudio as set_port
+import gc
 
 # Platform-specific modules will be imported after platform detection
 
@@ -1007,7 +1008,7 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs):
         actual_channels = max(1, actual_channels)
         
         # Record audio
-        print(f"Recording audio for o-scope traces using {actual_channels} channel(s)")
+        print(f"Recording audio for oscilloscope traces using {actual_channels} channel(s)")
         o_recording = sd.rec(int(sound_in_samplerate * TRACE_DURATION), 
                            samplerate=sound_in_samplerate, 
                            channels=actual_channels, 
@@ -1199,26 +1200,38 @@ def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel):
         plt.close()  # Close the figure instead of showing it
 
         # Open the saved image in the system's default image viewer
-        if platform_manager.is_wsl():
-            print("Attempting to open image in WSL...")
-            try:
-                print("Trying xdg-open...")
-                subprocess.Popen(['xdg-open', expanded_path])
-            except FileNotFoundError:
-                print("xdg-open not found, trying wslview...")
-                subprocess.Popen(['wslview', expanded_path])
-        elif platform_manager.is_macos():
-            print("Attempting to open image in macOS...")
-            subprocess.Popen(['open', expanded_path])
-        else:
-            print("Attempting to open image in Windows...")
-            os.startfile(expanded_path)
-        print("Image viewer command executed")
+        try:
+            if platform_manager.is_wsl():
+                print("Attempting to open image in WSL...")
+                try:
+                    print("Trying xdg-open...")
+                    subprocess.Popen(['xdg-open', expanded_path])
+                except FileNotFoundError:
+                    print("xdg-open not found, trying wslview...")
+                    subprocess.Popen(['wslview', expanded_path])
+            elif platform_manager.is_macos():
+                print("Attempting to open image in macOS...")
+                subprocess.Popen(['open', expanded_path])
+            else:
+                print("Attempting to open image in Windows...")
+                # For Windows, use start command instead of os.startfile
+                subprocess.Popen(['start', '', expanded_path], shell=True)
+            print("Image viewer command executed")
+        except Exception as e:
+            print(f"Could not open image viewer: {e}")
+            print(f"Image saved at: {plotname}")
+            print(f"Please check if the file exists: {os.path.exists(plotname)}")
         
     except Exception as e:
         print(f"Error in plot_fft: {e}")
     finally:
         plt.close('all')  # Ensure all plots are closed
+        # Force cleanup of any remaining resources
+        try:
+            plt.close('all')
+            gc.collect()  # Force garbage collection
+        except:
+            pass
 
 def trigger_fft():
     """Trigger FFT plot generation."""
@@ -1245,36 +1258,180 @@ def trigger_fft():
         # Cleanup if process is still running
         if fft_process.is_alive():
             print("FFT process taking too long, terminating...")
-            fft_process.terminate()
-            fft_process.join(timeout=1)
-            if fft_process.is_alive():
-                fft_process.kill()
+            try:
+                fft_process.terminate()
+                fft_process.join(timeout=1)
+                if fft_process.is_alive():
+                    # Force kill if still running
+                    fft_process.kill()
+                    fft_process.join(timeout=1)
+            except Exception as e:
+                print(f"Warning during process termination: {e}")
         
     except Exception as e:
         print(f"Error in trigger_fft: {e}")
     finally:
         # Always clean up
-        cleanup_process('f')
+        try:
+            cleanup_process('f')
+        except Exception as e:
+            print(f"Warning during cleanup: {e}")
         clear_input_buffer()
         print("FFT process completed")
 
 def trigger_spectrogram():
-    cleanup_process('s')  # Clean up any existing process
-    global file_offset, monitor_channel, time_diff
+    """Trigger spectrogram generation."""
+    try:
+        # Clean up any existing spectrogram process
+        cleanup_process('s')
+        
+        # Clear input buffer before starting
+        clear_input_buffer()
+        
+        # Get file offset and time difference
+        global file_offset, monitor_channel, time_diff
+        diff = time_diff()       # time since last file was read
+        if diff < (config.PERIOD_RECORD + config.PERIOD_INTERVAL):
+            file_offset += 1
+        else:
+            file_offset = 1 
+            
+        # Create and start the spectrogram process
+        active_processes['s'] = multiprocessing.Process(
+            target=plot_spectrogram, 
+            args=(monitor_channel, 'lin', file_offset-1)
+        )
+        active_processes['s'].start()
+        
+        print("Plotting spectrogram...")
+        clear_input_buffer()
+        
+        # Wait for completion with timeout
+        active_processes['s'].join(timeout=30)
+        
+        # Cleanup if process is still running
+        if active_processes['s'].is_alive():
+            print("Spectrogram process taking too long, terminating...")
+            try:
+                active_processes['s'].terminate()
+                active_processes['s'].join(timeout=1)
+                if active_processes['s'].is_alive():
+                    # Force kill if still running
+                    active_processes['s'].kill()
+                    active_processes['s'].join(timeout=1)
+            except Exception as e:
+                print(f"Warning during process termination: {e}")
+        
+    except Exception as e:
+        print(f"Error in trigger_spectrogram: {e}")
+    finally:
+        # Always clean up
+        try:
+            cleanup_process('s')
+        except Exception as e:
+            print(f"Warning during cleanup: {e}")
+        clear_input_buffer()
+        print("Spectrogram process completed")
 
-    diff = time_diff()       # time since last file was read
-    if diff < (config.PERIOD_RECORD + config.PERIOD_INTERVAL):
-        file_offset +=1
-    else:
-        file_offset = 1 
-    active_processes['s'] = multiprocessing.Process(target=plot_spectrogram, args=(monitor_channel, 'lin', file_offset-1))
-    active_processes['s'].start()
-    print("Plotting spectrogram...")
-    clear_input_buffer()
-    active_processes['s'].join()
-    cleanup_process('s')
-    print("exit spectrogram")
-    
+def plot_spectrogram(channel, y_axis_type, file_offset):
+    """
+    Generate a spectrogram from an audio file and display/save it as an image.
+    Parameters:
+    - channel: Channel to use for multi-channel audio files
+    - y_axis_type: Type of Y axis for the spectrogram ('log' or 'linear')
+    - file_offset: Offset for finding the audio file
+    """
+    try:
+        next_spectrogram = find_file_of_type_with_offset(file_offset) 
+        
+        if next_spectrogram is None:
+            print("No data available to see?")
+            return
+            
+        full_audio_path = os.path.join(PRIMARY_DIRECTORY, next_spectrogram)
+        print("Spectrogram source:", full_audio_path)
+
+        # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
+        y, sr = librosa.load(full_audio_path, sr=sound_in_samplerate, duration=config.PERIOD_RECORD, mono=False)
+        
+        # If multi-channel audio, select the specified channel
+        if len(y.shape) > 1:
+            y = y[channel]
+            
+        # Compute the spectrogram
+        D = librosa.amplitude_to_db(abs(librosa.stft(y)), ref=np.max)
+        
+        # Plot the spectrogram
+        plt.figure(figsize=(10, 4))
+
+        if y_axis_type == 'log':
+            librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='log')
+            y_decimal_places = 3
+        elif y_axis_type == 'lin':
+            librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='linear')
+            y_decimal_places = 0
+        else:
+            raise ValueError("y_axis_type must be 'log' or 'linear'")
+        
+        # Adjust y-ticks to be in kilohertz and have the specified number of decimal places
+        y_ticks = plt.gca().get_yticks()
+        plt.gca().set_yticklabels(['{:.{}f} kHz'.format(tick/1000, y_decimal_places) for tick in y_ticks])
+        
+        # Extract filename from the audio path
+        filename = os.path.basename(full_audio_path)
+        root, _ = os.path.splitext(filename)
+        plotname = os.path.join(PLOT_DIRECTORY, f"{root}_spectrogram.png")
+
+        # Set title to include filename and channel
+        plt.title(f'Spectrogram from {config.LOCATION_ID}, hive:{config.HIVE_ID}, Mic Loc:{config.MIC_LOCATION[channel]}\nfile:{filename}, Ch:{channel+1}')
+        plt.colorbar(format='%+2.0f dB')
+        plt.tight_layout()
+        print("\nSaving spectrogram to:", plotname)
+        
+        # Make sure the directory exists
+        os.makedirs(os.path.dirname(plotname), exist_ok=True)
+        
+        # Display the expanded path
+        expanded_path = os.path.abspath(os.path.expanduser(plotname))
+        print(f"Absolute path: {expanded_path}")
+        
+        plt.savefig(expanded_path, dpi=150)
+        print("Plot saved successfully")
+        plt.close()  # Close the figure instead of showing it
+
+        # Open the saved image in the system's default image viewer
+        try:
+            if platform_manager.is_wsl():
+                print("Attempting to open image in WSL...")
+                try:
+                    print("Trying xdg-open...")
+                    subprocess.Popen(['xdg-open', expanded_path])
+                except FileNotFoundError:
+                    print("xdg-open not found, trying wslview...")
+                    subprocess.Popen(['wslview', expanded_path])
+            elif platform_manager.is_macos():
+                print("Attempting to open image in macOS...")
+                subprocess.Popen(['open', expanded_path])
+            else:
+                print("Attempting to open image in Windows...")
+                # For Windows, use start command instead of os.startfile
+                subprocess.Popen(['start', '', expanded_path], shell=True)
+            print("Image viewer command executed")
+        except Exception as e:
+            print(f"Could not open image viewer: {e}")
+            print(f"Image saved at: {plotname}")
+            print(f"Please check if the file exists: {os.path.exists(plotname)}")
+        
+    except Exception as e:
+        print(f"Error in plot_spectrogram: {e}")
+    finally:
+        # Force cleanup of any remaining resources
+        try:
+            plt.close('all')
+            gc.collect()  # Force garbage collection
+        except:
+            pass
+
 # called from a thread
 # Print a string of asterisks, ending with only a carriage return to overwrite the line
 # value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
@@ -2519,103 +2676,6 @@ def cleanup():
     print("Exiting...", end='\r\n', flush=True)
     #sys.stdout.flush()
     os._exit(0)
-
-def plot_spectrogram(channel, y_axis_type, file_offset):
-    """
-    Generate a spectrogram from an audio file and display/save it as an image.
-    Parameters:
-    - audio_path: Path to the audio file (FLAC format).
-    - output_image_path: Path to save the spectrogram image.
-    - y_axis_type: Type of Y axis for the spectrogram. Can be 'log' or 'linear'.
-    - y_decimal_places: Number of decimal places for the Y axis (note: preset in statements below).
-    - channel: Channel to use for multi-channel audio files (default is 0 for left channel).
-
-    - in librosa.load() function, sr=None means no resampling, mono=True means all channels are averaged into mono
-    """
-    try:
-        next_spectrogram = find_file_of_type_with_offset(file_offset) 
-        ##print("preparing spectrogram of:", next_spectrogram)
-
-        if next_spectrogram == None:
-            print("No data available to see?")
-            return
-        else: 
-            full_audio_path = PRIMARY_DIRECTORY + next_spectrogram    # quick hack to eval code
-            print("Spectrogram source:", full_audio_path)
-
-        # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
-        y, sr = librosa.load(full_audio_path, sr=sound_in_samplerate, duration=config.PERIOD_RECORD, mono=False)
-        # If multi-channel audio, select the specified channel
-        if len(y.shape) > 1: y = y[channel]
-        # Compute the spectrogram
-        D = librosa.amplitude_to_db(abs(librosa.stft(y)), ref=np.max)
-        # Plot the spectrogram
-        plt.figure(figsize=(10, 4))
-
-        if y_axis_type == 'log':
-            librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='log')
-            y_decimal_places = 3
-        elif y_axis_type == 'lin':
-            librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='linear')
-            y_decimal_places = 0
-        else:
-            raise ValueError("y_axis_type must be 'log' or 'linear'")
-        
-        # Adjust y-ticks to be in kilohertz and have the specified number of decimal places
-        y_ticks = plt.gca().get_yticks()
-        plt.gca().set_yticklabels(['{:.{}f} kHz'.format(tick/1000, y_decimal_places) for tick in y_ticks])
-        
-        # Extract filename from the audio path
-        filename = os.path.basename(full_audio_path)
-        root, _ = os.path.splitext(filename)
-        plotname = os.path.join(PLOT_DIRECTORY, f"{root}_spectrogram.png")
-
-        # Set title to include filename and channel
-        plt.title(f'Spectrogram from {config.LOCATION_ID}, hive:{config.HIVE_ID}, Mic Loc:{config.MIC_LOCATION[channel]}\nfile:{filename}, Ch:{channel+1}')
-        plt.colorbar(format='%+2.0f dB')
-        plt.tight_layout()
-        print("\nSaving spectrogram to:", plotname)
-        
-        # Make sure the directory exists
-        os.makedirs(os.path.dirname(plotname), exist_ok=True)
-        
-        # Display the expanded path
-        expanded_path = os.path.abspath(os.path.expanduser(plotname))
-        print(f"Absolute path: {expanded_path}")
-        
-        plt.savefig(expanded_path, dpi=150)
-        print("Plot saved successfully")
-        plt.close()  # Close the figure instead of showing it
-
-        # Open the saved image in the system's default image viewer
-        try:
-            if platform_manager.is_wsl():
-                print("Attempting to open image in WSL...")
-                # For WSL, use xdg-open if available, otherwise use wslview
-                try:
-                    print("Trying xdg-open...")
-                    subprocess.Popen(['xdg-open', expanded_path])
-                except FileNotFoundError:
-                    print("xdg-open not found, trying wslview...")
-                    subprocess.Popen(['wslview', expanded_path])
-            elif platform_manager.is_macos():
-                print("Attempting to open image in macOS...")
-                # For macOS
-                subprocess.Popen(['open', expanded_path])
-            else:
-                print("Attempting to open image in Windows...")
-                # For Windows, use start command instead of os.startfile
-                subprocess.Popen(['start', '', expanded_path], shell=True)
-            print("Image viewer command executed")
-        except Exception as e:
-            print(f"Could not open image viewer: {e}")
-            print(f"Image saved at: {plotname}")
-            print(f"Please check if the file exists: {os.path.exists(plotname)}")
-        
-    except Exception as e:
-        print(f"Error in plot_spectrogram: {e}")
-    finally:
-        plt.close('all')  # Ensure all plots are closed
 
 def safe_stty(command):
     """
