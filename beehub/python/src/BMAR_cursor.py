@@ -1076,8 +1076,8 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs):
             subprocess.Popen(['open', expanded_path])
         else:
             print("Attempting to open image in Windows...")
-            # For Windows
-            os.startfile(expanded_path)
+            # For Windows, use start command instead of os.startfile
+            subprocess.Popen(['start', '', expanded_path], shell=True)
         print("Image viewer command executed")
     except Exception as e:
         print(f"Could not open image viewer: {e}")
@@ -2588,21 +2588,29 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
         plt.close()  # Close the figure instead of showing it
 
         # Open the saved image in the system's default image viewer
-        if platform_manager.is_wsl():
-            print("Attempting to open image in WSL...")
-            try:
-                print("Trying xdg-open...")
-                subprocess.Popen(['xdg-open', expanded_path])
-            except FileNotFoundError:
-                print("xdg-open not found, trying wslview...")
-                subprocess.Popen(['wslview', expanded_path])
-        elif platform_manager.is_macos():
-            print("Attempting to open image in macOS...")
-            subprocess.Popen(['open', expanded_path])
-        else:
-            print("Attempting to open image in Windows...")
-            os.startfile(expanded_path)
-        print("Image viewer command executed")
+        try:
+            if platform_manager.is_wsl():
+                print("Attempting to open image in WSL...")
+                # For WSL, use xdg-open if available, otherwise use wslview
+                try:
+                    print("Trying xdg-open...")
+                    subprocess.Popen(['xdg-open', expanded_path])
+                except FileNotFoundError:
+                    print("xdg-open not found, trying wslview...")
+                    subprocess.Popen(['wslview', expanded_path])
+            elif platform_manager.is_macos():
+                print("Attempting to open image in macOS...")
+                # For macOS
+                subprocess.Popen(['open', expanded_path])
+            else:
+                print("Attempting to open image in Windows...")
+                # For Windows, use start command instead of os.startfile
+                subprocess.Popen(['start', '', expanded_path], shell=True)
+            print("Image viewer command executed")
+        except Exception as e:
+            print(f"Could not open image viewer: {e}")
+            print(f"Image saved at: {plotname}")
+            print(f"Please check if the file exists: {os.path.exists(plotname)}")
         
     except Exception as e:
         print(f"Error in plot_spectrogram: {e}")
