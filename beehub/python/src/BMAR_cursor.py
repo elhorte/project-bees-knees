@@ -901,14 +901,41 @@ def show_audio_device_info_for_defaults():
 
 
 def show_audio_device_list():
-    SOUND_OUT_ID_DEFAULT = get_default_output_device()
-    print()
-    print(sd.query_devices())
-    show_audio_device_info_for_defaults()
-    print(f"\nCurrent device in: [{sound_in_id}], device out: [{SOUND_OUT_ID_DEFAULT}]")
-    print(f"Current bit depth: {config.PRIMARY_BITDEPTH} bits")
-    print()
-    show_audio_device_info_for_SOUND_IN_OUT()
+    """Display detailed information about the selected audio input and output devices."""
+    print("\nSelected Audio Device Information:")
+    print("-" * 50)
+    
+    # Get and display input device info
+    try:
+        input_info = sd.query_devices(sound_in_id)
+        print("\nInput Device:")
+        print(f"Name: [{sound_in_id}] {input_info['name']}")
+        print(f"Default Sample Rate: {int(input_info['default_samplerate'])} Hz")
+        print(f"Bit Depth: {config.PRIMARY_BITDEPTH} bits")
+        print(f"Max Input Channels: {input_info['max_input_channels']}")
+        print(f"Current Sample Rate: {int(sound_in_samplerate)} Hz")
+        print(f"Current Channels: {sound_in_chs}")
+        if 'hostapi' in input_info:
+            hostapi_info = sd.query_hostapis(index=input_info['hostapi'])
+            print(f"Audio API: {hostapi_info['name']}")
+    except Exception as e:
+        print(f"Error getting input device info: {e}")
+    
+    # Get and display output device info
+    try:
+        output_info = sd.query_devices(sound_out_id)
+        print("\nOutput Device:")
+        print(f"Name: [{sound_out_id}] {output_info['name']}")
+        print(f"Default Sample Rate: {int(output_info['default_samplerate'])} Hz")
+        print(f"Max Output Channels: {output_info['max_output_channels']}")
+        if 'hostapi' in output_info:
+            hostapi_info = sd.query_hostapis(index=output_info['hostapi'])
+            print(f"Audio API: {hostapi_info['name']}")
+    except Exception as e:
+        print(f"Error getting output device info: {e}")
+    
+    print("-" * 50)
+    sys.stdout.flush()
 
 
 def get_enabled_mic_locations():
@@ -2480,7 +2507,7 @@ def keyboard_listener():
 def show_list_of_commands():
     print("\na  audio pathway--check for over/underflows")
     print("c  channel--select channel to monitor, either before or during use of vu or intercom, '0' to exit")
-    print("d  detailed device in use data")
+    print("d  selected devices in use data")
     print("D  show all devices with active input/output indicator")
     print("f  fft--show plot")
     print("i  intercom: press i then press 1, 2, 3, ... to listen to that channel")
