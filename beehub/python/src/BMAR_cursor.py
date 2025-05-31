@@ -55,7 +55,7 @@ import pyaudio
 #import curses
 #import io
 #import queue
-import Setup_Pyaudio as Setup_Pyaudio
+import Setup_Pyaudio as set_port
 
 # Platform-specific modules will be imported after platform detection
 
@@ -601,7 +601,7 @@ def set_input_device(model_name, api_name_preference):
 
     try:
         # Create PyAudio manager with target configuration from config
-        manager = Setup_Pyaudio.AudioPortManager(
+        manager = set_port.AudioPortManager(
             target_sample_rate=config.PRIMARY_SAMPLERATE,
             target_bit_depth=config.PRIMARY_BITDEPTH
         )
