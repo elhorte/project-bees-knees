@@ -1307,7 +1307,7 @@ def trigger_spectrogram():
         clear_input_buffer()
         
         # Wait for completion with timeout
-        active_processes['s'].join(timeout=30)
+        active_processes['s'].join(timeout=60)
         
         # Cleanup if process is still running
         if active_processes['s'].is_alive():
