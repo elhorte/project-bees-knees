@@ -620,16 +620,61 @@ def set_input_device(model_name, api_name_preference):
                     print(f"  Default Sample Rate: {device['default_samplerate']} Hz")
                     
                     try:
-                        # Try to open a stream with our desired settings
+                        # Try to set the sample rate using PyAudio first
+                        if not platform_manager.is_wsl():
+                            try:
+                                import pyaudio
+                                p = pyaudio.PyAudio()
+                                device_info = p.get_device_info_by_index(device_id)
+                                print(f"\nCurrent Windows sample rate: {device_info['defaultSampleRate']} Hz")
+                                
+                                # Try to open a stream with our desired sample rate
+                                stream = p.open(format=pyaudio.paInt16,
+                                              channels=sound_in_chs,
+                                              rate=sound_in_samplerate,
+                                              input=True,
+                                              input_device_index=device_id,
+                                              frames_per_buffer=1024)
+                                
+                                # Verify the actual sample rate
+                                actual_rate = stream._get_stream_info()['sample_rate']
+                                print(f"PyAudio stream sample rate: {actual_rate} Hz")
+                                
+                                stream.close()
+                                p.terminate()
+                                
+                                if actual_rate != sound_in_samplerate:
+                                    print(f"\nWARNING: PyAudio could not set sample rate to {sound_in_samplerate} Hz")
+                                    print(f"Device is using {actual_rate} Hz instead")
+                                    print("This may affect recording quality.")
+                            except Exception as e:
+                                print(f"Warning: Could not set sample rate using PyAudio: {e}")
+                        
+                        # Now try with sounddevice
+                        print("\nAttempting to configure device with sounddevice...")
+                        sd.default.samplerate = sound_in_samplerate  # Set global default
+                        
                         with sd.InputStream(device=device_id, 
                                           channels=sound_in_chs,
                                           samplerate=sound_in_samplerate,
-                                          dtype=_dtype) as stream:
+                                          dtype=_dtype,
+                                          blocksize=1024) as stream:
+                            # Verify the actual sample rate being used
+                            actual_rate = stream.samplerate
+                            if actual_rate != sound_in_samplerate:
+                                print(f"\nWARNING: Requested sample rate {sound_in_samplerate} Hz, but device is using {actual_rate} Hz")
+                                print("This may affect recording quality. Consider using a different device or sample rate.")
+                                print("\nPossible solutions:")
+                                print("1. Check Windows Sound Control Panel settings")
+                                print("2. Check if your audio device has its own control panel")
+                                print("3. Try using a different sample rate that your device supports")
+                                print("4. Update your audio device drivers")
+                            
                             # If we get here, the device works with our settings
                             sound_in_id = device_id
                             print(f"\nSuccessfully configured specified device [{device_id}]")
                             print(f"Device Configuration:")
-                            print(f"  Sample Rate: {sound_in_samplerate} Hz")
+                            print(f"  Sample Rate: {actual_rate} Hz")
                             print(f"  Bit Depth: {config.PRIMARY_BITDEPTH} bits")
                             print(f"  Channels: {sound_in_chs}")
                             testmode = False
@@ -657,6 +702,8 @@ def set_input_device(model_name, api_name_preference):
                     print("Exiting as requested.")
                     sys.exit(1)
                 print("Falling back to device search...")
+        else:
+            print("\nNo device ID specified, skipping direct device configuration...")
         
         # Create a list of input devices with their IDs
         input_devices = [(i, device) for i, device in enumerate(devices) 
@@ -685,7 +732,8 @@ def set_input_device(model_name, api_name_preference):
                         with sd.InputStream(device=dev_id, 
                                           channels=sound_in_chs,
                                           samplerate=sound_in_samplerate,
-                                          dtype=_dtype) as stream:
+                                          dtype=_dtype,
+                                          blocksize=1024) as stream:
                             # If we get here, the device works with our settings
                             sound_in_id = dev_id
                             print(f"\nSuccessfully configured device [{dev_id}]")
@@ -715,7 +763,8 @@ def set_input_device(model_name, api_name_preference):
                 with sd.InputStream(device=dev_id, 
                                   channels=sound_in_chs,
                                   samplerate=sound_in_samplerate,
-                                  dtype=_dtype) as stream:
+                                  dtype=_dtype,
+                                  blocksize=1024) as stream:
                     # If we get here, the device works with our settings
                     sound_in_id = dev_id
                     print(f"\nSuccessfully configured device [{dev_id}]")
