@@ -177,6 +177,10 @@ elif sys.platform == 'win32' and not platform_manager.is_wsl():
     # Windows-specific imports (if any needed in the future)
     pass
 
+# audio interface info
+make_name = config.MAKE_NAME
+api_name = config.API_NAME
+
 # init recording varibles
 continuous_start_index = None
 continuous_end_index = 0        
@@ -587,7 +591,7 @@ def print_all_input_devices():
         if device['max_input_channels'] > 0:
             hostapi_info = sd.query_hostapis(index=device['hostapi'])
             api_name = hostapi_info['name']
-            print(f"  {i}: {device['name']} (API: {api_name}) | MaxCh: {device['max_input_channels']} | Default SR: {device['default_samplerate']} Hz")
+            print(f"  [{i}] {device['name']} (API: {api_name}) | MaxCh: {device['max_input_channels']} | Default SR: {device['default_samplerate']} Hz")
     print()
     sys.stdout.flush()
 
@@ -601,55 +605,47 @@ def set_input_device(model_name, api_name_preference):
     print_all_input_devices()
 
     try:
-        # Create PyAudio manager with target configuration from config
-        manager = set_port.AudioPortManager(
-            target_sample_rate=config.PRIMARY_SAMPLERATE,
-            target_bit_depth=config.PRIMARY_BITDEPTH
-        )
+        # Get all devices
+        devices = sd.query_devices()
         
-        # Configure audio input
-        success, device, achieved_rate, achieved_bits = manager.configure_audio_input(channels=sound_in_chs)
+        # Create a list of input devices with their IDs
+        input_devices = [(i, device) for i, device in enumerate(devices) 
+                        if device['max_input_channels'] > 0]
         
-        if not success:
-            print("\nNo devices could be configured with acceptable settings.")
-            return False
+        # Sort by device ID in descending order
+        input_devices.sort(reverse=True, key=lambda x: x[0])
+        
+        print("\nTrying devices in descending order of ID...")
+        
+        # Try each device until we find one that works
+        for device_id, device in input_devices:
+            print(f"\nTrying device [{device_id}]: {device['name']}")
+            print(f"  API: {sd.query_hostapis(index=device['hostapi'])['name']}")
+            print(f"  Max Channels: {device['max_input_channels']}")
+            print(f"  Default Sample Rate: {device['default_samplerate']} Hz")
             
-        # Set the selected device configuration
-        sound_in_id = device['index']
-        sound_in_samplerate = achieved_rate
-        
-        # Verify the sample rate was set correctly
-        try:
-            with sd.InputStream(device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate) as stream:
-                actual_rate = stream.samplerate
-                if actual_rate != sound_in_samplerate:
-                    print(f"\nWarning: Device is running at {actual_rate} Hz instead of {sound_in_samplerate} Hz")
-                    response = input("Would you like to proceed with this sample rate? (y/n): ")
-                    if response.lower() != 'y':
-                        print("Exiting as requested.")
-                        return False
-                    sound_in_samplerate = actual_rate
-                    testmode = True
-                else:
+            try:
+                # Try to open a stream with our desired settings
+                with sd.InputStream(device=device_id, 
+                                  channels=sound_in_chs,
+                                  samplerate=sound_in_samplerate,
+                                  dtype=_dtype) as stream:
+                    # If we get here, the device works with our settings
+                    sound_in_id = device_id
+                    print(f"\nSuccessfully configured device [{device_id}]")
+                    print(f"Device Configuration:")
+                    print(f"  Sample Rate: {sound_in_samplerate} Hz")
+                    print(f"  Bit Depth: {config.PRIMARY_BITDEPTH} bits")
+                    print(f"  Channels: {sound_in_chs}")
                     testmode = False
-        except Exception as e:
-            print(f"\nError verifying sample rate: {str(e)}")
-            return False
+                    return True
+                    
+            except Exception as e:
+                print(f"  Failed to configure device: {str(e)}")
+                continue
         
-        print(f"\nSelected device: {device['name']} (API: {device['api']})")
-        print(f"Device Configuration:")
-        print(f"  Default Sample Rate: {device['sample_rate']} Hz")
-        print(f"  Configured Sample Rate: {config.PRIMARY_SAMPLERATE} Hz")
-        print(f"  Actual Sample Rate: {sound_in_samplerate} Hz")
-        
-        # Adjust channel count if necessary
-        if device['channels'] < sound_in_chs:
-            print(f"\nWarning: Device only supports {device['channels']} channels, adjusting channel count to {device['channels']}")
-            sound_in_chs = device['channels']
-        print(f"  Channels: {sound_in_chs}")
-
-        sys.stdout.flush()
-        return True
+        print("\nNo devices could be configured with acceptable settings.")
+        return False
 
     except Exception as e:
         print(f"\nError during device selection: {str(e)}")
@@ -732,7 +728,7 @@ def show_audio_device_info_for_SOUND_IN_OUT():
     try:
         input_info = sd.query_devices(sound_in_id)
         print("\nInput Device:")
-        print(f"Name: {input_info['name']}")
+        print(f"Name: [{sound_in_id}] {input_info['name']}")
         print(f"Default Sample Rate: {int(input_info['default_samplerate'])} Hz")
         print(f"Bit Depth: {config.PRIMARY_BITDEPTH} bits")
         print(f"Max Input Channels: {input_info['max_input_channels']}")
@@ -748,7 +744,7 @@ def show_audio_device_info_for_SOUND_IN_OUT():
     try:
         output_info = sd.query_devices(sound_out_id)
         print("\nOutput Device:")
-        print(f"Name: {output_info['name']}")
+        print(f"Name: [{sound_out_id}] {output_info['name']}")
         print(f"Default Sample Rate: {int(output_info['default_samplerate'])} Hz")
         print(f"Max Output Channels: {output_info['max_output_channels']}")
         if 'hostapi' in output_info:
@@ -765,8 +761,8 @@ def show_audio_device_info_for_defaults():
     print("\nsounddevices default device info:")
     default_input_info = sd.query_devices(kind='input')
     default_output_info = sd.query_devices(kind='output')
-    print(f"\nDefault Input Device: {default_input_info}")
-    print(f"Default Output Device: {default_output_info}\n")
+    print(f"\nDefault Input Device: [{default_input_info['index']}] {default_input_info['name']}")
+    print(f"Default Output Device: [{default_output_info['index']}] {default_output_info['name']}\n")
 
 
 def show_audio_device_list():
@@ -774,7 +770,7 @@ def show_audio_device_list():
     print()
     print(sd.query_devices())
     show_audio_device_info_for_defaults()
-    print(f"\nCurrent device in: {sound_in_id}, device out: {SOUND_OUT_ID_DEFAULT}")
+    print(f"\nCurrent device in: [{sound_in_id}], device out: [{SOUND_OUT_ID_DEFAULT}]")
     print(f"Current bit depth: {config.PRIMARY_BITDEPTH} bits")
     print()
     show_audio_device_info_for_SOUND_IN_OUT()
@@ -1307,7 +1303,7 @@ def trigger_spectrogram():
         clear_input_buffer()
         
         # Wait for completion with timeout
-        active_processes['s'].join(timeout=60)
+        active_processes['s'].join(timeout=60)  # Fixed timeout value
         
         # Cleanup if process is still running
         if active_processes['s'].is_alive():
@@ -1797,10 +1793,10 @@ def toggle_intercom_m():
             # Only show device configuration in the main process
             if is_main_process():
                 print("\nDevice configuration:")
-                print(f"Input device: {input_device['name']}")
+                print(f"Input device: [{sound_in_id}] {input_device['name']}")
                 print(f"Input channels: {input_device['max_input_channels']}")
                 print(f"Input sample rate: {sound_in_samplerate} Hz")
-                print(f"Output device: {output_device['name']}")
+                print(f"Output device: [{sound_out_id}] {output_device['name']}")
                 print(f"Output channels: {output_device['max_output_channels']}")
                 print(f"Output sample rate: {sound_out_samplerate} Hz")
             
@@ -2112,7 +2108,7 @@ def audio_stream():
 
     # Print initialization info with forced output
     print("Initializing audio stream...", flush=True)
-    print(f"Device ID: {sound_in_id}", end='\r', flush=True)
+    print(f"Device ID: [{sound_in_id}]", end='\r', flush=True)
     print(f"Channels: {sound_in_chs}", end='\r', flush=True)
     print(f"Sample Rate: {sound_in_samplerate} Hz", end='\r', flush=True)
     print(f"Bit Depth: {config.PRIMARY_BITDEPTH} bits", end='\r', flush=True)
@@ -2122,7 +2118,7 @@ def audio_stream():
         # First verify the device configuration
         device_info = sd.query_devices(sound_in_id)
         print("\nSelected device info:", flush=True)
-        print(f"Name: {device_info['name']}", end='\r', flush=True)
+        print(f"Name: [{sound_in_id}] {device_info['name']}", end='\r', flush=True)
         print(f"Max Input Channels: {device_info['max_input_channels']}", end='\r', flush=True)
         print(f"Device Sample Rate: {device_info['default_samplerate']} Hz", end='\r', flush=True)
 
