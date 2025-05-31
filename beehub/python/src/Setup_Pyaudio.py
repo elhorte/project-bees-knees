@@ -127,8 +127,14 @@ class AudioPortManager:
         
         return devices
 
-    def print_device_list(self):
-        """Print a detailed list of all audio devices"""
+    def print_device_list(self, active_input_device: Optional[int] = None, active_output_device: Optional[int] = None):
+        """
+        Print a detailed list of all audio devices
+        
+        Args:
+            active_input_device: Index of the currently active input device
+            active_output_device: Index of the currently active output device
+        """
         print("\nAudio Device List")
         print("=" * 80)
         
@@ -152,12 +158,10 @@ class AudioPortManager:
             # Format the line
             line = f"{device['index']:3d} {name}, {api} {channel_info}"
             
-            # Add indicators for input/output devices
-            if device['is_input'] and device['is_output']:
-                line = f"<> {line}"
-            elif device['is_input']:
+            # Add indicators only for active devices
+            if device['index'] == active_input_device and in_channels > 0:
                 line = f">  {line}"
-            elif device['is_output']:
+            elif device['index'] == active_output_device and out_channels > 0:
                 line = f"<  {line}"
             else:
                 line = f"   {line}"
@@ -285,21 +289,22 @@ def main():
     print("=" * 60)
     print(f"Target Configuration: {target_sample_rate}Hz, {target_bit_depth}-bit")
     
-    # Print detailed device list
-    manager.print_device_list()
+    # Get default devices
+    pa = pyaudio.PyAudio()
+    default_input = pa.get_default_input_device_info()
+    default_output = pa.get_default_output_device_info()
+    pa.terminate()
     
-    # Configure audio input
-    success, device, achieved_rate, achieved_bits = manager.configure_audio_input()
+    # Print device list showing active devices
+    manager.print_device_list(
+        active_input_device=default_input['index'],
+        active_output_device=default_output['index']
+    )
     
-    if success:
-        print("\nSuccessfully configured audio input:")
-        print(f"Device: [{device['index']}] {device['name']}")
-        print(f"API: {device['api']}")
-        print(f"Sample Rate: {achieved_rate}Hz")
-        print(f"Bit Depth: {achieved_bits}-bit")
-    else:
-        print("\nFailed to configure audio input with target settings")
-        print("Please check your audio device configuration")
+    # Show version info and available APIs
+    get_pyaudio_version_info()
+    print()
+    list_host_apis()
 
 # Additional utility functions for PyAudio-specific features
 

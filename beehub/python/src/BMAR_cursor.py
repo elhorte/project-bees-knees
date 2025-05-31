@@ -635,13 +635,27 @@ def set_input_device(model_name, api_name_preference):
                             testmode = False
                             return True
                     except Exception as e:
-                        print(f"  Failed to configure specified device: {str(e)}")
+                        print(f"\nERROR: Could not use specified device ID {device_id}")
+                        print(f"Reason: {str(e)}")
+                        response = input("\nThe specified device could not be used. Would you like to proceed with an alternative device? (y/n): ")
+                        if response.lower() != 'y':
+                            print("Exiting as requested.")
+                            sys.exit(1)
                         print("Falling back to device search...")
                 else:
-                    print(f"Specified device [{device_id}] is not an input device")
+                    print(f"\nERROR: Specified device ID {device_id} is not an input device")
+                    response = input("\nThe specified device is not an input device. Would you like to proceed with an alternative device? (y/n): ")
+                    if response.lower() != 'y':
+                        print("Exiting as requested.")
+                        sys.exit(1)
                     print("Falling back to device search...")
             except Exception as e:
-                print(f"Error accessing specified device [{device_id}]: {str(e)}")
+                print(f"\nERROR: Could not access specified device ID {device_id}")
+                print(f"Reason: {str(e)}")
+                response = input("\nThe specified device could not be accessed. Would you like to proceed with an alternative device? (y/n): ")
+                if response.lower() != 'y':
+                    print("Exiting as requested.")
+                    sys.exit(1)
                 print("Falling back to device search...")
         
         # Create a list of input devices with their IDs
