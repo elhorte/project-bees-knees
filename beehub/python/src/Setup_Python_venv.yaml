@@ -1,4 +1,4 @@
-
+# Linux Instructions
 1. First, ensure you have Python and venv installed:
 
 sudo apt update
@@ -15,6 +15,41 @@ source myenv/bin/activate
 4. Check which Python is being used:
 
 which python
+python --version
+
+5. Install the required packages:
+
+pip install -r requirements.txt
+
+6. Deactivate the virtual environment:
+
+deactivate
+
+7. List installed packages:
+
+pip list
+
+# Windows Instructions
+1. First, ensure you have Python and venv installed:
+
+# Python should be installed from python.org
+# venv is included with Python 3.3+
+
+2. Create a virtual environment:
+
+python -m venv myenv
+
+3. Activate the virtual environment:
+
+# For Windows (PowerShell):
+.\myenv\Scripts\Activate.ps1
+
+# For Windows (Command Prompt):
+.\myenv\Scripts\activate.bat
+
+4. Check which Python is being used:
+
+where python
 python --version
 
 5. Install the required packages:

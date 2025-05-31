@@ -66,7 +66,7 @@ HOSTAPI_NAME = "Windows"                        # 'Windows' or 'ASIO' or 'DS' or
 HOSTAPI_INDEX = 3                               # 0 = Windows, 1 = ASIO, 2 = DS, 3 = WASAPI, 4 = WDM-KS
 
 # audio parameters:
-PRIMARY_SAMPLERATE = 96000                     # Audio sample rate
+PRIMARY_SAMPLERATE = 192000                     # Audio sample rate
 PRIMARY_BITDEPTH = 16                           # Audio bit depth
 PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 

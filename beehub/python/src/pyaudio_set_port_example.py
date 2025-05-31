@@ -1,6 +1,13 @@
 import pyaudio
 import platform
 
+sound_in_chs = 2
+sound_in_samplerate = 48000
+sound_in_bitdepth = 16
+#sound_in_format = "WAV"
+
+sound_in_id, sound_in_chs, sound_in_samplerate, sound_in_bitdepth, sound_in_format
+
 def set_sound_in_port():
     global sound_in_id, sound_in_chs, sound_in_samplerate, sound_in_bitdepth, sound_in_format, stream, p
     # Common parameters
