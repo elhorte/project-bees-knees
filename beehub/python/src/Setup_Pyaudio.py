@@ -87,7 +87,7 @@ class AudioPortManager:
     
     def list_audio_devices(self, api: Optional[str] = None) -> List[Dict]:
         """
-        List all available audio input devices, optionally filtered by API
+        List all available audio devices, optionally filtered by API
         
         Args:
             api: Audio API to filter by ('WASAPI', 'DirectSound', 'MME')
@@ -101,30 +101,71 @@ class AudioPortManager:
             try:
                 device_info = self.pa.get_device_info_by_index(i)
                 
-                # Only include input devices
-                if device_info['maxInputChannels'] > 0:
-                    # Get host API info
-                    host_api_info = self.pa.get_host_api_info_by_index(device_info['hostApi'])
-                    api_name = host_api_info['name']
-                    
-                    # Filter by API if specified
-                    if api and api.upper() not in api_name.upper():
-                        continue
-                    
-                    devices.append({
-                        'index': i,
-                        'name': device_info['name'],
-                        'channels': device_info['maxInputChannels'],
-                        'sample_rate': device_info['defaultSampleRate'],
-                        'api': api_name,
-                        'host_api_index': device_info['hostApi']
-                    })
+                # Get host API info
+                host_api_info = self.pa.get_host_api_info_by_index(device_info['hostApi'])
+                api_name = host_api_info['name']
+                
+                # Filter by API if specified
+                if api and api.upper() not in api_name.upper():
+                    continue
+                
+                # Include both input and output devices
+                devices.append({
+                    'index': i,
+                    'name': device_info['name'],
+                    'input_channels': device_info['maxInputChannels'],
+                    'output_channels': device_info['maxOutputChannels'],
+                    'default_sample_rate': device_info['defaultSampleRate'],
+                    'api': api_name,
+                    'host_api_index': device_info['hostApi'],
+                    'is_input': device_info['maxInputChannels'] > 0,
+                    'is_output': device_info['maxOutputChannels'] > 0
+                })
             except Exception as e:
                 print(f"Warning: Could not query device {i}: {e}")
                 continue
         
         return devices
-    
+
+    def print_device_list(self):
+        """Print a detailed list of all audio devices"""
+        print("\nAudio Device List")
+        print("=" * 80)
+        
+        # Get all devices
+        devices = self.list_audio_devices()
+        
+        # Sort devices by index
+        devices.sort(key=lambda x: x['index'])
+        
+        # Print devices in compact format
+        for device in devices:
+            # Format device name and API
+            name = device['name']
+            api = device['api']
+            
+            # Format channel counts
+            in_channels = device['input_channels']
+            out_channels = device['output_channels']
+            channel_info = f"({in_channels} in, {out_channels} out)"
+            
+            # Format the line
+            line = f"{device['index']:3d} {name}, {api} {channel_info}"
+            
+            # Add indicators for input/output devices
+            if device['is_input'] and device['is_output']:
+                line = f"<> {line}"
+            elif device['is_input']:
+                line = f">  {line}"
+            elif device['is_output']:
+                line = f"<  {line}"
+            else:
+                line = f"   {line}"
+            
+            print(line)
+        
+        print("\n" + "=" * 80)
+
     def test_device_configuration(self, device_index: int, sample_rate: int, 
                                 bit_depth: int = 16, channels: int = 2) -> bool:
         """
@@ -244,20 +285,21 @@ def main():
     print("=" * 60)
     print(f"Target Configuration: {target_sample_rate}Hz, {target_bit_depth}-bit")
     
+    # Print detailed device list
+    manager.print_device_list()
+    
     # Configure audio input
     success, device, achieved_rate, achieved_bits = manager.configure_audio_input()
     
     if success:
-        print("\n✓ Audio configuration successful!")
-        print(f"Device: {device['name']} ({device['api']})")
+        print("\nSuccessfully configured audio input:")
+        print(f"Device: [{device['index']}] {device['name']}")
+        print(f"API: {device['api']}")
         print(f"Sample Rate: {achieved_rate}Hz")
         print(f"Bit Depth: {achieved_bits}-bit")
     else:
-        print("\n✗ Failed to configure any audio device")
-        print("Please check your audio device connections and settings")
-    
-    # Clean up
-    manager.__del__()
+        print("\nFailed to configure audio input with target settings")
+        print("Please check your audio device configuration")
 
 # Additional utility functions for PyAudio-specific features
 

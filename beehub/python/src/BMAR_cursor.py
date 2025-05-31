@@ -180,6 +180,7 @@ elif sys.platform == 'win32' and not platform_manager.is_wsl():
 # audio interface info
 make_name = config.MAKE_NAME
 api_name = config.API_NAME
+device_id = config.DEVICE_ID
 
 # init recording varibles
 continuous_start_index = None
@@ -597,7 +598,7 @@ def print_all_input_devices():
 
 
 def set_input_device(model_name, api_name_preference):
-    global sound_in_id, sound_in_chs, testmode, sound_in_samplerate
+    global sound_in_id, sound_in_chs, testmode, sound_in_samplerate, device_id
 
     print("\nScanning for audio input devices...")
     sys.stdout.flush()
@@ -608,26 +609,12 @@ def set_input_device(model_name, api_name_preference):
         # Get all devices
         devices = sd.query_devices()
         
-        # Create a list of input devices with their IDs
-        input_devices = [(i, device) for i, device in enumerate(devices) 
-                        if device['max_input_channels'] > 0]
-        
-        # Sort by device ID in descending order
-        input_devices.sort(reverse=True, key=lambda x: x[0])
-        
-        print("\nTrying devices in descending order of ID...")
-        
-        # If make_name is specified, try those devices first
-        if make_name and make_name.strip():
-            print(f"\nLooking for devices matching make name: {make_name}")
-            matching_devices = [(i, device) for i, device in input_devices 
-                              if make_name.lower() in device['name'].lower()]
-            
-            if matching_devices:
-                print(f"Found {len(matching_devices)} devices matching make name")
-                # Try matching devices first
-                for device_id, device in matching_devices:
-                    print(f"\nTrying device [{device_id}]: {device['name']}")
+        # First try the specified device_id if it exists
+        if device_id is not None and device_id >= 0:
+            try:
+                device = sd.query_devices(device_id)
+                if device['max_input_channels'] > 0:
+                    print(f"\nTrying specified device [{device_id}]: {device['name']}")
                     print(f"  API: {sd.query_hostapis(index=device['hostapi'])['name']}")
                     print(f"  Max Channels: {device['max_input_channels']}")
                     print(f"  Default Sample Rate: {device['default_samplerate']} Hz")
@@ -640,7 +627,54 @@ def set_input_device(model_name, api_name_preference):
                                           dtype=_dtype) as stream:
                             # If we get here, the device works with our settings
                             sound_in_id = device_id
-                            print(f"\nSuccessfully configured device [{device_id}]")
+                            print(f"\nSuccessfully configured specified device [{device_id}]")
+                            print(f"Device Configuration:")
+                            print(f"  Sample Rate: {sound_in_samplerate} Hz")
+                            print(f"  Bit Depth: {config.PRIMARY_BITDEPTH} bits")
+                            print(f"  Channels: {sound_in_chs}")
+                            testmode = False
+                            return True
+                    except Exception as e:
+                        print(f"  Failed to configure specified device: {str(e)}")
+                        print("Falling back to device search...")
+                else:
+                    print(f"Specified device [{device_id}] is not an input device")
+                    print("Falling back to device search...")
+            except Exception as e:
+                print(f"Error accessing specified device [{device_id}]: {str(e)}")
+                print("Falling back to device search...")
+        
+        # Create a list of input devices with their IDs
+        input_devices = [(i, device) for i, device in enumerate(devices) 
+                        if device['max_input_channels'] > 0]
+        
+        # Sort by device ID in descending order
+        input_devices.sort(reverse=True, key=lambda x: x[0])
+        
+        # If make_name is specified, try those devices first
+        if make_name and make_name.strip():
+            print(f"\nLooking for devices matching make name: {make_name}")
+            matching_devices = [(i, device) for i, device in input_devices 
+                              if make_name.lower() in device['name'].lower()]
+            
+            if matching_devices:
+                print(f"Found {len(matching_devices)} devices matching make name")
+                # Try matching devices first
+                for dev_id, device in matching_devices:
+                    print(f"\nTrying device [{dev_id}]: {device['name']}")
+                    print(f"  API: {sd.query_hostapis(index=device['hostapi'])['name']}")
+                    print(f"  Max Channels: {device['max_input_channels']}")
+                    print(f"  Default Sample Rate: {device['default_samplerate']} Hz")
+                    
+                    try:
+                        # Try to open a stream with our desired settings
+                        with sd.InputStream(device=dev_id, 
+                                          channels=sound_in_chs,
+                                          samplerate=sound_in_samplerate,
+                                          dtype=_dtype) as stream:
+                            # If we get here, the device works with our settings
+                            sound_in_id = dev_id
+                            print(f"\nSuccessfully configured device [{dev_id}]")
                             print(f"Device Configuration:")
                             print(f"  Sample Rate: {sound_in_samplerate} Hz")
                             print(f"  Bit Depth: {config.PRIMARY_BITDEPTH} bits")
@@ -656,21 +690,21 @@ def set_input_device(model_name, api_name_preference):
                 print("Falling back to trying all devices...")
         
         # Try all devices if no matching devices were found or if make_name was empty
-        for device_id, device in input_devices:
-            print(f"\nTrying device [{device_id}]: {device['name']}")
+        for dev_id, device in input_devices:
+            print(f"\nTrying device [{dev_id}]: {device['name']}")
             print(f"  API: {sd.query_hostapis(index=device['hostapi'])['name']}")
             print(f"  Max Channels: {device['max_input_channels']}")
             print(f"  Default Sample Rate: {device['default_samplerate']} Hz")
             
             try:
                 # Try to open a stream with our desired settings
-                with sd.InputStream(device=device_id, 
+                with sd.InputStream(device=dev_id, 
                                   channels=sound_in_chs,
                                   samplerate=sound_in_samplerate,
                                   dtype=_dtype) as stream:
                     # If we get here, the device works with our settings
-                    sound_in_id = device_id
-                    print(f"\nSuccessfully configured device [{device_id}]")
+                    sound_in_id = dev_id
+                    print(f"\nSuccessfully configured device [{dev_id}]")
                     print(f"Device Configuration:")
                     print(f"  Sample Rate: {sound_in_samplerate} Hz")
                     print(f"  Bit Depth: {config.PRIMARY_BITDEPTH} bits")
@@ -2033,15 +2067,6 @@ def setup_audio_circular_buffer():
     sys.stdout.flush()
 
 def recording_worker_thread(record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
-    #
-    # recording_period is the length of time to record in seconds
-    # interval is the time between recordings in seconds if > 0
-    # thread_id is a string to label the thread
-    # file_format is the format in which to save the audio file
-    # target_sample_rate is the sample rate in which to save the audio file
-    # start_tod is the time of day to start recording, if 'None', record continuously
-    # end_tod is the time of day to stop recording, if start_tod == None, ignore & record continuously
-    #
     global buffer, buffer_size, buffer_index, stop_recording_event, _subtype
 
     if start_tod is None:
@@ -2059,6 +2084,10 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
             # wait PERIOD seconds to accumulate audio
             interruptable_sleep(record_period, stop_recording_event)
 
+            # Check if we're shutting down before saving
+            if stop_recording_event.is_set():
+                break
+
             period_end_index = buffer_index 
             save_start_index = period_start_index % buffer_size
             save_end_index = period_end_index % buffer_size
@@ -2072,6 +2101,10 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
             if target_sample_rate < sound_in_samplerate:
                 # resample to lower sample rate
                 audio_data = downsample_audio(audio_data, sound_in_samplerate, target_sample_rate)
+
+            # Check if we're shutting down before saving
+            if stop_recording_event.is_set():
+                break
 
             timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             output_filename = f"{timestamp}_{thread_id}_{record_period}_{interval}_{config.LOCATION_ID}_{config.HIVE_ID}.{file_format.lower()}"
@@ -2346,6 +2379,8 @@ def keyboard_listener():
                         change_monitor_channel()
                     elif key == "d":  
                         show_audio_device_list()
+                    elif key == "D":  
+                        show_detailed_device_list()
                     elif key == "f":  
                         try:
                             trigger_fft()
@@ -2382,7 +2417,8 @@ def keyboard_listener():
 def show_list_of_commands():
     print("\na  audio pathway--check for over/underflows")
     print("c  channel--select channel to monitor, either before or during use of vu or intercom, '0' to exit")
-    print("d  device list--show list of devices")
+    print("d  detailed device in use data")
+    print("D  show all devices with active input/output indicator")
     print("f  fft--show plot")
     print("i  intercom: press i then press 1, 2, 3, ... to listen to that channel")
     print("m  mic--show active positions")
@@ -2393,6 +2429,40 @@ def show_list_of_commands():
     print("v  vu meter--toggle--show vu meter on cli")
     print("^  toggle keyboard listener on/off")
     print("h or ?  show list of commands\n")
+
+def show_detailed_device_list():
+    """Display a detailed list of all audio devices with input/output indicators."""
+    print("\nAudio Device List:")
+    print("-" * 80)
+    
+    devices = sd.query_devices()
+    for i, device in enumerate(devices):
+        # Get API name
+        hostapi_info = sd.query_hostapis(index=device['hostapi'])
+        api_name = hostapi_info['name']
+        
+        # Determine if device is input, output, or both
+        in_channels = device['max_input_channels']
+        out_channels = device['max_output_channels']
+        
+        # Create prefix based on device type and whether it's the active device
+        if i == sound_in_id and in_channels > 0:
+            prefix = ">"
+        elif i == sound_out_id and out_channels > 0:
+            prefix = "<"
+        else:
+            prefix = " "
+            
+        # Format the device name to fit in 40 characters
+        device_name = device['name']
+        if len(device_name) > 40:
+            device_name = device_name[:37] + "..."
+            
+        # Print the device information
+        print(f"{prefix} {i:2d} {device_name:<40} {api_name} ({in_channels} in, {out_channels} out)")
+    
+    print("-" * 80)
+    sys.stdout.flush()
 
 ###########################
 ########## MAIN ###########
@@ -2641,7 +2711,6 @@ def stop_all():
     """Stop all processes and threads."""
     global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc, keyboard_listener_running
     print("Stopping all processes...\r")
-    #sys.stdout.flush()
     
     # Set all stop events
     stop_program[0] = True
@@ -2684,17 +2753,20 @@ def stop_all():
                     pass
 
     print("\nAll processes and threads stopped\r")
-    #sys.stdout.flush()
 
 def cleanup():
     """Clean up and exit."""
     print("Cleaning up...\r")
-    #sys.stdout.flush()
     
     try:
+        # Set stop flags to prevent any new recordings
+        stop_program[0] = True
+        stop_recording_event.set()
+        
+        # Stop all processes and threads
         stop_all()
         
-        # Platform-specific terminal cleanup - works on all platforms now
+        # Platform-specific terminal cleanup
         try:
             # Reset terminal settings safely
             safe_stty('sane')
@@ -2708,7 +2780,6 @@ def cleanup():
     
     # Force exit after cleanup
     print("Exiting...", end='\r\n', flush=True)
-    #sys.stdout.flush()
     os._exit(0)
 
 def safe_stty(command):

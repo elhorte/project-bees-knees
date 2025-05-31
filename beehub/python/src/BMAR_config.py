@@ -64,6 +64,7 @@ DEVICE_NAME = 'UAC'                             # 'UAC' or 'USB'
 API_NAME = "WASAPI"                             # 'MME' or 'WASAPI' or 'ASIO' or 'DS'  
 HOSTAPI_NAME = "Windows"                        # 'Windows' or 'ASIO' or 'DS' or 'WDM-KS'
 HOSTAPI_INDEX = 3                               # 0 = Windows, 1 = ASIO, 2 = DS, 3 = WASAPI, 4 = WDM-KS
+DEVICE_ID = 12
 
 # audio parameters:
 PRIMARY_SAMPLERATE = 192000                     # Audio sample rate
