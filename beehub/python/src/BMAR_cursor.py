@@ -70,6 +70,8 @@ class PlatformManager:
     _os_info = None
     _keyboard_info = None
     _msvcrt = None
+    _termios = None
+    _tty = None
     
     def __new__(cls):
         if cls._instance is None:
@@ -147,35 +149,38 @@ class PlatformManager:
                 self._msvcrt = msvcrt
                 print("Using Windows keyboard handling (msvcrt)")
                 self._keyboard_info = "Windows"
-            elif self.is_macos():
-                self._msvcrt = None
-                print("Using macOS keyboard handling")
-                self._keyboard_info = "macOS"
+            elif self.is_macos() or (sys.platform != 'win32' and not self.is_wsl()):
+                try:
+                    import termios
+                    import tty
+                    self._termios = termios
+                    self._tty = tty
+                    print("Using Unix keyboard handling (termios)")
+                    self._keyboard_info = "Unix"
+                except ImportError:
+                    print("Warning: termios module not available. Some keyboard functionality may be limited.", end='\r\n', flush=True)
+                    self._keyboard_info = "Limited"
             else:
                 self._msvcrt = None
-                print("Using Linux keyboard handling")
-                self._keyboard_info = "Linux"
+                print("Using limited keyboard handling")
+                self._keyboard_info = "Limited"
     
     @property
     def msvcrt(self):
         return self._msvcrt
+        
+    @property
+    def termios(self):
+        return self._termios
+        
+    @property
+    def tty(self):
+        return self._tty
 
 # Create global platform manager instance
 platform_manager = PlatformManager()
 # Initialize platform at startup
 platform_manager.initialize()
-
-# Now that we've properly detected the platform, import platform-specific modules
-if platform_manager.is_macos() or (sys.platform != 'win32' and not platform_manager.is_wsl()):
-    # For macOS and Linux systems
-    try:
-        import termios
-        import tty
-    except ImportError:
-        print("Warning: termios module not available. Some keyboard functionality may be limited.", end='\r\n', flush=True)
-elif sys.platform == 'win32' and not platform_manager.is_wsl():
-    # Windows-specific imports (if any needed in the future)
-    pass
 
 # audio interface info
 make_name = config.MAKE_NAME
@@ -437,10 +442,9 @@ def reset_terminal():
             return
             
         # For Unix-like systems (macOS and Linux)
-        try:
-            import termios
+        if platform_manager.termios is not None:
             # Reset terminal settings
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, termios.tcgetattr(sys.stdin))
+            platform_manager.termios.tcsetattr(sys.stdin, platform_manager.termios.TCSADRAIN, platform_manager.termios.tcgetattr(sys.stdin))
             
             # Reset terminal modes without clearing screen
             safe_stty('sane')
@@ -450,9 +454,6 @@ def reset_terminal():
             
             # Reset keyboard mode
             safe_stty('-raw -echo')
-        except ImportError:
-            # Fallback if termios isn't available
-            pass
             
         # Flush stdout to ensure all output is displayed
         sys.stdout.flush()
@@ -487,26 +488,17 @@ def get_key():
                 except ImportError:
                     print("Warning: msvcrt module not available on this Windows system", end='\r\n', flush=True)
                 return None
-            elif platform_manager.is_macos() or sys.platform.startswith('linux'):
+            elif platform_manager.termios is not None and platform_manager.tty is not None:
                 # Use termios for macOS and Linux
+                old_settings = platform_manager.termios.tcgetattr(sys.stdin)
                 try:
-                    import termios
-                    import tty
-                    
-                    old_settings = termios.tcgetattr(sys.stdin)
-                    try:
-                        tty.setraw(sys.stdin.fileno())
-                        if select.select([sys.stdin], [], [], 0.1)[0]:
-                            key = sys.stdin.read(1)
-                            return key
-                        return None
-                    finally:
-                        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-                except ImportError:
-                    # Fallback if termios is not available
+                    platform_manager.tty.setraw(sys.stdin.fileno())
                     if select.select([sys.stdin], [], [], 0.1)[0]:
-                        return sys.stdin.read(1)
+                        key = sys.stdin.read(1)
+                        return key
                     return None
+                finally:
+                    platform_manager.termios.tcsetattr(sys.stdin, platform_manager.termios.TCSADRAIN, old_settings)
             else:
                 # Fallback for other platforms
                 if select.select([sys.stdin], [], [], 0.1)[0]:
@@ -818,17 +810,14 @@ def clear_input_buffer():
             print(f"Warning: Could not clear input buffer: {e}")
     else:
         # For macOS and Linux/WSL
-        try:
-            # Using select and tty for Unix-like systems
-            import termios, tty, select
-            
+        if platform_manager.termios is not None and platform_manager.tty is not None:
             fd = sys.stdin.fileno()
             try:
                 # Save old terminal settings
-                old_settings = termios.tcgetattr(fd)
+                old_settings = platform_manager.termios.tcgetattr(fd)
                 
                 # Set non-blocking mode
-                tty.setraw(fd, termios.TCSANOW)
+                platform_manager.tty.setraw(fd, platform_manager.termios.TCSANOW)
                 
                 # Read all pending input
                 while select.select([sys.stdin], [], [], 0)[0]:
@@ -841,10 +830,10 @@ def clear_input_buffer():
             finally:
                 # Restore settings
                 try:
-                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                    platform_manager.termios.tcsetattr(fd, platform_manager.termios.TCSADRAIN, old_settings)
                 except Exception as e:
                     print(f"Warning during terminal reset: {e}")
-        except Exception as e:
+        else:
             # Silent fail or fallback - do NOT use stty on Windows
             if not sys.platform == 'win32':
                 try:
