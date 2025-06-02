@@ -2,4 +2,4 @@ _archive/
 *.pyc
 *Period_recording*
 .venv
-/beehub/python/src/auntbee
+*auntbee/
