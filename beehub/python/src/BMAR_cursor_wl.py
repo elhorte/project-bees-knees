@@ -2009,7 +2009,9 @@ def check_wsl_audio():
         return False
 
 def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_queue, asterisks):
-    buffer = np.zeros((int(sound_in_samplerate),))
+    # Ensure sample rate is an integer for buffer size calculation
+    buffer_size = int(sound_in_samplerate)
+    buffer = np.zeros(buffer_size)
     last_print = ""
     
     # Validate the channel is valid for the device
@@ -2054,7 +2056,7 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
                 with sd.InputStream(callback=callback_input,
                                   device=None,  # Use system default
                                   channels=1,   # Use mono
-                                  samplerate=44100,  # Use standard rate
+                                  samplerate=48000,  # Use standard rate
                                   blocksize=1024,    # Use smaller block size
                                   latency='low'):
                     while not stop_vu_queue.get():
@@ -2065,14 +2067,28 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
                 raise
         else:
             # Make sure we request at least as many channels as our selected channel
-            with sd.InputStream(callback=callback_input,
-                              device=sound_in_id,
-                              channels=sound_in_chs,
-                              samplerate=sound_in_samplerate,
-                              blocksize=1024,    # Use smaller block size
-                              latency='low'):
-                while not stop_vu_queue.get():
-                    sd.sleep(0.1)
+            # Ensure all parameters are integers for Windows compatibility
+            try:
+                device_id = int(sound_in_id) if sound_in_id is not None else None
+                num_channels = int(sound_in_chs)
+                sample_rate = int(sound_in_samplerate)
+                
+                print(f"VU meter parameters: device={device_id}, channels={num_channels}, rate={sample_rate}")
+                
+                with sd.InputStream(callback=callback_input,
+                                  device=device_id,
+                                  channels=num_channels,
+                                  samplerate=sample_rate,
+                                  blocksize=1024,    # Use smaller block size
+                                  latency='low'):
+                    while not stop_vu_queue.get():
+                        sd.sleep(0.1)
+            except ValueError as ve:
+                print(f"\nError converting parameters to integers: {ve}")
+                print(f"sound_in_id={sound_in_id} (type: {type(sound_in_id)})")
+                print(f"sound_in_chs={sound_in_chs} (type: {type(sound_in_chs)})")
+                print(f"sound_in_samplerate={sound_in_samplerate} (type: {type(sound_in_samplerate)})")
+                raise
     except Exception as e:
         print(f"\nError in VU meter: {e}")
     finally:
