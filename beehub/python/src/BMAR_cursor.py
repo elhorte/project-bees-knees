@@ -57,6 +57,10 @@ import pyaudio
 #import queue
 import Setup_Pyaudio as set_port
 import gc
+import psutil
+import termios
+import fcntl
+import struct
 
 # Platform-specific modules will be imported after platform detection
 
@@ -178,9 +182,13 @@ elif sys.platform == 'win32' and not platform_manager.is_wsl():
     pass
 
 # audio interface info
-make_name = config.MAKE_NAME
-api_name = config.API_NAME
-device_id = config.DEVICE_ID
+make_name = None
+model_name = None
+device_name = None
+api_name = None
+hostapi_name = None
+hostapi_index = None
+device_id = None
 
 # init recording varibles
 continuous_start_index = None
@@ -299,14 +307,38 @@ if platform_manager.is_macos():
     data_drive = os.path.expanduser(config.mac_data_drive)  # Expand ~ if present
     data_path = config.mac_data_path
     folders = config.mac_data_folders
+    # macOS audio device settings
+    make_name = config.MACOS_MAKE_NAME
+    model_name = config.MACOS_MODEL_NAME
+    device_name = config.MACOS_DEVICE_NAME
+    api_name = config.MACOS_API_NAME
+    hostapi_name = config.MACOS_HOSTAPI_NAME
+    hostapi_index = config.MACOS_HOSTAPI_INDEX
+    device_id = config.MACOS_DEVICE_ID
 elif sys.platform == 'win32':
     data_drive = config.win_data_drive
     data_path = config.win_data_path
     folders = config.win_data_folders
+    # Windows audio device settings
+    make_name = config.WINDOWS_MAKE_NAME
+    model_name = config.WINDOWS_MODEL_NAME
+    device_name = config.WINDOWS_DEVICE_NAME
+    api_name = config.WINDOWS_API_NAME
+    hostapi_name = config.WINDOWS_HOSTAPI_NAME
+    hostapi_index = config.WINDOWS_HOSTAPI_INDEX
+    device_id = config.WINDOWS_DEVICE_ID
 else:  # Linux or other Unix-like
     data_drive = os.path.expanduser(config.linux_data_drive)  # Expand ~ if present
     data_path = config.linux_data_path
     folders = config.linux_data_folders
+    # Linux audio device settings
+    make_name = config.LINUX_MAKE_NAME
+    model_name = config.LINUX_MODEL_NAME
+    device_name = config.LINUX_DEVICE_NAME
+    api_name = config.LINUX_API_NAME
+    hostapi_name = config.LINUX_HOSTAPI_NAME
+    hostapi_index = config.LINUX_HOSTAPI_INDEX
+    device_id = config.LINUX_DEVICE_ID
 
 # to be discovered from sounddevice.query_devices()
 sound_in_id = 1                             # id of input device, set as default in case none is detected
@@ -592,13 +624,13 @@ def print_all_input_devices():
         if device['max_input_channels'] > 0:
             hostapi_info = sd.query_hostapis(index=device['hostapi'])
             api_name = hostapi_info['name']
-            print(f"  [{i}] {device['name']} (API: {api_name}) | MaxCh: {device['max_input_channels']} | Default SR: {device['default_samplerate']} Hz")
+            print(f"  [{i}] {device['name']} (API: {api_name}) | MaxCh: {device['max_input_channels']} | Default SR: {int(device['default_samplerate'])} Hz")
     print()
     sys.stdout.flush()
 
 
-def set_input_device(model_name, api_name_preference):
-    global sound_in_id, sound_in_chs, testmode, sound_in_samplerate, device_id
+def set_input_device(model_name_arg, api_name_preference):
+    global sound_in_id, sound_in_chs, testmode, sound_in_samplerate, device_id, make_name, model_name, device_name, api_name, hostapi_name, hostapi_index
 
     print("\nScanning for audio input devices...")
     sys.stdout.flush()
@@ -1149,108 +1181,253 @@ def get_default_output_device():
     return None
 
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
-def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs): 
+def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs, queue): 
     try:
-        # Verify device and channel configuration
-        device_info = sd.query_devices(sound_in_id)
-        max_channels = device_info['max_input_channels']
+        # Force garbage collection before starting
+        gc.collect()
         
-        # If requested channels exceed device capabilities, adjust
-        if sound_in_chs > max_channels:
-            print(f"Warning: Device only supports {max_channels} channels, adjusting from {sound_in_chs}")
-            actual_channels = max_channels
-        else:
-            actual_channels = sound_in_chs
+        # Use non-interactive backend for plotting
+        plt.switch_backend('agg')
             
-        # Ensure at least 1 channel
-        actual_channels = max(1, actual_channels)
+        # Initialize PyAudio
+        p = pyaudio.PyAudio()
         
-        # Record audio
-        print(f"Recording audio for oscilloscope traces using {actual_channels} channel(s)")
-        o_recording = sd.rec(int(sound_in_samplerate * TRACE_DURATION), 
-                           samplerate=sound_in_samplerate, 
-                           channels=actual_channels, 
-                           device=sound_in_id)
-        sd.wait()  # Wait until recording is finished
-        print("Recording oscope finished.")
-    
+        try:
+            # Get device info
+            device_info = p.get_device_info_by_index(sound_in_id)
+            max_channels = int(device_info['maxInputChannels'])
+            
+            # If requested channels exceed device capabilities, adjust
+            if sound_in_chs > max_channels:
+                print(f"Warning: Device only supports {max_channels} channels, adjusting from {sound_in_chs}")
+                actual_channels = max_channels
+            else:
+                actual_channels = sound_in_chs
+                
+            # Ensure at least 1 channel
+            actual_channels = max(1, actual_channels)
+            
+            # Record audio
+            print(f"Recording audio for oscilloscope traces using {actual_channels} channel(s)")
+            
+            # Calculate number of frames needed
+            num_frames = int(sound_in_samplerate * TRACE_DURATION)
+            chunk_size = 4096  # Reduced chunk size for better reliability
+            
+            # Create the recording array
+            recording = np.zeros((num_frames, actual_channels), dtype=np.float32)
+            frames_recorded = 0
+            recording_complete = False
+            
+            def callback(in_data, frame_count, time_info, status):
+                nonlocal frames_recorded, recording_complete
+                try:
+                    if status:
+                        print(f"Stream status: {status}")
+                    if frames_recorded < num_frames and not recording_complete:
+                        data = np.frombuffer(in_data, dtype=np.float32)
+                        if len(data) > 0:
+                            start_idx = frames_recorded
+                            end_idx = min(start_idx + len(data) // actual_channels, num_frames)
+                            data = data.reshape(-1, actual_channels)
+                            recording[start_idx:end_idx] = data[:(end_idx - start_idx)]
+                            frames_recorded += len(data) // actual_channels
+                            if frames_recorded >= num_frames:
+                                recording_complete = True
+                                return (None, pyaudio.paComplete)
+                            elif frames_recorded % (chunk_size * 10) == 0:
+                                print(f"Recording progress: {frames_recorded}/{num_frames} frames ({frames_recorded/num_frames*100:.1f}%)", end='\r')
+                    return (None, pyaudio.paContinue)
+                except Exception as e:
+                    print(f"Error in callback: {e}")
+                    return (None, pyaudio.paComplete)
+            
+            # Open stream using callback
+            stream = p.open(format=pyaudio.paFloat32,
+                          channels=actual_channels,
+                          rate=int(sound_in_samplerate),
+                          input=True,
+                          input_device_index=sound_in_id,
+                          frames_per_buffer=chunk_size,
+                          stream_callback=callback)
+            
+            print("Stream opened successfully")
+            stream.start_stream()
+            
+            # Wait until we have recorded enough frames, received stop signal, or timed out
+            start_time = time.time()
+            timeout = TRACE_DURATION + 10  # Increased timeout buffer
+            
+            # Keep recording until one of these conditions is met:
+            # 1. We've recorded all frames
+            # 2. We've received a stop signal (queue has data)
+            # 3. We've hit the timeout
+            while frames_recorded < num_frames and queue.empty() and (time.time() - start_time) < timeout:
+                if recording_complete:
+                    break
+                print(f"Recording progress: {frames_recorded}/{num_frames} frames ({frames_recorded/num_frames*100:.1f}%)", end='\r')
+                time.sleep(0.1)  # Increased sleep time to reduce CPU usage
+            
+            # Stop and close stream
+            stream.stop_stream()
+            stream.close()
+            
+            print("\nRecording oscope finished.")
+            print(f"Recorded {frames_recorded} of {num_frames} frames ({frames_recorded/num_frames*100:.1f}%)")
+            
+            # Only process if we got enough data
+            if frames_recorded < num_frames * 0.9:  # Allow for small missing chunks
+                print(f"Warning: Recording incomplete - only got {frames_recorded}/{num_frames} frames")
+                return
+                
+            # Apply gain if needed
+            if OSCOPE_GAIN_DB > 0:
+                gain = 10 ** (OSCOPE_GAIN_DB / 20)      
+                print(f"Applying gain of: {gain:.1f}") 
+                recording *= gain
+
+            print("Creating plot...")
+            # Create figure with reduced DPI for better performance
+            fig = plt.figure(figsize=(10, 3 * actual_channels), dpi=80)
+            
+            # Optimize plotting by downsampling for display
+            downsample_factor = max(1, len(recording) // 5000)  # Limit points to ~5k for better performance
+            time_points = np.arange(0, len(recording), downsample_factor) / sound_in_samplerate
+            
+            # Plot each channel
+            for i in range(actual_channels):
+                ax = plt.subplot(actual_channels, 1, i+1)
+                ax.plot(time_points, recording[::downsample_factor, i], linewidth=0.5)
+                ax.set_title(f"Oscilloscope Traces w/{OSCOPE_GAIN_DB}dB Gain--Ch{i+1}")
+                ax.set_xlabel('Time (seconds)')
+                ax.set_ylim(-1.0, 1.0)
+                # Remove unnecessary grid and ticks for better performance
+                ax.grid(False)
+                ax.tick_params(axis='both', which='both', labelsize=8)
+            
+            plt.tight_layout()
+
+            # Save the plot
+            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_oscope_{int(sound_in_samplerate/1000)}_kHz_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
+            print("\nSaving oscilloscope plot to:", plotname)
+            
+            # Make sure the directory exists
+            os.makedirs(os.path.dirname(plotname), exist_ok=True)
+            
+            # Display the expanded path
+            expanded_path = os.path.abspath(os.path.expanduser(plotname))
+            print(f"Absolute path: {expanded_path}")
+            
+            # Save with optimized settings
+            print("Saving figure...")
+            plt.savefig(expanded_path, dpi=80, bbox_inches='tight', pad_inches=0.1, format='png')
+            print("Plot saved successfully")
+            plt.close('all')  # Close all figures
+
+            # Open the saved image based on OS
+            try:
+                if platform_manager.is_wsl():
+                    print("Opening image in WSL...")
+                    try:
+                        subprocess.run(['xdg-open', expanded_path], check=True, timeout=5)
+                    except FileNotFoundError:
+                        subprocess.run(['wslview', expanded_path], check=True, timeout=5)
+                elif platform_manager.is_macos():
+                    print("Opening image in macOS...")
+                    subprocess.run(['open', expanded_path], check=True, timeout=5)
+                elif sys.platform == 'win32':
+                    print("Opening image in Windows...")
+                    os.startfile(expanded_path)
+                else:
+                    print("Opening image in Linux...")
+                    subprocess.run(['xdg-open', expanded_path], check=True, timeout=5)
+                print("Image viewer command executed")
+            except subprocess.TimeoutExpired:
+                print("Warning: Image viewer command timed out, but image was saved")
+            except Exception as e:
+                print(f"Could not open image viewer: {e}")
+                print(f"Image saved at: {expanded_path}")
+                
+        except Exception as e:
+            print(f"Error in recording: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # Clean up PyAudio
+            try:
+                p.terminate()
+            except:
+                pass
+            
     except Exception as e:
         print(f"Error in oscilloscope recording: {e}")
-        # Create dummy data if recording fails
-        print("Creating dummy data for visualization")
-        sample_count = int(sound_in_samplerate * TRACE_DURATION)
-        o_recording = np.zeros((sample_count, max(1, min(sound_in_chs, 2))))
-        return
+        import traceback
+        traceback.print_exc()
+    finally:
+        # Ensure cleanup happens
+        try:
+            plt.close('all')
+            gc.collect()
+        except:
+            pass
 
-    if OSCOPE_GAIN_DB > 0:
-        gain = 10 ** (OSCOPE_GAIN_DB / 20)      
-        print(f"applying gain of: {gain:.1f}") 
-        o_recording *= gain
-
-    plt.figure(figsize=(10, 3 * sound_in_chs))
-    # Plot number of channels
-    for i in range(sound_in_chs):
-        plt.subplot(sound_in_chs, 1, i+1)
-        plt.plot(o_recording[:, i])
-        plt.title(f"Oscilloscope Traces w/{OSCOPE_GAIN_DB}dB Gain--Ch{i+1}")
-        plt.ylim(-1.0, 1.0)
-    plt.tight_layout()
-
-    # Save the plot
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    # Create a descriptive filename with timestamp and details but no redundant date info
-    plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_oscope_{sound_in_samplerate/1000:.0F}_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
-    print("\nSaving oscilloscope plot to:", plotname)
-    
+def trigger_oscope():
+    """Trigger oscilloscope plot generation with proper cleanup."""
     try:
-        # Make sure the directory exists
-        os.makedirs(os.path.dirname(plotname), exist_ok=True)
+        # Clean up any existing process
+        cleanup_process('o')
+        clear_input_buffer()
         
-        # Display the expanded path
-        expanded_path = os.path.abspath(os.path.expanduser(plotname))
-        print(f"Absolute path: {expanded_path}")
+        # Create a queue for communication
+        stop_queue = multiprocessing.Queue()
         
-        plt.savefig(expanded_path, dpi=150)
-        print("Plot saved successfully")
-    except Exception as e:
-        print(f"Error saving plot: {e}")
-        return
+        # Create and configure the process
+        oscope_process = multiprocessing.Process(
+            target=plot_oscope, 
+            args=(sound_in_samplerate, sound_in_id, sound_in_chs, stop_queue)
+        )
         
-    plt.close()  # Close the figure instead of showing it
-
-    # Open the saved image in the system's default image viewer
-    try:
-        if platform_manager.is_wsl():
-            print("Attempting to open image in WSL...")
-            # For WSL, use xdg-open if available, otherwise use wslview
+        # Set process as daemon
+        oscope_process.daemon = True
+        
+        # Store in active processes
+        active_processes['o'] = oscope_process
+        
+        print("Starting oscilloscope process...")
+        # Start the process
+        oscope_process.start()
+        
+        # Wait for completion with timeout
+        timeout = TRACE_DURATION + 15  # Reduced timeout to be more responsive
+        oscope_process.join(timeout=timeout)
+        
+        # Check if process is still running
+        if oscope_process.is_alive():
+            print("\nOscilloscope process taking too long, terminating...")
             try:
-                print("Trying xdg-open...")
-                subprocess.Popen(['xdg-open', expanded_path])
-            except FileNotFoundError:
-                print("xdg-open not found, trying wslview...")
-                subprocess.Popen(['wslview', expanded_path])
-        elif platform_manager.is_macos():
-            print("Attempting to open image in macOS...")
-            # For macOS
-            subprocess.Popen(['open', expanded_path])
-        else:
-            print("Attempting to open image in Windows...")
-            # For Windows, use start command instead of os.startfile
-            subprocess.Popen(['start', '', expanded_path], shell=True)
-        print("Image viewer command executed")
+                # Signal the process to stop
+                stop_queue.put(True)
+                # Give it a moment to clean up
+                time.sleep(1)
+                # Then terminate if still running
+                if oscope_process.is_alive():
+                    oscope_process.terminate()
+                    oscope_process.join(timeout=2)
+                    if oscope_process.is_alive():
+                        oscope_process.kill()
+            except Exception as e:
+                print(f"Error terminating oscilloscope process: {e}")
+        
     except Exception as e:
-        print(f"Could not open image viewer: {e}")
-        print(f"Image saved at: {plotname}")
-        print(f"Please check if the file exists: {os.path.exists(plotname)}")
-
-# Add near the top with other global variables
-active_processes = {
-    'v': None,  # VU meter
-    'o': None,  # Oscilloscope
-    's': None,  # Spectrogram 
-    'f': None,  # FFT
-    'i': None   # Intercom
-}
+        print(f"Error in trigger_oscope: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # Always ensure cleanup
+        cleanup_process('o')
+        clear_input_buffer()
+        print("Oscilloscope process completed")
 
 def cleanup_process(command):
     """Clean up a specific command's process."""
@@ -1276,132 +1453,19 @@ def cleanup_process(command):
     except Exception as e:
         print(f"Error in cleanup_process for command '{command}': {e}")
 
-def trigger_oscope():
-    cleanup_process('o')  # Clean up any existing process
-    clear_input_buffer()
-    active_processes['o'] = multiprocessing.Process(target=plot_oscope, args=(sound_in_samplerate, sound_in_id, sound_in_chs))
-    active_processes['o'].start()
-    clear_input_buffer()  
-    active_processes['o'].join()
-    cleanup_process('o')
-    print("exit oscope")
-
-# single-shot fft plot of audio
-def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel):
-    try:
-        N = sound_in_samplerate * FFT_DURATION  # Number of samples
-        # Convert gain from dB to linear scale
-        gain = 10 ** (FFT_GAIN / 20)
-        
-        # Verify device and channel configuration
-        device_info = sd.query_devices(sound_in_id)
-        max_channels = device_info['max_input_channels']
-        
-        # If requested channels exceed device capabilities, adjust
-        if sound_in_chs > max_channels:
-            print(f"Warning: Device only supports {max_channels} channels, adjusting from {sound_in_chs}")
-            actual_channels = max_channels
-        else:
-            actual_channels = sound_in_chs
-            
-        # Ensure channel index is valid
-        if channel >= actual_channels:
-            print(f"Warning: Channel {channel+1} not available, using channel 1")
-            monitor_channel = 0
-        else:
-            monitor_channel = channel
-            
-        # Record audio
-        print(f"Recording audio for FFT on channel {monitor_channel+1} of {actual_channels}")
-        all_channels_audio = sd.rec(int(N), samplerate=sound_in_samplerate, channels=actual_channels, device=sound_in_id)
-        sd.wait()  # Wait until recording is finished
-        
-        # Extract the requested channel
-        single_channel_audio = all_channels_audio[:, monitor_channel]
-        single_channel_audio *= gain
-        print("Recording fft finished.")
-
-        # Perform FFT
-        yf = rfft(single_channel_audio.flatten())
-        xf = rfftfreq(N, 1 / sound_in_samplerate)
-
-        # Define bucket width
-        bucket_width = FFT_BW  # Hz
-        bucket_size = int(bucket_width * N / sound_in_samplerate)  # Number of indices per bucket
-
-        # Average buckets
-        buckets = np.array([yf[i:i + bucket_size].mean() for i in range(0, len(yf), bucket_size)])
-        bucket_freqs = np.array([xf[i:i + bucket_size].mean() for i in range(0, len(xf), bucket_size)])
-
-        # Plot results
-        plt.figure(figsize=(10, 6))
-        plt.plot(bucket_freqs, np.abs(buckets))
-        plt.xlabel('Frequency (Hz)')
-        plt.ylabel('Amplitude')
-        plt.title('FFT Plot monitoring ch: ' + str(channel + 1) + ' of ' + str(sound_in_chs) + ' channels')
-        plt.grid(True)
-
-        # Save the plot
-        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_fft_{sound_in_samplerate/1000:.0F}_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
-        print("\nSaving FFT plot to:", plotname)
-        
-        # Make sure the directory exists
-        os.makedirs(os.path.dirname(plotname), exist_ok=True)
-        
-        # Display the expanded path
-        expanded_path = os.path.abspath(os.path.expanduser(plotname))
-        print(f"Absolute path: {expanded_path}")
-        
-        plt.savefig(expanded_path, dpi=150)
-        print("Plot saved successfully")
-        plt.close()  # Close the figure instead of showing it
-
-        # Open the saved image in the system's default image viewer
-        try:
-            if platform_manager.is_wsl():
-                print("Attempting to open image in WSL...")
-                try:
-                    print("Trying xdg-open...")
-                    subprocess.Popen(['xdg-open', expanded_path])
-                except FileNotFoundError:
-                    print("xdg-open not found, trying wslview...")
-                    subprocess.Popen(['wslview', expanded_path])
-            elif platform_manager.is_macos():
-                print("Attempting to open image in macOS...")
-                subprocess.Popen(['open', expanded_path])
-            else:
-                print("Attempting to open image in Windows...")
-                # For Windows, use start command instead of os.startfile
-                subprocess.Popen(['start', '', expanded_path], shell=True)
-            print("Image viewer command executed")
-        except Exception as e:
-            print(f"Could not open image viewer: {e}")
-            print(f"Image saved at: {plotname}")
-            print(f"Please check if the file exists: {os.path.exists(plotname)}")
-        
-    except Exception as e:
-        print(f"Error in plot_fft: {e}")
-    finally:
-        plt.close('all')  # Ensure all plots are closed
-        # Force cleanup of any remaining resources
-        try:
-            plt.close('all')
-            gc.collect()  # Force garbage collection
-        except:
-            pass
-
 def trigger_fft():
-    """Trigger FFT plot generation."""
+    """Trigger FFT plot generation with proper cleanup."""
     try:
         # Clean up any existing FFT process
-        if 'f' in active_processes and active_processes['f'] is not None:
-            cleanup_process('f')
+        cleanup_process('f')
+        
+        # Create a queue for communication
+        stop_queue = multiprocessing.Queue()
         
         # Create new process
         fft_process = multiprocessing.Process(
             target=plot_fft,
-            args=(sound_in_samplerate, sound_in_id, sound_in_chs, monitor_channel)
+            args=(sound_in_samplerate, sound_in_id, sound_in_chs, monitor_channel, stop_queue)
         )
         
         # Store process reference
@@ -1411,20 +1475,25 @@ def trigger_fft():
         fft_process.start()
         
         # Wait for completion with timeout
-        fft_process.join(timeout=30)
+        timeout = FFT_DURATION + 15  # Recording duration plus extra time for processing
+        fft_process.join(timeout=timeout)
         
-        # Cleanup if process is still running
+        # Check if process is still running
         if fft_process.is_alive():
-            print("FFT process taking too long, terminating...")
+            print("\nFFT process taking too long, terminating...")
             try:
-                fft_process.terminate()
-                fft_process.join(timeout=1)
+                # Signal the process to stop
+                stop_queue.put(True)
+                # Give it a moment to clean up
+                time.sleep(1)
+                # Then terminate if still running
                 if fft_process.is_alive():
-                    # Force kill if still running
-                    fft_process.kill()
-                    fft_process.join(timeout=1)
+                    fft_process.terminate()
+                    fft_process.join(timeout=2)
+                    if fft_process.is_alive():
+                        fft_process.kill()
             except Exception as e:
-                print(f"Warning during process termination: {e}")
+                print(f"Error terminating FFT process: {e}")
         
     except Exception as e:
         print(f"Error in trigger_fft: {e}")
@@ -1509,6 +1578,10 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
         full_audio_path = os.path.join(PRIMARY_DIRECTORY, next_spectrogram)
         print("Spectrogram source:", full_audio_path)
 
+        # Use non-interactive backend for Linux and WSL
+        if platform_manager.is_wsl() or (sys.platform.startswith('linux')):
+            plt.switch_backend('Agg')
+
         # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
         y, sr = librosa.load(full_audio_path, sr=sound_in_samplerate, duration=config.PERIOD_RECORD, mono=False)
         
@@ -1555,31 +1628,31 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
         
         plt.savefig(expanded_path, dpi=150)
         print("Plot saved successfully")
-        plt.close()  # Close the figure instead of showing it
+        plt.close('all')  # Close all figures
 
-        # Open the saved image in the system's default image viewer
+        # Open the saved image based on OS
         try:
             if platform_manager.is_wsl():
-                print("Attempting to open image in WSL...")
+                print("Opening image in WSL...")
                 try:
-                    print("Trying xdg-open...")
-                    subprocess.Popen(['xdg-open', expanded_path])
+                    subprocess.run(['xdg-open', expanded_path], check=True)
                 except FileNotFoundError:
-                    print("xdg-open not found, trying wslview...")
-                    subprocess.Popen(['wslview', expanded_path])
+                    subprocess.run(['wslview', expanded_path], check=True)
             elif platform_manager.is_macos():
-                print("Attempting to open image in macOS...")
-                subprocess.Popen(['open', expanded_path])
+                print("Opening image in macOS...")
+                subprocess.run(['open', expanded_path], check=True)
+            elif sys.platform == 'win32':
+                print("Opening image in Windows...")
+                os.startfile(expanded_path)
             else:
-                print("Attempting to open image in Windows...")
-                # For Windows, use start command instead of os.startfile
-                subprocess.Popen(['start', '', expanded_path], shell=True)
+                print("Opening image in Linux...")
+                subprocess.run(['xdg-open', expanded_path], check=True)
             print("Image viewer command executed")
         except Exception as e:
             print(f"Could not open image viewer: {e}")
-            print(f"Image saved at: {plotname}")
-            print(f"Please check if the file exists: {os.path.exists(plotname)}")
-        
+            print(f"Image saved at: {expanded_path}")
+            if not os.path.exists(expanded_path):
+                print("Warning: The saved image file does not exist!")
     except Exception as e:
         print(f"Error in plot_spectrogram: {e}")
     finally:
@@ -1590,9 +1663,6 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
         except:
             pass
 
-# called from a thread
-# Print a string of asterisks, ending with only a carriage return to overwrite the line
-# value (/1000) is the number of asterisks to print, end = '\r' or '\n' to overwrite or not
 def check_wsl_audio():
     """Check WSL audio configuration and provide setup instructions."""
     try:
@@ -1668,10 +1738,11 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
             if current_print != last_print:
                 print(current_print, end='\r')
                 last_print = current_print
+                sys.stdout.flush()  # Ensure output is displayed immediately
         except Exception as e:
             # Log the error but don't crash
-            print(f"\rVU meter error: {e}", end='\r')
-            time.sleep(1)  # Prevent too many messages
+            print(f"\rVU meter error: {e}", end='\r\n')
+            time.sleep(0.1)  # Prevent too many messages
 
     try:
         # In WSL, we need to use different stream parameters
@@ -1692,25 +1763,16 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
                         sd.sleep(0.1)
             except Exception as e:
                 print(f"\nError with default configuration: {e}")
-                print("\nPlease ensure your WSL audio is properly configured:")
-                print("1. Install required packages:")
-                print("   sudo apt-get update")
-                print("   sudo apt-get install -y pulseaudio libasound2-plugins")
-                print("\n2. Configure PulseAudio:")
-                print("   echo 'export PULSE_SERVER=tcp:localhost' >> ~/.bashrc")
-                print("   source ~/.bashrc")
-                print("\n3. Create PulseAudio configuration:")
-                print("   mkdir -p ~/.config/pulse")
-                print("   echo 'load-module module-native-protocol-tcp auth-ip-acl=127.0.0.1' > ~/.config/pulse/default.pa")
-                print("\n4. Start PulseAudio:")
-                print("   pulseaudio --start")
+                print("\nPlease ensure your WSL audio is properly configured.")
                 raise
         else:
             # Make sure we request at least as many channels as our selected channel
             with sd.InputStream(callback=callback_input,
                               device=sound_in_id,
                               channels=sound_in_chs,
-                              samplerate=sound_in_samplerate):
+                              samplerate=sound_in_samplerate,
+                              blocksize=1024,    # Use smaller block size
+                              latency='low'):
                 while not stop_vu_queue.get():
                     sd.sleep(0.1)
     except Exception as e:
@@ -1736,6 +1798,7 @@ def toggle_vu_meter():
         print("\nVU meter monitoring channel:", monitor_channel+1)
         vu_manager = multiprocessing.Manager()
         stop_vu_queue = multiprocessing.Queue()
+        stop_vu_queue.put(False)  # Initialize with False to keep running
         asterisks = vu_manager.Value(str, '*' * 50)
 
         # Print initial state once
@@ -1746,8 +1809,7 @@ def toggle_vu_meter():
             asterisks.value = '*' * normalized_value
             print("threshold:", asterisks.value.ljust(50, ' '))
             
-        # Create the VU meter process with environment variables to suppress output
-        # This is more reliable than using a global flag with multiprocessing
+        # Create the VU meter process
         vu_proc = multiprocessing.Process(
             target=vu_meter, 
             args=(sound_in_id, sound_in_samplerate, sound_in_chs, monitor_channel, stop_vu_queue, asterisks)
@@ -1768,14 +1830,27 @@ def stop_vu():
     global vu_proc, stop_vu_event, stop_vu_queue
 
     if vu_proc is not None:
-        stop_vu_event.set()
-        stop_vu_queue.put(True)
-        if vu_proc.is_alive():
-            vu_proc.join()            # make sure its stopped, hate zombies
+        try:
+            stop_vu_event.set()
+            stop_vu_queue.put(True)  # Signal the process to stop
+            
+            # Give the process a short time to stop gracefully
+            vu_proc.join(timeout=1)
+            
+            if vu_proc.is_alive():
+                # If still running after timeout, terminate
+                vu_proc.terminate()
+                vu_proc.join(timeout=1)
+                if vu_proc.is_alive():
+                    vu_proc.kill()  # Force kill if still alive
+            
             print("\nvu stopped")
-        vu_proc = None
-        cleanup_process('v')
-        clear_input_buffer()
+        except Exception as e:
+            print(f"\nError stopping VU meter: {e}")
+        finally:
+            vu_proc = None
+            cleanup_process('v')
+            clear_input_buffer()
 
 #
 # ############ intercom using multiprocessing #############
@@ -1957,10 +2032,10 @@ def toggle_intercom_m():
                 print("\nDevice configuration:")
                 print(f"Input device: [{sound_in_id}] {input_device['name']}")
                 print(f"Input channels: {input_device['max_input_channels']}")
-                print(f"Input sample rate: {sound_in_samplerate} Hz")
+                print(f"Input sample rate: {int(sound_in_samplerate)} Hz")
                 print(f"Output device: [{sound_out_id}] {output_device['name']}")
                 print(f"Output channels: {output_device['max_output_channels']}")
-                print(f"Output sample rate: {sound_out_samplerate} Hz")
+                print(f"Output sample rate: {int(sound_out_samplerate)} Hz")
             
             # Create the process with daemon setting to ensure proper cleanup
             intercom_proc = multiprocessing.Process(
@@ -2271,7 +2346,7 @@ def audio_stream():
     print("Initializing audio stream...", flush=True)
     print(f"Device ID: [{sound_in_id}]", end='\r', flush=True)
     print(f"Channels: {sound_in_chs}", end='\r', flush=True)
-    print(f"Sample Rate: {sound_in_samplerate} Hz", end='\r', flush=True)
+    print(f"Sample Rate: {int(sound_in_samplerate)} Hz", end='\r', flush=True)
     print(f"Bit Depth: {config.PRIMARY_BITDEPTH} bits", end='\r', flush=True)
     print(f"Data Type: {_dtype}", end='\r', flush=True)
 
@@ -2281,7 +2356,7 @@ def audio_stream():
         print("\nSelected device info:", flush=True)
         print(f"Name: [{sound_in_id}] {device_info['name']}", end='\r', flush=True)
         print(f"Max Input Channels: {device_info['max_input_channels']}", end='\r', flush=True)
-        print(f"Device Sample Rate: {device_info['default_samplerate']} Hz", end='\r', flush=True)
+        print(f"Device Sample Rate: {int(device_info['default_samplerate'])} Hz", end='\r', flush=True)
 
         if device_info['max_input_channels'] < sound_in_chs:
             raise RuntimeError(f"Device only supports {device_info['max_input_channels']} channels, but {sound_in_chs} channels are required")
@@ -2437,7 +2512,7 @@ def keyboard_listener():
                     if key.isdigit():
                         # Handle direct channel changes when in VU meter or Intercom mode
                         if vu_proc is not None or intercom_proc is not None:
-                            key_int = int(key) - 1
+                            key_int = int(key) - 1  # Convert to 0-based index
                             
                             # Validate channel number is within range
                             if key_int < 0 or key_int >= sound_in_chs:
@@ -2445,15 +2520,19 @@ def keyboard_listener():
                                 continue
                                 
                             if is_mic_position_in_bounds(MICS_ACTIVE, key_int):
+                                # Stop current VU meter if running
+                                if vu_proc is not None:
+                                    stop_vu()
+                                    time.sleep(0.1)  # Give it time to clean up
+                                
                                 monitor_channel = key_int
                                 if intercom_proc is not None:
                                     change_ch_event.set()
                                 print(f"\nNow monitoring channel: {monitor_channel+1} (of {sound_in_chs})", end='\n', flush=True)
-                                # Restart VU meter if running
+                                
+                                # Restart VU meter if it was running
                                 if vu_proc is not None:
                                     print(f"Restarting VU meter on channel: {monitor_channel+1}", end='\n', flush=True)
-                                    toggle_vu_meter()
-                                    time.sleep(0.1)
                                     toggle_vu_meter()
                             else:
                                 print(f"Sound device has only {sound_in_chs} channel(s)", end='\n', flush=True)
@@ -2707,20 +2786,28 @@ def check_dependencies():
 #=== Main() ============================================================
 
 def main():
-    global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel, sound_in_id, sound_in_chs, MICS_ACTIVE, keyboard_listener_running
+    global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel, sound_in_id, sound_in_chs, MICS_ACTIVE, keyboard_listener_running, make_name, model_name, device_name, api_name, hostapi_name, hostapi_index, device_id, original_terminal_settings
+
+    # Save original terminal settings at startup
+    original_terminal_settings = save_terminal_settings()
+
+    # Register cleanup handlers
+    atexit.register(cleanup)
+    signal.signal(signal.SIGINT, emergency_cleanup)   # Ctrl+C
+    signal.signal(signal.SIGTERM, emergency_cleanup)  # Termination request
+    if sys.platform != 'win32':
+        signal.signal(signal.SIGHUP, emergency_cleanup)   # Terminal closed
+        signal.signal(signal.SIGQUIT, emergency_cleanup)  # Ctrl+\
 
     # --- Audio format validation ---
     allowed_primary_formats = ["FLAC", "WAV"]
     allowed_monitor_formats = ["MP3", "FLAC", "WAV"]
     if config.PRIMARY_FILE_FORMAT.upper() not in allowed_primary_formats:
         print(f"WARNING: PRIMARY_FILE_FORMAT '{config.PRIMARY_FILE_FORMAT}' is not allowed. Must be one of: {allowed_primary_formats}")
-        # sys.exit(1)  # Commented out to allow user to fix without abrupt exit
     if config.AUDIO_MONITOR_FORMAT.upper() not in allowed_monitor_formats:
         print(f"WARNING: AUDIO_MONITOR_FORMAT '{config.AUDIO_MONITOR_FORMAT}' is not allowed. Must be one of: {allowed_monitor_formats}")
-        # sys.exit(1)  # Commented out to allow user to fix without abrupt exit
 
     print("\n\nBeehive Multichannel Acoustic-Signal Recorder\n")
-    #sys.stdout.flush()
    
     # Display platform-specific messages
     if sys.platform == 'win32' and not platform_manager.is_wsl():
@@ -2736,19 +2823,16 @@ def main():
             sys.exit(1)
     
     print(f"Saving data to: {PRIMARY_DIRECTORY}\n")
-    #sys.stdout.flush()
 
     # Try to set up the input device
-    if not set_input_device(config.MODEL_NAME, config.API_NAME):
+    if not set_input_device(model_name, api_name):
         print("\nExiting due to no suitable audio input device found.")
         sys.exit(1)
 
     setup_audio_circular_buffer()
 
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/500000:.2f} megabytes")
-    #sys.stdout.flush()
-    print(f"Sample Rate: {sound_in_samplerate}; File Format: { config.PRIMARY_FILE_FORMAT}; Channels: {sound_in_chs}")
-    #sys.stdout.flush()
+    print(f"Sample Rate: {int(sound_in_samplerate)} Hz; File Format: {config.PRIMARY_FILE_FORMAT}; Channels: {sound_in_chs}")
 
     # Check and create required directories
     required_directories = [PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOT_DIRECTORY]
@@ -2770,10 +2854,6 @@ def main():
         fft_periodic_plot_proc.daemon = True  
         fft_periodic_plot_proc.start()
         print("started fft_periodic_plot_process")
-        #sys.stdout.flush()
-
-    # Register cleanup handler before starting any threads
-    atexit.register(cleanup)
 
     try:
         if KB_or_CP == 'KB':
@@ -2789,58 +2869,66 @@ def main():
             
     except KeyboardInterrupt: # ctrl-c in windows
         print('\nCtrl-C: Recording process stopped by user.')
-        #sys.stdout.flush()
         cleanup()
 
     except Exception as e:
         print(f"An error occurred while attempting to execute this script: {e}")
-        #sys.stdout.flush()
         cleanup()
+    finally:
+        # Ensure terminal is reset even if an error occurs
+        restore_terminal_settings(original_terminal_settings)
 
 def stop_all():
     """Stop all processes and threads."""
     global stop_program, stop_recording_event, stop_fft_periodic_plot_event, fft_periodic_plot_proc, keyboard_listener_running
     print("Stopping all processes...\r")
     
-    # Set all stop events
-    stop_program[0] = True
-    stop_recording_event.set()
-    stop_fft_periodic_plot_event.set()
-    stop_vu_event.set()
-    stop_intercom_event.set()
-    stop_tod_event.set()
-    keyboard_listener_running = False
+    try:
+        # Set all stop events
+        stop_program[0] = True
+        stop_recording_event.set()
+        stop_fft_periodic_plot_event.set()
+        stop_vu_event.set()
+        stop_intercom_event.set()
+        stop_tod_event.set()
+        keyboard_listener_running = False
 
-    # Clean up all active processes
-    for command in active_processes:
-        cleanup_process(command)
+        # Clean up all active processes
+        for command in active_processes:
+            cleanup_process(command)
 
-    # Stop the FFT periodic plot process
-    if fft_periodic_plot_proc is not None and fft_periodic_plot_proc.is_alive():
-        print("Stopping FFT periodic plot process...\r")
-        fft_periodic_plot_proc.terminate()
-        fft_periodic_plot_proc.join(timeout=2)
-        if fft_periodic_plot_proc.is_alive():
-            fft_periodic_plot_proc.kill()
-        print("FFT periodic plot process stopped\r")
+        # Stop the FFT periodic plot process
+        if fft_periodic_plot_proc is not None and fft_periodic_plot_proc.is_alive():
+            print("Stopping FFT periodic plot process...\r")
+            try:
+                fft_periodic_plot_proc.terminate()
+                fft_periodic_plot_proc.join(timeout=2)
+                if fft_periodic_plot_proc.is_alive():
+                    fft_periodic_plot_proc.kill()
+            except Exception as e:
+                print(f"Error stopping FFT process: {e}")
 
-    # Stop VU meter
-    stop_vu()
+        # Stop VU meter
+        stop_vu()
 
-    # Stop intercom
-    stop_intercom_m()
+        # Stop intercom
+        stop_intercom_m()
 
-    # List and stop all worker threads
-    print("Stopping worker threads...\r")
-    current_thread = threading.current_thread()
-    for thread in threading.enumerate():
-        if thread != threading.main_thread() and thread != current_thread:
-            print(f"Stopping thread: {thread.name}\r")
-            if thread.is_alive():
-                try:
-                    thread.join(timeout=1)
-                except RuntimeError:
-                    pass
+        # List and stop all worker threads
+        print("Stopping worker threads...\r")
+        current_thread = threading.current_thread()
+        for thread in threading.enumerate():
+            if thread != threading.main_thread() and thread != current_thread:
+                print(f"Stopping thread: {thread.name}\r")
+                if thread.is_alive():
+                    try:
+                        thread.join(timeout=1)
+                    except RuntimeError:
+                        pass
+    except Exception as e:
+        print(f"Error in stop_all: {e}")
+        # If normal stop fails, try emergency cleanup
+        emergency_cleanup()
 
     print("\nAll processes and threads stopped\r")
 
@@ -2858,15 +2946,37 @@ def cleanup():
         
         # Platform-specific terminal cleanup
         try:
-            # Reset terminal settings safely
-            safe_stty('sane')
+            restore_terminal_settings(original_terminal_settings)
         except Exception as e:
             print(f"Error resetting terminal: {e}", end='\r\n', flush=True)
+            # Try alternative terminal reset
+            try:
+                if sys.platform != 'win32':
+                    os.system('stty sane')
+                    os.system('stty echo')
+                    os.system('reset')
+            except:
+                pass
     except Exception as e:
         print(f"Error during cleanup: {e}", end='\r\n', flush=True)
+        # If normal cleanup fails, try emergency cleanup
+        emergency_cleanup()
     
     # Give threads a moment to clean up
     time.sleep(0.5)
+    
+    # Force kill any remaining processes
+    force_kill_child_processes()
+    
+    # Final terminal reset attempt
+    try:
+        if sys.platform != 'win32':
+            os.system('stty sane')
+            os.system('stty echo')
+            sys.stdout.write('\n')
+            sys.stdout.flush()
+    except:
+        pass
     
     # Force exit after cleanup
     print("Exiting...", end='\r\n', flush=True)
@@ -2882,6 +2992,99 @@ def safe_stty(command):
             os.system(f'stty {command}')
         except Exception as e:
             # Silent fail - this is OK on platforms where stty fails
+            pass
+
+def force_kill_child_processes():
+    """Force kill all child processes of the current process."""
+    try:
+        current_process = psutil.Process()
+        children = current_process.children(recursive=True)
+        for child in children:
+            try:
+                child.kill()
+            except psutil.NoSuchProcess:
+                pass
+    except Exception as e:
+        print(f"Error killing child processes: {e}")
+
+def emergency_cleanup(signum=None, frame=None):
+    """Emergency cleanup function for handling signals and abnormal termination."""
+    print("\nEmergency cleanup initiated...")
+    try:
+        # Stop all processes first
+        stop_all()
+        
+        # Force kill any remaining child processes
+        force_kill_child_processes()
+        
+        # Reset terminal settings
+        try:
+            restore_terminal_settings(original_terminal_settings)
+        except Exception as e:
+            print(f"Error resetting terminal: {e}")
+            # Try alternative terminal reset
+            try:
+                if sys.platform != 'win32':
+                    os.system('stty sane')
+                    os.system('stty echo')
+                    os.system('reset')
+            except:
+                pass
+        
+        print("Emergency cleanup completed")
+    except Exception as e:
+        print(f"Error during emergency cleanup: {e}")
+    finally:
+        # Force exit
+        os._exit(1)
+
+# Register the emergency cleanup for various signals
+signal.signal(signal.SIGINT, emergency_cleanup)   # Ctrl+C
+signal.signal(signal.SIGTERM, emergency_cleanup)  # Termination request
+if sys.platform != 'win32':
+    signal.signal(signal.SIGHUP, emergency_cleanup)   # Terminal closed
+    signal.signal(signal.SIGQUIT, emergency_cleanup)  # Ctrl+\
+
+# Register emergency cleanup as a last resort
+atexit.register(emergency_cleanup)
+
+def save_terminal_settings():
+    """Save current terminal settings."""
+    try:
+        if sys.platform != 'win32':
+            fd = sys.stdin.fileno()
+            return termios.tcgetattr(fd)
+    except:
+        return None
+    return None
+
+def restore_terminal_settings(old_settings):
+    """Restore terminal settings to their original state."""
+    try:
+        if sys.platform != 'win32' and old_settings is not None:
+            fd = sys.stdin.fileno()
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            # Additional terminal reset commands
+            try:
+                # Reset terminal mode
+                os.system('stty sane')
+                # Reset input mode
+                os.system('stty icrnl')
+                # Enable echo
+                os.system('stty echo')
+                # Reset line settings
+                fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
+            except:
+                pass
+            sys.stdout.write('\n')  # Ensure we're on a new line
+            sys.stdout.flush()
+    except Exception as e:
+        print(f"Warning: Could not restore terminal settings: {e}")
+        try:
+            # Last resort terminal reset
+            if sys.platform != 'win32':
+                os.system('reset')
+        except:
             pass
 
 if __name__ == "__main__":

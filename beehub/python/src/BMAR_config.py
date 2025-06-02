@@ -35,16 +35,16 @@ EVENT_THRESHOLD = 20000                         # audio level threshold to be co
 
 # Windows
 win_data_drive = "G:"   # D is internal and limited; G is Google Drive, just FYI
-win_data_path = "My Drive\eb_beehive_data"
+win_data_path = "My Drive\eb_beehive_data"  # Using forward slashes for consistency
 win_data_folders = ["audio", "plots"]  # Fixed syntax - use commas not semicolons
 #Macos
 mac_data_drive = "~"  
 mac_data_path = "data/eb_beehive_data"
 mac_data_folders = ["audio", "plots"]  # Fixed syntax - use commas not semicolons
 #Linux
-linux_data_drive = "/mnt/beedata" 
-linux_data_path = "eb_beehive_data"
-linux_data_folders = ["audio", "plots"]  # Fixed syntax - use commas not semicolons
+linux_data_drive = "~"                          # Use home directory
+linux_data_path = "beedata/eb_beehive_data"     # Store in ~/beedata
+linux_data_folders = ["audio", "plots"]         # Fixed syntax - use commas not semicolons
 
 # mic location map channel to position
 MIC_LOCATION = ['1: upper--front', '2: upper--back', '3: lower w/queen--front', '4: lower w/queen--back']
@@ -57,14 +57,32 @@ MIC_4 = False
 
 SOUND_IN_CHS = MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
 
-# input device parameters:
-MAKE_NAME = "Focusrite"                         # 'Behringer' or 'Zoom or Scarlett'
-MODEL_NAME = ["UMC404HD", "Analogue 1 + 2", "Zoom", "Volt"]
-DEVICE_NAME = 'UAC'                             # 'UAC' or 'USB'
-API_NAME = "WASAPI"                             # 'MME' or 'WASAPI' or 'ASIO' or 'DS'  
-HOSTAPI_NAME = "Windows"                        # 'Windows' or 'ASIO' or 'DS' or 'WDM-KS'
-HOSTAPI_INDEX = 3                               # 0 = Windows, 1 = ASIO, 2 = DS, 3 = WASAPI, 4 = WDM-KS
-DEVICE_ID = 12
+# input device parameters--linux:
+LINUX_MAKE_NAME = ""                                     # Leave empty for Linux default
+LINUX_MODEL_NAME = ["pipewire"]                         # Use pipewire as the audio system
+LINUX_DEVICE_NAME = "pipewire"                          # Use pipewire device
+LINUX_API_NAME = "ALSA"                                 # Use ALSA API for Linux
+LINUX_HOSTAPI_NAME = "ALSA"                             # Use ALSA host API
+LINUX_HOSTAPI_INDEX = 0                                 # ALSA is typically index 0
+LINUX_DEVICE_ID = None                                     # Use pipewire device ID
+
+# input device parameters--windows:
+WINDOWS_MAKE_NAME = "Focusrite"                          # Audio interface make
+WINDOWS_MODEL_NAME = ["Scarlett"]                        # Audio interface model
+WINDOWS_DEVICE_NAME = "Focusrite Scarlett"              # Device name
+WINDOWS_API_NAME = "WASAPI"                      # Windows audio API
+WINDOWS_HOSTAPI_NAME = "WASAPI"                  # Host API name
+WINDOWS_HOSTAPI_INDEX = 0                                # Default host API index
+WINDOWS_DEVICE_ID = 12                                   # Device ID for Focusrite
+
+# input device parameters--macos:
+MACOS_MAKE_NAME = ""                                    # Leave empty for macOS default
+MACOS_MODEL_NAME = ["Built-in"]                        # Built-in audio
+MACOS_DEVICE_NAME = "Built-in"                         # Built-in device
+MACOS_API_NAME = "CoreAudio"                           # macOS audio API
+MACOS_HOSTAPI_NAME = "CoreAudio"                       # Host API name
+MACOS_HOSTAPI_INDEX = 0                                # Default host API index
+MACOS_DEVICE_ID = 0                                    # Default device ID
 
 # audio parameters:
 PRIMARY_SAMPLERATE = 192000                     # Audio sample rate
