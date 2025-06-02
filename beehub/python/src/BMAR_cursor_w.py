@@ -60,7 +60,7 @@ import gc
 
 # Platform-specific modules will be imported after platform detection
 
-import BMAR_config as config
+import BMAR_config_w as config
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 
 # Near the top of the file, after the imports

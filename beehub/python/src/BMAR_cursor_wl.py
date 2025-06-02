@@ -58,13 +58,13 @@ import pyaudio
 import Setup_Pyaudio as set_port
 import gc
 import psutil
-import termios
-import fcntl
+#import termios
+#import fcntl
 import struct
 
 # Platform-specific modules will be imported after platform detection
 
-import BMAR_config as config
+import BMAR_config_wl as config
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 
 # Near the top of the file, after the imports
@@ -157,8 +157,10 @@ class PlatformManager:
                 try:
                     import termios
                     import tty
+                    import fcntl
                     self._termios = termios
                     self._tty = tty
+                    self._fcntl = fcntl
                     print("Using Unix keyboard handling (termios)")
                     self._keyboard_info = "Unix"
                 except ImportError:
