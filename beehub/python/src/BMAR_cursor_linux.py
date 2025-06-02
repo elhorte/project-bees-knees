@@ -1330,21 +1330,19 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs, queue):
                 if platform_manager.is_wsl():
                     print("Opening image in WSL...")
                     try:
-                        subprocess.run(['xdg-open', expanded_path], check=True, timeout=5)
+                        subprocess.Popen(['xdg-open', expanded_path])
                     except FileNotFoundError:
-                        subprocess.run(['wslview', expanded_path], check=True, timeout=5)
+                        subprocess.Popen(['wslview', expanded_path])
                 elif platform_manager.is_macos():
                     print("Opening image in macOS...")
-                    subprocess.run(['open', expanded_path], check=True, timeout=5)
+                    subprocess.Popen(['open', expanded_path])
                 elif sys.platform == 'win32':
                     print("Opening image in Windows...")
                     os.startfile(expanded_path)
                 else:
                     print("Opening image in Linux...")
-                    subprocess.run(['xdg-open', expanded_path], check=True, timeout=5)
+                    subprocess.Popen(['xdg-open', expanded_path])
                 print("Image viewer command executed")
-            except subprocess.TimeoutExpired:
-                print("Warning: Image viewer command timed out, but image was saved")
             except Exception as e:
                 print(f"Could not open image viewer: {e}")
                 print(f"Image saved at: {expanded_path}")
@@ -1435,14 +1433,20 @@ def cleanup_process(command):
         # Check if the command key exists in active_processes
         if command in active_processes:
             process = active_processes[command]
-            if process is not None and process.is_alive():
+            if process is not None:
                 try:
-                    process.terminate()
-                    process.join(timeout=1)
-                    if process.is_alive():
-                        process.kill()
+                    # Check if it's still alive without raising an exception
+                    if hasattr(process, 'is_alive') and process.is_alive():
+                        try:
+                            process.terminate()
+                            process.join(timeout=1)
+                            if process.is_alive():
+                                process.kill()
+                        except Exception as e:
+                            print(f"Error terminating process for command '{command}': {e}")
                 except Exception as e:
-                    print(f"Error terminating process for command '{command}': {e}")
+                    # Process may no longer exist or be accessible
+                    print(f"Warning: Could not check process status for command '{command}': {e}")
                 
                 # Reset the process reference
                 active_processes[command] = None
@@ -1452,6 +1456,251 @@ def cleanup_process(command):
             print(f"Warning: No process tracking for command '{command}'")
     except Exception as e:
         print(f"Error in cleanup_process for command '{command}': {e}")
+
+
+# single-shot fft plot of audio
+def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel, stop_queue):
+    try:
+        # Force garbage collection before starting
+        gc.collect()
+        
+        # Use non-interactive backend for plotting
+        plt.switch_backend('agg')
+        
+        # Initialize PyAudio
+        p = pyaudio.PyAudio()
+        
+        try:
+            # Get device info
+            device_info = p.get_device_info_by_index(sound_in_id)
+            max_channels = int(device_info['maxInputChannels'])
+            
+            # If requested channels exceed device capabilities, adjust
+            if sound_in_chs > max_channels:
+                print(f"Warning: Device only supports {max_channels} channels, adjusting from {sound_in_chs}")
+                actual_channels = max_channels
+            else:
+                actual_channels = sound_in_chs
+                
+            # Ensure at least 1 channel
+            actual_channels = max(1, actual_channels)
+            
+            # Ensure channel index is valid
+            if channel >= actual_channels:
+                print(f"Warning: Channel {channel+1} not available, using channel 1")
+                monitor_channel = 0
+            else:
+                monitor_channel = channel
+                
+            # Record audio
+            print(f"Recording audio for FFT on channel {monitor_channel+1} of {actual_channels}")
+            
+            # Calculate number of frames needed
+            num_frames = int(sound_in_samplerate * FFT_DURATION)
+            chunk_size = 4096  # Reduced chunk size for better reliability
+            
+            # Create the recording array
+            recording = np.zeros((num_frames, actual_channels), dtype=np.float32)
+            frames_recorded = 0
+            recording_complete = False
+            
+            def callback(in_data, frame_count, time_info, status):
+                nonlocal frames_recorded, recording_complete
+                try:
+                    if status:
+                        print(f"Stream status: {status}")
+                    if frames_recorded < num_frames and not recording_complete:
+                        data = np.frombuffer(in_data, dtype=np.float32)
+                        if len(data) > 0:
+                            start_idx = frames_recorded
+                            end_idx = min(start_idx + len(data) // actual_channels, num_frames)
+                            data = data.reshape(-1, actual_channels)
+                            recording[start_idx:end_idx] = data[:(end_idx - start_idx)]
+                            frames_recorded += len(data) // actual_channels
+                            if frames_recorded >= num_frames:
+                                recording_complete = True
+                                return (None, pyaudio.paComplete)
+                            elif frames_recorded % (chunk_size * 10) == 0:
+                                print(f"Recording progress: {frames_recorded}/{num_frames} frames ({frames_recorded/num_frames*100:.1f}%)", end='\r')
+                    return (None, pyaudio.paContinue)
+                except Exception as e:
+                    print(f"Error in callback: {e}")
+                    return (None, pyaudio.paComplete)
+            
+            # Open stream using callback
+            stream = p.open(format=pyaudio.paFloat32,
+                          channels=actual_channels,
+                          rate=int(sound_in_samplerate),
+                          input=True,
+                          input_device_index=sound_in_id,
+                          frames_per_buffer=chunk_size,
+                          stream_callback=callback)
+            
+            print("Stream opened successfully")
+            stream.start_stream()
+            
+            # Wait until we have recorded enough frames, received stop signal, or timed out
+            start_time = time.time()
+            timeout = FFT_DURATION + 10  # Increased timeout buffer
+            
+            # Keep recording until one of these conditions is met:
+            # 1. We've recorded all frames
+            # 2. We've received a stop signal (queue has data)
+            # 3. We've hit the timeout
+            while frames_recorded < num_frames and stop_queue.empty() and (time.time() - start_time) < timeout:
+                if recording_complete:
+                    break
+                print(f"Recording progress: {frames_recorded}/{num_frames} frames ({frames_recorded/num_frames*100:.1f}%)", end='\r')
+                time.sleep(0.1)  # Increased sleep time to reduce CPU usage
+            
+            # Stop and close stream
+            stream.stop_stream()
+            stream.close()
+            
+            print("\nRecording fft finished.")
+            print(f"Recorded {frames_recorded} of {num_frames} frames ({frames_recorded/num_frames*100:.1f}%)")
+            
+            # Only process if we got enough data
+            if frames_recorded < num_frames * 0.9:  # Allow for small missing chunks
+                print(f"Warning: Recording incomplete - only got {frames_recorded}/{num_frames} frames")
+                return
+                
+            # Extract the requested channel
+            single_channel_audio = recording[:frames_recorded, monitor_channel]
+            
+            # Apply gain if needed
+            if FFT_GAIN > 0:
+                gain = 10 ** (FFT_GAIN / 20)
+                print(f"Applying gain of: {gain:.1f}")
+                single_channel_audio *= gain
+
+            print("Performing FFT...")
+            # Perform FFT
+            yf = rfft(single_channel_audio.flatten())
+            xf = rfftfreq(frames_recorded, 1 / sound_in_samplerate)
+
+            # Define bucket width
+            bucket_width = FFT_BW  # Hz
+            bucket_size = int(bucket_width * frames_recorded / sound_in_samplerate)  # Number of indices per bucket
+
+            # Calculate the number of complete buckets
+            num_buckets = len(yf) // bucket_size
+            
+            # Average buckets - ensure both arrays have the same length
+            buckets = []
+            bucket_freqs = []
+            for i in range(num_buckets):
+                start_idx = i * bucket_size
+                end_idx = start_idx + bucket_size
+                buckets.append(yf[start_idx:end_idx].mean())
+                bucket_freqs.append(xf[start_idx:end_idx].mean())
+            
+            buckets = np.array(buckets)
+            bucket_freqs = np.array(bucket_freqs)
+
+            print("Creating plot...")
+            # Create figure with reduced DPI for better performance
+            fig = plt.figure(figsize=(10, 6), dpi=80)
+            plt.plot(bucket_freqs, np.abs(buckets), linewidth=1.0)
+            plt.xlabel('Frequency (Hz)')
+            plt.ylabel('Amplitude')
+            plt.title(f'FFT Plot monitoring ch: {monitor_channel + 1} of {actual_channels} channels')
+            plt.grid(True)
+
+            # Save the plot
+            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_fft_{int(sound_in_samplerate/1000)}_kHz_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
+            print("\nSaving FFT plot to:", plotname)
+            
+            # Make sure the directory exists
+            os.makedirs(os.path.dirname(plotname), exist_ok=True)
+            
+            # Display the expanded path
+            expanded_path = os.path.abspath(os.path.expanduser(plotname))
+            print(f"Absolute path: {expanded_path}")
+            
+            # Save with optimized settings
+            print("Saving figure...")
+            plt.savefig(expanded_path, dpi=80, bbox_inches='tight', pad_inches=0.1, format='png')
+            print("Plot saved successfully")
+            plt.close('all')  # Close all figures
+
+            # Open the saved image based on OS
+            try:
+                # First verify the file exists
+                if not os.path.exists(expanded_path):
+                    print(f"ERROR: Plot file does not exist at: {expanded_path}")
+                    return
+                    
+                print(f"Plot file exists, size: {os.path.getsize(expanded_path)} bytes")
+                
+                if platform_manager.is_wsl():
+                    print("Opening image in WSL...")
+                    try:
+                        proc = subprocess.Popen(['xdg-open', expanded_path])
+                        print(f"xdg-open launched with PID: {proc.pid}")
+                    except FileNotFoundError:
+                        print("xdg-open not found, trying wslview...")
+                        proc = subprocess.Popen(['wslview', expanded_path])
+                        print(f"wslview launched with PID: {proc.pid}")
+                elif platform_manager.is_macos():
+                    print("Opening image in macOS...")
+                    proc = subprocess.Popen(['open', expanded_path])
+                    print(f"open command launched with PID: {proc.pid}")
+                elif sys.platform == 'win32':
+                    print("Opening image in Windows...")
+                    os.startfile(expanded_path)
+                else:
+                    print("Opening image in Linux...")
+                    proc = subprocess.Popen(['xdg-open', expanded_path])
+                    print(f"xdg-open launched with PID: {proc.pid}")
+                    
+                print("Image viewer command executed successfully")
+                
+                # Give the process a moment to start
+                time.sleep(0.5)
+                
+                # Also print the command that can be run manually
+                print(f"\nIf the image didn't open, you can manually run:")
+                if platform_manager.is_wsl() or not sys.platform == 'win32':
+                    print(f"  xdg-open '{expanded_path}'")
+                elif platform_manager.is_macos():
+                    print(f"  open '{expanded_path}'")
+                    
+            except Exception as e:
+                print(f"Could not open image viewer: {e}")
+                print(f"Trying alternative method...")
+                try:
+                    # Try with shell=True as a fallback
+                    subprocess.Popen(f"xdg-open '{expanded_path}'", shell=True)
+                    print("Alternative method executed")
+                except Exception as e2:
+                    print(f"Alternative method also failed: {e2}")
+                print(f"Image saved at: {expanded_path}")
+                print(f"You can manually open this file with your image viewer")
+                
+        except Exception as e:
+            print(f"Error in recording: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # Clean up PyAudio
+            try:
+                p.terminate()
+            except:
+                pass
+            
+    except Exception as e:
+        print(f"Error in FFT recording: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # Ensure cleanup happens
+        try:
+            plt.close('all')
+            gc.collect()
+        except:
+            pass
 
 def trigger_fft():
     """Trigger FFT plot generation with proper cleanup."""
@@ -1528,13 +1777,14 @@ def trigger_spectrogram():
             target=plot_spectrogram, 
             args=(monitor_channel, 'lin', file_offset-1)
         )
+        active_processes['s'].daemon = True  # Make it a daemon process
         active_processes['s'].start()
         
         print("Plotting spectrogram...")
         clear_input_buffer()
         
         # Wait for completion with timeout
-        active_processes['s'].join(timeout=60)  # Fixed timeout value
+        active_processes['s'].join(timeout=120)  # Increased timeout for spectrogram generation
         
         # Cleanup if process is still running
         if active_processes['s'].is_alive():
@@ -1569,7 +1819,12 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
     - file_offset: Offset for finding the audio file
     """
     try:
-        next_spectrogram = find_file_of_type_with_offset(file_offset) 
+        # Force non-interactive backend before any plotting
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        
+        next_spectrogram = find_file_of_type_with_offset(file_offset)
         
         if next_spectrogram is None:
             print("No data available to see?")
@@ -1582,24 +1837,65 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
         if platform_manager.is_wsl() or (sys.platform.startswith('linux')):
             plt.switch_backend('Agg')
 
-        # Load the audio file (only up to 300 seconds or the end of the file, whichever is shorter)
-        y, sr = librosa.load(full_audio_path, sr=sound_in_samplerate, duration=config.PERIOD_RECORD, mono=False)
+        print("Loading audio file with librosa...")
+        try:
+            # For spectrogram display, limit duration to avoid memory issues
+            max_duration = min(config.PERIOD_RECORD, 300)  # Max 5 minutes for display
+            
+            # Load the audio file with duration limit
+            # Using mono=False to preserve channels, keeping native sample rate
+            y, sr = librosa.load(full_audio_path, sr=None, duration=max_duration, mono=False)
+            print(f"Audio loaded: shape={y.shape if hasattr(y, 'shape') else 'scalar'}, sample_rate={sr} Hz, duration={max_duration}s")
+            
+            # Keep the native sample rate to preserve high-frequency information
+            print(f"Keeping native sample rate of {sr} Hz to preserve high-frequency artifacts")
+        except Exception as e:
+            print(f"Error loading audio file: {e}")
+            return
         
         # If multi-channel audio, select the specified channel
         if len(y.shape) > 1:
             y = y[channel]
+            print(f"Selected channel {channel+1}")
             
-        # Compute the spectrogram
-        D = librosa.amplitude_to_db(abs(librosa.stft(y)), ref=np.max)
+        print("Computing spectrogram...")
+        D_db = None  # Initialize for later reference
+        try:
+            # Use larger hop length for long files or high sample rates to reduce spectrogram size
+            duration_seconds = len(y) / sr
+            
+            # Adaptive parameters based on duration and sample rate
+            if sr > 96000:  # Very high sample rate
+                if duration_seconds > 60:
+                    hop_length = 4096  # Very large hop for high SR + long duration
+                    n_fft = 8192
+                else:
+                    hop_length = 2048
+                    n_fft = 4096
+            elif duration_seconds > 60:  # Normal sample rate, long file
+                hop_length = 2048
+                n_fft = 4096
+            else:  # Normal sample rate, short file
+                hop_length = 512
+                n_fft = 2048
+                
+            # Compute the spectrogram with specified parameters
+            D = librosa.stft(y, n_fft=n_fft, hop_length=hop_length)
+            D_db = librosa.amplitude_to_db(abs(D), ref=np.max)
+            print(f"Spectrogram computed: shape={D_db.shape}, hop_length={hop_length}, n_fft={n_fft}")
+            print(f"Frequency resolution: {sr/n_fft:.1f} Hz/bin, Time resolution: {hop_length/sr*1000:.1f} ms/frame")
+        except Exception as e:
+            print(f"Error computing spectrogram: {e}")
+            return
         
         # Plot the spectrogram
-        plt.figure(figsize=(10, 4))
+        plt.figure(figsize=(12, 6))
 
         if y_axis_type == 'log':
-            librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='log')
+            librosa.display.specshow(D_db, sr=sr, x_axis='time', y_axis='log', hop_length=hop_length)
             y_decimal_places = 3
         elif y_axis_type == 'lin':
-            librosa.display.specshow(D, sr=sr, x_axis='time', y_axis='linear')
+            librosa.display.specshow(D_db, sr=sr, x_axis='time', y_axis='linear', hop_length=hop_length)
             y_decimal_places = 0
         else:
             raise ValueError("y_axis_type must be 'log' or 'linear'")
@@ -1626,8 +1922,19 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
         expanded_path = os.path.abspath(os.path.expanduser(plotname))
         print(f"Absolute path: {expanded_path}")
         
-        plt.savefig(expanded_path, dpi=150)
-        print("Plot saved successfully")
+        print("Attempting to save plot...")
+        try:
+            # For large spectrograms, use rasterization to speed up saving
+            if D_db.shape[1] > 10000:  # If more than 10k time frames
+                print("Using rasterized format for large spectrogram...")
+                plt.gca().set_rasterized(True)
+                
+            plt.savefig(expanded_path, dpi=72, format='png', bbox_inches='tight')  # Lower DPI for very large plots
+            print("Plot saved successfully")
+        except Exception as e:
+            print(f"Error saving plot: {e}")
+            return
+            
         plt.close('all')  # Close all figures
 
         # Open the saved image based on OS
@@ -1635,18 +1942,18 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
             if platform_manager.is_wsl():
                 print("Opening image in WSL...")
                 try:
-                    subprocess.run(['xdg-open', expanded_path], check=True)
+                    subprocess.Popen(['xdg-open', expanded_path])
                 except FileNotFoundError:
-                    subprocess.run(['wslview', expanded_path], check=True)
+                    subprocess.Popen(['wslview', expanded_path])
             elif platform_manager.is_macos():
                 print("Opening image in macOS...")
-                subprocess.run(['open', expanded_path], check=True)
+                subprocess.Popen(['open', expanded_path])
             elif sys.platform == 'win32':
                 print("Opening image in Windows...")
                 os.startfile(expanded_path)
             else:
                 print("Opening image in Linux...")
-                subprocess.run(['xdg-open', expanded_path], check=True)
+                subprocess.Popen(['xdg-open', expanded_path])
             print("Image viewer command executed")
         except Exception as e:
             print(f"Could not open image viewer: {e}")
@@ -2439,6 +2746,7 @@ def kill_worker_threads():
 # Add this near the top with other global variables
 keyboard_listener_running = True
 keyboard_listener_active = True  # New variable to track if keyboard listener is active
+emergency_cleanup_in_progress = False  # Add this to prevent recursion
 
 def toggle_listening():
     global keyboard_listener_active
@@ -2898,13 +3206,15 @@ def stop_all():
             cleanup_process(command)
 
         # Stop the FFT periodic plot process
-        if fft_periodic_plot_proc is not None and fft_periodic_plot_proc.is_alive():
+        if fft_periodic_plot_proc is not None:
             print("Stopping FFT periodic plot process...\r")
             try:
-                fft_periodic_plot_proc.terminate()
-                fft_periodic_plot_proc.join(timeout=2)
-                if fft_periodic_plot_proc.is_alive():
-                    fft_periodic_plot_proc.kill()
+                # Check if it's still alive without raising an exception
+                if hasattr(fft_periodic_plot_proc, 'is_alive') and fft_periodic_plot_proc.is_alive():
+                    fft_periodic_plot_proc.terminate()
+                    fft_periodic_plot_proc.join(timeout=2)
+                    if fft_periodic_plot_proc.is_alive():
+                        fft_periodic_plot_proc.kill()
             except Exception as e:
                 print(f"Error stopping FFT process: {e}")
 
@@ -2927,8 +3237,7 @@ def stop_all():
                         pass
     except Exception as e:
         print(f"Error in stop_all: {e}")
-        # If normal stop fails, try emergency cleanup
-        emergency_cleanup()
+        # Don't call emergency_cleanup here as it creates recursion
 
     print("\nAll processes and threads stopped\r")
 
@@ -2959,8 +3268,7 @@ def cleanup():
                 pass
     except Exception as e:
         print(f"Error during cleanup: {e}", end='\r\n', flush=True)
-        # If normal cleanup fails, try emergency cleanup
-        emergency_cleanup()
+        # Don't call emergency_cleanup here as it may cause recursion
     
     # Give threads a moment to clean up
     time.sleep(0.5)
@@ -3009,6 +3317,13 @@ def force_kill_child_processes():
 
 def emergency_cleanup(signum=None, frame=None):
     """Emergency cleanup function for handling signals and abnormal termination."""
+    global emergency_cleanup_in_progress
+    
+    # Prevent recursive calls
+    if emergency_cleanup_in_progress:
+        return
+        
+    emergency_cleanup_in_progress = True
     print("\nEmergency cleanup initiated...")
     try:
         # Stop all processes first
@@ -3044,9 +3359,6 @@ signal.signal(signal.SIGTERM, emergency_cleanup)  # Termination request
 if sys.platform != 'win32':
     signal.signal(signal.SIGHUP, emergency_cleanup)   # Terminal closed
     signal.signal(signal.SIGQUIT, emergency_cleanup)  # Ctrl+\
-
-# Register emergency cleanup as a last resort
-atexit.register(emergency_cleanup)
 
 def save_terminal_settings():
     """Save current terminal settings."""
