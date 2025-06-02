@@ -58,13 +58,13 @@ MIC_4 = False
 SOUND_IN_CHS = MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
 
 # input device parameters--linux:
-LINUX_MAKE_NAME = ""                                     # Leave empty for Linux default
-LINUX_MODEL_NAME = ["pipewire"]                         # Use pipewire as the audio system
-LINUX_DEVICE_NAME = "pipewire"                          # Use pipewire device
-LINUX_API_NAME = "ALSA"                                 # Use ALSA API for Linux
-LINUX_HOSTAPI_NAME = "ALSA"                             # Use ALSA host API
-LINUX_HOSTAPI_INDEX = 0                                 # ALSA is typically index 0
-LINUX_DEVICE_ID = None                                     # Use pipewire device ID
+MAKE_NAME = ""                                     # Leave empty for Linux default
+MODEL_NAME = ["pipewire"]                         # Use pipewire as the audio system
+DEVICE_NAME = "pipewire"                          # Use pipewire device
+API_NAME = "ALSA"                                 # Use ALSA API for Linux
+HOSTAPI_NAME = "ALSA"                             # Use ALSA host API
+HOSTAPI_INDEX = 0                                 # ALSA is typically index 0
+DEVICE_ID = None                                     # Use pipewire device ID
 
 # input device parameters--windows:
 WINDOWS_MAKE_NAME = "Focusrite"                          # Audio interface make

@@ -509,6 +509,27 @@ def reset_terminal():
         except:
             pass
 
+def getch():
+    """Simple getch implementation for Linux."""
+    try:
+        if platform_manager.termios is not None:
+            fd = sys.stdin.fileno()
+            old = platform_manager.termios.tcgetattr(fd)
+            new = platform_manager.termios.tcgetattr(fd)
+            new[3] = new[3] & ~platform_manager.termios.ICANON & ~platform_manager.termios.ECHO
+            new[6][platform_manager.termios.VMIN] = 1
+            new[6][platform_manager.termios.VTIME] = 0
+            platform_manager.termios.tcsetattr(fd, platform_manager.termios.TCSANOW, new)
+            try:
+                c = os.read(fd, 1)
+                return c.decode('utf-8')
+            finally:
+                platform_manager.termios.tcsetattr(fd, platform_manager.termios.TCSAFLUSH, old)
+        else:
+            return input()[:1]
+    except:
+        return None
+
 def get_key():
     """Get a single keypress from the user."""
     if platform_manager.msvcrt is not None:
@@ -528,17 +549,26 @@ def get_key():
                 except ImportError:
                     print("Warning: msvcrt module not available on this Windows system", end='\r\n', flush=True)
                 return None
-            elif platform_manager.termios is not None and platform_manager.tty is not None:
+            elif platform_manager.is_macos() or sys.platform.startswith('linux'):
                 # Use termios for macOS and Linux
-                old_settings = platform_manager.termios.tcgetattr(sys.stdin)
                 try:
-                    platform_manager.tty.setraw(sys.stdin.fileno())
+                    import termios
+                    import tty
+                    
+                    old_settings = termios.tcgetattr(sys.stdin)
+                    try:
+                        tty.setraw(sys.stdin.fileno())
+                        if select.select([sys.stdin], [], [], 0.1)[0]:
+                            key = sys.stdin.read(1)
+                            return key
+                        return None
+                    finally:
+                        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                except ImportError:
+                    # Fallback if termios is not available
                     if select.select([sys.stdin], [], [], 0.1)[0]:
-                        key = sys.stdin.read(1)
-                        return key
+                        return sys.stdin.read(1)
                     return None
-                finally:
-                    platform_manager.termios.tcsetattr(sys.stdin, platform_manager.termios.TCSADRAIN, old_settings)
             else:
                 # Fallback for other platforms
                 if select.select([sys.stdin], [], [], 0.1)[0]:
@@ -1191,6 +1221,7 @@ def create_progress_bar(current, total, bar_length=50):
     if total == 0:
         return f"[{'#' * bar_length}]"
     
+    
     percent = min(100, int(current * 100 / total))
     filled_length = int(bar_length * current // total)
     bar = '#' * filled_length + ' ' * (bar_length - filled_length)
@@ -1293,7 +1324,7 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs, queue):
             
             print("\nRecording oscope finished.")
             progress_bar = create_progress_bar(frames_recorded, num_frames)
-            print(f"Final progress: {progress_bar}")
+            #print(f"Final progress: {progress_bar}")
             
             # Only process if we got enough data
             if frames_recorded < num_frames * 0.9:  # Allow for small missing chunks
@@ -1596,7 +1627,7 @@ def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel, stop_queue
             
             print("\nRecording fft finished.")
             progress_bar = create_progress_bar(frames_recorded, num_frames)
-            print(f"Final progress: {progress_bar}")
+            #print(f"Final progress: {progress_bar}")
             
             # Only process if we got enough data
             if frames_recorded < num_frames * 0.9:  # Allow for small missing chunks
@@ -2584,38 +2615,57 @@ def reset_terminal_settings():
             print("\n[Terminal formatting reset (Windows)]", end='\r\n', flush=True)
             return
             
-        # For Unix-like systems (macOS/Linux)
+        # For Unix-like systems (macOS/Linux) - don't reset to canonical mode during keyboard listening
         try:
-            import termios
-            # Reset terminal settings
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, termios.tcgetattr(sys.stdin))
+            # Flush stdout to ensure all output is displayed
+            sys.stdout.flush()
             
-            # Reset terminal modes without clearing screen
-            safe_stty('sane')
-            
-            # DO NOT clear screen and reset cursor
-            # print('\033[2J\033[H', end='')  # Commented out to preserve terminal history
-            
-            # Reset keyboard mode
-            safe_stty('-raw -echo')
+            # Force line buffering - but only if supported on this platform/Python version
+            try:
+                sys.stdout.reconfigure(line_buffering=True)
+            except (AttributeError, TypeError):
+                # Older Python versions or Windows may not support reconfigure
+                pass
+                
         except ImportError:
             # Fallback if termios isn't available
-            pass
-            
-        # Flush stdout to ensure all output is displayed
-        sys.stdout.flush()
-        
-        # Force line buffering - but only if supported on this platform/Python version
-        try:
-            sys.stdout.reconfigure(line_buffering=True)
-        except (AttributeError, TypeError):
-            # Older Python versions or Windows may not support reconfigure
             pass
         
         print("\n[Terminal formatting reset]", end='\r\n', flush=True)
         
     except Exception as e:
         print(f"Warning: Could not reset terminal settings: {e}", end='\r\n', flush=True)
+
+def setup_raw_terminal():
+    """Setup terminal for immediate keypress detection on Unix-like systems."""
+    global original_terminal_settings
+    
+    if sys.platform == 'win32' and not platform_manager.is_wsl():
+        return  # Windows doesn't need this
+        
+    if platform_manager.termios is not None:
+        try:
+            fd = sys.stdin.fileno()
+            # Save current settings for cleanup later
+            original_terminal_settings = platform_manager.termios.tcgetattr(fd)
+            print("[Terminal ready for immediate keypress detection]", end='\r\n', flush=True)
+        except Exception as e:
+            print(f"Warning: Could not prepare terminal: {e}", end='\r\n', flush=True)
+
+def restore_canonical_terminal():
+    """Restore terminal to canonical mode (normal line-buffered mode)."""
+    global original_terminal_settings
+    
+    if sys.platform == 'win32' and not platform_manager.is_wsl():
+        return  # Windows doesn't need this
+        
+    if platform_manager.termios is not None and original_terminal_settings is not None:
+        try:
+            fd = sys.stdin.fileno()
+            platform_manager.termios.tcsetattr(fd, platform_manager.termios.TCSADRAIN, original_terminal_settings)
+            print("\n[Terminal restored to canonical mode]", end='\r\n', flush=True)
+        except Exception as e:
+            print(f"Warning: Could not restore terminal settings: {e}", end='\r\n', flush=True)
 
 #
 # #############################################################
@@ -2846,6 +2896,7 @@ def kill_worker_threads():
 keyboard_listener_running = True
 keyboard_listener_active = True  # New variable to track if keyboard listener is active
 emergency_cleanup_in_progress = False  # Add this to prevent recursion
+original_terminal_settings = None  # Store original terminal settings for cleanup
 
 def toggle_listening():
     global keyboard_listener_active
@@ -2927,19 +2978,15 @@ def keyboard_listener():
                                 continue
                                 
                             if is_mic_position_in_bounds(MICS_ACTIVE, key_int):
-                                # Stop current VU meter if running
-                                if vu_proc is not None:
-                                    stop_vu()
-                                    time.sleep(0.1)  # Give it time to clean up
-                                
                                 monitor_channel = key_int
                                 if intercom_proc is not None:
                                     change_ch_event.set()
                                 print(f"\nNow monitoring channel: {monitor_channel+1} (of {sound_in_chs})", end='\n', flush=True)
-                                
-                                # Restart VU meter if it was running
+                                # Restart VU meter if running
                                 if vu_proc is not None:
                                     print(f"Restarting VU meter on channel: {monitor_channel+1}", end='\n', flush=True)
+                                    toggle_vu_meter()
+                                    time.sleep(0.1)
                                     toggle_vu_meter()
                             else:
                                 print(f"Sound device has only {sound_in_chs} channel(s)", end='\n', flush=True)
@@ -2988,22 +3035,6 @@ def keyboard_listener():
             # Don't exit the keyboard listener on error, just continue
             continue
             
-        time.sleep(0.01)  # Small delay to prevent high CPU usage
-
-def show_list_of_commands():
-    print("\na  audio pathway--check for over/underflows")
-    print("c  channel--select channel to monitor, either before or during use of vu or intercom, '0' to exit")
-    print("d  selected devices in use data")
-    print("D  show all devices with active input/output indicator")
-    print("f  fft--show plot")
-    print("i  intercom: press i then press 1, 2, 3, ... to listen to that channel")
-    print("m  mic--show active positions")
-    print("o  oscilloscope--show trace of each active channel")
-    print("q  quit--stop all processes and exit")
-    print("s  spectrogram--plot of last recording")
-    print("t  threads--see list of all threads")
-    print("v  vu meter--toggle--show vu meter on cli")
-    print("^  toggle keyboard listener on/off")
     print("h or ?  show list of commands\n")
 
 def show_detailed_device_list():
@@ -3039,6 +3070,22 @@ def show_detailed_device_list():
     
     print("-" * 80)
     sys.stdout.flush()
+
+def show_list_of_commands():
+    print("\na  audio pathway--check for over/underflows")
+    print("c  channel--select channel to monitor, either before or during use of vu or intercom, '0' to exit")
+    print("d  selected devices in use data")
+    print("D  show all devices with active input/output indicator")
+    print("f  fft--show plot")
+    print("i  intercom: press i then press 1, 2, 3, ... to listen to that channel")
+    print("m  mic--show active positions")
+    print("o  oscilloscope--show trace of each active channel")
+    print("q  quit--stop all processes and exit")
+    print("s  spectrogram--plot of last recording")
+    print("t  threads--see list of all threads")
+    print("v  vu meter--toggle--show vu meter on cli")
+    print("^  toggle keyboard listener on/off")
+    print("h or ?  show list of commands\n")
 
 ###########################
 ########## MAIN ###########
@@ -3354,7 +3401,7 @@ def cleanup():
         
         # Platform-specific terminal cleanup
         try:
-            restore_terminal_settings(original_terminal_settings)
+            restore_canonical_terminal()
         except Exception as e:
             print(f"Error resetting terminal: {e}", end='\r\n', flush=True)
             # Try alternative terminal reset
@@ -3362,7 +3409,6 @@ def cleanup():
                 if sys.platform != 'win32':
                     os.system('stty sane')
                     os.system('stty echo')
-                    os.system('reset')
             except:
                 pass
     except Exception as e:
@@ -3433,7 +3479,7 @@ def emergency_cleanup(signum=None, frame=None):
         
         # Reset terminal settings
         try:
-            restore_terminal_settings(original_terminal_settings)
+            restore_canonical_terminal()
         except Exception as e:
             print(f"Error resetting terminal: {e}")
             # Try alternative terminal reset
@@ -3441,7 +3487,6 @@ def emergency_cleanup(signum=None, frame=None):
                 if sys.platform != 'win32':
                     os.system('stty sane')
                     os.system('stty echo')
-                    os.system('reset')
             except:
                 pass
         
@@ -3462,9 +3507,9 @@ if sys.platform != 'win32':
 def save_terminal_settings():
     """Save current terminal settings."""
     try:
-        if sys.platform != 'win32':
+        if sys.platform != 'win32' and platform_manager.termios is not None:
             fd = sys.stdin.fileno()
-            return termios.tcgetattr(fd)
+            return platform_manager.termios.tcgetattr(fd)
     except:
         return None
     return None
@@ -3472,19 +3517,15 @@ def save_terminal_settings():
 def restore_terminal_settings(old_settings):
     """Restore terminal settings to their original state."""
     try:
-        if sys.platform != 'win32' and old_settings is not None:
+        if sys.platform != 'win32' and old_settings is not None and platform_manager.termios is not None:
             fd = sys.stdin.fileno()
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            platform_manager.termios.tcsetattr(fd, platform_manager.termios.TCSADRAIN, old_settings)
             # Additional terminal reset commands
             try:
                 # Reset terminal mode
                 os.system('stty sane')
-                # Reset input mode
-                os.system('stty icrnl')
                 # Enable echo
                 os.system('stty echo')
-                # Reset line settings
-                fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
             except:
                 pass
             sys.stdout.write('\n')  # Ensure we're on a new line
@@ -3494,7 +3535,8 @@ def restore_terminal_settings(old_settings):
         try:
             # Last resort terminal reset
             if sys.platform != 'win32':
-                os.system('reset')
+                os.system('stty sane')
+                os.system('stty echo')
         except:
             pass
 
