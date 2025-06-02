@@ -1177,6 +1177,26 @@ def get_default_output_device():
             return device['name']
     return None
 
+def create_progress_bar(current, total, bar_length=50):
+    """Create a progress bar string.
+    
+    Args:
+        current: Current progress value
+        total: Total value
+        bar_length: Length of the progress bar (default 50)
+        
+    Returns:
+        String representation of progress bar like [######     ]
+    """
+    if total == 0:
+        return f"[{'#' * bar_length}]"
+    
+    percent = min(100, int(current * 100 / total))
+    filled_length = int(bar_length * current // total)
+    bar = '#' * filled_length + ' ' * (bar_length - filled_length)
+    
+    return f"[{bar}] {percent}%"
+
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
 def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs, queue): 
     try:
@@ -1233,7 +1253,8 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs, queue):
                                 recording_complete = True
                                 return (None, pyaudio.paComplete)
                             elif frames_recorded % (chunk_size * 10) == 0:
-                                print(f"Recording progress: {frames_recorded}/{num_frames} frames ({frames_recorded/num_frames*100:.1f}%)", end='\r')
+                                progress_bar = create_progress_bar(frames_recorded, num_frames)
+                                print(f"Recording progress: {progress_bar}", end='\r')
                     return (None, pyaudio.paContinue)
                 except Exception as e:
                     print(f"Error in callback: {e}")
@@ -1262,7 +1283,8 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs, queue):
             while frames_recorded < num_frames and queue.empty() and (time.time() - start_time) < timeout:
                 if recording_complete:
                     break
-                print(f"Recording progress: {frames_recorded}/{num_frames} frames ({frames_recorded/num_frames*100:.1f}%)", end='\r')
+                progress_bar = create_progress_bar(frames_recorded, num_frames)
+                print(f"Recording progress: {progress_bar}", end='\r')
                 time.sleep(0.1)  # Increased sleep time to reduce CPU usage
             
             # Stop and close stream
@@ -1270,7 +1292,8 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs, queue):
             stream.close()
             
             print("\nRecording oscope finished.")
-            print(f"Recorded {frames_recorded} of {num_frames} frames ({frames_recorded/num_frames*100:.1f}%)")
+            progress_bar = create_progress_bar(frames_recorded, num_frames)
+            print(f"Final progress: {progress_bar}")
             
             # Only process if we got enough data
             if frames_recorded < num_frames * 0.9:  # Allow for small missing chunks
@@ -1298,8 +1321,23 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs, queue):
                 ax.set_title(f"Oscilloscope Traces w/{OSCOPE_GAIN_DB}dB Gain--Ch{i+1}")
                 ax.set_xlabel('Time (seconds)')
                 ax.set_ylim(-1.0, 1.0)
-                # Remove unnecessary grid and ticks for better performance
-                ax.grid(False)
+                
+                # Add graticule
+                # Horizontal line at 0
+                ax.axhline(y=0, color='gray', linewidth=0.5, alpha=0.7)
+                
+                # Vertical lines at each second
+                max_time = time_points[-1]
+                for t in range(0, int(max_time) + 1):
+                    ax.axvline(x=t, color='gray', linewidth=0.5, alpha=0.5)
+                
+                # Add minor vertical lines at 0.5 second intervals
+                for t in np.arange(0.5, max_time, 0.5):
+                    ax.axvline(x=t, color='gray', linewidth=0.3, alpha=0.3, linestyle='--')
+                
+                # Configure grid and ticks
+                ax.set_xticks(range(0, int(max_time) + 1))
+                ax.set_yticks([-1.0, -0.5, 0, 0.5, 1.0])
                 ax.tick_params(axis='both', which='both', labelsize=8)
             
             plt.tight_layout()
@@ -1518,7 +1556,8 @@ def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel, stop_queue
                                 recording_complete = True
                                 return (None, pyaudio.paComplete)
                             elif frames_recorded % (chunk_size * 10) == 0:
-                                print(f"Recording progress: {frames_recorded}/{num_frames} frames ({frames_recorded/num_frames*100:.1f}%)", end='\r')
+                                progress_bar = create_progress_bar(frames_recorded, num_frames)
+                                print(f"Recording progress: {progress_bar}", end='\r')
                     return (None, pyaudio.paContinue)
                 except Exception as e:
                     print(f"Error in callback: {e}")
@@ -1547,7 +1586,8 @@ def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel, stop_queue
             while frames_recorded < num_frames and stop_queue.empty() and (time.time() - start_time) < timeout:
                 if recording_complete:
                     break
-                print(f"Recording progress: {frames_recorded}/{num_frames} frames ({frames_recorded/num_frames*100:.1f}%)", end='\r')
+                progress_bar = create_progress_bar(frames_recorded, num_frames)
+                print(f"Recording progress: {progress_bar}", end='\r')
                 time.sleep(0.1)  # Increased sleep time to reduce CPU usage
             
             # Stop and close stream
@@ -1555,7 +1595,8 @@ def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel, stop_queue
             stream.close()
             
             print("\nRecording fft finished.")
-            print(f"Recorded {frames_recorded} of {num_frames} frames ({frames_recorded/num_frames*100:.1f}%)")
+            progress_bar = create_progress_bar(frames_recorded, num_frames)
+            print(f"Final progress: {progress_bar}")
             
             # Only process if we got enough data
             if frames_recorded < num_frames * 0.9:  # Allow for small missing chunks
