@@ -1329,9 +1329,20 @@ def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel):
         bucket_width = FFT_BW  # Hz
         bucket_size = int(bucket_width * N / sound_in_samplerate)  # Number of indices per bucket
 
-        # Average buckets
-        buckets = np.array([yf[i:i + bucket_size].mean() for i in range(0, len(yf), bucket_size)])
-        bucket_freqs = np.array([xf[i:i + bucket_size].mean() for i in range(0, len(xf), bucket_size)])
+        # Calculate the number of complete buckets
+        num_buckets = len(yf) // bucket_size
+        
+        # Average buckets - ensure both arrays have the same length
+        buckets = []
+        bucket_freqs = []
+        for i in range(num_buckets):
+            start_idx = i * bucket_size
+            end_idx = start_idx + bucket_size
+            buckets.append(yf[start_idx:end_idx].mean())
+            bucket_freqs.append(xf[start_idx:end_idx].mean())
+        
+        buckets = np.array(buckets)
+        bucket_freqs = np.array(bucket_freqs)
 
         # Plot results
         plt.figure(figsize=(10, 6))
@@ -2072,9 +2083,20 @@ def plot_and_save_fft(sound_in_samplerate, channel):
         bucket_width = FFT_BW  # Hz
         bucket_size = int(bucket_width * N / sound_in_samplerate)  # Number of indices per bucket
 
-        # Average buckets
-        buckets = np.array([yf[i:i + bucket_size].mean() for i in range(0, len(yf), bucket_size)])
-        bucket_freqs = np.array([xf[i:i + bucket_size].mean() for i in range(0, len(xf), bucket_size)])
+        # Calculate the number of complete buckets
+        num_buckets = len(yf) // bucket_size
+        
+        # Average buckets - ensure both arrays have the same length
+        buckets = []
+        bucket_freqs = []
+        for i in range(num_buckets):
+            start_idx = i * bucket_size
+            end_idx = start_idx + bucket_size
+            buckets.append(yf[start_idx:end_idx].mean())
+            bucket_freqs.append(xf[start_idx:end_idx].mean())
+        
+        buckets = np.array(buckets)
+        bucket_freqs = np.array(bucket_freqs)
 
         # Plot results
         plt.plot(bucket_freqs, np.abs(buckets))
