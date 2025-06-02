@@ -349,10 +349,16 @@ else:  # Linux or other Unix-like
 
 # to be discovered from sounddevice.query_devices()
 sound_in_id = 1                             # id of input device, set as default in case none is detected
-sound_in_chs = config.SOUND_IN_CHS          # number of input channels
-sound_out_id = config.SOUND_OUT_ID_DEFAULT
-sound_out_chs = config.SOUND_OUT_CHS_DEFAULT                        
-sound_out_samplerate = config.SOUND_OUT_SR_DEFAULT    
+sound_in_chs = int(config.SOUND_IN_CHS) if hasattr(config, 'SOUND_IN_CHS') else 1  # Ensure it's an integer
+sound_out_id = int(config.SOUND_OUT_ID_DEFAULT) if hasattr(config, 'SOUND_OUT_ID_DEFAULT') else None
+sound_out_chs = int(config.SOUND_OUT_CHS_DEFAULT) if hasattr(config, 'SOUND_OUT_CHS_DEFAULT') else 2                        
+sound_out_samplerate = int(config.SOUND_OUT_SR_DEFAULT) if hasattr(config, 'SOUND_OUT_SR_DEFAULT') else 44100    
+
+# Verify the values are reasonable
+if sound_in_chs <= 0 or sound_in_chs > 64:  # Sanity check for number of channels
+    print(f"Warning: Invalid SOUND_IN_CHS value in config: {config.SOUND_IN_CHS}")
+    print(f"Setting to default of 1 channel")
+    sound_in_chs = 1
 
 # Create date components in the correct format
 # For folder structure we need YY (2-digit year), MM, DD format
@@ -1388,7 +1394,7 @@ def trigger_oscope():
         oscope_process.start()
         
         # Wait for completion with timeout
-        timeout = TRACE_DURATION + 15  # Reduced timeout to be more responsive
+        timeout = TRACE_DURATION + 30  # Reduced timeout to be more responsive
         oscope_process.join(timeout=timeout)
         
         # Check if process is still running
@@ -1715,7 +1721,7 @@ def trigger_fft():
         fft_process.start()
         
         # Wait for completion with timeout
-        timeout = FFT_DURATION + 15  # Recording duration plus extra time for processing
+        timeout = FFT_DURATION + 30  # Recording duration plus extra time for processing
         fft_process.join(timeout=timeout)
         
         # Check if process is still running
@@ -1775,7 +1781,7 @@ def trigger_spectrogram():
         clear_input_buffer()
         
         # Wait for completion with timeout
-        active_processes['s'].join(timeout=120)  # Increased timeout for spectrogram generation
+        active_processes['s'].join(timeout=240)  # Increased timeout for spectrogram generation
         
         # Cleanup if process is still running
         if active_processes['s'].is_alive():
@@ -2009,7 +2015,17 @@ def check_wsl_audio():
         return False
 
 def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_queue, asterisks):
-    buffer = np.zeros((int(sound_in_samplerate),))
+    # Debug: Print incoming parameter types
+    if config.DEBUG_VERBOSE:
+        print(f"\n[VU Debug] Parameter types:")
+        print(f"  sound_in_id: {sound_in_id} (type: {type(sound_in_id)})")
+        print(f"  sound_in_samplerate: {sound_in_samplerate} (type: {type(sound_in_samplerate)})")
+        print(f"  sound_in_chs: {sound_in_chs} (type: {type(sound_in_chs)})")
+        print(f"  channel: {channel} (type: {type(channel)})")
+    
+    # Ensure sample rate is an integer for buffer size calculation
+    buffer_size = int(sound_in_samplerate)
+    buffer = np.zeros(buffer_size)
     last_print = ""
     
     # Validate the channel is valid for the device
@@ -2021,11 +2037,17 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
     def callback_input(indata, frames, time, status):
         nonlocal last_print
         try:
+            # Debug first callback
+            if config.DEBUG_VERBOSE and last_print == "":
+                print(f"\n[VU Debug] First callback: frames={frames}, indata.shape={indata.shape}")
+            
             # Always validate channel before accessing the data
-            selected_channel = min(channel, indata.shape[1] - 1)
+            selected_channel = int(min(channel, indata.shape[1] - 1))
             
             channel_data = indata[:, selected_channel]
-            buffer[:frames] = channel_data
+            # Ensure frames is an integer for array slicing
+            frames_int = int(frames)
+            buffer[:frames_int] = channel_data
             audio_level = np.max(np.abs(channel_data))
             normalized_value = int((audio_level / 1.0) * 50)
             
@@ -2039,12 +2061,25 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
                 sys.stdout.flush()  # Ensure output is displayed immediately
         except Exception as e:
             # Log the error but don't crash
-            print(f"\rVU meter error: {e}", end='\r\n')
+            print(f"\rVU meter callback error: {e}", end='\r\n')
+            if config.DEBUG_VERBOSE:
+                print(f"Error details: channel={channel}, frames={frames}, indata.shape={indata.shape}", end='\r\n')
+                import traceback
+                traceback.print_exc()
             time.sleep(0.1)  # Prevent too many messages
 
     try:
+        # Debug platform detection
+        if config.DEBUG_VERBOSE:
+            print(f"\n[VU Debug] Platform detection:")
+            print(f"  sys.platform: {sys.platform}")
+            print(f"  platform_manager.is_wsl(): {platform_manager.is_wsl()}")
+            print(f"  Platform OS info: {platform_manager.get_os_info()}")
+        
         # In WSL, we need to use different stream parameters
         if platform_manager.is_wsl():
+            if config.DEBUG_VERBOSE:
+                print("[VU Debug] Using WSL audio configuration")
             # Check audio configuration first
             if not check_wsl_audio():
                 raise Exception("Audio configuration check failed")
@@ -2054,25 +2089,39 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
                 with sd.InputStream(callback=callback_input,
                                   device=None,  # Use system default
                                   channels=1,   # Use mono
-                                  samplerate=44100,  # Use standard rate
+                                  samplerate=48000,  # Use standard rate
                                   blocksize=1024,    # Use smaller block size
                                   latency='low'):
                     while not stop_vu_queue.get():
-                        sd.sleep(0.1)
+                        sd.sleep(100)  # Changed from 0.1 to 100 milliseconds
             except Exception as e:
                 print(f"\nError with default configuration: {e}")
                 print("\nPlease ensure your WSL audio is properly configured.")
                 raise
         else:
+            if config.DEBUG_VERBOSE:
+                print("[VU Debug] Using standard audio configuration (non-WSL)")
             # Make sure we request at least as many channels as our selected channel
-            with sd.InputStream(callback=callback_input,
-                              device=sound_in_id,
-                              channels=sound_in_chs,
-                              samplerate=sound_in_samplerate,
-                              blocksize=1024,    # Use smaller block size
-                              latency='low'):
-                while not stop_vu_queue.get():
-                    sd.sleep(0.1)
+            # Ensure all parameters are integers for compatibility
+            try:
+                # Simple approach - just ensure the critical parameters are integers
+                with sd.InputStream(callback=callback_input,
+                                  device=int(sound_in_id) if sound_in_id is not None else None,
+                                  channels=int(sound_in_chs),
+                                  samplerate=int(sound_in_samplerate),
+                                  blocksize=1024,
+                                  latency='low'):
+                    while not stop_vu_queue.get():
+                        sd.sleep(100)  # Changed from 0.1 to 100 milliseconds
+            except Exception as e:
+                print(f"\nError in VU meter InputStream: {e}")
+                print(f"Debug info:")
+                print(f"  sound_in_id={sound_in_id} (type: {type(sound_in_id)})")
+                print(f"  sound_in_chs={sound_in_chs} (type: {type(sound_in_chs)})")
+                print(f"  sound_in_samplerate={sound_in_samplerate} (type: {type(sound_in_samplerate)})")
+                import traceback
+                traceback.print_exc()
+                raise
     except Exception as e:
         print(f"\nError in VU meter: {e}")
     finally:
@@ -2107,10 +2156,28 @@ def toggle_vu_meter():
             asterisks.value = '*' * normalized_value
             print("threshold:", asterisks.value.ljust(50, ' '))
             
+        # Debug and validate parameters before creating process
+        if config.DEBUG_VERBOSE:
+            print(f"\n[Toggle VU Debug] Parameter validation:")
+            print(f"  sound_in_id: {sound_in_id} (type: {type(sound_in_id)})")
+            print(f"  sound_in_samplerate: {sound_in_samplerate} (type: {type(sound_in_samplerate)})")
+            print(f"  sound_in_chs: {sound_in_chs} (type: {type(sound_in_chs)})")
+            print(f"  monitor_channel: {monitor_channel} (type: {type(monitor_channel)})")
+        
+        # Ensure all parameters are the correct type
+        try:
+            proc_sound_in_id = int(sound_in_id) if sound_in_id is not None else None
+            proc_sound_in_samplerate = int(sound_in_samplerate)
+            proc_sound_in_chs = int(sound_in_chs)
+            proc_monitor_channel = int(monitor_channel)
+        except (ValueError, TypeError) as e:
+            print(f"Error converting parameters to integers: {e}")
+            return
+            
         # Create the VU meter process
         vu_proc = multiprocessing.Process(
             target=vu_meter, 
-            args=(sound_in_id, sound_in_samplerate, sound_in_chs, monitor_channel, stop_vu_queue, asterisks)
+            args=(proc_sound_in_id, proc_sound_in_samplerate, proc_sound_in_chs, proc_monitor_channel, stop_vu_queue, asterisks)
         )
         
         # Set the process to start in a clean environment
@@ -2180,7 +2247,7 @@ def intercom_m_downsampled(sound_in_id, sound_in_samplerate, sound_in_chs, sound
         sd.OutputStream(callback=callback_output, device=sound_out_id, channels=sound_out_chs, samplerate=sound_out_samplerate): 
         # The streams are now open and the callback function will be called every time there is audio input and output
         while not stop_intercom_event.is_set():
-            sd.sleep(1)
+            sd.sleep(1000)  # Changed from 1 to 1000 milliseconds
         print("Stopping intercom...")
 
 
@@ -2281,7 +2348,7 @@ def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sou
                     # Clear the buffer when changing channels to avoid audio artifacts
                     buffer.fill(0)
                     change_ch_event.clear()
-                sd.sleep(10)  # Reduced sleep time for better responsiveness
+                sd.sleep(10000)  # Changed from 10 to 10000 milliseconds (10 seconds)
             print("Stopping intercom...")
     except Exception as e:
         print(f"Error in intercom_m: {e}")

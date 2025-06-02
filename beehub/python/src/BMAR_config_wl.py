@@ -16,6 +16,9 @@ MODE_PERIOD = True                              # period recording
 MODE_EVENT = False                              # event recording
 MODE_FFT_PERIODIC_RECORD = True                 # record fft periodically
 
+# debug control
+DEBUG_VERBOSE = False                           # Enable verbose debug output (set to True for troubleshooting)
+
 # recording types controls:
 AUDIO_MONITOR_START = None  ##datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec; None = continuous recording
 AUDIO_MONITOR_END = datetime.time(23, 0, 0)     # time of day to stop recording hr, min, sec
@@ -73,7 +76,7 @@ WINDOWS_DEVICE_NAME = "Focusrite Scarlett"              # Device name
 WINDOWS_API_NAME = "WASAPI"                      # Windows audio API
 WINDOWS_HOSTAPI_NAME = "WASAPI"                  # Host API name
 WINDOWS_HOSTAPI_INDEX = 0                                # Default host API index
-WINDOWS_DEVICE_ID = 12                                   # Device ID for Focusrite
+WINDOWS_DEVICE_ID = None                                   # Device ID for Focusrite
 
 # input device parameters--macos:
 MACOS_MAKE_NAME = ""                                    # Leave empty for macOS default
