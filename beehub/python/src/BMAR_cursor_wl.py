@@ -2090,6 +2090,7 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
                                   device=None,  # Use system default
                                   channels=1,   # Use mono
                                   samplerate=48000,  # Use standard rate
+                                  samplerate=48000,  # Use standard rate
                                   blocksize=1024,    # Use smaller block size
                                   latency='low'):
                     while not stop_vu_queue.get():
