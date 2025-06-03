@@ -28,6 +28,7 @@ AUDIO_MONITOR_INTERVAL = 0                      # seconds between recordings
 PERIOD_START = None  ##datetime.time(4, 0, 0)   # 'None' = continuous recording
 PERIOD_END = datetime.time(20, 0, 0)
 PERIOD_RECORD = 900                             # seconds of recording (default 900 sec)
+PERIOD_SPECTROGRAM = 120                        # spectrogram duration for saved png images
 PERIOD_INTERVAL = 0                             # seconds between start of period, must be > period, of course
 
 EVENT_START = datetime.time(4, 0, 0)

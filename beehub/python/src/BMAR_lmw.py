@@ -309,6 +309,8 @@ current_year = current_date.strftime('%Y')
 current_month = current_date.strftime('%m')
 current_day = current_date.strftime('%d')
 
+spectrogram_period = config.PERIOD_SPECTROGRAM
+
 # Select the appropriate data drive and path based on OS
 if platform_manager.is_macos():
     data_drive = os.path.expanduser(config.mac_data_drive)  # Expand ~ if present
@@ -1892,7 +1894,7 @@ def trigger_spectrogram():
         # Create and start the spectrogram process
         active_processes['s'] = multiprocessing.Process(
             target=plot_spectrogram, 
-            args=(monitor_channel, 'lin', file_offset-1)
+            args=(monitor_channel, 'lin', file_offset-1, spectrogram_period)
         )
         active_processes['s'].daemon = True  # Make it a daemon process
         active_processes['s'].start()
@@ -1927,7 +1929,7 @@ def trigger_spectrogram():
         clear_input_buffer()
         print("Spectrogram process completed")
 
-def plot_spectrogram(channel, y_axis_type, file_offset):
+def plot_spectrogram(channel, y_axis_type, file_offset, period):
     """
     Generate a spectrogram from an audio file and display/save it as an image.
     Parameters:
@@ -1957,7 +1959,7 @@ def plot_spectrogram(channel, y_axis_type, file_offset):
         print("Loading audio file with librosa...")
         try:
             # For spectrogram display, limit duration to avoid memory issues
-            max_duration = min(config.PERIOD_RECORD, 300)  # Max 5 minutes for display
+            max_duration = min(config.PERIOD_RECORD, period)  # Max 5 minutes for display
             
             # Load the audio file with duration limit
             # Using mono=False to preserve channels, keeping native sample rate
