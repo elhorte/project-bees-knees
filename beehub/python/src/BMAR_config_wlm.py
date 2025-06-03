@@ -94,7 +94,7 @@ PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'INTERVAL = 0 # 
 
 AUDIO_MONITOR_SAMPLERATE = 48000                # For continuous audio
 AUDIO_MONITOR_BITDEPTH = 16                     # Audio bit depthv
-AUDIO_MONITOR_CHANNELS = 2                      # Number of channels
+AUDIO_MONITOR_CHANNELS = 1                      # Number of channels
 AUDIO_MONITOR_QUALITY = 0                       # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
 

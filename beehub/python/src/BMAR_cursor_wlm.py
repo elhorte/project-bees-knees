@@ -807,6 +807,7 @@ def set_input_device(model_name_arg, api_name_preference):
                             return True
                             
                     except Exception as e:
+                        print(f"\nERROR: Could not configure device [{dev_id}{sound_in_chs}]")
                         print(f"  Failed to configure device: {str(e)}")
                         continue
             else:
