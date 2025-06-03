@@ -64,7 +64,7 @@ import struct
 
 # Platform-specific modules will be imported after platform detection
 
-import BMAR_config_wl as config
+import BMAR_config_wlm as config
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 
 # Near the top of the file, after the imports
@@ -681,74 +681,89 @@ def set_input_device(model_name_arg, api_name_preference):
                     print(f"  Max Channels: {device['max_input_channels']}")
                     print(f"  Default Sample Rate: {device['default_samplerate']} Hz")
                     
-                    try:
-                        # Try to set the sample rate using PyAudio first
-                        if not platform_manager.is_wsl():
-                            try:
-                                import pyaudio
-                                p = pyaudio.PyAudio()
-                                device_info = p.get_device_info_by_index(device_id)
-                                print(f"\nCurrent Windows sample rate: {device_info['defaultSampleRate']} Hz")
-                                
-                                # Try to open a stream with our desired sample rate
-                                stream = p.open(format=pyaudio.paInt16,
-                                              channels=sound_in_chs,
-                                              rate=sound_in_samplerate,
-                                              input=True,
-                                              input_device_index=device_id,
-                                              frames_per_buffer=1024)
-                                
-                                # Verify the actual sample rate
-                                actual_rate = stream._get_stream_info()['sample_rate']
-                                print(f"PyAudio stream sample rate: {actual_rate} Hz")
-                                
-                                stream.close()
-                                p.terminate()
-                                
-                                if actual_rate != sound_in_samplerate:
-                                    print(f"\nWARNING: PyAudio could not set sample rate to {sound_in_samplerate} Hz")
-                                    print(f"Device is using {actual_rate} Hz instead")
-                                    print("This may affect recording quality.")
-                            except Exception as e:
-                                print(f"Warning: Could not set sample rate using PyAudio: {e}")
-                        
-                        # Now try with sounddevice
-                        print("\nAttempting to configure device with sounddevice...")
-                        sd.default.samplerate = sound_in_samplerate  # Set global default
-                        
-                        with sd.InputStream(device=device_id, 
-                                          channels=sound_in_chs,
-                                          samplerate=sound_in_samplerate,
-                                          dtype=_dtype,
-                                          blocksize=1024) as stream:
-                            # Verify the actual sample rate being used
-                            actual_rate = stream.samplerate
-                            if actual_rate != sound_in_samplerate:
-                                print(f"\nWARNING: Requested sample rate {sound_in_samplerate} Hz, but device is using {actual_rate} Hz")
-                                print("This may affect recording quality. Consider using a different device or sample rate.")
-                                print("\nPossible solutions:")
-                                print("1. Check Windows Sound Control Panel settings")
-                                print("2. Check if your audio device has its own control panel")
-                                print("3. Try using a different sample rate that your device supports")
-                                print("4. Update your audio device drivers")
-                            
-                            # If we get here, the device works with our settings
-                            sound_in_id = device_id
-                            print(f"\nSuccessfully configured specified device [{device_id}]")
-                            print(f"Device Configuration:")
-                            print(f"  Sample Rate: {actual_rate} Hz")
-                            print(f"  Bit Depth: {config.PRIMARY_BITDEPTH} bits")
-                            print(f"  Channels: {sound_in_chs}")
-                            testmode = False
-                            return True
-                    except Exception as e:
-                        print(f"\nERROR: Could not use specified device ID {device_id}")
-                        print(f"Reason: {str(e)}")
-                        response = input("\nThe specified device could not be used. Would you like to proceed with an alternative device? (y/n): ")
+                    # Check channel compatibility and ask user permission if needed
+                    original_channels = sound_in_chs
+                    user_approved = True
+                    
+                    if sound_in_chs > device['max_input_channels']:
+                        print(f"\nChannel mismatch detected:")
+                        print(f"  Configuration requires: {original_channels} channels")
+                        print(f"  Device supports: {device['max_input_channels']} channels")
+                        response = input(f"\nWould you like to proceed with {device['max_input_channels']} channel(s) instead? (y/n): ")
                         if response.lower() != 'y':
-                            print("Exiting as requested.")
-                            sys.exit(1)
-                        print("Falling back to device search...")
+                            print("User declined to use fewer channels.")
+                            print("Falling back to device search...")
+                            user_approved = False
+                        else:
+                            sound_in_chs = device['max_input_channels']
+                            print(f"Adjusting channel count from {original_channels} to {sound_in_chs}")
+                    
+                    if user_approved:
+                        try:
+                            # Try to set the sample rate using PyAudio first
+                            if not platform_manager.is_wsl():
+                                try:
+                                    import pyaudio
+                                    p = pyaudio.PyAudio()
+                                    device_info = p.get_device_info_by_index(device_id)
+                                    print(f"\nCurrent Windows sample rate: {device_info['defaultSampleRate']} Hz")
+                                    
+                                    # Try to open a stream with our desired sample rate
+                                    stream = p.open(format=pyaudio.paInt16,
+                                                  channels=sound_in_chs,
+                                                  rate=sound_in_samplerate,
+                                                  input=True,
+                                                  input_device_index=device_id,
+                                                  frames_per_buffer=1024)
+                                    
+                                    # Verify the actual sample rate
+                                    actual_rate = stream._get_stream_info()['sample_rate']
+                                    print(f"PyAudio stream sample rate: {actual_rate} Hz")
+                                    
+                                    stream.close()
+                                    p.terminate()
+                                    
+                                    if actual_rate != sound_in_samplerate:
+                                        print(f"\nWARNING: PyAudio could not set sample rate to {sound_in_samplerate} Hz")
+                                        print(f"Device is using {actual_rate} Hz instead")
+                                        print("This may affect recording quality.")
+                                except Exception as e:
+                                    print(f"Warning: Could not set sample rate using PyAudio: {e}")
+                            
+                            # Now try with sounddevice
+                            print("\nAttempting to configure device with sounddevice...")
+                            sd.default.samplerate = sound_in_samplerate
+                            
+                            with sd.InputStream(device=device_id, 
+                                              channels=sound_in_chs,
+                                              samplerate=sound_in_samplerate,
+                                              dtype=_dtype,
+                                              blocksize=1024) as stream:
+                                # Verify the actual sample rate being used
+                                actual_rate = stream.samplerate
+                                if actual_rate != sound_in_samplerate:
+                                    print(f"\nWARNING: Requested sample rate {sound_in_samplerate} Hz, but device is using {actual_rate} Hz")
+                                    print("This may affect recording quality.")
+                                
+                                # If we get here, the device works with our settings
+                                sound_in_id = device_id
+                                print(f"\nSuccessfully configured specified device [{device_id}]")
+                                print(f"Device Configuration:")
+                                print(f"  Sample Rate: {actual_rate} Hz")
+                                print(f"  Bit Depth: {config.PRIMARY_BITDEPTH} bits")
+                                print(f"  Channels: {sound_in_chs}")
+                                if original_channels != sound_in_chs:
+                                    print(f"  Note: Channel count was adjusted from {original_channels} to {sound_in_chs}")
+                                testmode = False
+                                return True
+                        except Exception as e:
+                            print(f"\nERROR: Could not use specified device ID {device_id}")
+                            print(f"Reason: {str(e)}")
+                            response = input("\nThe specified device could not be used. Would you like to proceed with an alternative device? (y/n): ")
+                            if response.lower() != 'y':
+                                print("Exiting as requested.")
+                                sys.exit(1)
+                            print("Falling back to device search...")
                 else:
                     print(f"\nERROR: Specified device ID {device_id} is not an input device")
                     response = input("\nThe specified device is not an input device. Would you like to proceed with an alternative device? (y/n): ")
@@ -789,10 +804,24 @@ def set_input_device(model_name_arg, api_name_preference):
                     print(f"  Max Channels: {device['max_input_channels']}")
                     print(f"  Default Sample Rate: {device['default_samplerate']} Hz")
                     
+                    # Auto-adjust channel count to match device capabilities
+                    original_channels = sound_in_chs
+                    actual_channels = min(sound_in_chs, device['max_input_channels'])
+                    if actual_channels != sound_in_chs:
+                        print(f"\nChannel mismatch detected:")
+                        print(f"  Configuration requires: {sound_in_chs} channels")
+                        print(f"  Device supports: {actual_channels} channels")
+                        response = input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/n): ")
+                        if response.lower() != 'y':
+                            print("Skipping this device...")
+                            continue
+                        sound_in_chs = actual_channels
+                        print(f"Adjusting channel count from {original_channels} to {sound_in_chs}")
+                    
                     try:
                         # Try to open a stream with our desired settings
                         with sd.InputStream(device=dev_id, 
-                                          channels=sound_in_chs,
+                                          channels=sound_in_chs,  # Use adjusted channel count
                                           samplerate=sound_in_samplerate,
                                           dtype=_dtype,
                                           blocksize=1024) as stream:
@@ -803,11 +832,13 @@ def set_input_device(model_name_arg, api_name_preference):
                             print(f"  Sample Rate: {sound_in_samplerate} Hz")
                             print(f"  Bit Depth: {config.PRIMARY_BITDEPTH} bits")
                             print(f"  Channels: {sound_in_chs}")
+                            if original_channels != sound_in_chs:
+                                print(f"  Note: Channel count was auto-adjusted from {original_channels} to {sound_in_chs}")
                             testmode = False
                             return True
                             
                     except Exception as e:
-                        print(f"\nERROR: Could not configure device [{dev_id}{sound_in_chs}]")
+                        print(f"\nERROR: Could not configure device [{dev_id}]")
                         print(f"  Failed to configure device: {str(e)}")
                         continue
             else:
@@ -821,10 +852,24 @@ def set_input_device(model_name_arg, api_name_preference):
             print(f"  Max Channels: {device['max_input_channels']}")
             print(f"  Default Sample Rate: {device['default_samplerate']} Hz")
             
+            # Auto-adjust channel count to match device capabilities
+            original_channels = sound_in_chs
+            actual_channels = min(sound_in_chs, device['max_input_channels'])
+            if actual_channels != sound_in_chs:
+                print(f"\nChannel mismatch detected:")
+                print(f"  Configuration requires: {sound_in_chs} channels")
+                print(f"  Device supports: {actual_channels} channels")
+                response = input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/n): ")
+                if response.lower() != 'y':
+                    print("Skipping this device...")
+                    continue
+                sound_in_chs = actual_channels
+                print(f"Adjusting channel count from {original_channels} to {sound_in_chs}")
+            
             try:
                 # Try to open a stream with our desired settings
                 with sd.InputStream(device=dev_id, 
-                                  channels=sound_in_chs,
+                                  channels=sound_in_chs,  # Use adjusted channel count
                                   samplerate=sound_in_samplerate,
                                   dtype=_dtype,
                                   blocksize=1024) as stream:
@@ -835,6 +880,8 @@ def set_input_device(model_name_arg, api_name_preference):
                     print(f"  Sample Rate: {sound_in_samplerate} Hz")
                     print(f"  Bit Depth: {config.PRIMARY_BITDEPTH} bits")
                     print(f"  Channels: {sound_in_chs}")
+                    if original_channels != sound_in_chs:
+                        print(f"  Note: Channel count was auto-adjusted from {original_channels} to {sound_in_chs}")
                     testmode = False
                     return True
                     
@@ -3283,6 +3330,12 @@ def main():
     if not set_input_device(model_name, api_name):
         print("\nExiting due to no suitable audio input device found.")
         sys.exit(1)
+
+    # Validate and adjust monitor_channel after device setup
+    if monitor_channel >= sound_in_chs:
+        print(f"\nWarning: Monitor channel {monitor_channel+1} exceeds available channels ({sound_in_chs})")
+        monitor_channel = 0  # Default to first channel
+        print(f"Setting monitor channel to {monitor_channel+1}")
 
     setup_audio_circular_buffer()
 
