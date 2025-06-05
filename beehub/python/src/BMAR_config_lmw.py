@@ -89,8 +89,9 @@ MACOS_HOSTAPI_INDEX = 0                                # Default host API index
 MACOS_DEVICE_ID = 0                                    # Default device ID
 
 # audio parameters:
-PRIMARY_SAMPLERATE = 192000                     # Audio sample rate
+PRIMARY_IN_SAMPLERATE = 192000                     # Audio sample rate
 PRIMARY_BITDEPTH = 16                           # Audio bit depth
+PRIMARY_SAVE_SAMPLERATE = 96000                 # if None then save at Input Samplerate
 PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'INTERVAL = 0 # seconds between recordings
 
 AUDIO_MONITOR_SAMPLERATE = 48000                # For continuous audio

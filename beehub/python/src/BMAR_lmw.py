@@ -64,7 +64,7 @@ import struct
 
 # Platform-specific modules will be imported after platform detection
 
-import BMAR_config_wlm as config
+import BMAR_config_lmw as config
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 
 # Near the top of the file, after the imports
@@ -294,14 +294,14 @@ else:
     quit(-1)
 
 # Set sound input parameters from config
-sound_in_samplerate = config.PRIMARY_SAMPLERATE
-sound_in_bitdepth = config.PRIMARY_BITDEPTH
-sound_in_format = config.PRIMARY_FILE_FORMAT
+##sound_in_samplerate = config.PRIMARY_IN_SAMPLERATE
+##sound_in_bitdepth = config.PRIMARY_BITDEPTH
+##sound_in_format = config.PRIMARY_FILE_FORMAT
 
 # Set monitor parameters from config
-monitor_samplerate = config.AUDIO_MONITOR_SAMPLERATE
-monitor_bitdepth = config.AUDIO_MONITOR_BITDEPTH
-monitor_format = config.AUDIO_MONITOR_FORMAT
+##monitor_samplerate = config.AUDIO_MONITOR_SAMPLERATE
+##monitor_bitdepth = config.AUDIO_MONITOR_BITDEPTH
+##monitor_format = config.AUDIO_MONITOR_FORMAT
 
 # Date and time stuff for file naming
 current_date = datetime.datetime.now()
@@ -405,10 +405,10 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 def ensure_directories_exist(directories):
     """
-    Check if directories exist and create them if necessary with user permission.
+    Check if directories exist and create them if necessary.
     
     Args:
-        directories: List of directory paths to check and potentially create
+        directories: List of directory paths to check and create
         
     Returns:
         bool: True if all directories exist or were created, False otherwise
@@ -423,19 +423,13 @@ def ensure_directories_exist(directories):
         print("All required directories exist.")
         return True
     
-    print("\nThe following directories do not exist:")
+    print("\nCreating the following directories:")
     for d in missing_dirs:
         print(f"  - {d}")
-    
-    response = input("\nDo you want to create these directories? (y/n): ")
-    if response.lower() != 'y':
-        print("Directory creation aborted. The program may not function correctly.")
-        return False
     
     success = True
     for d in missing_dirs:
         try:
-            print(f"Attempting to create directory: {d}")
             os.makedirs(d, exist_ok=True)
             
             # Verify directory was created
@@ -462,6 +456,31 @@ def ensure_directories_exist(directories):
     
     return success
 
+def check_and_create_date_folders():
+    """
+    Check if today's date folders exist and create them if necessary.
+    This function should be called at startup and periodically during operation.
+    """
+    global PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOT_DIRECTORY
+    
+    # Get current date components
+    current_date = datetime.datetime.now()
+    yy = current_date.strftime('%y')
+    mm = current_date.strftime('%m')
+    dd = current_date.strftime('%d')
+    date_folder = f"{yy}{mm}{dd}"
+    
+    # Update directory paths with current date
+    PRIMARY_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
+                                    folders[0], "raw", date_folder, "")
+    MONITOR_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
+                                    folders[0], "mp3", date_folder, "")
+    PLOT_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
+                                 folders[1], date_folder, "")
+    
+    # Create directories if they don't exist
+    required_directories = [PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOT_DIRECTORY]
+    return ensure_directories_exist(required_directories)
 
 def signal_handler(sig, frame):
     print('\nStopping all threads...\r')
@@ -662,7 +681,7 @@ def print_all_input_devices():
 
 
 def set_input_device(model_name_arg, api_name_preference):
-    global sound_in_id, sound_in_chs, testmode, sound_in_samplerate, device_id, make_name, model_name, device_name, api_name, hostapi_name, hostapi_index
+    global sound_in_id, sound_in_chs, testmode, device_id, make_name, model_name, device_name, api_name, hostapi_name, hostapi_index
 
     print("\nScanning for audio input devices...")
     sys.stdout.flush()
@@ -713,7 +732,7 @@ def set_input_device(model_name_arg, api_name_preference):
                                     # Try to open a stream with our desired sample rate
                                     stream = p.open(format=pyaudio.paInt16,
                                                   channels=sound_in_chs,
-                                                  rate=sound_in_samplerate,
+                                                  rate=config.PRIMARY_IN_SAMPLERATE,
                                                   input=True,
                                                   input_device_index=device_id,
                                                   frames_per_buffer=1024)
@@ -725,8 +744,8 @@ def set_input_device(model_name_arg, api_name_preference):
                                     stream.close()
                                     p.terminate()
                                     
-                                    if actual_rate != sound_in_samplerate:
-                                        print(f"\nWARNING: PyAudio could not set sample rate to {sound_in_samplerate} Hz")
+                                    if actual_rate != config.PRIMARY_IN_SAMPLERATE:
+                                        print(f"\nWARNING: PyAudio could not set sample rate to {config.PRIMARY_IN_SAMPLERATE} Hz")
                                         print(f"Device is using {actual_rate} Hz instead")
                                         print("This may affect recording quality.")
                                 except Exception as e:
@@ -734,17 +753,17 @@ def set_input_device(model_name_arg, api_name_preference):
                             
                             # Now try with sounddevice
                             print("\nAttempting to configure device with sounddevice...")
-                            sd.default.samplerate = sound_in_samplerate
+                            sd.default.samplerate = config.PRIMARY_IN_SAMPLERATE
                             
                             with sd.InputStream(device=device_id, 
                                               channels=sound_in_chs,
-                                              samplerate=sound_in_samplerate,
+                                              samplerate=config.PRIMARY_IN_SAMPLERATE,
                                               dtype=_dtype,
                                               blocksize=1024) as stream:
                                 # Verify the actual sample rate being used
                                 actual_rate = stream.samplerate
-                                if actual_rate != sound_in_samplerate:
-                                    print(f"\nWARNING: Requested sample rate {sound_in_samplerate} Hz, but device is using {actual_rate} Hz")
+                                if actual_rate != config.PRIMARY_IN_SAMPLERATE:
+                                    print(f"\nWARNING: Requested sample rate {config.PRIMARY_IN_SAMPLERATE} Hz, but device is using {actual_rate} Hz")
                                     print("This may affect recording quality.")
                                 
                                 # If we get here, the device works with our settings
@@ -824,14 +843,14 @@ def set_input_device(model_name_arg, api_name_preference):
                         # Try to open a stream with our desired settings
                         with sd.InputStream(device=dev_id, 
                                           channels=sound_in_chs,  # Use adjusted channel count
-                                          samplerate=sound_in_samplerate,
+                                          samplerate=config.PRIMARY_IN_SAMPLERATE,
                                           dtype=_dtype,
                                           blocksize=1024) as stream:
                             # If we get here, the device works with our settings
                             sound_in_id = dev_id
                             print(f"\nSuccessfully configured device [{dev_id}]")
                             print(f"Device Configuration:")
-                            print(f"  Sample Rate: {sound_in_samplerate} Hz")
+                            print(f"  Sample Rate: {config.PRIMARY_IN_SAMPLERATE} Hz")
                             print(f"  Bit Depth: {config.PRIMARY_BITDEPTH} bits")
                             print(f"  Channels: {sound_in_chs}")
                             if original_channels != sound_in_chs:
@@ -872,14 +891,14 @@ def set_input_device(model_name_arg, api_name_preference):
                 # Try to open a stream with our desired settings
                 with sd.InputStream(device=dev_id, 
                                   channels=sound_in_chs,  # Use adjusted channel count
-                                  samplerate=sound_in_samplerate,
+                                  samplerate=config.PRIMARY_IN_SAMPLERATE,
                                   dtype=_dtype,
                                   blocksize=1024) as stream:
                     # If we get here, the device works with our settings
                     sound_in_id = dev_id
                     print(f"\nSuccessfully configured device [{dev_id}]")
                     print(f"Device Configuration:")
-                    print(f"  Sample Rate: {sound_in_samplerate} Hz")
+                    print(f"  Sample Rate: {config.PRIMARY_IN_SAMPLERATE} Hz")
                     print(f"  Bit Depth: {config.PRIMARY_BITDEPTH} bits")
                     print(f"  Channels: {sound_in_chs}")
                     if original_channels != sound_in_chs:
@@ -976,7 +995,7 @@ def show_audio_device_info_for_SOUND_IN_OUT():
         print(f"Default Sample Rate: {int(input_info['default_samplerate'])} Hz")
         print(f"Bit Depth: {config.PRIMARY_BITDEPTH} bits")
         print(f"Max Input Channels: {input_info['max_input_channels']}")
-        print(f"Current Sample Rate: {int(sound_in_samplerate)} Hz")
+        print(f"Current Sample Rate: {int(config.PRIMARY_IN_SAMPLERATE)} Hz")
         print(f"Current Channels: {sound_in_chs}")
         if 'hostapi' in input_info:
             hostapi_info = sd.query_hostapis(index=input_info['hostapi'])
@@ -1022,7 +1041,7 @@ def show_audio_device_list():
         print(f"Default Sample Rate: {int(input_info['default_samplerate'])} Hz")
         print(f"Bit Depth: {config.PRIMARY_BITDEPTH} bits")
         print(f"Max Input Channels: {input_info['max_input_channels']}")
-        print(f"Current Sample Rate: {int(sound_in_samplerate)} Hz")
+        print(f"Current Sample Rate: {int(config.PRIMARY_IN_SAMPLERATE)} Hz")
         print(f"Current Channels: {sound_in_chs}")
         if 'hostapi' in input_info:
             hostapi_info = sd.query_hostapis(index=input_info['hostapi'])
@@ -1279,7 +1298,7 @@ def create_progress_bar(current, total, bar_length=50):
     return f"[{bar}] {percent}%"
 
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
-def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs, queue): 
+def plot_oscope(sound_in_id, sound_in_chs, queue): 
     try:
         # Force garbage collection before starting
         gc.collect()
@@ -1309,7 +1328,7 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs, queue):
             print(f"Recording audio for oscilloscope traces using {actual_channels} channel(s)")
             
             # Calculate number of frames needed
-            num_frames = int(sound_in_samplerate * TRACE_DURATION)
+            num_frames = int(config.PRIMARY_IN_SAMPLERATE * TRACE_DURATION)
             chunk_size = 4096  # Reduced chunk size for better reliability
             
             # Create the recording array
@@ -1344,7 +1363,7 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs, queue):
             # Open stream using callback
             stream = p.open(format=pyaudio.paFloat32,
                           channels=actual_channels,
-                          rate=int(sound_in_samplerate),
+                          rate=int(config.PRIMARY_IN_SAMPLERATE),
                           input=True,
                           input_device_index=sound_in_id,
                           frames_per_buffer=chunk_size,
@@ -1393,7 +1412,7 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs, queue):
             
             # Optimize plotting by downsampling for display
             downsample_factor = max(1, len(recording) // 5000)  # Limit points to ~5k for better performance
-            time_points = np.arange(0, len(recording), downsample_factor) / sound_in_samplerate
+            time_points = np.arange(0, len(recording), downsample_factor) / config.PRIMARY_IN_SAMPLERATE
             
             # Plot each channel
             for i in range(actual_channels):
@@ -1425,7 +1444,7 @@ def plot_oscope(sound_in_samplerate, sound_in_id, sound_in_chs, queue):
 
             # Save the plot
             timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_oscope_{int(sound_in_samplerate/1000)}_kHz_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
+            plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_oscope_{int(config.PRIMARY_IN_SAMPLERATE/1000)}_kHz_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
             print("\nSaving oscilloscope plot to:", plotname)
             
             # Make sure the directory exists
@@ -1499,7 +1518,7 @@ def trigger_oscope():
         # Create and configure the process
         oscope_process = multiprocessing.Process(
             target=plot_oscope, 
-            args=(sound_in_samplerate, sound_in_id, sound_in_chs, stop_queue)
+            args=(sound_in_id, sound_in_chs, stop_queue)
         )
         
         # Set process as daemon
@@ -1575,7 +1594,7 @@ def cleanup_process(command):
 
 
 # single-shot fft plot of audio
-def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel, stop_queue):
+def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
     try:
         # Force garbage collection before starting
         gc.collect()
@@ -1612,7 +1631,7 @@ def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel, stop_queue
             print(f"Recording audio for FFT on channel {monitor_channel+1} of {actual_channels}")
             
             # Calculate number of frames needed
-            num_frames = int(sound_in_samplerate * FFT_DURATION)
+            num_frames = int(config.PRIMARY_IN_SAMPLERATE * FFT_DURATION)
             chunk_size = 4096  # Reduced chunk size for better reliability
             
             # Create the recording array
@@ -1647,7 +1666,7 @@ def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel, stop_queue
             # Open stream using callback
             stream = p.open(format=pyaudio.paFloat32,
                           channels=actual_channels,
-                          rate=int(sound_in_samplerate),
+                          rate=int(config.PRIMARY_IN_SAMPLERATE),
                           input=True,
                           input_device_index=sound_in_id,
                           frames_per_buffer=chunk_size,
@@ -1696,11 +1715,11 @@ def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel, stop_queue
             print("Performing FFT...")
             # Perform FFT
             yf = rfft(single_channel_audio.flatten())
-            xf = rfftfreq(frames_recorded, 1 / sound_in_samplerate)
+            xf = rfftfreq(frames_recorded, 1 / config.PRIMARY_IN_SAMPLERATE)
 
             # Define bucket width
             bucket_width = FFT_BW  # Hz
-            bucket_size = int(bucket_width * frames_recorded / sound_in_samplerate)  # Number of indices per bucket
+            bucket_size = int(bucket_width * frames_recorded / config.PRIMARY_IN_SAMPLERATE)  # Number of indices per bucket
 
             # Calculate the number of complete buckets
             num_buckets = len(yf) // bucket_size
@@ -1728,7 +1747,7 @@ def plot_fft(sound_in_samplerate, sound_in_id, sound_in_chs, channel, stop_queue
 
             # Save the plot
             timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_fft_{int(sound_in_samplerate/1000)}_kHz_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
+            plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_fft_{int(config.PRIMARY_IN_SAMPLERATE/1000)}_kHz_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
             print("\nSaving FFT plot to:", plotname)
             
             # Make sure the directory exists
@@ -1833,7 +1852,7 @@ def trigger_fft():
         # Create new process
         fft_process = multiprocessing.Process(
             target=plot_fft,
-            args=(sound_in_samplerate, sound_in_id, sound_in_chs, monitor_channel, stop_queue)
+            args=(sound_in_id, sound_in_chs, monitor_channel, stop_queue)
         )
         
         # Store process reference
@@ -2136,17 +2155,17 @@ def check_wsl_audio():
         print("   pulseaudio --start")
         return False
 
-def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_queue, asterisks):
+def vu_meter(sound_in_id, sound_in_chs, channel, stop_vu_queue, asterisks):
     # Debug: Print incoming parameter types
     if config.DEBUG_VERBOSE:
         print(f"\n[VU Debug] Parameter types:")
         print(f"  sound_in_id: {sound_in_id} (type: {type(sound_in_id)})")
-        print(f"  sound_in_samplerate: {sound_in_samplerate} (type: {type(sound_in_samplerate)})")
+        print(f"  config.PRIMARY_IN_SAMPLERATE: {config.PRIMARY_IN_SAMPLERATE} (type: {type(config.PRIMARY_IN_SAMPLERATE)})")
         print(f"  sound_in_chs: {sound_in_chs} (type: {type(sound_in_chs)})")
         print(f"  channel: {channel} (type: {type(channel)})")
     
     # Ensure sample rate is an integer for buffer size calculation
-    buffer_size = int(sound_in_samplerate)
+    buffer_size = int(config.PRIMARY_IN_SAMPLERATE)
     buffer = np.zeros(buffer_size)
     last_print = ""
     
@@ -2230,7 +2249,7 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
                 with sd.InputStream(callback=callback_input,
                                   device=int(sound_in_id) if sound_in_id is not None else None,
                                   channels=int(sound_in_chs),
-                                  samplerate=int(sound_in_samplerate),
+                                  samplerate=int(config.PRIMARY_IN_SAMPLERATE),
                                   blocksize=1024,
                                   latency='low'):
                     while not stop_vu_queue.get():
@@ -2240,7 +2259,7 @@ def vu_meter(sound_in_id, sound_in_samplerate, sound_in_chs, channel, stop_vu_qu
                 print(f"Debug info:")
                 print(f"  sound_in_id={sound_in_id} (type: {type(sound_in_id)})")
                 print(f"  sound_in_chs={sound_in_chs} (type: {type(sound_in_chs)})")
-                print(f"  sound_in_samplerate={sound_in_samplerate} (type: {type(sound_in_samplerate)})")
+                print(f"  config.PRIMARY_IN_SAMPLERATE={config.PRIMARY_IN_SAMPLERATE} (type: {type(config.PRIMARY_IN_SAMPLERATE)})")
                 import traceback
                 traceback.print_exc()
                 raise
@@ -2282,14 +2301,13 @@ def toggle_vu_meter():
         if config.DEBUG_VERBOSE:
             print(f"\n[Toggle VU Debug] Parameter validation:")
             print(f"  sound_in_id: {sound_in_id} (type: {type(sound_in_id)})")
-            print(f"  sound_in_samplerate: {sound_in_samplerate} (type: {type(sound_in_samplerate)})")
+            print(f"  config.PRIMARY_IN_SAMPLERATE: {config.PRIMARY_IN_SAMPLERATE} (type: {type(config.PRIMARY_IN_SAMPLERATE)})")
             print(f"  sound_in_chs: {sound_in_chs} (type: {type(sound_in_chs)})")
             print(f"  monitor_channel: {monitor_channel} (type: {type(monitor_channel)})")
         
         # Ensure all parameters are the correct type
         try:
             proc_sound_in_id = int(sound_in_id) if sound_in_id is not None else None
-            proc_sound_in_samplerate = int(sound_in_samplerate)
             proc_sound_in_chs = int(sound_in_chs)
             proc_monitor_channel = int(monitor_channel)
         except (ValueError, TypeError) as e:
@@ -2299,7 +2317,7 @@ def toggle_vu_meter():
         # Create the VU meter process
         vu_proc = multiprocessing.Process(
             target=vu_meter, 
-            args=(proc_sound_in_id, proc_sound_in_samplerate, proc_sound_in_chs, proc_monitor_channel, stop_vu_queue, asterisks)
+            args=(proc_sound_in_id, proc_sound_in_chs, proc_monitor_channel, stop_vu_queue, asterisks)
         )
         
         # Set the process to start in a clean environment
@@ -2343,10 +2361,10 @@ def stop_vu():
 # ############ intercom using multiprocessing #############
 #
 
-def intercom_m_downsampled(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel):
+def intercom_m_downsampled(sound_in_id, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel):
 
     # Create a buffer to hold the audio data
-    buffer_size = sound_in_samplerate // 4      # For 48,000 samples per second
+    buffer_size = config.PRIMARY_IN_SAMPLERATE // 4      # For 48,000 samples per second
     buffer = np.zeros((buffer_size,))
     channel = monitor_channel
 
@@ -2355,7 +2373,7 @@ def intercom_m_downsampled(sound_in_id, sound_in_samplerate, sound_in_chs, sound
         # Only process audio from the designated channel
         channel_data = indata[:, channel]
         # Downsample the audio using resampy
-        downsampled_data = resampy.resample(channel_data, sound_in_samplerate, 44100)
+        downsampled_data = resampy.resample(channel_data, config.PRIMARY_IN_SAMPLERATE, 44100)
         buffer[:len(downsampled_data)] = downsampled_data
 
     # Callback function to handle audio output
@@ -2365,7 +2383,7 @@ def intercom_m_downsampled(sound_in_id, sound_in_samplerate, sound_in_chs, sound
         ##outdata[:, 1] = buffer[:frames]         # Play back on the second channel
 
     # Open an input stream and an output stream with the callback function
-    with sd.InputStream(callback=callback_input, device=sound_in_id, channels=sound_in_chs, samplerate=sound_in_samplerate), \
+    with sd.InputStream(callback=callback_input, device=sound_in_id, channels=sound_in_chs, samplerate=config.PRIMARY_IN_SAMPLERATE), \
         sd.OutputStream(callback=callback_output, device=sound_out_id, channels=sound_out_chs, samplerate=sound_out_samplerate): 
         # The streams are now open and the callback function will be called every time there is audio input and output
         while not stop_intercom_event.is_set():
@@ -2373,10 +2391,10 @@ def intercom_m_downsampled(sound_in_id, sound_in_samplerate, sound_in_chs, sound
         print("Stopping intercom...")
 
 
-def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel):
+def intercom_m(sound_in_id, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel):
     print(f"[Intercom] Monitoring channel: {monitor_channel+1}", end='\r\n')
     # Create a buffer to hold the audio data at input sample rate
-    buffer = np.zeros((int(sound_in_samplerate),))
+    buffer = np.zeros((int(config.PRIMARY_IN_SAMPLERATE),))
     
     # Validate the channel is valid for the device
     if monitor_channel >= sound_in_chs:
@@ -2423,7 +2441,7 @@ def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sou
             print(f"Output status: {status}")
         try:
             # Calculate how many input samples we need based on the output frames
-            input_frames = int(frames * sound_in_samplerate / sound_out_samplerate)
+            input_frames = int(frames * config.PRIMARY_IN_SAMPLERATE / sound_out_samplerate)
             
             # Get the input samples and resample them to output rate
             input_samples = buffer[:input_frames]
@@ -2446,7 +2464,7 @@ def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sou
         with sd.InputStream(callback=callback_input, 
                           device=sound_in_id, 
                           channels=sound_in_chs, 
-                          samplerate=sound_in_samplerate,
+                          samplerate=config.PRIMARY_IN_SAMPLERATE,
                           blocksize=1024,
                           latency='low'), \
              sd.OutputStream(callback=callback_output, 
@@ -2459,7 +2477,7 @@ def intercom_m(sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sou
             
             # Only show device information in the main process
             if is_main_process():
-                print(f"Input device: {sd.query_devices(sound_in_id)['name']} ({sound_in_samplerate} Hz)")
+                print(f"Input device: {sd.query_devices(sound_in_id)['name']} ({config.PRIMARY_IN_SAMPLERATE} Hz)")
                 print(f"Output device: {sd.query_devices(sound_out_id)['name']} ({sound_out_samplerate} Hz)")
             
             # The streams are now open and the callback function will be called every time there is audio input and output
@@ -2495,7 +2513,7 @@ def stop_intercom_m():
         print("Intercom stopped")
 
 def toggle_intercom_m():
-    global intercom_proc, sound_in_id, sound_in_samplerate, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel, change_ch_event
+    global intercom_proc, sound_in_id, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel, change_ch_event
 
     if intercom_proc is None:
         # Validate channel before starting
@@ -2519,7 +2537,7 @@ def toggle_intercom_m():
                 print("\nDevice configuration:")
                 print(f"Input device: [{sound_in_id}] {input_device['name']}")
                 print(f"Input channels: {input_device['max_input_channels']}")
-                print(f"Input sample rate: {int(sound_in_samplerate)} Hz")
+                print(f"Input sample rate: {int(config.PRIMARY_IN_SAMPLERATE)} Hz")
                 print(f"Output device: [{sound_out_id}] {output_device['name']}")
                 print(f"Output channels: {output_device['max_output_channels']}")
                 print(f"Output sample rate: {int(sound_out_samplerate)} Hz")
@@ -2527,7 +2545,7 @@ def toggle_intercom_m():
             # Create the process with daemon setting to ensure proper cleanup
             intercom_proc = multiprocessing.Process(
                 target=intercom_m, 
-                args=(sound_in_id, sound_in_samplerate, sound_in_chs, 
+                args=(sound_in_id, sound_in_chs, 
                      sound_out_id, sound_out_samplerate, sound_out_chs, 
                      monitor_channel)
             )
@@ -2609,9 +2627,9 @@ def change_monitor_channel():
 # continuous fft plot of audio in a separate background process
 #
 
-def plot_and_save_fft(sound_in_samplerate, channel):
+def plot_and_save_fft(channel):
     interval = FFT_INTERVAL * 60    # convert to seconds, time betwwen ffts
-    N = int(sound_in_samplerate * FFT_DURATION)  # Number of samples, ensure it's an integer
+    N = int(config.PRIMARY_IN_SAMPLERATE * FFT_DURATION)  # Number of samples, ensure it's an integer
     # Convert gain from dB to linear scale
     gain = 10 ** (FFT_GAIN / 20)
 
@@ -2621,18 +2639,18 @@ def plot_and_save_fft(sound_in_samplerate, channel):
         # Wait for the desired time interval before recording and plotting again
         interruptable_sleep(interval, stop_fft_periodic_plot_event)
             
-        myrecording = sd.rec(N, samplerate=sound_in_samplerate, channels=channel + 1)
+        myrecording = sd.rec(N, samplerate=config.PRIMARY_IN_SAMPLERATE, channels=channel + 1)
         sd.wait()  # Wait until recording is finished
         myrecording *= gain
         print("Recording auto fft finished.")
 
         # Perform FFT
         yf = rfft(myrecording.flatten())
-        xf = rfftfreq(N, 1 / sound_in_samplerate)
+        xf = rfftfreq(N, 1 / config.PRIMARY_IN_SAMPLERATE)
 
         # Define bucket width
         bucket_width = FFT_BW  # Hz
-        bucket_size = int(bucket_width * N / sound_in_samplerate)  # Number of indices per bucket
+        bucket_size = int(bucket_width * N / config.PRIMARY_IN_SAMPLERATE)  # Number of indices per bucket
 
         # Average buckets
         buckets = np.array([yf[i:i + bucket_size].mean() for i in range(0, len(yf), bucket_size)])
@@ -2648,7 +2666,7 @@ def plot_and_save_fft(sound_in_samplerate, channel):
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         # Save plot to disk with a unique filename based on current time
-        output_filename = f"{timestamp}_fft_{sound_in_samplerate/1000:.0F}_{config.PRIMARY_BITDEPTH}_{channel}_{config.LOCATION_ID}_{config.HIVE_ID}.png"
+        output_filename = f"{timestamp}_fft_{config.PRIMARY_IN_SAMPLERATE/1000:.0F}_{config.PRIMARY_BITDEPTH}_{channel}_{config.LOCATION_ID}_{config.HIVE_ID}.png"
         full_path_name = os.path.join(PLOT_DIRECTORY, output_filename)
         plt.savefig(full_path_name)
 
@@ -2728,7 +2746,7 @@ def setup_audio_circular_buffer():
     global buffer_size, buffer, buffer_index, buffer_wrap, blocksize, buffer_wrap_event
 
     # Create a buffer to hold the audio data
-    buffer_size = int(BUFFER_SECONDS * sound_in_samplerate)
+    buffer_size = int(BUFFER_SECONDS * config.PRIMARY_IN_SAMPLERATE)
     buffer = np.zeros((buffer_size, sound_in_chs), dtype=_dtype)
     buffer_index = 0
     buffer_wrap = False
@@ -2743,82 +2761,92 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
     if start_tod is None:
         print(f"{thread_id} is recording continuously\r")
 
-    samplerate = sound_in_samplerate
+    samplerate = config.PRIMARY_IN_SAMPLERATE
 
     while not stop_recording_event.is_set():
-        current_time = datetime.datetime.now().time()
+        try:
+            current_time = datetime.datetime.now().time()
+            
+            if start_tod is None or (start_tod <= current_time <= end_tod):        
+                print(f"{thread_id} started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec\r")
 
-        if start_tod is None or (start_tod <= current_time <= end_tod):        
-            print(f"{thread_id} started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec\r")
+                period_start_index = buffer_index 
+                # wait PERIOD seconds to accumulate audio
+                interruptable_sleep(record_period, stop_recording_event)
 
-            period_start_index = buffer_index 
-            # wait PERIOD seconds to accumulate audio
-            interruptable_sleep(record_period, stop_recording_event)
+                # Check if we're shutting down before saving
+                if stop_recording_event.is_set():
+                    break
 
-            # Check if we're shutting down before saving
-            if stop_recording_event.is_set():
-                break
+                period_end_index = buffer_index 
+                save_start_index = period_start_index % buffer_size
+                save_end_index = period_end_index % buffer_size
 
-            period_end_index = buffer_index 
-            save_start_index = period_start_index % buffer_size
-            save_end_index = period_end_index % buffer_size
+                # saving from a circular buffer so segments aren't necessarily contiguous
+                if save_end_index > save_start_index:   # indexing is contiguous
+                    audio_data = buffer[save_start_index:save_end_index]
+                else:                                   # ain't contiguous so concatenate to make it contiguous
+                    audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
 
-            # saving from a circular buffer so segments aren't necessarily contiguous
-            if save_end_index > save_start_index:   # indexing is contiguous
-                audio_data = buffer[save_start_index:save_end_index]
-            else:                                   # ain't contiguous so concatenate to make it contiguous
-                audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+                # Determine the sample rate to use for saving
+                save_sample_rate = config.PRIMARY_SAVE_SAMPLERATE if config.PRIMARY_SAVE_SAMPLERATE is not None else config.PRIMARY_IN_SAMPLERATE
+                
+                # Resample if needed
+                if save_sample_rate < config.PRIMARY_IN_SAMPLERATE:
+                    # resample to lower sample rate
+                    audio_data = downsample_audio(audio_data, config.PRIMARY_IN_SAMPLERATE, save_sample_rate)
+                    print(f"Resampling from {config.PRIMARY_IN_SAMPLERATE}Hz to {save_sample_rate}Hz for saving")
 
-            if target_sample_rate < sound_in_samplerate:
-                # resample to lower sample rate
-                audio_data = downsample_audio(audio_data, sound_in_samplerate, target_sample_rate)
+                # Check if we're shutting down before saving
+                if stop_recording_event.is_set():
+                    break
 
-            # Check if we're shutting down before saving
-            if stop_recording_event.is_set():
-                break
+                # Get current date for folder name
+                current_date = datetime.datetime.now()
+                date_folder = current_date.strftime('%y%m%d')  # Format: YYMMDD
 
-            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            output_filename = f"{timestamp}_{thread_id}_{record_period}_{interval}_{config.LOCATION_ID}_{config.HIVE_ID}.{file_format.lower()}"
-
-            # Handle different file formats
-            if file_format.upper() == 'MP3':
-                if target_sample_rate == 44100 or target_sample_rate == 48000:
-                    full_path_name = os.path.join(MONITOR_DIRECTORY, output_filename)
-                    print(f"\nAttempting to save MP3 file: {full_path_name}")
-                    # Make sure parent directory exists
-                    os.makedirs(os.path.dirname(full_path_name), exist_ok=True)
+                # Handle different file formats
+                if file_format.upper() == 'MP3':
+                    if target_sample_rate == 44100 or target_sample_rate == 48000:
+                        full_path_name = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
+                                                    folders[0], "mp3", date_folder, 
+                                                    f"{current_date.strftime('%H%M%S')}_{thread_id}_{record_period}_{interval}_{config.LOCATION_ID}_{config.HIVE_ID}.{file_format.lower()}")
+                        print(f"\nAttempting to save MP3 file: {full_path_name}")
+                        try:
+                            pcm_to_mp3_write(audio_data, full_path_name)
+                            print(f"Successfully saved: {full_path_name}")
+                        except Exception as e:
+                            print(f"Error saving MP3 file: {e}")
+                    else:
+                        print("MP3 only supports 44.1k and 48k sample rates")
+                        quit(-1)
+                elif file_format.upper() in ['FLAC', 'WAV']:
+                    full_path_name = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
+                                                folders[0], "raw", date_folder, 
+                                                f"{current_date.strftime('%H%M%S')}_{thread_id}_{record_period}_{interval}_{config.LOCATION_ID}_{config.HIVE_ID}.{file_format.lower()}")
+                    print(f"\nAttempting to save {file_format.upper()} file: {full_path_name}")
+                    # Ensure sample rate is an integer
+                    save_sample_rate = int(save_sample_rate)
                     try:
-                        pcm_to_mp3_write(audio_data, full_path_name)
+                        sf.write(full_path_name, audio_data, save_sample_rate, 
+                                format=file_format.upper(), 
+                                subtype=_subtype)
                         print(f"Successfully saved: {full_path_name}")
                     except Exception as e:
-                        print(f"Error saving MP3 file: {e}")
+                        print(f"Error saving {file_format.upper()} file: {e}")
                 else:
-                    print("MP3 only supports 44.1k and 48k sample rates")
+                    print(f"Unsupported file format: {file_format}")
+                    print("Supported formats are: MP3, FLAC, WAV")
                     quit(-1)
-            elif file_format.upper() in ['FLAC', 'WAV']:
-                full_path_name = os.path.join(PRIMARY_DIRECTORY, output_filename)
-                print(f"\nAttempting to save {file_format.upper()} file: {full_path_name}")
-                # Make sure parent directory exists
-                os.makedirs(os.path.dirname(full_path_name), exist_ok=True)
-                # Ensure target_sample_rate is an integer
-                target_sample_rate = int(target_sample_rate)
-                try:
-                    sf.write(full_path_name, audio_data, target_sample_rate, 
-                            format=file_format.upper(), 
-                            subtype=_subtype)
-                    print(f"Successfully saved: {full_path_name}")
-                except Exception as e:
-                    print(f"Error saving {file_format.upper()} file: {e}")
-            else:
-                print(f"Unsupported file format: {file_format}")
-                print("Supported formats are: MP3, FLAC, WAV")
-                quit(-1)
-
-            if not stop_recording_event.is_set():
-                print(f"Saved {thread_id} audio to {full_path_name}, period: {record_period}, interval {interval} seconds\r")
-            # wait "interval" seconds before starting recording again
-            interruptable_sleep(interval, stop_recording_event)
-
+                
+                if not stop_recording_event.is_set():
+                    print(f"Saved {thread_id} audio to {full_path_name}, period: {record_period}, interval {interval} seconds\r")
+                # wait "interval" seconds before starting recording again
+                interruptable_sleep(interval, stop_recording_event)
+            
+        except Exception as e:
+            print(f"Error in recording_worker_thread: {e}")
+            stop_recording_event.set()
 
 def callback(indata, frames, time, status):
     """Callback function for audio input stream."""
@@ -2843,7 +2871,7 @@ def callback(indata, frames, time, status):
     buffer_index = (buffer_index + data_len) % buffer_size
 
 def audio_stream():
-    global stop_program, sound_in_id, sound_in_chs, sound_in_samplerate, _dtype, testmode
+    global stop_program, sound_in_id, sound_in_chs, _dtype, testmode
 
     # Reset terminal settings before printing
     reset_terminal_settings()
@@ -2852,7 +2880,7 @@ def audio_stream():
     print("Initializing audio stream...", flush=True)
     print(f"Device ID: [{sound_in_id}]", end='\r', flush=True)
     print(f"Channels: {sound_in_chs}", end='\r', flush=True)
-    print(f"Sample Rate: {int(sound_in_samplerate)} Hz", end='\r', flush=True)
+    print(f"Sample Rate: {int(config.PRIMARY_IN_SAMPLERATE)} Hz", end='\r', flush=True)
     print(f"Bit Depth: {config.PRIMARY_BITDEPTH} bits", end='\r', flush=True)
     print(f"Data Type: {_dtype}", end='\r', flush=True)
 
@@ -2868,13 +2896,13 @@ def audio_stream():
             raise RuntimeError(f"Device only supports {device_info['max_input_channels']} channels, but {sound_in_chs} channels are required")
 
         # Set the device's sample rate to match our configuration
-        sd.default.samplerate = sound_in_samplerate
+        sd.default.samplerate = config.PRIMARY_IN_SAMPLERATE
         
         # Initialize the stream with the configured sample rate and bit depth
         stream = sd.InputStream(
             device=sound_in_id,
             channels=sound_in_chs,
-            samplerate=sound_in_samplerate,  # Use configured rate
+            samplerate=config.PRIMARY_IN_SAMPLERATE,  # Use configured rate
             dtype=_dtype,  # Use configured bit depth
             blocksize=blocksize,
             callback=callback
@@ -2898,13 +2926,13 @@ def audio_stream():
                                                                         config.AUDIO_MONITOR_END)).start()
 
             if config.MODE_PERIOD and not testmode:
-                print("Starting recording_worker_thread for saving period audio at primary sample rate and all channels...\r")
+                print("Starting recording_worker_thread for caching period audio at primary sample rate and all channels...\r")
                 #sys.stdout.flush()
                 threading.Thread(target=recording_worker_thread, args=( config.PERIOD_RECORD, \
                                                                         config.PERIOD_INTERVAL, \
                                                                         "Period_recording", \
                                                                         config.PRIMARY_FILE_FORMAT, \
-                                                                        sound_in_samplerate, \
+                                                                        config.PRIMARY_IN_SAMPLERATE, \
                                                                         config.PERIOD_START, \
                                                                         config.PERIOD_END)).start()
 
@@ -2915,7 +2943,7 @@ def audio_stream():
                                                                         config.SAVE_AFTER_EVENT, \
                                                                         "Event_recording", \
                                                                         config.PRIMARY_FILE_FORMAT, \
-                                                                        sound_in_samplerate, \
+                                                                        config.PRIMARY_IN_SAMPLERATE, \
                                                                         config.EVENT_START, \
                                                                         config.EVENT_END)).start()
 
@@ -3342,10 +3370,12 @@ def main():
     setup_audio_circular_buffer()
 
     print(f"buffer size: {BUFFER_SECONDS} second, {buffer.size/500000:.2f} megabytes")
-    print(f"Sample Rate: {int(sound_in_samplerate)} Hz; File Format: {config.PRIMARY_FILE_FORMAT}; Channels: {sound_in_chs}")
+    print(f"Sample Rate: {int(config.PRIMARY_IN_SAMPLERATE)} Hz; File Format: {config.PRIMARY_FILE_FORMAT}; Channels: {sound_in_chs}")
 
-    # Check and create required directories
-    required_directories = [PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOT_DIRECTORY]
+    # Check and create date-based directories
+    if not check_and_create_date_folders():
+        print("\nCritical directories could not be created. Exiting.")
+        sys.exit(1)
     
     # Print directories for verification
     print("\nDirectory setup:")
@@ -3354,13 +3384,13 @@ def main():
     print(f"  Plot files: {PLOT_DIRECTORY}")
     
     # Ensure all required directories exist
-    if not ensure_directories_exist(required_directories):
+    if not ensure_directories_exist([PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOT_DIRECTORY]):
         print("\nCritical directories could not be created. Exiting.")
         sys.exit(1)
 
     # Create and start the process
     if config.MODE_FFT_PERIODIC_RECORD:
-        fft_periodic_plot_proc = multiprocessing.Process(target=plot_and_save_fft, args=(sound_in_samplerate, monitor_channel,)) 
+        fft_periodic_plot_proc = multiprocessing.Process(target=plot_and_save_fft, args=(monitor_channel,)) 
         fft_periodic_plot_proc.daemon = True  
         fft_periodic_plot_proc.start()
         print("started fft_periodic_plot_process")
