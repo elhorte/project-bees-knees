@@ -2035,7 +2035,8 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
         # Extract filename from the audio path
         filename = os.path.basename(full_audio_path)
         root, _ = os.path.splitext(filename)
-        plotname = os.path.join(PLOT_DIRECTORY, f"{root}_spectrogram.png")
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_{root}_spectrogram.png")
 
         # Set title to include filename and channel
         plt.title(f'Spectrogram from {config.LOCATION_ID}, hive:{config.HIVE_ID}, Mic Loc:{config.MIC_LOCATION[channel]}\nfile:{filename}, Ch:{channel+1}')
