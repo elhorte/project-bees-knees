@@ -260,18 +260,17 @@ active_processes = {
 # #############################################################
 
 MONITOR_CH = 0                                  # channel to monitor for event (if > number of chs, all channels are monitored)
-TRACE_DURATION = 10                             # seconds of audio to show on oscope
-OSCOPE_GAIN_DB = 12                             # Gain in dB of audio level for oscope 
+##TRACE_DURATION = config.TRACE_DURATION          # seconds of audio to show on oscope
+##config.OSCOPE_GAIN_DB = 12                             # Gain in dB of audio level for oscope 
 
 # instrumentation parms
 FFT_BINS = 800                                  # number of bins for fft
 FFT_BW = 1000                                   # bandwidth of each bucket in hertz
-FFT_DURATION = 5                                # seconds of audio to show on fft
-FFT_GAIN = 20                                   # gain in dB for fft
+##FFT_DURATION = config.FFT_DURATION              # seconds of audio to show on fft
 FFT_INTERVAL = 30                               # minutes between ffts
 
-OSCOPE_DURATION = 10                            # seconds of audio to show on oscope
-OSCOPE_GAIN_DB = 12                             # gain in dB for oscope
+##OSCOPE_DURATION = config.OSCILLOSCOPE_DURATION # seconds of audio to show on oscope
+##OSCOPE_GAIN_DB = 12                             # gain in dB for oscope
 
 FULL_SCALE = 2 ** 16                            # just for cli vu meter level reference
 BUFFER_SECONDS = 1000                           # time length of circular buffer 
@@ -293,15 +292,6 @@ else:
     print("The bit depth is not supported: ", config.PRIMARY_BITDEPTH)
     quit(-1)
 
-# Set sound input parameters from config
-##sound_in_samplerate = config.PRIMARY_IN_SAMPLERATE
-##sound_in_bitdepth = config.PRIMARY_BITDEPTH
-##sound_in_format = config.PRIMARY_FILE_FORMAT
-
-# Set monitor parameters from config
-##monitor_samplerate = config.AUDIO_MONITOR_SAMPLERATE
-##monitor_bitdepth = config.AUDIO_MONITOR_BITDEPTH
-##monitor_format = config.AUDIO_MONITOR_FORMAT
 
 # Date and time stuff for file naming
 current_date = datetime.datetime.now()
@@ -1328,7 +1318,7 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
             print(f"Recording audio for oscilloscope traces using {actual_channels} channel(s)")
             
             # Calculate number of frames needed
-            num_frames = int(config.PRIMARY_IN_SAMPLERATE * TRACE_DURATION)
+            num_frames = int(config.PRIMARY_IN_SAMPLERATE * config.TRACE_DURATION)
             chunk_size = 4096  # Reduced chunk size for better reliability
             
             # Create the recording array
@@ -1374,7 +1364,7 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
             
             # Wait until we have recorded enough frames, received stop signal, or timed out
             start_time = time.time()
-            timeout = TRACE_DURATION + 10  # Increased timeout buffer
+            timeout = config.TRACE_DURATION + 10  # Increased timeout buffer
             
             # Keep recording until one of these conditions is met:
             # 1. We've recorded all frames
@@ -1401,8 +1391,8 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
                 return
                 
             # Apply gain if needed
-            if OSCOPE_GAIN_DB > 0:
-                gain = 10 ** (OSCOPE_GAIN_DB / 20)      
+            if config.OSCOPE_GAIN_DB > 0:
+                gain = 10 ** (config.OSCOPE_GAIN_DB / 20)      
                 print(f"Applying gain of: {gain:.1f}") 
                 recording *= gain
 
@@ -1418,7 +1408,7 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
             for i in range(actual_channels):
                 ax = plt.subplot(actual_channels, 1, i+1)
                 ax.plot(time_points, recording[::downsample_factor, i], linewidth=0.5)
-                ax.set_title(f"Oscilloscope Traces w/{OSCOPE_GAIN_DB}dB Gain--Ch{i+1}")
+                ax.set_title(f"Oscilloscope Traces w/{config.OSCOPE_GAIN_DB}dB Gain--Ch{i+1}")
                 ax.set_xlabel('Time (seconds)')
                 ax.set_ylim(-1.0, 1.0)
                 
@@ -1532,7 +1522,7 @@ def trigger_oscope():
         oscope_process.start()
         
         # Wait for completion with timeout
-        timeout = TRACE_DURATION + 30  # Reduced timeout to be more responsive
+        timeout = config.TRACE_DURATION + 30  # Reduced timeout to be more responsive
         oscope_process.join(timeout=timeout)
         
         # Check if process is still running
@@ -1631,7 +1621,7 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
             print(f"Recording audio for FFT on channel {monitor_channel+1} of {actual_channels}")
             
             # Calculate number of frames needed
-            num_frames = int(config.PRIMARY_IN_SAMPLERATE * FFT_DURATION)
+            num_frames = int(config.PRIMARY_IN_SAMPLERATE * config.FFT_DURATION)
             chunk_size = 4096  # Reduced chunk size for better reliability
             
             # Create the recording array
@@ -1677,7 +1667,7 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
             
             # Wait until we have recorded enough frames, received stop signal, or timed out
             start_time = time.time()
-            timeout = FFT_DURATION + 10  # Increased timeout buffer
+            timeout = config.FFT_DURATION + 10  # Increased timeout buffer
             
             # Keep recording until one of these conditions is met:
             # 1. We've recorded all frames
@@ -1707,8 +1697,8 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
             single_channel_audio = recording[:frames_recorded, monitor_channel]
             
             # Apply gain if needed
-            if FFT_GAIN > 0:
-                gain = 10 ** (FFT_GAIN / 20)
+            if config.FFT_GAIN > 0:
+                gain = 10 ** (config.FFT_GAIN / 20)
                 print(f"Applying gain of: {gain:.1f}")
                 single_channel_audio *= gain
 
@@ -1862,7 +1852,7 @@ def trigger_fft():
         fft_process.start()
         
         # Wait for completion with timeout
-        timeout = FFT_DURATION + 30  # Recording duration plus extra time for processing
+        timeout = config.FFT_DURATION + 30  # Recording duration plus extra time for processing
         fft_process.join(timeout=timeout)
         
         # Check if process is still running
@@ -2629,9 +2619,9 @@ def change_monitor_channel():
 
 def plot_and_save_fft(channel):
     interval = FFT_INTERVAL * 60    # convert to seconds, time betwwen ffts
-    N = int(config.PRIMARY_IN_SAMPLERATE * FFT_DURATION)  # Number of samples, ensure it's an integer
+    N = int(config.PRIMARY_IN_SAMPLERATE * config.FFT_DURATION)  # Number of samples, ensure it's an integer
     # Convert gain from dB to linear scale
-    gain = 10 ** (FFT_GAIN / 20)
+    gain = 10 ** (config.FFT_GAIN / 20)
 
     while not stop_fft_periodic_plot_event.is_set():
         # Record audio

@@ -106,3 +106,12 @@ SOUND_OUT_ID_DEFAULT = 3                        # default output device id
 SOUND_OUT_CHS_DEFAULT = 1                       # default number of output channels
 SOUND_OUT_SR_DEFAULT = 48000                    # default sample rate
 
+# audio display parameters:
+TRACE_DURATION = 5.0                        # seconds
+OSCOPE_GAIN_DB = 20                             # Gain in dB of audio level for oscope 
+
+FFT_DURATION = 5.0                          # seconds
+FFT_GAIN = 12                             # Gain in dB of audio level for fft
+
+SPECTROGRAM_DURATION = 10.0                 # seconds
+SPECTROGRAM_GAIN = 12                        # Gain in dB of audio level for spectrogram 
