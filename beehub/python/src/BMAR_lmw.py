@@ -299,6 +299,13 @@ current_year = current_date.strftime('%Y')
 current_month = current_date.strftime('%m')
 current_day = current_date.strftime('%d')
 
+# Create date components in the correct format
+# For folder structure we need YY (2-digit year), MM, DD format
+yy = current_date.strftime('%y')  # 2-digit year (e.g., '23' for 2023)
+mm = current_date.strftime('%m')  # Month (01-12)
+dd = current_date.strftime('%d')  # Day (01-31)
+date_folder = f"{yy}{mm}{dd}"     # Format YYMMDD (e.g., '230516')
+
 spectrogram_period = config.PERIOD_SPECTROGRAM
 
 # Select the appropriate data drive and path based on OS
@@ -351,13 +358,6 @@ if sound_in_chs <= 0 or sound_in_chs > 64:  # Sanity check for number of channel
     print(f"Warning: Invalid SOUND_IN_CHS value in config: {config.SOUND_IN_CHS}")
     print(f"Setting to default of 1 channel")
     sound_in_chs = 1
-
-# Create date components in the correct format
-# For folder structure we need YY (2-digit year), MM, DD format
-yy = current_date.strftime('%y')  # 2-digit year (e.g., '23' for 2023)
-mm = current_date.strftime('%m')  # Month (01-12)
-dd = current_date.strftime('%d')  # Day (01-31)
-date_folder = f"{yy}{mm}{dd}"     # Format YYMMDD (e.g., '230516')
 
 # Only print config values in the main process, not in subprocesses
 # This ensures they don't show up when starting the VU meter or intercom
@@ -460,6 +460,8 @@ def check_and_create_date_folders():
     dd = current_date.strftime('%d')
     date_folder = f"{yy}{mm}{dd}"
     
+    print(f"\nChecking/creating date folders for {date_folder}...")
+    
     # Update directory paths with current date
     PRIMARY_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
                                     folders[0], "raw", date_folder, "")
@@ -467,6 +469,10 @@ def check_and_create_date_folders():
                                     folders[0], "mp3", date_folder, "")
     PLOT_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
                                  folders[1], date_folder, "")
+    
+    print(f"Primary directory: {PRIMARY_DIRECTORY}")
+    print(f"Monitor directory: {MONITOR_DIRECTORY}")
+    print(f"Plot directory: {PLOT_DIRECTORY}")
     
     # Create directories if they don't exist
     required_directories = [PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOT_DIRECTORY]
@@ -1135,19 +1141,37 @@ def find_file_of_type_with_offset(offset, directory=PRIMARY_DIRECTORY, file_type
     # Expand path if it contains a tilde
     expanded_dir = os.path.expanduser(directory)
     
+    print(f"\nSearching for {file_type} files in: {expanded_dir}")
+    
     # Ensure directory exists
     if not os.path.exists(expanded_dir):
         print(f"Directory does not exist: {expanded_dir}")
         return None
         
     try:
-        # List all files of the specified type in the directory
-        files_of_type = [f for f in os.listdir(expanded_dir) if os.path.isfile(os.path.join(expanded_dir, f)) and f.endswith(f".{file_type.lower()}")]
+        # List all files in the directory first
+        all_files = os.listdir(expanded_dir)
+        print(f"All files in directory: {all_files}")
+        
+        # List all files of the specified type in the directory (case-insensitive)
+        files_of_type = [f for f in all_files if os.path.isfile(os.path.join(expanded_dir, f)) and f.lower().endswith(f".{file_type.lower()}")]
+        
+        if not files_of_type:
+            print(f"No {file_type} files found in directory: {expanded_dir}")
+            print(f"Looking for files ending with: .{file_type.lower()} (case-insensitive)")
+            return None
+            
         # Sort files alphabetically - most recent first
         files_of_type.sort(reverse=True)
+        print(f"Found {len(files_of_type)} {file_type} files: {files_of_type}")
         
-        if files_of_type and offset < len(files_of_type):
-            return files_of_type[offset]
+        if offset < len(files_of_type):
+            selected_file = files_of_type[offset]
+            print(f"Selected file at offset {offset}: {selected_file}")
+            return selected_file
+        else:
+            print(f"Offset {offset} is out of range. Found {len(files_of_type)} {file_type} files.")
+            return None
     except Exception as e:
         print(f"Error listing files in {expanded_dir}: {e}")
     
@@ -1162,10 +1186,11 @@ def time_between():
     def helper():
         current_time = time.time()
         
-        # If the function has never been called before, set last_called to the current time and return 0.
+        # If the function has never been called before, set last_called to the current time and return a large value
+        # to prevent file_offset increment on first call
         if last_called[0] is None:
             last_called[0] = current_time
-            return 0
+            return 1800  # Return max value to prevent file_offset increment
         # Calculate the difference and update the last_called time.
         diff = current_time - last_called[0]
         last_called[0] = current_time
@@ -1898,12 +1923,12 @@ def trigger_spectrogram():
         if diff < (config.PERIOD_RECORD + config.PERIOD_INTERVAL):
             file_offset += 1
         else:
-            file_offset = 1 
+            file_offset = 0  # Changed from 1 to 0 to start with the first file
             
         # Create and start the spectrogram process
         active_processes['s'] = multiprocessing.Process(
             target=plot_spectrogram, 
-            args=(monitor_channel, 'lin', file_offset-1, spectrogram_period)
+            args=(monitor_channel, 'lin', file_offset, spectrogram_period)  # Removed the -1 since we're now using correct offset
         )
         active_processes['s'].daemon = True  # Make it a daemon process
         active_processes['s'].start()
