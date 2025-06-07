@@ -2001,7 +2001,7 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
             print(f"Audio loaded: shape={y.shape if hasattr(y, 'shape') else 'scalar'}, sample_rate={sr} Hz, duration={max_duration}s")
             
             # Keep the native sample rate to preserve high-frequency information
-            print(f"Keeping native sample rate of {sr} Hz to preserve high-frequency artifacts")
+            print(f"Using sample rate of {sr} Hz from native sample rate of {config.PRIMARY_IN_SAMPLERATE} Hz")
         except Exception as e:
             print(f"Error loading audio file: {e}")
             return
