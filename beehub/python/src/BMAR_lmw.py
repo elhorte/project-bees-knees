@@ -1919,16 +1919,20 @@ def trigger_spectrogram():
         
         # Get file offset and time difference
         global file_offset, monitor_channel, time_diff
-        diff = time_diff()       # time since last file was read
-        if diff < (config.PERIOD_RECORD + config.PERIOD_INTERVAL):
-            file_offset += 1
+        time_since_last = time_diff()  # Store the time difference
+        
+        # Only increment offset if we're within the recording period
+        if time_since_last < (config.PERIOD_RECORD + config.PERIOD_INTERVAL):
+            file_offset = min(file_offset + 1, 0)  # Cap at 0 to prevent going negative
         else:
-            file_offset = 0  # Changed from 1 to 0 to start with the first file
+            file_offset = 0  # Reset to first file
+            
+        print(f"Time since last file: {time_since_last:.1f}s, using file offset: {file_offset}")
             
         # Create and start the spectrogram process
         active_processes['s'] = multiprocessing.Process(
             target=plot_spectrogram, 
-            args=(monitor_channel, 'lin', file_offset, spectrogram_period)  # Removed the -1 since we're now using correct offset
+            args=(monitor_channel, 'lin', file_offset, spectrogram_period)
         )
         active_processes['s'].daemon = True  # Make it a daemon process
         active_processes['s'].start()
