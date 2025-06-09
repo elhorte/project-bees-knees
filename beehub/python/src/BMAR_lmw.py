@@ -52,15 +52,15 @@ import atexit
 import subprocess 
 import platform
 import pyaudio
-#import curses
-#import io
-#import queue
 import Setup_Pyaudio as set_port
 import gc
 import psutil
+import struct
+#import curses
+#import io
+#import queue
 #import termios
 #import fcntl
-import struct
 
 # Platform-specific modules will be imported after platform detection
 
