@@ -2821,6 +2821,9 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
                 if stop_recording_event.is_set():
                     break
 
+                # Check and create new date folders if needed
+                check_and_create_date_folders()
+
                 # Get current date for folder name
                 current_date = datetime.datetime.now()
                 date_folder = current_date.strftime('%y%m%d')  # Format: YYMMDD
