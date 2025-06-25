@@ -252,7 +252,8 @@ active_processes = {
     'o': None,  # Oscilloscope
     's': None,  # Spectrogram 
     'f': None,  # FFT
-    'i': None   # Intercom
+    'i': None,  # Intercom
+    'p': None   # Performance monitor
 }
 
 # #############################################################
@@ -3118,6 +3119,8 @@ def keyboard_listener():
                         show_mic_locations()
                     elif key == "o":  
                         trigger_oscope()        
+                    elif key == "p":
+                        toggle_performance_monitor()
                     elif key == "q":  
                         print("\nQuitting...", end='\n', flush=True)
                         keyboard_listener_running = False
@@ -3136,7 +3139,7 @@ def keyboard_listener():
             # Don't exit the keyboard listener on error, just continue
             continue
             
-    print("h or ?  show list of commands\n")
+        time.sleep(0.01)  # Small delay to prevent high CPU usage
 
 def show_detailed_device_list():
     """Display a detailed list of all audio devices with input/output indicators."""
@@ -3181,6 +3184,7 @@ def show_list_of_commands():
     print("i  intercom: press i then press 1, 2, 3, ... to listen to that channel")
     print("m  mic--show active positions")
     print("o  oscilloscope--show trace of each active channel")
+    print("p  performance monitor--show CPU and RAM usage")
     print("q  quit--stop all processes and exit")
     print("s  spectrogram--plot of last recording")
     print("t  threads--see list of all threads")
@@ -3454,6 +3458,7 @@ def stop_all():
         stop_vu_event.set()
         stop_intercom_event.set()
         stop_tod_event.set()
+        stop_performance_monitor_event.set()  # Add this line
         keyboard_listener_running = False
 
         # Clean up all active processes
@@ -3648,6 +3653,66 @@ def restore_terminal_settings(old_settings):
                 os.system('stty echo')
         except:
             pass
+
+# Add near other global variables
+performance_monitor_proc = None
+stop_performance_monitor_event = threading.Event()
+
+def monitor_system_performance():
+    """Monitor and display CPU and RAM usage."""
+    try:
+        while not stop_performance_monitor_event.is_set():
+            # Get CPU usage for each core
+            cpu_percents = psutil.cpu_percent(interval=1, percpu=True)
+            
+            # Get memory usage
+            memory = psutil.virtual_memory()
+            
+            # Clear previous lines (assuming max 32 CPU cores + 3 lines for memory)
+            print("\033[K", end='\r')  # Clear current line
+            
+            # Print CPU usage
+            print("\nCPU Usage by Core:", end='\r')
+            for i, percent in enumerate(cpu_percents):
+                print(f"Core {i}: {percent:5.1f}% ", end='\r\n')
+            
+            # Print memory usage
+            print(f"\nMemory Usage:", end='\r')
+            print(f"Total: {memory.total / (1024**3):5.1f} GB", end='\r')
+            print(f"Used: {memory.used / (1024**3):5.1f} GB", end='\r')
+            print(f"Free: {memory.available / (1024**3):5.1f} GB", end='\r')
+            print(f"Percent Used: {memory.percent}%", end='\r')
+            
+            # Sleep for a short duration
+            time.sleep(2)
+            
+    except Exception as e:
+        print(f"\nError in performance monitor: {e}", end='\r')
+    finally:
+        print("\nPerformance monitor stopped.", end='\r')
+
+def toggle_performance_monitor():
+    """Toggle the performance monitor on/off."""
+    global performance_monitor_proc, stop_performance_monitor_event
+    
+    if performance_monitor_proc is None or not performance_monitor_proc.is_alive():
+        cleanup_process('p')  # Clean up any existing process
+        print("\nStarting performance monitor...", end='\r')
+        performance_monitor_proc = multiprocessing.Process(target=monitor_system_performance)
+        performance_monitor_proc.daemon = True
+        active_processes['p'] = performance_monitor_proc
+        stop_performance_monitor_event.clear()
+        performance_monitor_proc.start()
+    else:
+        print("\nStopping performance monitor...", end='\r')
+        stop_performance_monitor_event.set()
+        if performance_monitor_proc.is_alive():
+            performance_monitor_proc.join(timeout=2)
+            if performance_monitor_proc.is_alive():
+                performance_monitor_proc.terminate()
+        performance_monitor_proc = None
+        cleanup_process('p')
+        print("Performance monitor stopped", end='\r')
 
 if __name__ == "__main__":
     main()
