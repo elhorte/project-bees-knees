@@ -3668,20 +3668,24 @@ def monitor_system_performance():
             # Get memory usage
             memory = psutil.virtual_memory()
             
-            # Clear previous lines (assuming max 32 CPU cores + 3 lines for memory)
-            print("\033[K", end='\r')  # Clear current line
+            # Build the output string
+            output = "\n=== System Performance Monitor ===\n"
             
-            # Print CPU usage
-            print("\nCPU Usage by Core:", end='\r')
+            # Add CPU information
+            output += "CPU Usage by Core:\n"
             for i, percent in enumerate(cpu_percents):
-                print(f"Core {i}: {percent:5.1f}% ", end='\r\n')
+                output += f"Core {i}: {percent:5.1f}%\n"
             
-            # Print memory usage
-            print(f"\nMemory Usage:", end='\r')
-            print(f"Total: {memory.total / (1024**3):5.1f} GB", end='\r')
-            print(f"Used: {memory.used / (1024**3):5.1f} GB", end='\r')
-            print(f"Free: {memory.available / (1024**3):5.1f} GB", end='\r')
-            print(f"Percent Used: {memory.percent}%", end='\r')
+            # Add memory information
+            output += "\nMemory Usage:\n"
+            output += f"Total: {memory.total / (1024**3):5.1f} GB\n"
+            output += f"Used:  {memory.used / (1024**3):5.1f} GB\n"
+            output += f"Free:  {memory.available / (1024**3):5.1f} GB\n"
+            output += f"Used%: {memory.percent}%\n"
+            output += "=" * 30 + "\n"
+            
+            # Print the entire output at once
+            print(output, flush=True)
             
             # Sleep for a short duration
             time.sleep(2)
