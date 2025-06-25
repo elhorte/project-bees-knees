@@ -76,7 +76,7 @@ WINDOWS_MODEL_NAME = ["Scarlett"]                        # Audio interface model
 WINDOWS_DEVICE_NAME = "Focusrite Scarlett"              # Device name
 WINDOWS_API_NAME = "WASAPI"                      # Windows audio API
 WINDOWS_HOSTAPI_NAME = "WASAPI"                  # Host API name
-WINDOWS_HOSTAPI_INDEX = 0                                # Default host API index
+WINDOWS_HOSTAPI_INDEX = 7                                # Default host API index
 WINDOWS_DEVICE_ID = None                                   # Device ID for Focusrite
 
 # input device parameters--macos:
