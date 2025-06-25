@@ -253,7 +253,8 @@ active_processes = {
     's': None,  # Spectrogram 
     'f': None,  # FFT
     'i': None,  # Intercom
-    'p': None   # Performance monitor
+    'p': None,  # Performance monitor (one-shot)
+    'P': None   # Performance monitor (continuous)
 }
 
 # #############################################################
@@ -3120,7 +3121,9 @@ def keyboard_listener():
                     elif key == "o":  
                         trigger_oscope()        
                     elif key == "p":
-                        toggle_performance_monitor()
+                        run_performance_monitor_once()
+                    elif key == "P":
+                        toggle_continuous_performance_monitor()
                     elif key == "q":  
                         print("\nQuitting...", end='\n', flush=True)
                         keyboard_listener_running = False
@@ -3184,7 +3187,8 @@ def show_list_of_commands():
     print("i  intercom: press i then press 1, 2, 3, ... to listen to that channel")
     print("m  mic--show active positions")
     print("o  oscilloscope--show trace of each active channel")
-    print("p  performance monitor--show CPU and RAM usage")
+    print("p  performance monitor--show CPU and RAM usage (one-shot)")
+    print("P  performance monitor--show CPU and RAM usage (continuous)")
     print("q  quit--stop all processes and exit")
     print("s  spectrogram--plot of last recording")
     print("t  threads--see list of all threads")
@@ -3658,53 +3662,72 @@ def restore_terminal_settings(old_settings):
 performance_monitor_proc = None
 stop_performance_monitor_event = threading.Event()
 
-def monitor_system_performance():
-    """Monitor and display CPU and RAM usage."""
+def get_system_performance():
+    """Get a single snapshot of system performance."""
+    # Get CPU usage for each core
+    cpu_percents = psutil.cpu_percent(interval=1, percpu=True)
+    
+    # Get memory usage
+    memory = psutil.virtual_memory()
+    
+    # Build the output string
+    output = "\n=== System Performance Monitor ===\n"
+    
+    # Add CPU information
+    output += "CPU Usage by Core:\n"
+    for i, percent in enumerate(cpu_percents):
+        output += f"Core {i}: {percent:5.1f}%\n"
+    
+    # Add memory information
+    output += "\nMemory Usage:\n"
+    output += f"Total: {memory.total / (1024**3):5.1f} GB\n"
+    output += f"Used:  {memory.used / (1024**3):5.1f} GB\n"
+    output += f"Free:  {memory.available / (1024**3):5.1f} GB\n"
+    output += f"Used%: {memory.percent}%\n"
+    output += "=" * 30 + "\n"
+    
+    return output
+
+def monitor_system_performance_once():
+    """Display a single snapshot of system performance."""
+    try:
+        output = get_system_performance()
+        print(output, flush=True)
+    except Exception as e:
+        print(f"\nError in performance monitor: {e}", end='\r')
+
+def monitor_system_performance_continuous():
+    """Continuously monitor and display CPU and RAM usage."""
     try:
         while not stop_performance_monitor_event.is_set():
-            # Get CPU usage for each core
-            cpu_percents = psutil.cpu_percent(interval=1, percpu=True)
-            
-            # Get memory usage
-            memory = psutil.virtual_memory()
-            
-            # Build the output string
-            output = "\n=== System Performance Monitor ===\n"
-            
-            # Add CPU information
-            output += "CPU Usage by Core:\n"
-            for i, percent in enumerate(cpu_percents):
-                output += f"Core {i}: {percent:5.1f}%\n"
-            
-            # Add memory information
-            output += "\nMemory Usage:\n"
-            output += f"Total: {memory.total / (1024**3):5.1f} GB\n"
-            output += f"Used:  {memory.used / (1024**3):5.1f} GB\n"
-            output += f"Free:  {memory.available / (1024**3):5.1f} GB\n"
-            output += f"Used%: {memory.percent}%\n"
-            output += "=" * 30 + "\n"
-            
-            # Print the entire output at once
+            output = get_system_performance()
             print(output, flush=True)
-            
-            # Sleep for a short duration
             time.sleep(2)
-            
     except Exception as e:
         print(f"\nError in performance monitor: {e}", end='\r')
     finally:
         print("\nPerformance monitor stopped.", end='\r')
 
-def toggle_performance_monitor():
-    """Toggle the performance monitor on/off."""
+def run_performance_monitor_once():
+    """Run the performance monitor once."""
+    cleanup_process('p')  # Clean up any existing process
+    proc = multiprocessing.Process(target=monitor_system_performance_once)
+    proc.daemon = True
+    active_processes['p'] = proc
+    proc.start()
+    proc.join()  # Wait for it to complete
+    cleanup_process('p')
+
+def toggle_continuous_performance_monitor():
+    """Toggle the continuous performance monitor on/off."""
     global performance_monitor_proc, stop_performance_monitor_event
     
     if performance_monitor_proc is None or not performance_monitor_proc.is_alive():
-        cleanup_process('p')  # Clean up any existing process
-        print("\nStarting performance monitor...", end='\r')
-        performance_monitor_proc = multiprocessing.Process(target=monitor_system_performance)
+        cleanup_process('P')  # Clean up any existing process
+        print("\nStarting continuous performance monitor...", end='\r')
+        performance_monitor_proc = multiprocessing.Process(target=monitor_system_performance_continuous)
         performance_monitor_proc.daemon = True
-        active_processes['p'] = performance_monitor_proc
+        active_processes['P'] = performance_monitor_proc
         stop_performance_monitor_event.clear()
         performance_monitor_proc.start()
     else:
@@ -3715,7 +3738,7 @@ def toggle_performance_monitor():
             if performance_monitor_proc.is_alive():
                 performance_monitor_proc.terminate()
         performance_monitor_proc = None
-        cleanup_process('p')
+        cleanup_process('P')
         print("Performance monitor stopped", end='\r')
 
 if __name__ == "__main__":
