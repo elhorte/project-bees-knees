@@ -29,6 +29,8 @@ import time
 import threading
 import multiprocessing
 import numpy as np
+import matplotlib
+#matplotlib.use('Agg', force=True)
 import matplotlib.pyplot as plt
 from scipy.io.wavfile import write
 from scipy.signal import resample
@@ -56,6 +58,7 @@ import Setup_Pyaudio as set_port
 import gc
 import psutil
 import struct
+import logging
 #import curses
 #import io
 #import queue
@@ -1314,6 +1317,91 @@ def create_progress_bar(current, total, bar_length=50):
     
     return f"[{bar}] {percent}%"
 
+def _record_audio_pyaudio(duration, sound_in_id, sound_in_chs, stop_queue, task_name="audio recording"):
+    """
+    Helper function to record a chunk of audio using PyAudio and return it as a numpy array.
+    This function encapsulates the PyAudio stream setup, callback, and teardown.
+    """
+    p = pyaudio.PyAudio()
+    recording = None
+    try:
+        device_info = p.get_device_info_by_index(sound_in_id)
+        max_channels = int(device_info['maxInputChannels'])
+        
+        actual_channels = min(sound_in_chs, max_channels)
+        actual_channels = max(1, actual_channels)
+
+        logging.info(f"Starting {task_name} for {duration:.1f}s on {actual_channels} channel(s).")
+
+        num_frames = int(config.PRIMARY_IN_SAMPLERATE * duration)
+        chunk_size = 4096
+        
+        recording_array = np.zeros((num_frames, actual_channels), dtype=np.float32)
+        frames_recorded = 0
+        recording_complete = False
+
+        def callback(in_data, frame_count, time_info, status):
+            nonlocal frames_recorded, recording_complete
+            try:
+                if status:
+                    logging.warning(f"PyAudio stream status: {status}")
+                if frames_recorded < num_frames and not recording_complete:
+                    data = np.frombuffer(in_data, dtype=np.float32)
+                    if len(data) > 0:
+                        start_idx = frames_recorded
+                        end_idx = min(start_idx + len(data) // actual_channels, num_frames)
+                        data = data.reshape(-1, actual_channels)
+                        recording_array[start_idx:end_idx] = data[:(end_idx - start_idx)]
+                        frames_recorded += len(data) // actual_channels
+                        if frames_recorded >= num_frames:
+                            recording_complete = True
+                            return (None, pyaudio.paComplete)
+                return (None, pyaudio.paContinue)
+            except Exception as e:
+                logging.error(f"Error in PyAudio callback: {e}", exc_info=True)
+                recording_complete = True
+                return (None, pyaudio.paAbort)
+
+        stream = p.open(format=pyaudio.paFloat32,
+                        channels=actual_channels,
+                        rate=int(config.PRIMARY_IN_SAMPLERATE),
+                        input=True,
+                        input_device_index=sound_in_id,
+                        frames_per_buffer=chunk_size,
+                        stream_callback=callback)
+        
+        stream.start_stream()
+        
+        start_time = time.time()
+        timeout = duration + 10
+        
+        while not recording_complete and stop_queue.empty() and (time.time() - start_time) < timeout:
+            progress_bar = create_progress_bar(frames_recorded, num_frames)
+            print(f"Recording progress: {progress_bar}", end='\r')
+            time.sleep(0.1)
+        
+        stream.stop_stream()
+        stream.close()
+        
+        print() # Newline after progress bar
+        if frames_recorded < num_frames * 0.9:
+            logging.warning(f"Recording incomplete: only got {frames_recorded}/{num_frames} frames.")
+            return None, 0
+        
+        logging.info(f"Finished {task_name}.")
+        return recording_array, actual_channels
+
+    except Exception as e:
+        logging.error(f"Failed to record audio with PyAudio for {task_name}", exc_info=True)
+        return None, 0
+    finally:
+        if p:
+            try:
+                p.terminate()
+                time.sleep(0.1) # Allow time for resources to be released
+            except Exception as e:
+                logging.error(f"Error terminating PyAudio instance for {task_name}", exc_info=True)
+
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
 def plot_oscope(sound_in_id, sound_in_chs, queue): 
     try:
@@ -1330,200 +1418,101 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
         import time
         time.sleep(0.1)
             
-        # Initialize PyAudio
-        p = pyaudio.PyAudio()
+        recording, actual_channels = _record_audio_pyaudio(
+            config.TRACE_DURATION, sound_in_id, sound_in_chs, queue, "oscilloscope traces"
+        )
         
+        if recording is None:
+            logging.error("Failed to record audio for oscilloscope.")
+            return
+
+        # Apply gain if needed
+        if config.OSCOPE_GAIN_DB > 0:
+            gain = 10 ** (config.OSCOPE_GAIN_DB / 20)      
+            logging.info(f"Applying gain of: {gain:.1f}") 
+            recording *= gain
+
+        logging.info("Creating oscilloscope plot...")
+        # Create figure with reduced DPI for better performance
+        fig = plt.figure(figsize=(10, 3 * actual_channels), dpi=80)
+        
+        # Optimize plotting by downsampling for display
+        downsample_factor = max(1, len(recording) // 5000)  # Limit points to ~5k for better performance
+        time_points = np.arange(0, len(recording), downsample_factor) / config.PRIMARY_IN_SAMPLERATE
+        
+        # Plot each channel
+        for i in range(actual_channels):
+            ax = plt.subplot(actual_channels, 1, i+1)
+            ax.plot(time_points, recording[::downsample_factor, i], linewidth=0.5)
+            ax.set_title(f"Oscilloscope Traces w/{config.OSCOPE_GAIN_DB}dB Gain--Ch{i+1}")
+            ax.set_xlabel('Time (seconds)')
+            ax.set_ylim(-1.0, 1.0)
+            
+            # Add graticule
+            # Horizontal line at 0
+            ax.axhline(y=0, color='gray', linewidth=0.5, alpha=0.7)
+            
+            # Vertical lines at each second
+            max_time = time_points[-1]
+            for t in range(0, int(max_time) + 1):
+                ax.axvline(x=t, color='gray', linewidth=0.5, alpha=0.5)
+            
+            # Add minor vertical lines at 0.5 second intervals
+            for t in np.arange(0.5, max_time, 0.5):
+                ax.axvline(x=t, color='gray', linewidth=0.3, alpha=0.3, linestyle='--')
+            
+            # Configure grid and ticks
+            ax.set_xticks(range(0, int(max_time) + 1))
+            ax.set_yticks([-1.0, -0.5, 0, 0.5, 1.0])
+            ax.tick_params(axis='both', which='both', labelsize=8)
+        
+        plt.tight_layout()
+
+        # Save the plot
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_oscope_{int(config.PRIMARY_IN_SAMPLERATE/1000)}_kHz_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
+        logging.info(f"Saving oscilloscope plot to: {plotname}")
+        
+        # Make sure the directory exists
+        os.makedirs(os.path.dirname(plotname), exist_ok=True)
+        
+        # Display the expanded path
+        expanded_path = os.path.abspath(os.path.expanduser(plotname))
+        logging.info(f"Absolute path: {expanded_path}")
+        
+        # Save with optimized settings
+        logging.info("Saving figure...")
+        plt.savefig(expanded_path, dpi=80, bbox_inches='tight', pad_inches=0.1, format='png')
+        logging.info("Plot saved successfully")
+        plt.close('all')  # Close all figures
+
+        # Open the saved image based on OS
         try:
-            # Get device info
-            device_info = p.get_device_info_by_index(sound_in_id)
-            max_channels = int(device_info['maxInputChannels'])
-            
-            # If requested channels exceed device capabilities, adjust
-            if sound_in_chs > max_channels:
-                print(f"Warning: Device only supports {max_channels} channels, adjusting from {sound_in_chs}")
-                actual_channels = max_channels
-            else:
-                actual_channels = sound_in_chs
-                
-            # Ensure at least 1 channel
-            actual_channels = max(1, actual_channels)
-            
-            # Record audio
-            print(f"Recording audio for oscilloscope traces using {actual_channels} channel(s)")
-            
-            # Calculate number of frames needed
-            num_frames = int(config.PRIMARY_IN_SAMPLERATE * config.TRACE_DURATION)
-            chunk_size = 4096  # Reduced chunk size for better reliability
-            
-            # Create the recording array
-            recording = np.zeros((num_frames, actual_channels), dtype=np.float32)
-            frames_recorded = 0
-            recording_complete = False
-            
-            def callback(in_data, frame_count, time_info, status):
-                nonlocal frames_recorded, recording_complete
+            if platform_manager.is_wsl():
+                logging.info("Opening image in WSL...")
                 try:
-                    if status:
-                        print(f"Stream status: {status}")
-                    if frames_recorded < num_frames and not recording_complete:
-                        data = np.frombuffer(in_data, dtype=np.float32)
-                        if len(data) > 0:
-                            start_idx = frames_recorded
-                            end_idx = min(start_idx + len(data) // actual_channels, num_frames)
-                            data = data.reshape(-1, actual_channels)
-                            recording[start_idx:end_idx] = data[:(end_idx - start_idx)]
-                            frames_recorded += len(data) // actual_channels
-                            if frames_recorded >= num_frames:
-                                recording_complete = True
-                                return (None, pyaudio.paComplete)
-                            elif frames_recorded % (chunk_size * 10) == 0:
-                                progress_bar = create_progress_bar(frames_recorded, num_frames)
-                                print(f"Recording progress: {progress_bar}", end='\r')
-                    return (None, pyaudio.paContinue)
-                except Exception as e:
-                    print(f"Error in callback: {e}")
-                    return (None, pyaudio.paComplete)
-            
-            # Open stream using callback
-            stream = p.open(format=pyaudio.paFloat32,
-                          channels=actual_channels,
-                          rate=int(config.PRIMARY_IN_SAMPLERATE),
-                          input=True,
-                          input_device_index=sound_in_id,
-                          frames_per_buffer=chunk_size,
-                          stream_callback=callback)
-            
-            print("Stream opened successfully")
-            stream.start_stream()
-            
-            # Wait until we have recorded enough frames, received stop signal, or timed out
-            start_time = time.time()
-            timeout = config.TRACE_DURATION + 10  # Increased timeout buffer
-            
-            # Keep recording until one of these conditions is met:
-            # 1. We've recorded all frames
-            # 2. We've received a stop signal (queue has data)
-            # 3. We've hit the timeout
-            while frames_recorded < num_frames and queue.empty() and (time.time() - start_time) < timeout:
-                if recording_complete:
-                    break
-                progress_bar = create_progress_bar(frames_recorded, num_frames)
-                print(f"Recording progress: {progress_bar}", end='\r')
-                time.sleep(0.1)  # Increased sleep time to reduce CPU usage
-            
-            # Stop and close stream
-            stream.stop_stream()
-            stream.close()
-            
-            print("\nRecording oscope finished.")
-            progress_bar = create_progress_bar(frames_recorded, num_frames)
-            #print(f"Final progress: {progress_bar}")
-            
-            # Only process if we got enough data
-            if frames_recorded < num_frames * 0.9:  # Allow for small missing chunks
-                print(f"Warning: Recording incomplete - only got {frames_recorded}/{num_frames} frames")
-                return
-                
-            # Apply gain if needed
-            if config.OSCOPE_GAIN_DB > 0:
-                gain = 10 ** (config.OSCOPE_GAIN_DB / 20)      
-                print(f"Applying gain of: {gain:.1f}") 
-                recording *= gain
-
-            print("Creating plot...")
-            # Create figure with reduced DPI for better performance
-            fig = plt.figure(figsize=(10, 3 * actual_channels), dpi=80)
-            
-            # Optimize plotting by downsampling for display
-            downsample_factor = max(1, len(recording) // 5000)  # Limit points to ~5k for better performance
-            time_points = np.arange(0, len(recording), downsample_factor) / config.PRIMARY_IN_SAMPLERATE
-            
-            # Plot each channel
-            for i in range(actual_channels):
-                ax = plt.subplot(actual_channels, 1, i+1)
-                ax.plot(time_points, recording[::downsample_factor, i], linewidth=0.5)
-                ax.set_title(f"Oscilloscope Traces w/{config.OSCOPE_GAIN_DB}dB Gain--Ch{i+1}")
-                ax.set_xlabel('Time (seconds)')
-                ax.set_ylim(-1.0, 1.0)
-                
-                # Add graticule
-                # Horizontal line at 0
-                ax.axhline(y=0, color='gray', linewidth=0.5, alpha=0.7)
-                
-                # Vertical lines at each second
-                max_time = time_points[-1]
-                for t in range(0, int(max_time) + 1):
-                    ax.axvline(x=t, color='gray', linewidth=0.5, alpha=0.5)
-                
-                # Add minor vertical lines at 0.5 second intervals
-                for t in np.arange(0.5, max_time, 0.5):
-                    ax.axvline(x=t, color='gray', linewidth=0.3, alpha=0.3, linestyle='--')
-                
-                # Configure grid and ticks
-                ax.set_xticks(range(0, int(max_time) + 1))
-                ax.set_yticks([-1.0, -0.5, 0, 0.5, 1.0])
-                ax.tick_params(axis='both', which='both', labelsize=8)
-            
-            plt.tight_layout()
-
-            # Save the plot
-            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_oscope_{int(config.PRIMARY_IN_SAMPLERATE/1000)}_kHz_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
-            print("\nSaving oscilloscope plot to:", plotname)
-            
-            # Make sure the directory exists
-            os.makedirs(os.path.dirname(plotname), exist_ok=True)
-            
-            # Display the expanded path
-            expanded_path = os.path.abspath(os.path.expanduser(plotname))
-            print(f"Absolute path: {expanded_path}")
-            
-            # Save with optimized settings
-            print("Saving figure...")
-            plt.savefig(expanded_path, dpi=80, bbox_inches='tight', pad_inches=0.1, format='png')
-            print("Plot saved successfully")
-            plt.close('all')  # Close all figures
-
-            # Open the saved image based on OS
-            try:
-                if platform_manager.is_wsl():
-                    print("Opening image in WSL...")
-                    try:
-                        subprocess.Popen(['xdg-open', expanded_path])
-                    except FileNotFoundError:
-                        subprocess.Popen(['wslview', expanded_path])
-                elif platform_manager.is_macos():
-                    print("Opening image in macOS...")
-                    subprocess.Popen(['open', expanded_path])
-                elif sys.platform == 'win32':
-                    print("Opening image in Windows...")
-                    os.startfile(expanded_path)
-                else:
-                    print("Opening image in Linux...")
                     subprocess.Popen(['xdg-open', expanded_path])
-                print("Image viewer command executed")
-            except Exception as e:
-                print(f"Could not open image viewer: {e}")
-                print(f"Image saved at: {expanded_path}")
-                
+                except FileNotFoundError:
+                    subprocess.Popen(['wslview', expanded_path])
+                logging.info("Image viewer command executed")
+            elif platform_manager.is_macos():
+                logging.info("Opening image in macOS...")
+                subprocess.Popen(['open', expanded_path])
+                logging.info("Image viewer command executed")
+            elif sys.platform == 'win32':
+                logging.info("Opening image in Windows...")
+                os.startfile(expanded_path)
+                logging.info("Image viewer command executed")
+            else:
+                logging.info("Opening image in Linux...")
+                subprocess.Popen(['xdg-open', expanded_path])
+                logging.info("Image viewer command executed")
         except Exception as e:
-            print(f"Error in recording: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            # Clean up PyAudio - ensure complete cleanup
-            try:
-                if hasattr(p, 'terminate'):
-                    p.terminate()
-                # Additional cleanup to ensure PyAudio releases audio device
-                import time
-                time.sleep(0.1)  # Brief pause to allow device cleanup
-            except Exception as e:
-                print(f"Warning during PyAudio cleanup in oscilloscope: {e}")
-                pass
+            logging.error(f"Could not open image viewer: {e}")
+            logging.info(f"Image saved at: {expanded_path}")
             
     except Exception as e:
-        print(f"Error in oscilloscope recording: {e}")
+        logging.error(f"Error in oscilloscope recording: {e}")
         import traceback
         traceback.print_exc()
     finally:
@@ -1638,241 +1627,137 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
         import time
         time.sleep(0.1)
         
-        # Initialize PyAudio
-        p = pyaudio.PyAudio()
+        recording, actual_channels = _record_audio_pyaudio(
+            config.FFT_DURATION, sound_in_id, sound_in_chs, stop_queue, "FFT analysis"
+        )
         
+        if recording is None:
+            logging.error("Failed to record audio for FFT.")
+            return
+
+        # Ensure channel index is valid
+        if channel >= actual_channels:
+            logging.warning(f"Channel {channel+1} not available for FFT, using channel 1.")
+            monitor_channel = 0
+        else:
+            monitor_channel = channel
+            
+        # Extract the requested channel
+        single_channel_audio = recording[:, monitor_channel]
+        
+        # Apply gain if needed
+        if config.FFT_GAIN > 0:
+            gain = 10 ** (config.FFT_GAIN / 20)
+            logging.info(f"Applying FFT gain of: {gain:.1f}")
+            single_channel_audio *= gain
+
+        logging.info("Performing FFT...")
+        # Perform FFT
+        yf = rfft(single_channel_audio.flatten())
+        xf = rfftfreq(len(single_channel_audio), 1 / config.PRIMARY_IN_SAMPLERATE)
+
+        # Define bucket width
+        bucket_width = FFT_BW  # Hz
+        bucket_size = int(bucket_width * len(single_channel_audio) / config.PRIMARY_IN_SAMPLERATE)  # Number of indices per bucket
+
+        # Calculate the number of complete buckets
+        num_buckets = len(yf) // bucket_size
+        
+        # Average buckets - ensure both arrays have the same length
+        buckets = []
+        bucket_freqs = []
+        for i in range(num_buckets):
+            start_idx = i * bucket_size
+            end_idx = start_idx + bucket_size
+            buckets.append(yf[start_idx:end_idx].mean())
+            bucket_freqs.append(xf[start_idx:end_idx].mean())
+        
+        buckets = np.array(buckets)
+        bucket_freqs = np.array(bucket_freqs)
+
+        logging.info("Creating FFT plot...")
+        # Create figure with reduced DPI for better performance
+        fig = plt.figure(figsize=(10, 6), dpi=80)
+        plt.plot(bucket_freqs, np.abs(buckets), linewidth=1.0)
+        plt.xlabel('Frequency (Hz)')
+        plt.ylabel('Amplitude')
+        plt.title(f'FFT Plot monitoring ch: {monitor_channel + 1} of {actual_channels} channels')
+        plt.grid(True)
+
+        # Save the plot
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_fft_{int(config.PRIMARY_IN_SAMPLERATE/1000)}_kHz_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
+        logging.info(f"Saving FFT plot to: {plotname}")
+        
+        # Make sure the directory exists
+        os.makedirs(os.path.dirname(plotname), exist_ok=True)
+        
+        # Display the expanded path
+        expanded_path = os.path.abspath(os.path.expanduser(plotname))
+        logging.info(f"Absolute path: {expanded_path}")
+        
+        # Save with optimized settings
+        logging.info("Saving figure...")
+        plt.savefig(expanded_path, dpi=80, bbox_inches='tight', pad_inches=0.1, format='png')
+        logging.info("Plot saved successfully")
+        plt.close('all')  # Close all figures
+
+        # Open the saved image based on OS
         try:
-            # Get device info
-            device_info = p.get_device_info_by_index(sound_in_id)
-            max_channels = int(device_info['maxInputChannels'])
-            
-            # If requested channels exceed device capabilities, adjust
-            if sound_in_chs > max_channels:
-                print(f"Warning: Device only supports {max_channels} channels, adjusting from {sound_in_chs}")
-                actual_channels = max_channels
-            else:
-                actual_channels = sound_in_chs
-                
-            # Ensure at least 1 channel
-            actual_channels = max(1, actual_channels)
-            
-            # Ensure channel index is valid
-            if channel >= actual_channels:
-                print(f"Warning: Channel {channel+1} not available, using channel 1")
-                monitor_channel = 0
-            else:
-                monitor_channel = channel
-                
-            # Record audio
-            print(f"Recording audio for FFT on channel {monitor_channel+1} of {actual_channels}")
-            
-            # Calculate number of frames needed
-            num_frames = int(config.PRIMARY_IN_SAMPLERATE * config.FFT_DURATION)
-            chunk_size = 4096  # Reduced chunk size for better reliability
-            
-            # Create the recording array
-            recording = np.zeros((num_frames, actual_channels), dtype=np.float32)
-            frames_recorded = 0
-            recording_complete = False
-            
-            def callback(in_data, frame_count, time_info, status):
-                nonlocal frames_recorded, recording_complete
-                try:
-                    if status:
-                        print(f"Stream status: {status}")
-                    if frames_recorded < num_frames and not recording_complete:
-                        data = np.frombuffer(in_data, dtype=np.float32)
-                        if len(data) > 0:
-                            start_idx = frames_recorded
-                            end_idx = min(start_idx + len(data) // actual_channels, num_frames)
-                            data = data.reshape(-1, actual_channels)
-                            recording[start_idx:end_idx] = data[:(end_idx - start_idx)]
-                            frames_recorded += len(data) // actual_channels
-                            if frames_recorded >= num_frames:
-                                recording_complete = True
-                                return (None, pyaudio.paComplete)
-                            elif frames_recorded % (chunk_size * 10) == 0:
-                                progress_bar = create_progress_bar(frames_recorded, num_frames)
-                                print(f"Recording progress: {progress_bar}", end='\r')
-                    return (None, pyaudio.paContinue)
-                except Exception as e:
-                    print(f"Error in callback: {e}")
-                    return (None, pyaudio.paComplete)
-            
-            # Open stream using callback
-            stream = p.open(format=pyaudio.paFloat32,
-                          channels=actual_channels,
-                          rate=int(config.PRIMARY_IN_SAMPLERATE),
-                          input=True,
-                          input_device_index=sound_in_id,
-                          frames_per_buffer=chunk_size,
-                          stream_callback=callback)
-            
-            print("Stream opened successfully")
-            stream.start_stream()
-            
-            # Wait until we have recorded enough frames, received stop signal, or timed out
-            start_time = time.time()
-            timeout = config.FFT_DURATION + 10  # Increased timeout buffer
-            
-            # Keep recording until one of these conditions is met:
-            # 1. We've recorded all frames
-            # 2. We've received a stop signal (queue has data)
-            # 3. We've hit the timeout
-            while frames_recorded < num_frames and stop_queue.empty() and (time.time() - start_time) < timeout:
-                if recording_complete:
-                    break
-                progress_bar = create_progress_bar(frames_recorded, num_frames)
-                print(f"Recording progress: {progress_bar}", end='\r')
-                time.sleep(0.1)  # Increased sleep time to reduce CPU usage
-            
-            # Stop and close stream
-            stream.stop_stream()
-            stream.close()
-            
-            print("\nRecording fft finished.")
-            progress_bar = create_progress_bar(frames_recorded, num_frames)
-            #print(f"Final progress: {progress_bar}")
-            
-            # Only process if we got enough data
-            if frames_recorded < num_frames * 0.9:  # Allow for small missing chunks
-                print(f"Warning: Recording incomplete - only got {frames_recorded}/{num_frames} frames")
+            # First verify the file exists
+            if not os.path.exists(expanded_path):
+                logging.error(f"Plot file does not exist at: {expanded_path}")
                 return
                 
-            # Extract the requested channel
-            single_channel_audio = recording[:frames_recorded, monitor_channel]
+            logging.info(f"Plot file exists, size: {os.path.getsize(expanded_path)} bytes")
             
-            # Apply gain if needed
-            if config.FFT_GAIN > 0:
-                gain = 10 ** (config.FFT_GAIN / 20)
-                print(f"Applying gain of: {gain:.1f}")
-                single_channel_audio *= gain
-
-            print("Performing FFT...")
-            # Perform FFT
-            yf = rfft(single_channel_audio.flatten())
-            xf = rfftfreq(frames_recorded, 1 / config.PRIMARY_IN_SAMPLERATE)
-
-            # Define bucket width
-            bucket_width = FFT_BW  # Hz
-            bucket_size = int(bucket_width * frames_recorded / config.PRIMARY_IN_SAMPLERATE)  # Number of indices per bucket
-
-            # Calculate the number of complete buckets
-            num_buckets = len(yf) // bucket_size
-            
-            # Average buckets - ensure both arrays have the same length
-            buckets = []
-            bucket_freqs = []
-            for i in range(num_buckets):
-                start_idx = i * bucket_size
-                end_idx = start_idx + bucket_size
-                buckets.append(yf[start_idx:end_idx].mean())
-                bucket_freqs.append(xf[start_idx:end_idx].mean())
-            
-            buckets = np.array(buckets)
-            bucket_freqs = np.array(bucket_freqs)
-
-            print("Creating plot...")
-            # Create figure with reduced DPI for better performance
-            fig = plt.figure(figsize=(10, 6), dpi=80)
-            plt.plot(bucket_freqs, np.abs(buckets), linewidth=1.0)
-            plt.xlabel('Frequency (Hz)')
-            plt.ylabel('Amplitude')
-            plt.title(f'FFT Plot monitoring ch: {monitor_channel + 1} of {actual_channels} channels')
-            plt.grid(True)
-
-            # Save the plot
-            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_fft_{int(config.PRIMARY_IN_SAMPLERATE/1000)}_kHz_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
-            print("\nSaving FFT plot to:", plotname)
-            
-            # Make sure the directory exists
-            os.makedirs(os.path.dirname(plotname), exist_ok=True)
-            
-            # Display the expanded path
-            expanded_path = os.path.abspath(os.path.expanduser(plotname))
-            print(f"Absolute path: {expanded_path}")
-            
-            # Save with optimized settings
-            print("Saving figure...")
-            plt.savefig(expanded_path, dpi=80, bbox_inches='tight', pad_inches=0.1, format='png')
-            print("Plot saved successfully")
-            plt.close('all')  # Close all figures
-
-            # Open the saved image based on OS
-            try:
-                # First verify the file exists
-                if not os.path.exists(expanded_path):
-                    print(f"ERROR: Plot file does not exist at: {expanded_path}")
-                    return
-                    
-                print(f"Plot file exists, size: {os.path.getsize(expanded_path)} bytes")
-                
-                if platform_manager.is_wsl():
-                    print("Opening image in WSL...")
-                    try:
-                        proc = subprocess.Popen(['xdg-open', expanded_path])
-                        print(f"xdg-open launched with PID: {proc.pid}")
-                    except FileNotFoundError:
-                        print("xdg-open not found, trying wslview...")
-                        proc = subprocess.Popen(['wslview', expanded_path])
-                        print(f"wslview launched with PID: {proc.pid}")
-                elif platform_manager.is_macos():
-                    print("Opening image in macOS...")
-                    proc = subprocess.Popen(['open', expanded_path])
-                    print(f"open command launched with PID: {proc.pid}")
-                elif sys.platform == 'win32':
-                    print("Opening image in Windows...")
-                    os.startfile(expanded_path)
-                else:
-                    print("Opening image in Linux...")
-                    proc = subprocess.Popen(['xdg-open', expanded_path])
-                    print(f"xdg-open launched with PID: {proc.pid}")
-                    
-                print("Image viewer command executed successfully")
-                
-                # Give the process a moment to start
-                time.sleep(0.5)
-                
-                # Also print the command that can be run manually
-                print(f"\nIf the image didn't open, you can manually run:")
-                if platform_manager.is_wsl() or not sys.platform == 'win32':
-                    print(f"  xdg-open '{expanded_path}'")
-                elif platform_manager.is_macos():
-                    print(f"  open '{expanded_path}'")
-                    
-            except Exception as e:
-                print(f"Could not open image viewer: {e}")
-                print(f"Trying alternative method...")
+            if platform_manager.is_wsl():
+                logging.info("Opening image in WSL...")
                 try:
-                    # Try with shell=True as a fallback
-                    subprocess.Popen(f"xdg-open '{expanded_path}'", shell=True)
-                    print("Alternative method executed")
-                except Exception as e2:
-                    print(f"Alternative method also failed: {e2}")
-                print(f"Image saved at: {expanded_path}")
-                print(f"You can manually open this file with your image viewer")
+                    proc = subprocess.Popen(['xdg-open', expanded_path])
+                    logging.info(f"xdg-open launched with PID: {proc.pid}")
+                except FileNotFoundError:
+                    logging.info("xdg-open not found, trying wslview...")
+                    proc = subprocess.Popen(['wslview', expanded_path])
+                    logging.info(f"wslview launched with PID: {proc.pid}")
+            elif platform_manager.is_macos():
+                logging.info("Opening image in macOS...")
+                proc = subprocess.Popen(['open', expanded_path])
+                logging.info(f"open command launched with PID: {proc.pid}")
+            elif sys.platform == 'win32':
+                logging.info("Opening image in Windows...")
+                os.startfile(expanded_path)
+                logging.info("Image viewer command executed")
+            else:
+                logging.info("Opening image in Linux...")
+                proc = subprocess.Popen(['xdg-open', expanded_path])
+                logging.info(f"xdg-open launched with PID: {proc.pid}")
+                
+            logging.info("Image viewer command executed successfully")
+            
+            # Give the process a moment to start
+            time.sleep(0.5)
+            
+            # Also print the command that can be run manually
+            print(f"\nIf the image didn't open, you can manually run:")
+            if platform_manager.is_wsl() or not sys.platform == 'win32':
+                print(f"  xdg-open '{expanded_path}'")
+            elif platform_manager.is_macos():
+                print(f"  open '{expanded_path}'")
                 
         except Exception as e:
-            print(f"Error in recording: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            # Clean up PyAudio - ensure complete cleanup
+            logging.error("Could not open image viewer", exc_info=True)
             try:
-                if hasattr(p, 'terminate'):
-                    p.terminate()
-                # Additional cleanup to ensure PyAudio releases audio device
-                import time
-                time.sleep(0.1)  # Brief pause to allow device cleanup
-            except Exception as e:
-                print(f"Warning during PyAudio cleanup in FFT: {e}")
-                pass
+                # Try with shell=True as a fallback
+                subprocess.Popen(f"xdg-open '{expanded_path}'", shell=True)
+                logging.info("Alternative method executed")
+            except Exception as e2:
+                logging.error("Alternative open method also failed", exc_info=True)
+            logging.info(f"Image saved at: {expanded_path}")
+            logging.info("You can manually open this file with your image viewer")
             
     except Exception as e:
-        print(f"Error in FFT recording: {e}")
-        import traceback
-        traceback.print_exc()
+        logging.error("Error in FFT recording", exc_info=True)
     finally:
         # Ensure cleanup happens
         try:
@@ -3440,6 +3325,18 @@ def check_dependencies():
 def main():
     global fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel, sound_in_id, sound_in_chs, MICS_ACTIVE, keyboard_listener_running, make_name, model_name, device_name, api_name, hostapi_name, hostapi_index, device_id, original_terminal_settings
 
+    # --- Setup Logging ---
+    log_file_path = os.path.join(data_drive, data_path, 'BMAR.log')
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(processName)s - %(threadName)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file_path),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    logging.info("--- Starting Beehive Multichannel Acoustic-Signal Recorder ---")
+
     # Save original terminal settings at startup
     original_terminal_settings = save_terminal_settings()
 
@@ -3459,33 +3356,33 @@ def main():
     if config.AUDIO_MONITOR_FORMAT.upper() not in allowed_monitor_formats:
         print(f"WARNING: AUDIO_MONITOR_FORMAT '{config.AUDIO_MONITOR_FORMAT}' is not allowed. Must be one of: {allowed_monitor_formats}")
 
-    print("\n\nBeehive Multichannel Acoustic-Signal Recorder\n")
+    logging.info("Beehive Multichannel Acoustic-Signal Recorder")
    
     # Display platform-specific messages
     if sys.platform == 'win32' and not platform_manager.is_wsl():
-        print("Running on Windows - some terminal features will be limited.")
-        print("Note: You can safely ignore the 'No module named termios' warning.\n")
+        logging.info("Running on Windows - some terminal features will be limited.")
+        logging.info("Note: You can safely ignore the 'No module named termios' warning.")
    
     # Check dependencies
     if not check_dependencies():
-        print("\nWarning: Some required packages are missing or outdated.")
-        print("The script may not function correctly.")
+        logging.warning("Some required packages are missing or outdated.")
+        logging.warning("The script may not function correctly.")
         response = input("Do you want to continue anyway? (y/n): ")
         if response.lower() != 'y':
             sys.exit(1)
     
-    print(f"Saving data to: {PRIMARY_DIRECTORY}\n")
+    logging.info(f"Saving data to: {PRIMARY_DIRECTORY}")
 
     # Try to set up the input device
     if not set_input_device(model_name, api_name):
-        print("\nExiting due to no suitable audio input device found.")
+        logging.critical("Exiting due to no suitable audio input device found.")
         sys.exit(1)
 
     # Validate and adjust monitor_channel after device setup
     if monitor_channel >= sound_in_chs:
-        print(f"\nWarning: Monitor channel {monitor_channel+1} exceeds available channels ({sound_in_chs})")
+        logging.warning(f"Monitor channel {monitor_channel+1} exceeds available channels ({sound_in_chs})")
         monitor_channel = 0  # Default to first channel
-        print(f"Setting monitor channel to {monitor_channel+1}")
+        logging.info(f"Setting monitor channel to {monitor_channel+1}")
 
     setup_audio_circular_buffer()
 
@@ -3494,18 +3391,18 @@ def main():
 
     # Check and create date-based directories
     if not check_and_create_date_folders():
-        print("\nCritical directories could not be created. Exiting.")
+        logging.critical("Critical directories could not be created. Exiting.")
         sys.exit(1)
     
     # Print directories for verification
-    print("\nDirectory setup:")
-    print(f"  Primary recordings: {PRIMARY_DIRECTORY}")
-    print(f"  Monitor recordings: {MONITOR_DIRECTORY}")
-    print(f"  Plot files: {PLOT_DIRECTORY}")
+    logging.info("Directory setup:")
+    logging.info(f"  Primary recordings: {PRIMARY_DIRECTORY}")
+    logging.info(f"  Monitor recordings: {MONITOR_DIRECTORY}")
+    logging.info(f"  Plot files: {PLOT_DIRECTORY}")
     
     # Ensure all required directories exist
     if not ensure_directories_exist([PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOT_DIRECTORY]):
-        print("\nCritical directories could not be created. Exiting.")
+        logging.critical("Critical directories could not be created. Exiting.")
         sys.exit(1)
 
     # Create and start the process
@@ -3532,7 +3429,7 @@ def main():
         cleanup()
 
     except Exception as e:
-        print(f"An error occurred while attempting to execute this script: {e}")
+        logging.critical("An error occurred while attempting to execute this script", exc_info=True)
         cleanup()
     finally:
         # Ensure terminal is reset even if an error occurs
