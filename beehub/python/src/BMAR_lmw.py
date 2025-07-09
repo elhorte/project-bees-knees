@@ -1320,8 +1320,15 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
         # Force garbage collection before starting
         gc.collect()
         
-        # Use non-interactive backend for plotting
-        plt.switch_backend('agg')
+        # Ensure clean matplotlib state for this process
+        import matplotlib
+        matplotlib.use('Agg', force=True)
+        import matplotlib.pyplot as plt
+        plt.close('all')  # Close any existing figures
+        
+        # Brief delay to ensure clean audio device state
+        import time
+        time.sleep(0.1)
             
         # Initialize PyAudio
         p = pyaudio.PyAudio()
@@ -1504,10 +1511,15 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
             import traceback
             traceback.print_exc()
         finally:
-            # Clean up PyAudio
+            # Clean up PyAudio - ensure complete cleanup
             try:
-                p.terminate()
-            except:
+                if hasattr(p, 'terminate'):
+                    p.terminate()
+                # Additional cleanup to ensure PyAudio releases audio device
+                import time
+                time.sleep(0.1)  # Brief pause to allow device cleanup
+            except Exception as e:
+                print(f"Warning during PyAudio cleanup in oscilloscope: {e}")
                 pass
             
     except Exception as e:
@@ -1616,8 +1628,15 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
         # Force garbage collection before starting
         gc.collect()
         
-        # Use non-interactive backend for plotting
-        plt.switch_backend('agg')
+        # Ensure clean matplotlib state for this process
+        import matplotlib
+        matplotlib.use('Agg', force=True)
+        import matplotlib.pyplot as plt
+        plt.close('all')  # Close any existing figures
+        
+        # Brief delay to ensure clean audio device state
+        import time
+        time.sleep(0.1)
         
         # Initialize PyAudio
         p = pyaudio.PyAudio()
@@ -1839,10 +1858,15 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
             import traceback
             traceback.print_exc()
         finally:
-            # Clean up PyAudio
+            # Clean up PyAudio - ensure complete cleanup
             try:
-                p.terminate()
-            except:
+                if hasattr(p, 'terminate'):
+                    p.terminate()
+                # Additional cleanup to ensure PyAudio releases audio device
+                import time
+                time.sleep(0.1)  # Brief pause to allow device cleanup
+            except Exception as e:
+                print(f"Warning during PyAudio cleanup in FFT: {e}")
                 pass
             
     except Exception as e:
@@ -1939,6 +1963,11 @@ def trigger_spectrogram():
         active_processes['s'].daemon = True  # Make it a daemon process
         active_processes['s'].start()
         
+        # Brief delay to allow the spectrogram process to initialize properly
+        # and prevent interference with subsequent audio operations
+        import time
+        time.sleep(0.2)
+        
         print("Plotting spectrogram...")
         clear_input_buffer()
         
@@ -1977,11 +2006,23 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
     - y_axis_type: Type of Y axis for the spectrogram ('log' or 'linear')
     - file_offset: Offset for finding the audio file
     """
+    # Store original matplotlib backend to restore later
+    original_backend = None
+    plt_imported = False
+    
     try:
+        # Force garbage collection before starting
+        gc.collect()
+        
         # Force non-interactive backend before any plotting
         import matplotlib
+        original_backend = matplotlib.get_backend()
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
+        plt_imported = True
+        
+        # Clear any existing figures to prevent interference
+        plt.close('all')
         
         next_spectrogram = find_file_of_type_with_offset(file_offset)
         
@@ -1992,11 +2033,12 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
         full_audio_path = os.path.join(PRIMARY_DIRECTORY, next_spectrogram)
         print("Spectrogram source:", full_audio_path)
 
-        # Use non-interactive backend for Linux and WSL
-        if platform_manager.is_wsl() or (sys.platform.startswith('linux')):
-            plt.switch_backend('Agg')
-
         print("Loading audio file with librosa...")
+        # Variables to ensure cleanup
+        y = None
+        sr = None
+        D_db = None
+        
         try:
             # For spectrogram display, limit duration to avoid memory issues
             max_duration = min(config.PERIOD_RECORD, period)  # Max 5 minutes for display
@@ -2011,6 +2053,20 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
         except Exception as e:
             print(f"Error loading audio file: {e}")
             return
+        finally:
+            # Ensure librosa releases file handles
+            if 'librosa' in sys.modules:
+                try:
+                    # Force garbage collection after librosa operations
+                    if 'y' in locals():
+                        del y
+                    gc.collect()
+                except:
+                    pass
+        
+        # Re-load y if it was deleted in cleanup
+        if y is None:
+            y, sr = librosa.load(full_audio_path, sr=None, duration=max_duration, mono=False)
         
         # If multi-channel audio, select the specified channel
         if len(y.shape) > 1:
@@ -2018,7 +2074,6 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
             print(f"Selected channel {channel+1}")
             
         print("Computing spectrogram...")
-        D_db = None  # Initialize for later reference
         try:
             # Use larger hop length for long files or high sample rates to reduce spectrogram size
             duration_seconds = len(y) / sr
@@ -2046,88 +2101,138 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
         except Exception as e:
             print(f"Error computing spectrogram: {e}")
             return
+        finally:
+            # Clean up intermediate variables
+            try:
+                if 'D' in locals():
+                    del D
+                gc.collect()
+            except:
+                pass
         
         # Plot the spectrogram
-        plt.figure(figsize=(12, 6))
-
-        if y_axis_type == 'log':
-            librosa.display.specshow(D_db, sr=sr, x_axis='time', y_axis='log', hop_length=hop_length)
-            y_decimal_places = 3
-        elif y_axis_type == 'lin':
-            librosa.display.specshow(D_db, sr=sr, x_axis='time', y_axis='linear', hop_length=hop_length)
-            y_decimal_places = 0
-        else:
-            raise ValueError("y_axis_type must be 'log' or 'linear'")
-        
-        # Adjust y-ticks to be in kilohertz and have the specified number of decimal places
-        y_ticks = plt.gca().get_yticks()
-        plt.gca().set_yticklabels(['{:.{}f} kHz'.format(tick/1000, y_decimal_places) for tick in y_ticks])
-        
-        # Extract filename from the audio path
-        filename = os.path.basename(full_audio_path)
-        root, _ = os.path.splitext(filename)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_{root}_spectrogram.png")
-
-        # Set title to include filename and channel
-        plt.title(f'Spectrogram from {config.LOCATION_ID}, hive:{config.HIVE_ID}, Mic Loc:{config.MIC_LOCATION[channel]}\nfile:{filename}, Ch:{channel+1}')
-        plt.colorbar(format='%+2.0f dB')
-        plt.tight_layout()
-        print("\nSaving spectrogram to:", plotname)
-        
-        # Make sure the directory exists
-        os.makedirs(os.path.dirname(plotname), exist_ok=True)
-        
-        # Display the expanded path
-        expanded_path = os.path.abspath(os.path.expanduser(plotname))
-        print(f"Absolute path: {expanded_path}")
-        
-        print("Attempting to save plot...")
+        fig = None
         try:
-            # For large spectrograms, use rasterization to speed up saving
-            if D_db.shape[1] > 10000:  # If more than 10k time frames
-                print("Using rasterized format for large spectrogram...")
-                plt.gca().set_rasterized(True)
-                
-            plt.savefig(expanded_path, dpi=72, format='png', bbox_inches='tight')  # Lower DPI for very large plots
-            print("Plot saved successfully")
-        except Exception as e:
-            print(f"Error saving plot: {e}")
-            return
-            
-        plt.close('all')  # Close all figures
+            fig = plt.figure(figsize=(12, 6))
 
-        # Open the saved image based on OS
-        try:
-            if platform_manager.is_wsl():
-                print("Opening image in WSL...")
-                try:
-                    subprocess.Popen(['xdg-open', expanded_path])
-                except FileNotFoundError:
-                    subprocess.Popen(['wslview', expanded_path])
-            elif platform_manager.is_macos():
-                print("Opening image in macOS...")
-                subprocess.Popen(['open', expanded_path])
-            elif sys.platform == 'win32':
-                print("Opening image in Windows...")
-                os.startfile(expanded_path)
+            if y_axis_type == 'log':
+                librosa.display.specshow(D_db, sr=sr, x_axis='time', y_axis='log', hop_length=hop_length)
+                y_decimal_places = 3
+            elif y_axis_type == 'lin':
+                librosa.display.specshow(D_db, sr=sr, x_axis='time', y_axis='linear', hop_length=hop_length)
+                y_decimal_places = 0
             else:
-                print("Opening image in Linux...")
-                subprocess.Popen(['xdg-open', expanded_path])
-            print("Image viewer command executed")
+                raise ValueError("y_axis_type must be 'log' or 'linear'")
+            
+            # Adjust y-ticks to be in kilohertz and have the specified number of decimal places
+            y_ticks = plt.gca().get_yticks()
+            plt.gca().set_yticklabels(['{:.{}f} kHz'.format(tick/1000, y_decimal_places) for tick in y_ticks])
+            
+            # Extract filename from the audio path
+            filename = os.path.basename(full_audio_path)
+            root, _ = os.path.splitext(filename)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_{root}_spectrogram.png")
+
+            # Set title to include filename and channel
+            plt.title(f'Spectrogram from {config.LOCATION_ID}, hive:{config.HIVE_ID}, Mic Loc:{config.MIC_LOCATION[channel]}\nfile:{filename}, Ch:{channel+1}')
+            plt.colorbar(format='%+2.0f dB')
+            plt.tight_layout()
+            print("\nSaving spectrogram to:", plotname)
+            
+            # Make sure the directory exists
+            os.makedirs(os.path.dirname(plotname), exist_ok=True)
+            
+            # Display the expanded path
+            expanded_path = os.path.abspath(os.path.expanduser(plotname))
+            print(f"Absolute path: {expanded_path}")
+            
+            print("Attempting to save plot...")
+            try:
+                # For large spectrograms, use rasterization to speed up saving
+                if D_db.shape[1] > 10000:  # If more than 10k time frames
+                    print("Using rasterized format for large spectrogram...")
+                    plt.gca().set_rasterized(True)
+                    
+                plt.savefig(expanded_path, dpi=72, format='png', bbox_inches='tight')  # Lower DPI for very large plots
+                print("Plot saved successfully")
+            except Exception as e:
+                print(f"Error saving plot: {e}")
+                return
+            finally:
+                # Always close the figure, even if save failed
+                if fig is not None:
+                    plt.close(fig)
+                    
+            # Open the saved image based on OS
+            try:
+                if platform_manager.is_wsl():
+                    print("Opening image in WSL...")
+                    try:
+                        subprocess.Popen(['xdg-open', expanded_path])
+                    except FileNotFoundError:
+                        subprocess.Popen(['wslview', expanded_path])
+                elif platform_manager.is_macos():
+                    print("Opening image in macOS...")
+                    subprocess.Popen(['open', expanded_path])
+                elif sys.platform == 'win32':
+                    print("Opening image in Windows...")
+                    os.startfile(expanded_path)
+                else:
+                    print("Opening image in Linux...")
+                    subprocess.Popen(['xdg-open', expanded_path])
+                print("Image viewer command executed")
+            except Exception as e:
+                print(f"Could not open image viewer: {e}")
+                print(f"Image saved at: {expanded_path}")
+                if not os.path.exists(expanded_path):
+                    print("Warning: The saved image file does not exist!")
         except Exception as e:
-            print(f"Could not open image viewer: {e}")
-            print(f"Image saved at: {expanded_path}")
-            if not os.path.exists(expanded_path):
-                print("Warning: The saved image file does not exist!")
+            print(f"Error in plotting: {e}")
+            if fig is not None:
+                plt.close(fig)
+            raise
+        
     except Exception as e:
         print(f"Error in plot_spectrogram: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
-        # Force cleanup of any remaining resources
+        # Force cleanup of all matplotlib and librosa resources
         try:
-            plt.close('all')
-            gc.collect()  # Force garbage collection
-        except:
+            if plt_imported:
+                plt.close('all')
+                # Clear matplotlib's internal state
+                plt.clf()
+                plt.cla()
+            
+            # Restore original matplotlib backend if it was changed
+            if original_backend is not None and plt_imported:
+                try:
+                    import matplotlib
+                    matplotlib.use(original_backend)
+                    print(f"Restored matplotlib backend to: {original_backend}")
+                except Exception as e:
+                    print(f"Warning: Could not restore matplotlib backend: {e}")
+            
+            # Force garbage collection to free memory
+            gc.collect()
+            
+            # Clear any remaining variables
+            try:
+                if 'y' in locals():
+                    del y
+                if 'sr' in locals():
+                    del sr
+                if 'D_db' in locals():
+                    del D_db
+            except:
+                pass
+            
+            # Final garbage collection
+            gc.collect()
+        except Exception as e:
+            print(f"Warning during cleanup: {e}")
             pass
 
 def check_wsl_audio():
