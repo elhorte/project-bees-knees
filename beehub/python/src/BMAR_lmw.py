@@ -2053,20 +2053,6 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
         except Exception as e:
             print(f"Error loading audio file: {e}")
             return
-        finally:
-            # Ensure librosa releases file handles
-            if 'librosa' in sys.modules:
-                try:
-                    # Force garbage collection after librosa operations
-                    if 'y' in locals():
-                        del y
-                    gc.collect()
-                except:
-                    pass
-        
-        # Re-load y if it was deleted in cleanup
-        if y is None:
-            y, sr = librosa.load(full_audio_path, sr=None, duration=max_duration, mono=False)
         
         # If multi-channel audio, select the specified channel
         if len(y.shape) > 1:
@@ -2218,14 +2204,12 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
             # Force garbage collection to free memory
             gc.collect()
             
-            # Clear any remaining variables
+            # Clear any remaining variables to free memory
             try:
-                if 'y' in locals():
-                    del y
-                if 'sr' in locals():
-                    del sr
-                if 'D_db' in locals():
-                    del D_db
+                # Set large variables to None to help garbage collection
+                y = None
+                sr = None
+                D_db = None
             except:
                 pass
             
