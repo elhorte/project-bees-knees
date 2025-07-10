@@ -377,6 +377,8 @@ detected_level = None
 # threads
 recording_worker_thread = None
 intercom_thread = None
+keyboard_listener_thread = None
+continuous_perf_proc = None
 
 # procs
 vu_proc = None
