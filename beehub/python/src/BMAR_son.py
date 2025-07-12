@@ -70,7 +70,6 @@ import logging
 import BMAR_config as config
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 
-# Near the top of the file, after the imports
 class PlatformManager:
     _instance = None
     _initialized = False
@@ -616,7 +615,6 @@ def get_api_name_for_device(device_id):
 def get_windows_sample_rate(device_name):
     """Get the actual sample rate from Windows using PyAudio."""
     try:
-        import pyaudio
         p = pyaudio.PyAudio()
         
         # Find the device index that matches our device name
@@ -693,9 +691,6 @@ def timed_input(prompt, timeout=3, default='n'):
     Returns:
         User input string or default value
     """
-    import sys
-    import select
-    import time
     
     # Print the prompt
     print(prompt, end='', flush=True)
@@ -787,7 +782,6 @@ def set_input_device(model_name_arg, api_name_preference):
                             # Try to set the sample rate using PyAudio first
                             if not platform_manager.is_wsl():
                                 try:
-                                    import pyaudio
                                     p = pyaudio.PyAudio()
                                     device_info = p.get_device_info_by_index(device_id)
                                     print(f"\nCurrent Windows sample rate: {device_info['defaultSampleRate']} Hz")
@@ -1477,7 +1471,6 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
         plt.close('all')  # Close any existing figures
         
         # Brief delay to ensure clean audio device state
-        import time
         time.sleep(0.1)
             
         recording, actual_channels = _record_audio_pyaudio(
@@ -1686,7 +1679,6 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
         plt.close('all')  # Close any existing figures
         
         # Brief delay to ensure clean audio device state
-        import time
         time.sleep(0.1)
         
         recording, actual_channels = _record_audio_pyaudio(
@@ -1912,7 +1904,6 @@ def trigger_spectrogram():
         
         # Brief delay to allow the spectrogram process to initialize properly
         # and prevent interference with subsequent audio operations
-        import time
         time.sleep(0.2)
         
         print("Plotting spectrogram...")
@@ -2168,10 +2159,7 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
 
 def check_wsl_audio():
     """Check WSL audio configuration and provide setup instructions."""
-    try:
-        import subprocess
-        import os
-        
+    try:       
         # Set PulseAudio server to use TCP
         os.environ['PULSE_SERVER'] = 'tcp:localhost'
         
@@ -3279,7 +3267,6 @@ def check_dependencies():
     
     # Check for ffmpeg
     try:
-        import subprocess
         if sys.platform == 'win32':
             # Try multiple possible ffmpeg locations in Windows
             ffmpeg_paths = [
