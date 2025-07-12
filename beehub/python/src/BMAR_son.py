@@ -843,14 +843,14 @@ def set_input_device(model_name_arg, api_name_preference):
                         except Exception as e:
                             print(f"\nERROR: Could not use specified device ID {device_id}")
                             print(f"Reason: {str(e)}")
-                            response = timed_input("\nThe specified device could not be used. Would you like to proceed with an alternative device? (y/n): ", timeout=3, default='n')
+                            response = timed_input("\nThe specified device could not be used. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
                             if response.lower() != 'y':
                                 print("Exiting as requested.")
                                 sys.exit(1)
                             print("Falling back to device search...")
                 else:
                     print(f"\nERROR: Specified device ID {device_id} is not an input device")
-                    response = timed_input("\nThe specified device is not an input device. Would you like to proceed with an alternative device? (y/n): ", timeout=3, default='n')
+                    response = timed_input("\nThe specified device is not an input device. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
                     if response.lower() != 'y':
                         print("Exiting as requested.")
                         sys.exit(1)
@@ -858,7 +858,7 @@ def set_input_device(model_name_arg, api_name_preference):
             except Exception as e:
                 print(f"\nERROR: Could not access specified device ID {device_id}")
                 print(f"Reason: {str(e)}")
-                response = timed_input("\nThe specified device could not be accessed. Would you like to proceed with an alternative device? (y/n): ", timeout=3, default='n')
+                response = timed_input("\nThe specified device could not be accessed. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
                 if response.lower() != 'y':
                     print("Exiting as requested.")
                     sys.exit(1)
@@ -3429,7 +3429,7 @@ def main():
     if not check_dependencies():
         logging.warning("Some required packages are missing or outdated.")
         logging.warning("The script may not function correctly.")
-        response = timed_input("Do you want to continue anyway? (y/n): ", timeout=3, default='n')
+        response = timed_input("Do you want to continue anyway? (y/N): ", timeout=3, default='n')
         if response.lower() != 'y':
             sys.exit(1)
     
