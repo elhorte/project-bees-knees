@@ -681,6 +681,67 @@ def print_all_input_devices():
     sys.stdout.flush()
 
 
+def timed_input(prompt, timeout=3, default='n'):
+    """
+    Get user input with a timeout and default value for headless operation.
+    
+    Args:
+        prompt: The prompt to display to the user
+        timeout: Timeout in seconds (default: 3)
+        default: Default response if timeout or Enter is pressed (default: 'n')
+        
+    Returns:
+        User input string or default value
+    """
+    import sys
+    import select
+    import time
+    
+    # Print the prompt
+    print(prompt, end='', flush=True)
+    
+    # Check if stdin is available (not redirected/piped)
+    if not sys.stdin.isatty():
+        print(f"[Headless mode] Using default: '{default}'")
+        return default
+    
+    start_time = time.time()
+    
+    # Platform-specific input handling
+    if sys.platform == 'win32' and not platform_manager.is_wsl():
+        # Windows implementation using msvcrt
+        user_input = ""
+        while (time.time() - start_time) < timeout:
+            if platform_manager.msvcrt and platform_manager.msvcrt.kbhit():
+                char = platform_manager.msvcrt.getch().decode('utf-8', errors='ignore')
+                if char == '\r':  # Enter key
+                    print()  # New line
+                    return user_input.strip().lower() if user_input.strip() else default
+                elif char == '\b':  # Backspace
+                    if user_input:
+                        user_input = user_input[:-1]
+                        print('\b \b', end='', flush=True)
+                elif char.isprintable():
+                    user_input += char
+                    print(char, end='', flush=True)
+            time.sleep(0.01)  # Small delay to prevent high CPU usage
+    else:
+        # Unix/Linux/macOS implementation using select
+        while (time.time() - start_time) < timeout:
+            ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+            if ready:
+                try:
+                    user_input = sys.stdin.readline().strip()
+                    return user_input.lower() if user_input else default
+                except:
+                    break
+    
+    # Timeout occurred
+    print(f"\n[Timeout after {timeout}s] Using default: '{default}'")
+    return default
+
+
+
 def set_input_device(model_name_arg, api_name_preference):
     global sound_in_id, sound_in_chs, testmode, device_id, make_name, model_name, device_name, api_name, hostapi_name, hostapi_index
 
@@ -711,7 +772,8 @@ def set_input_device(model_name_arg, api_name_preference):
                         print(f"\nChannel mismatch detected:")
                         print(f"  Configuration requires: {original_channels} channels")
                         print(f"  Device supports: {device['max_input_channels']} channels")
-                        response = input(f"\nWould you like to proceed with {device['max_input_channels']} channel(s) instead? (y/N): ")
+                        response = timed_input(f"\nWould you like to proceed with {device['max_input_channels']} channel(s) instead? (y/N): ", timeout=3, default='n')
+
                         if response.lower() != 'y':
                             print("User declined to use fewer channels.")
                             print("Falling back to device search...")
@@ -781,14 +843,14 @@ def set_input_device(model_name_arg, api_name_preference):
                         except Exception as e:
                             print(f"\nERROR: Could not use specified device ID {device_id}")
                             print(f"Reason: {str(e)}")
-                            response = input("\nThe specified device could not be used. Would you like to proceed with an alternative device? (y/n): ")
+                            response = timed_input("\nThe specified device could not be used. Would you like to proceed with an alternative device? (y/n): ", timeout=3, default='n')
                             if response.lower() != 'y':
                                 print("Exiting as requested.")
                                 sys.exit(1)
                             print("Falling back to device search...")
                 else:
                     print(f"\nERROR: Specified device ID {device_id} is not an input device")
-                    response = input("\nThe specified device is not an input device. Would you like to proceed with an alternative device? (y/n): ")
+                    response = timed_input("\nThe specified device is not an input device. Would you like to proceed with an alternative device? (y/n): ", timeout=3, default='n')
                     if response.lower() != 'y':
                         print("Exiting as requested.")
                         sys.exit(1)
@@ -796,7 +858,7 @@ def set_input_device(model_name_arg, api_name_preference):
             except Exception as e:
                 print(f"\nERROR: Could not access specified device ID {device_id}")
                 print(f"Reason: {str(e)}")
-                response = input("\nThe specified device could not be accessed. Would you like to proceed with an alternative device? (y/n): ")
+                response = timed_input("\nThe specified device could not be accessed. Would you like to proceed with an alternative device? (y/n): ", timeout=3, default='n')
                 if response.lower() != 'y':
                     print("Exiting as requested.")
                     sys.exit(1)
@@ -833,7 +895,7 @@ def set_input_device(model_name_arg, api_name_preference):
                         print(f"\nChannel mismatch detected:")
                         print(f"  Configuration requires: {sound_in_chs} channels")
                         print(f"  Device supports: {actual_channels} channels")
-                        response = input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ")
+                        response = timed_input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ", timeout=3, default='n')
                         if response.lower() != 'y':
                             print("Skipping this device...")
                             continue
@@ -881,7 +943,7 @@ def set_input_device(model_name_arg, api_name_preference):
                 print(f"\nChannel mismatch detected:")
                 print(f"  Configuration requires: {sound_in_chs} channels")
                 print(f"  Device supports: {actual_channels} channels")
-                response = input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ")
+                response = timed_input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ", timeout=3, default='n')
                 if response.lower() != 'y':
                     print("Skipping this device...")
                     continue
@@ -3367,7 +3429,7 @@ def main():
     if not check_dependencies():
         logging.warning("Some required packages are missing or outdated.")
         logging.warning("The script may not function correctly.")
-        response = input("Do you want to continue anyway? (y/n): ")
+        response = timed_input("Do you want to continue anyway? (y/n): ", timeout=3, default='n')
         if response.lower() != 'y':
             sys.exit(1)
     
