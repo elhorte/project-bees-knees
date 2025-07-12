@@ -67,7 +67,7 @@ import logging
 
 # Platform-specific modules will be imported after platform detection
 
-import BMAR_config_lmw as config
+import BMAR_config as config
 ##os.environ['NUMBA_NUM_THREADS'] = '1'
 
 # Near the top of the file, after the imports
@@ -711,7 +711,7 @@ def set_input_device(model_name_arg, api_name_preference):
                         print(f"\nChannel mismatch detected:")
                         print(f"  Configuration requires: {original_channels} channels")
                         print(f"  Device supports: {device['max_input_channels']} channels")
-                        response = input(f"\nWould you like to proceed with {device['max_input_channels']} channel(s) instead? (y/n): ")
+                        response = input(f"\nWould you like to proceed with {device['max_input_channels']} channel(s) instead? (y/N): ")
                         if response.lower() != 'y':
                             print("User declined to use fewer channels.")
                             print("Falling back to device search...")
@@ -833,7 +833,7 @@ def set_input_device(model_name_arg, api_name_preference):
                         print(f"\nChannel mismatch detected:")
                         print(f"  Configuration requires: {sound_in_chs} channels")
                         print(f"  Device supports: {actual_channels} channels")
-                        response = input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/n): ")
+                        response = input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ")
                         if response.lower() != 'y':
                             print("Skipping this device...")
                             continue
@@ -881,7 +881,7 @@ def set_input_device(model_name_arg, api_name_preference):
                 print(f"\nChannel mismatch detected:")
                 print(f"  Configuration requires: {sound_in_chs} channels")
                 print(f"  Device supports: {actual_channels} channels")
-                response = input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/n): ")
+                response = input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ")
                 if response.lower() != 'y':
                     print("Skipping this device...")
                     continue
