@@ -47,6 +47,7 @@ import os
 import atexit
 import signal
 import warnings
+import traceback
 import librosa
 import logging
 import pyaudio
@@ -278,7 +279,7 @@ class BmarApp:
         self.blocksize = 8196
         self.monitor_channel = 0
         self.file_offset = 0
-        self.stop_program = False
+        self.stop_program = [False]  # Use list to allow modification by reference
         self.testmode = True
 
         # Date and time stuff for file naming
@@ -716,37 +717,69 @@ def stop_all():
     # This is a placeholder function that should be implemented based on your application's needs
     pass
 
-def check_and_create_date_folders():
+def check_and_create_date_folders(app=None):
     """
     Check if today's date folders exist and create them if necessary.
     This function should be called at startup and periodically during operation.
+    
+    Args:
+        app: BmarApp instance containing configuration and directory paths.
+             If None, uses global variables for backward compatibility.
     """
-    global PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOT_DIRECTORY
-    
-    # Get current date components
-    current_date = datetime.datetime.now()
-    yy = current_date.strftime('%y')
-    mm = current_date.strftime('%m')
-    dd = current_date.strftime('%d')
-    date_folder = f"{yy}{mm}{dd}"
-    
-    print(f"\nChecking/creating date folders for {date_folder}...")
-    
-    # Update directory paths with current date
-    PRIMARY_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
-                                    folders[0], "raw", date_folder, "")
-    MONITOR_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
-                                    folders[0], "mp3", date_folder, "")
-    PLOT_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
-                                 folders[1], date_folder, "")
-    
-    print(f"Primary directory: {PRIMARY_DIRECTORY}")
-    print(f"Monitor directory: {MONITOR_DIRECTORY}")
-    print(f"Plot directory: {PLOT_DIRECTORY}")
-    
-    # Create directories if they don't exist
-    required_directories = [PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOT_DIRECTORY]
-    return ensure_directories_exist(required_directories)
+    if app is not None:
+        # Use BmarApp instance
+        # Get current date components
+        current_date = datetime.datetime.now()
+        yy = current_date.strftime('%y')
+        mm = current_date.strftime('%m')
+        dd = current_date.strftime('%d')
+        date_folder = f"{yy}{mm}{dd}"
+        
+        print(f"\nChecking/creating date folders for {date_folder}...")
+        
+        # Update directory paths with current date using app properties
+        app.PRIMARY_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID, 
+                                        app.folders[0], "raw", date_folder, "")
+        app.MONITOR_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID, 
+                                        app.folders[0], "mp3", date_folder, "")
+        app.PLOT_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID, 
+                                     app.folders[1], date_folder, "")
+        
+        print(f"Primary directory: {app.PRIMARY_DIRECTORY}")
+        print(f"Monitor directory: {app.MONITOR_DIRECTORY}")
+        print(f"Plot directory: {app.PLOT_DIRECTORY}")
+        
+        # Create directories if they don't exist
+        required_directories = [app.PRIMARY_DIRECTORY, app.MONITOR_DIRECTORY, app.PLOT_DIRECTORY]
+        return ensure_directories_exist(required_directories)
+    else:
+        # Backward compatibility: use global variables
+        global PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOT_DIRECTORY
+        
+        # Get current date components
+        current_date = datetime.datetime.now()
+        yy = current_date.strftime('%y')
+        mm = current_date.strftime('%m')
+        dd = current_date.strftime('%d')
+        date_folder = f"{yy}{mm}{dd}"
+        
+        print(f"\nChecking/creating date folders for {date_folder}...")
+        
+        # Update directory paths with current date
+        PRIMARY_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
+                                        folders[0], "raw", date_folder, "")
+        MONITOR_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
+                                        folders[0], "mp3", date_folder, "")
+        PLOT_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
+                                     folders[1], date_folder, "")
+        
+        print(f"Primary directory: {PRIMARY_DIRECTORY}")
+        print(f"Monitor directory: {MONITOR_DIRECTORY}")
+        print(f"Plot directory: {PLOT_DIRECTORY}")
+        
+        # Create directories if they don't exist
+        required_directories = [PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOT_DIRECTORY]
+        return ensure_directories_exist(required_directories)
 
 def signal_handler(sig, frame):
     print('\nStopping all threads...\r')
@@ -1467,13 +1500,13 @@ def is_mic_position_in_bounds(mic_list, position):
     return False  
 
 
-def check_stream_status(stream_duration):
+def check_stream_status(app, stream_duration):
     """
     Check the status of a sounddevice input stream for overflows and underflows.
     Parameters:
+    - app: BmarApp instance containing audio device configuration
     - stream_duration: Duration for which the stream should be open and checked (in seconds).
     """
-    global sound_in_id
     print(f"Checking input stream for overflow. Watching for {stream_duration} seconds")
 
     # Define a callback function to process the audio stream
@@ -1482,7 +1515,7 @@ def check_stream_status(stream_duration):
                 print("Input overflow detected at:", datetime.datetime.now())
 
     # Open an input stream
-    with sd.InputStream(callback=callback, device=sound_in_id) as stream:
+    with sd.InputStream(callback=callback, device=app.sound_in_id) as stream:
         # Run the stream for the specified duration
         timeout = time.time() + stream_duration
         while time.time() < timeout:
@@ -1979,9 +2012,8 @@ def cleanup_process(command):
 # Global variables for buffer management
 buffer_wrap_event = threading.Event()
 
-def callback(indata, frames, time, status):
+def callback(app, indata, frames, time, status):
     """Callback function for audio input stream."""
-    global buffer, buffer_index, buffer_size
     if status:
         print("Callback status:", status)
         if status.input_overflow:
@@ -1990,71 +2022,63 @@ def callback(indata, frames, time, status):
     data_len = len(indata)
 
     # managing the circular buffer
-    if buffer_index + data_len <= buffer_size:
-        buffer[buffer_index:buffer_index + data_len] = indata
+    if app.buffer_index + data_len <= app.buffer_size:
+        app.buffer[app.buffer_index:app.buffer_index + data_len] = indata
         buffer_wrap_event.clear()
     else:
-        overflow = (buffer_index + data_len) - buffer_size
-        buffer[buffer_index:] = indata[:-overflow]
-        buffer[:overflow] = indata[-overflow:]
+        overflow = (app.buffer_index + data_len) - app.buffer_size
+        app.buffer[app.buffer_index:] = indata[:-overflow]
+        app.buffer[:overflow] = indata[-overflow:]
         buffer_wrap_event.set()
 
-    buffer_index = (buffer_index + data_len) % buffer_size
+    app.buffer_index = (app.buffer_index + data_len) % app.buffer_size
 
-def setup_audio_circular_buffer():
+def setup_audio_circular_buffer(app):
     """Set up the circular buffer for audio recording."""
-    global buffer_size, buffer, buffer_index, buffer_wrap, blocksize
     
-    # Get values from app instance
-    buffer_size = int(app.BUFFER_SECONDS * app.PRIMARY_IN_SAMPLERATE)
-    buffer = np.zeros((buffer_size, app.sound_in_chs), dtype=app._dtype)
-    buffer_index = 0
-    buffer_wrap = False
-    blocksize = 8196
+    # Calculate buffer size and initialize buffer
+    app.buffer_size = int(app.BUFFER_SECONDS * app.PRIMARY_IN_SAMPLERATE)
+    app.buffer = np.zeros((app.buffer_size, app.sound_in_chs), dtype=app._dtype)
+    app.buffer_index = 0
+    app.buffer_wrap = False
+    app.blocksize = 8196
     buffer_wrap_event.clear()
     
-    # Update app instance with buffer info
-    app.buffer_size = buffer_size
-    app.buffer = buffer
-    app.buffer_index = buffer_index
-    app.blocksize = blocksize
-    
-    print(f"\naudio buffer size: {sys.getsizeof(buffer)}\n")
+    print(f"\naudio buffer size: {sys.getsizeof(app.buffer)}\n")
     sys.stdout.flush()
 
-def recording_worker_thread(record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
+def recording_worker_thread(app, record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
     """Worker thread for recording audio to files."""
-    global buffer, buffer_size, buffer_index, stop_recording_event
     
     if start_tod is None:
         print(f"{thread_id} is recording continuously\r")
 
     samplerate = app.PRIMARY_IN_SAMPLERATE
 
-    while not stop_recording_event.is_set():
+    while not app.stop_recording_event.is_set():
         try:
             current_time = datetime.datetime.now().time()
             
             if start_tod is None or (start_tod <= current_time <= end_tod):        
                 print(f"{thread_id} started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec\r")
 
-                period_start_index = buffer_index 
+                period_start_index = app.buffer_index 
                 # wait PERIOD seconds to accumulate audio
-                interruptable_sleep(record_period, stop_recording_event)
+                interruptable_sleep(record_period, app.stop_recording_event)
 
                 # Check if we're shutting down before saving
-                if stop_recording_event.is_set():
+                if app.stop_recording_event.is_set():
                     break
 
-                period_end_index = buffer_index 
-                save_start_index = period_start_index % buffer_size
-                save_end_index = period_end_index % buffer_size
+                period_end_index = app.buffer_index 
+                save_start_index = period_start_index % app.buffer_size
+                save_end_index = period_end_index % app.buffer_size
 
                 # saving from a circular buffer so segments aren't necessarily contiguous
                 if save_end_index > save_start_index:   # indexing is contiguous
-                    audio_data = buffer[save_start_index:save_end_index]
+                    audio_data = app.buffer[save_start_index:save_end_index]
                 else:                                   # ain't contiguous so concatenate to make it contiguous
-                    audio_data = np.concatenate((buffer[save_start_index:], buffer[:save_end_index]))
+                    audio_data = np.concatenate((app.buffer[save_start_index:], app.buffer[:save_end_index]))
 
                 # Determine the sample rate to use for saving
                 save_sample_rate = app.PRIMARY_SAVE_SAMPLERATE if app.PRIMARY_SAVE_SAMPLERATE is not None else app.PRIMARY_IN_SAMPLERATE
@@ -2066,11 +2090,11 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
                     print(f"Resampling from {app.PRIMARY_IN_SAMPLERATE}Hz to {save_sample_rate}Hz for saving")
 
                 # Check if we're shutting down before saving
-                if stop_recording_event.is_set():
+                if app.stop_recording_event.is_set():
                     break
 
                 # Check and create new date folders if needed
-                if not check_and_create_date_folders():
+                if not check_and_create_date_folders(app):
                     print(f"Warning: Could not create/verify date folders for {thread_id}")
                     continue
 
@@ -2107,51 +2131,16 @@ def recording_worker_thread(record_period, interval, thread_id, file_format, tar
                     continue
 
                 # Wait for the next recording interval
-                if not stop_recording_event.is_set():
-                    interruptable_sleep(interval, stop_recording_event)
+                if not app.stop_recording_event.is_set():
+                    interruptable_sleep(interval, app.stop_recording_event)
             else:
                 # Not in recording time window, wait briefly and check again
-                interruptable_sleep(10, stop_recording_event)
+                interruptable_sleep(10, app.stop_recording_event)
                 
         except Exception as e:
             print(f"Error in {thread_id}: {e}")
-            if not stop_recording_event.is_set():
-                interruptable_sleep(30, stop_recording_event)  # Wait before retrying
-
-def check_and_create_date_folders():
-    """Check and create date-based folders if needed."""
-    global app
-    
-    try:
-        current_date = datetime.datetime.now().strftime("%y%m%d")
-        
-        # Check if date has changed and update folder paths if needed
-        if current_date != app.date_folder:
-            print(f"Date changed from {app.date_folder} to {current_date}, updating directory paths...")
-            app.date_folder = current_date
-            
-            # Update directory paths
-            app.PRIMARY_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID,
-                                                app.folders[0], "raw", app.date_folder)
-            app.MONITOR_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID,
-                                                app.folders[0], "mp3", app.date_folder)
-            app.PLOT_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID,
-                                             app.folders[1], app.date_folder)
-            
-            # Ensure paths end with separator
-            app.PRIMARY_DIRECTORY = os.path.join(app.PRIMARY_DIRECTORY, "")
-            app.MONITOR_DIRECTORY = os.path.join(app.MONITOR_DIRECTORY, "")
-            app.PLOT_DIRECTORY = os.path.join(app.PLOT_DIRECTORY, "")
-            
-            # Update global variables for backward compatibility
-            # update_globals_from_app()  # TODO: Implement this function
-        
-        # Ensure directories exist
-        return ensure_directories_exist([app.PRIMARY_DIRECTORY, app.MONITOR_DIRECTORY, app.PLOT_DIRECTORY])
-        
-    except Exception as e:
-        print(f"Error in check_and_create_date_folders: {e}")
-        return False
+            if not app.stop_recording_event.is_set():
+                interruptable_sleep(30, app.stop_recording_event)  # Wait before retrying
 
 def ensure_directories_exist(directories):
     """
@@ -2214,9 +2203,8 @@ def reset_terminal_settings():
     except Exception as e:
         print(f"Warning: Could not reset terminal settings: {e}")
 
-def audio_stream():
+def audio_stream(app):
     """Main audio streaming function."""
-    global app, stop_program, buffer, buffer_size, buffer_index
     
     # Reset terminal settings before printing
     reset_terminal_settings()
@@ -2243,6 +2231,9 @@ def audio_stream():
         # Set the device's sample rate to match our configuration
         sd.default.samplerate = app.PRIMARY_IN_SAMPLERATE
         
+        # Create a partial function to pass app to the callback
+        app_callback = lambda indata, frames, time, status: callback(app, indata, frames, time, status)
+        
         # Initialize the stream with the configured sample rate and bit depth
         stream = sd.InputStream(
             device=app.sound_in_id,
@@ -2250,7 +2241,7 @@ def audio_stream():
             samplerate=app.PRIMARY_IN_SAMPLERATE,
             dtype=app._dtype,
             blocksize=app.blocksize,
-            callback=callback
+            callback=app_callback
         )
 
         print("\nAudio stream initialized successfully\r", flush=True)
@@ -2262,6 +2253,7 @@ def audio_stream():
             if hasattr(app.config, 'MODE_AUDIO_MONITOR') and app.config.MODE_AUDIO_MONITOR:
                 print("Starting recording_worker_thread for down sampling audio to 48k and saving mp3...\r")
                 threading.Thread(target=recording_worker_thread, args=(
+                    app,  # Pass app as first parameter
                     app.config.AUDIO_MONITOR_RECORD,
                     app.config.AUDIO_MONITOR_INTERVAL,
                     "Audio_monitor",
@@ -2274,6 +2266,7 @@ def audio_stream():
             if hasattr(app.config, 'MODE_PERIOD') and app.config.MODE_PERIOD and not app.testmode:
                 print("Starting recording_worker_thread for caching period audio at primary sample rate and all channels...\r")
                 threading.Thread(target=recording_worker_thread, args=(
+                    app,  # Pass app as first parameter
                     app.config.PERIOD_RECORD,
                     app.config.PERIOD_INTERVAL,
                     "Period_recording",
@@ -2286,6 +2279,7 @@ def audio_stream():
             if hasattr(app.config, 'MODE_EVENT') and app.config.MODE_EVENT and not app.testmode:
                 print("Starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...\r")
                 threading.Thread(target=recording_worker_thread, args=(
+                    app,  # Pass app as first parameter
                     app.config.SAVE_BEFORE_EVENT,
                     app.config.SAVE_AFTER_EVENT,
                     "Event_recording",
@@ -2296,7 +2290,7 @@ def audio_stream():
                 )).start()
 
             # Wait for keyboard input to stop
-            while not stop_program[0]:
+            while not app.stop_program[0]:
                 time.sleep(0.1)
 
     except Exception as e:
@@ -2307,15 +2301,14 @@ def audio_stream():
 
     return True
 
-def stop_all():
+def stop_all(app):
     """Stop all processes and threads."""
-    global stop_program, keyboard_listener_running, app, buffer_wrap_event
     
     print("\nStopping all processes and threads...")
     
     # Set stop flags
-    stop_program[0] = True
-    keyboard_listener_running = False
+    app.stop_program[0] = True
+    app.keyboard_listener_running = False
     
     # Stop recording events
     if hasattr(app, 'stop_recording_event'):
@@ -2344,18 +2337,18 @@ def stop_all():
     
     print("All processes stopped.")
 
-def cleanup():
+def cleanup(app):
     """Clean up and exit."""
     global original_terminal_settings
     
     print("\nPerforming cleanup...")
     
     # Stop all processes first (but don't print duplicate messages)
-    global stop_program, keyboard_listener_running, app, buffer_wrap_event
+    global buffer_wrap_event
     
     # Set stop flags
-    stop_program[0] = True
-    keyboard_listener_running = False
+    app.stop_program[0] = True
+    app.keyboard_listener_running = False
     
     # Stop recording events
     if hasattr(app, 'stop_recording_event'):
@@ -2398,9 +2391,8 @@ def cleanup():
     import os
     os._exit(0)
 
-def keyboard_listener():
+def keyboard_listener(app):
     """Main keyboard listener loop."""
-    global app, keyboard_listener_running, keyboard_listener_active, monitor_channel
     global change_ch_event, vu_proc, intercom_proc
     
     # Reset terminal settings before starting
@@ -2408,13 +2400,13 @@ def keyboard_listener():
     
     print("\nKeyboard listener started. Press 'h' for help.", end='\n', flush=True)
     
-    while keyboard_listener_running:
+    while app.keyboard_listener_running:
         try:
             key = get_key()
             if key is not None:
                 if key == "^":  # Toggle listening
-                    toggle_listening()
-                elif keyboard_listener_active:
+                    toggle_listening(app)
+                elif app.keyboard_listener_active:
                     if key.isdigit():
                         # Handle direct channel changes when in VU meter or Intercom mode
                         if vu_proc is not None or intercom_proc is not None:
@@ -2425,13 +2417,13 @@ def keyboard_listener():
                                 print(f"\nInvalid channel selection: Device has only {app.sound_in_chs} channel(s) (1-{app.sound_in_chs})", end='\n', flush=True)
                                 continue
                                 
-                            monitor_channel = key_int
+                            app.monitor_channel = key_int
                             if intercom_proc is not None:
                                 change_ch_event.set()
-                            print(f"\nNow monitoring channel: {monitor_channel+1} (of {app.sound_in_chs})", end='\n', flush=True)
+                            print(f"\nNow monitoring channel: {app.monitor_channel+1} (of {app.sound_in_chs})", end='\n', flush=True)
                             # Restart VU meter if running
                             if vu_proc is not None:
-                                print(f"Restarting VU meter on channel: {monitor_channel+1}", end='\n', flush=True)
+                                print(f"Restarting VU meter on channel: {app.monitor_channel+1}", end='\n', flush=True)
                                 toggle_vu_meter()
                                 time.sleep(0.1)
                                 toggle_vu_meter()
@@ -2441,9 +2433,9 @@ def keyboard_listener():
                             else:
                                 print(f"Unknown command: {key}", end='\n', flush=True)
                     elif key == "a": 
-                        check_stream_status(10)
+                        check_stream_status(app, 10)
                     elif key == "c":  
-                        change_monitor_channel()
+                        change_monitor_channel(app)
                     elif key == "d":  
                         show_audio_device_list()
                     elif key == "f":  
@@ -2460,8 +2452,8 @@ def keyboard_listener():
                         trigger_oscope()        
                     elif key == "q":  
                         print("\nQuitting...", end='\n', flush=True)
-                        keyboard_listener_running = False
-                        stop_all()
+                        app.keyboard_listener_running = False
+                        stop_all(app)
                     elif key == "s":  
                         trigger_spectrogram()
                     elif key == "t":  
@@ -2477,11 +2469,10 @@ def keyboard_listener():
             
         time.sleep(0.01)  # Small delay to prevent high CPU usage
 
-def toggle_listening():
+def toggle_listening(app):
     """Toggle keyboard listener active state."""
-    global keyboard_listener_active
-    keyboard_listener_active = not keyboard_listener_active
-    if keyboard_listener_active:
+    app.keyboard_listener_active = not app.keyboard_listener_active
+    if app.keyboard_listener_active:
         print("\nKeyboard listener activated. Listening for commands...")
         show_list_of_commands()
     else:
@@ -2507,10 +2498,9 @@ def show_list_of_commands():
     print("  ^ - Toggle keyboard listener")
     print("  1-4 - Direct channel selection")
 
-def change_monitor_channel():
+def change_monitor_channel(app):
     """Change the monitor channel."""
-    global monitor_channel
-    print(f"\nCurrent monitor channel: {monitor_channel + 1}")
+    print(f"\nCurrent monitor channel: {app.monitor_channel + 1}")
     print(f"Device has {app.sound_in_chs} channel(s) available")
     print("Enter new channel number (1-{}) or 0 to cancel: ".format(app.sound_in_chs), end='', flush=True)
     
@@ -2522,32 +2512,493 @@ def change_monitor_channel():
         
         new_channel = int(choice) - 1  # Convert to 0-based
         if 0 <= new_channel < app.sound_in_chs:
-            monitor_channel = new_channel
-            print(f"Monitor channel changed to: {monitor_channel + 1}")
+            app.monitor_channel = new_channel
+            print(f"Monitor channel changed to: {app.monitor_channel + 1}")
         else:
             print(f"Invalid channel. Must be 1-{app.sound_in_chs}")
     except ValueError:
         print("Invalid input. Please enter a number.")
 
+def check_wsl_audio():
+    """Check WSL audio configuration and provide setup instructions."""
+    try:       
+        # Set PulseAudio server to use TCP
+        os.environ['PULSE_SERVER'] = 'tcp:localhost'
+        
+        # Check if PulseAudio is running
+        result = subprocess.run(['pulseaudio', '--check'], capture_output=True, text=True)
+        if result.returncode != 0:
+            print("\nPulseAudio is not running. Starting it...")
+            subprocess.run(['pulseaudio', '--start'], capture_output=True)
+        
+        # Check if ALSA is configured
+        result = subprocess.run(['aplay', '-l'], capture_output=True, text=True)
+        print("\nALSA devices:")
+        print(result.stdout)
+        
+        # Check if PulseAudio is configured
+        result = subprocess.run(['pactl', 'info'], capture_output=True, text=True)
+        print("\nPulseAudio info:")
+        print(result.stdout)
+        
+        # Check if we can list audio devices through PulseAudio
+        result = subprocess.run(['pactl', 'list', 'sources'], capture_output=True, text=True)
+        print("\nPulseAudio sources:")
+        print(result.stdout)
+        
+        return True
+    except Exception as e:
+        print(f"\nError checking audio configuration: {e}")
+        print("\nPlease ensure your WSL audio is properly configured:")
+        print("1. Install required packages:")
+        print("   sudo apt-get update")
+        print("   sudo apt-get install -y pulseaudio libasound2-plugins")
+        print("\n2. Configure PulseAudio:")
+        print("   echo 'export PULSE_SERVER=tcp:localhost' >> ~/.bashrc")
+        print("   source ~/.bashrc")
+        print("\n3. Create PulseAudio configuration:")
+        print("   mkdir -p ~/.config/pulse")
+        print("   echo 'load-module module-native-protocol-tcp auth-ip-acl=127.0.0.1' > ~/.config/pulse/default.pa")
+        print("\n4. Start PulseAudio:")
+        print("   pulseaudio --start")
+        print("\n5. Test audio:")
+        print("   speaker-test -t sine -f 1000 -l 1")
+        return False
+
+def vu_meter(sound_in_id, sound_in_chs, channel, stop_vu_queue, asterisks):
+    """VU meter function for displaying audio levels."""
+    # Debug: Print incoming parameter types
+    if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE:
+        print(f"\n[VU Debug] Parameter types:")
+        print(f"  sound_in_id: {sound_in_id} (type: {type(sound_in_id)})")
+        print(f"  config.PRIMARY_IN_SAMPLERATE: {config.PRIMARY_IN_SAMPLERATE} (type: {type(config.PRIMARY_IN_SAMPLERATE)})")
+        print(f"  sound_in_chs: {sound_in_chs} (type: {type(sound_in_chs)})")
+        print(f"  channel: {channel} (type: {type(channel)})")
+    
+    # Ensure sample rate is an integer for buffer size calculation
+    buffer_size = int(config.PRIMARY_IN_SAMPLERATE)
+    buffer = np.zeros(buffer_size)
+    last_print = ""
+    
+    # Validate the channel is valid for the device
+    if channel >= sound_in_chs:
+        print(f"\nError: Selected channel {channel+1} exceeds available channels ({sound_in_chs})", end='\r\n')
+        print(f"Defaulting to channel 1", end='\r\n')
+        channel = 0  # Default to first channel
+
+    def callback_input(indata, frames, time, status):
+        nonlocal last_print
+        try:
+            # Debug first callback
+            if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE and last_print == "":
+                print(f"\n[VU Debug] First callback: frames={frames}, indata.shape={indata.shape}")
+            
+            # Always validate channel before accessing the data
+            selected_channel = int(min(channel, indata.shape[1] - 1))
+            
+            channel_data = indata[:, selected_channel]
+            # Ensure frames is an integer for array slicing
+            frames_int = int(frames)
+            buffer[:frames_int] = channel_data
+            audio_level = np.max(np.abs(channel_data))
+            normalized_value = int((audio_level / 1.0) * 50)
+            
+            asterisks.value = '*' * normalized_value
+            current_print = ' ' * 11 + asterisks.value.ljust(50, ' ')
+            
+            # Only print if the value has changed
+            if current_print != last_print:
+                print(current_print, end='\r')
+                last_print = current_print
+                sys.stdout.flush()  # Ensure output is displayed immediately
+        except Exception as e:
+            # Log the error but don't crash
+            print(f"\rVU meter callback error: {e}", end='\r\n')
+            if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE:
+                print(f"Error details: channel={channel}, frames={frames}, indata.shape={indata.shape}", end='\r\n')
+                import traceback
+                traceback.print_exc()
+            time.sleep(0.1)  # Prevent too many messages
+
+    try:
+        # Debug platform detection
+        if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE:
+            print(f"\n[VU Debug] Platform detection:")
+            print(f"  sys.platform: {sys.platform}")
+            print(f"  platform_manager.is_wsl(): {platform_manager.is_wsl()}")
+            print(f"  Platform OS info: {platform_manager.get_os_info()}")
+        
+        # In WSL, we need to use different stream parameters
+        if platform_manager.is_wsl():
+            if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE:
+                print("[VU Debug] Using WSL audio configuration")
+            # Check audio configuration first
+            if not check_wsl_audio():
+                raise Exception("Audio configuration check failed")
+            
+            # Try with minimal configuration
+            try:
+                with sd.InputStream(callback=callback_input,
+                                  device=None,  # Use system default
+                                  channels=1,   # Use mono
+                                  samplerate=48000,  # Use standard rate
+                                  blocksize=1024,    # Use smaller block size
+                                  latency='low'):
+                    while not stop_vu_queue.get():
+                        sd.sleep(100)  # Changed from 0.1 to 100 milliseconds
+            except Exception as e:
+                print(f"\nError with default configuration: {e}")
+                print("\nPlease ensure your WSL audio is properly configured.")
+                raise
+        else:
+            if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE:
+                print("[VU Debug] Using standard audio configuration (non-WSL)")
+            # Make sure we request at least as many channels as our selected channel
+            # Ensure all parameters are integers for compatibility
+            try:
+                # Simple approach - just ensure the critical parameters are integers
+                with sd.InputStream(callback=callback_input,
+                                  device=int(sound_in_id) if sound_in_id is not None else None,
+                                  channels=int(sound_in_chs),
+                                  samplerate=int(config.PRIMARY_IN_SAMPLERATE),
+                                  blocksize=1024,
+                                  latency='low'):
+                    while not stop_vu_queue.get():
+                        sd.sleep(100)  # Changed from 0.1 to 100 milliseconds
+            except Exception as e:
+                print(f"\nError in VU meter InputStream: {e}")
+                print(f"Debug info:")
+                print(f"  sound_in_id={sound_in_id} (type: {type(sound_in_id)})")
+                print(f"  sound_in_chs={sound_in_chs} (type: {type(sound_in_chs)})")
+                print(f"  config.PRIMARY_IN_SAMPLERATE={config.PRIMARY_IN_SAMPLERATE} (type: {type(config.PRIMARY_IN_SAMPLERATE)})")
+                import traceback
+                traceback.print_exc()
+                raise
+    except Exception as e:
+        print(f"\nError in VU meter: {e}")
+    finally:
+        print("\nStopping VU meter...")
+
 def toggle_vu_meter():
-    """Toggle VU meter display - PLACEHOLDER."""
-    print("VU meter toggle placeholder - full implementation pending")
+    """Toggle VU meter display."""
+    global vu_proc, asterisks, change_ch_event
+    
+    # Clear any buffered input before toggling
+    clear_input_buffer()
+
+    if vu_proc is None:
+        cleanup_process('v')  # Clean up any existing process
+        
+        # Get current app instance from main (we'll need to pass this as parameter)
+        # For now, use global variables for compatibility
+        monitor_channel = globals().get('monitor_channel', 0)
+        sound_in_chs = globals().get('sound_in_chs', 1)
+        sound_in_id = globals().get('sound_in_id', 1)
+        
+        # Validate channel before starting process
+        if monitor_channel >= sound_in_chs:
+            print(f"\nError: Selected channel {monitor_channel+1} exceeds available channels ({sound_in_chs})")
+            print(f"Defaulting to channel 1")
+            monitor_channel = 0  # Default to first channel
+            
+        print("\nVU meter monitoring channel:", monitor_channel+1)
+        vu_manager = multiprocessing.Manager()
+        stop_vu_queue = multiprocessing.Queue()
+        stop_vu_queue.put(False)  # Initialize with False to keep running
+        asterisks = vu_manager.Value(str, '*' * 50)
+
+        # Print initial state once
+        print("fullscale:", asterisks.value.ljust(50, ' '))
+
+        if hasattr(config, 'MODE_EVENT') and config.MODE_EVENT:
+            normalized_value = int(config.EVENT_THRESHOLD / 1000)
+            asterisks.value = '*' * normalized_value
+            print("threshold:", asterisks.value.ljust(50, ' '))
+            
+        # Debug and validate parameters before creating process
+        if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE:
+            print(f"\n[Toggle VU Debug] Parameter validation:")
+            print(f"  sound_in_id: {sound_in_id} (type: {type(sound_in_id)})")
+            print(f"  config.PRIMARY_IN_SAMPLERATE: {config.PRIMARY_IN_SAMPLERATE} (type: {type(config.PRIMARY_IN_SAMPLERATE)})")
+            print(f"  sound_in_chs: {sound_in_chs} (type: {type(sound_in_chs)})")
+            print(f"  monitor_channel: {monitor_channel} (type: {type(monitor_channel)})")
+        
+        # Ensure all parameters are the correct type
+        try:
+            proc_sound_in_id = int(sound_in_id) if sound_in_id is not None else None
+            proc_sound_in_chs = int(sound_in_chs)
+            proc_monitor_channel = int(monitor_channel)
+        except (ValueError, TypeError) as e:
+            print(f"Error converting parameters to integers: {e}")
+            return
+            
+        # Create the VU meter process
+        vu_proc = multiprocessing.Process(
+            target=vu_meter, 
+            args=(proc_sound_in_id, proc_sound_in_chs, proc_monitor_channel, stop_vu_queue, asterisks)
+        )
+        
+        # Set the process to start in a clean environment
+        vu_proc.daemon = True
+            
+        active_processes['v'] = vu_proc
+        vu_proc.start()
+    else:
+        stop_vu()
+    
+    # Clear input buffer after toggling
+    clear_input_buffer()
+
+def stop_vu():
+    """Stop VU meter."""
+    global vu_proc
+    
+    if vu_proc is not None:
+        try:
+            # Try to get the stop_vu_queue and stop_vu_event that were created in toggle_vu_meter
+            # For now, we'll terminate the process directly since we need better process management
+            
+            # Give the process a short time to stop gracefully
+            vu_proc.join(timeout=1)
+            
+            if vu_proc.is_alive():
+                # If still running after timeout, terminate
+                vu_proc.terminate()
+                vu_proc.join(timeout=1)
+                if vu_proc.is_alive():
+                    vu_proc.kill()  # Force kill if still alive
+            
+            print("\nvu stopped")
+        except Exception as e:
+            print(f"\nError stopping VU meter: {e}")
+        finally:
+            vu_proc = None
+            cleanup_process('v')
+            clear_input_buffer()
 
 def toggle_intercom_m():
     """Toggle intercom functionality - PLACEHOLDER."""
     print("Intercom toggle placeholder - full implementation pending")
 
-def stop_vu():
-    """Stop VU meter - PLACEHOLDER."""
-    print("Stop VU meter placeholder - full implementation pending")
+
 
 def stop_intercom_m():
     """Stop intercom - PLACEHOLDER."""
     print("Stop intercom placeholder - full implementation pending")
 
+def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
+    """Single-shot FFT plot of audio."""
+    try:
+        # Force garbage collection before starting
+        gc.collect()
+        
+        # Ensure clean matplotlib state for this process
+        matplotlib.use('Agg', force=True)
+        plt.close('all')  # Close any existing figures
+        
+        # Brief delay to ensure clean audio device state
+        time.sleep(0.1)
+        
+        recording, actual_channels = _record_audio_pyaudio(
+            config.FFT_DURATION, sound_in_id, sound_in_chs, stop_queue, "FFT analysis"
+        )
+        
+        if recording is None:
+            logging.error("Failed to record audio for FFT.")
+            return
+
+        # Ensure channel index is valid
+        if channel >= actual_channels:
+            logging.warning(f"Channel {channel+1} not available for FFT, using channel 1.")
+            monitor_channel = 0
+        else:
+            monitor_channel = channel
+            
+        # Extract the requested channel
+        single_channel_audio = recording[:, monitor_channel]
+        
+        # Apply gain if needed
+        if hasattr(config, 'FFT_GAIN') and config.FFT_GAIN > 0:
+            gain = 10 ** (config.FFT_GAIN / 20)
+            logging.info(f"Applying FFT gain of: {gain:.1f}")
+            single_channel_audio *= gain
+
+        logging.info("Performing FFT...")
+        # Perform FFT
+        yf = rfft(single_channel_audio.flatten())
+        xf = rfftfreq(len(single_channel_audio), 1 / config.PRIMARY_IN_SAMPLERATE)
+
+        # Define bucket width
+        bucket_width = FFT_BW  # Hz
+        bucket_size = int(bucket_width * len(single_channel_audio) / config.PRIMARY_IN_SAMPLERATE)  # Number of indices per bucket
+
+        # Calculate the number of complete buckets
+        num_buckets = len(yf) // bucket_size
+        
+        # Average buckets - ensure both arrays have the same length
+        buckets = []
+        bucket_freqs = []
+        for i in range(num_buckets):
+            start_idx = i * bucket_size
+            end_idx = start_idx + bucket_size
+            buckets.append(yf[start_idx:end_idx].mean())
+            bucket_freqs.append(xf[start_idx:end_idx].mean())
+        
+        buckets = np.array(buckets)
+        bucket_freqs = np.array(bucket_freqs)
+
+        logging.info("Creating FFT plot...")
+        # Create figure with reduced DPI for better performance
+        fig = plt.figure(figsize=(10, 6), dpi=80)
+        plt.plot(bucket_freqs, np.abs(buckets), linewidth=1.0)
+        plt.xlabel('Frequency (Hz)')
+        plt.ylabel('Amplitude')
+        plt.title(f'FFT Plot monitoring ch: {monitor_channel + 1} of {actual_channels} channels')
+        plt.grid(True)
+
+        # Save the plot
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_fft_{int(config.PRIMARY_IN_SAMPLERATE/1000)}_kHz_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
+        logging.info(f"Saving FFT plot to: {plotname}")
+        
+        # Make sure the directory exists
+        os.makedirs(os.path.dirname(plotname), exist_ok=True)
+        
+        # Display the expanded path
+        expanded_path = os.path.abspath(os.path.expanduser(plotname))
+        logging.info(f"Absolute path: {expanded_path}")
+        
+        # Save with optimized settings
+        logging.info("Saving figure...")
+        plt.savefig(expanded_path, dpi=80, bbox_inches='tight', pad_inches=0.1, format='png')
+        logging.info("Plot saved successfully")
+        plt.close('all')  # Close all figures
+
+        # Open the saved image based on OS
+        try:
+            # First verify the file exists
+            if not os.path.exists(expanded_path):
+                logging.error(f"Plot file does not exist at: {expanded_path}")
+                return
+                
+            logging.info(f"Plot file exists, size: {os.path.getsize(expanded_path)} bytes")
+            
+            if platform_manager.is_wsl():
+                logging.info("Opening image in WSL...")
+                try:
+                    proc = subprocess.Popen(['xdg-open', expanded_path])
+                    logging.info(f"xdg-open launched with PID: {proc.pid}")
+                except FileNotFoundError:
+                    logging.info("xdg-open not found, trying wslview...")
+                    proc = subprocess.Popen(['wslview', expanded_path])
+                    logging.info(f"wslview launched with PID: {proc.pid}")
+            elif platform_manager.is_macos():
+                logging.info("Opening image in macOS...")
+                proc = subprocess.Popen(['open', expanded_path])
+                logging.info(f"open command launched with PID: {proc.pid}")
+            elif sys.platform == 'win32':
+                logging.info("Opening image in Windows...")
+                os.startfile(expanded_path)
+                logging.info("Image viewer command executed")
+            else:
+                logging.info("Opening image in Linux...")
+                proc = subprocess.Popen(['xdg-open', expanded_path])
+                logging.info(f"xdg-open launched with PID: {proc.pid}")
+                
+            logging.info("Image viewer command executed successfully")
+            
+            # Give the process a moment to start
+            time.sleep(0.5)
+            
+            # Also print the command that can be run manually
+            print(f"\nIf the image didn't open, you can manually run:")
+            if platform_manager.is_wsl() or not sys.platform == 'win32':
+                print(f"  xdg-open '{expanded_path}'")
+            elif platform_manager.is_macos():
+                print(f"  open '{expanded_path}'")
+                
+        except Exception as e:
+            logging.error("Could not open image viewer", exc_info=True)
+            try:
+                # Try with shell=True as a fallback
+                subprocess.Popen(f"xdg-open '{expanded_path}'", shell=True)
+                logging.info("Alternative method executed")
+            except Exception as e2:
+                logging.error("Alternative open method also failed", exc_info=True)
+            logging.info(f"Image saved at: {expanded_path}")
+            logging.info("You can manually open this file with your image viewer")
+            
+    except Exception as e:
+        logging.error("Error in FFT recording", exc_info=True)
+    finally:
+        # Ensure cleanup happens
+        try:
+            plt.close('all')
+            gc.collect()
+        except:
+            pass
+
 def trigger_fft():
-    """Trigger FFT plot generation - PLACEHOLDER."""
-    print("FFT trigger placeholder - full implementation pending")
+    """Trigger FFT plot generation with proper cleanup."""
+    try:
+        # Clean up any existing FFT process
+        cleanup_process('f')
+        clear_input_buffer()
+        
+        # Get current app instance parameters
+        # For now, use global variables for compatibility
+        monitor_channel = globals().get('monitor_channel', 0)
+        sound_in_chs = globals().get('sound_in_chs', 1)
+        sound_in_id = globals().get('sound_in_id', 1)
+        
+        # Create a queue for communication
+        stop_queue = multiprocessing.Queue()
+        
+        # Create new process
+        fft_process = multiprocessing.Process(
+            target=plot_fft,
+            args=(sound_in_id, sound_in_chs, monitor_channel, stop_queue)
+        )
+        
+        # Set process as daemon
+        fft_process.daemon = True
+        
+        # Store process reference
+        active_processes['f'] = fft_process
+        
+        print("Starting FFT analysis process...")
+        # Start process
+        fft_process.start()
+        
+        # Wait for completion with timeout
+        timeout = config.FFT_DURATION + 30  # Recording duration plus extra time for processing
+        fft_process.join(timeout=timeout)
+        
+        # Check if process is still running
+        if fft_process.is_alive():
+            print("\nFFT process taking too long, terminating...")
+            try:
+                # Signal the process to stop
+                stop_queue.put(True)
+                # Give it a moment to clean up
+                time.sleep(1)
+                # Then terminate if still running
+                if fft_process.is_alive():
+                    fft_process.terminate()
+                    fft_process.join(timeout=2)
+                    if fft_process.is_alive():
+                        fft_process.kill()
+            except Exception as e:
+                print(f"Error terminating FFT process: {e}")
+        
+    except Exception as e:
+        print(f"Error in trigger_fft: {e}")
+        traceback.print_exc()
+    finally:
+        # Always clean up
+        cleanup_process('f')
+        clear_input_buffer()
+        print("FFT process completed")
 
 def trigger_spectrogram():
     """Trigger spectrogram generation - PLACEHOLDER."""
@@ -2556,7 +3007,7 @@ def trigger_spectrogram():
 def emergency_cleanup(signum, frame):
     """Emergency cleanup handler for signals."""
     print(f"\nEmergency cleanup triggered by signal {signum}")
-    cleanup()
+    cleanup(app)
     sys.exit(0)
 
 # Global variables for application control
@@ -2564,16 +3015,9 @@ app = None
 fft_periodic_plot_proc = None
 oscope_proc = None
 one_shot_fft_proc = None
-monitor_channel = 0
-keyboard_listener_running = True
-keyboard_listener_active = True
 original_terminal_settings = None
-stop_program = [False]
 
 # Global variables for buffer management
-buffer = None
-buffer_size = None
-buffer_index = None
 buffer_wrap_event = threading.Event()
 
 # Global variables for processes and events
@@ -2583,8 +3027,6 @@ change_ch_event = threading.Event()
 
 def main():
     """Main function to initialize and run the BmarApp."""
-    global app, fft_periodic_plot_proc, oscope_proc, one_shot_fft_proc, monitor_channel
-    global keyboard_listener_running, original_terminal_settings, stop_program
     
     # Create and initialize the application
     app = BmarApp()
@@ -2604,18 +3046,18 @@ def main():
     show_audio_device_info_for_SOUND_IN_OUT()
     
     # Set monitor channel with validation
-    if monitor_channel >= app.sound_in_chs:
-        monitor_channel = 0
-        print(f"Setting monitor channel to {monitor_channel+1}")
+    if app.monitor_channel >= app.sound_in_chs:
+        app.monitor_channel = 0
+        print(f"Setting monitor channel to {app.monitor_channel+1}")
 
     # Set up audio circular buffer
-    setup_audio_circular_buffer()
+    setup_audio_circular_buffer(app)
     
-    print(f"Buffer size: {app.BUFFER_SECONDS} seconds, {buffer.size/500000:.2f} megabytes")
+    print(f"Buffer size: {app.BUFFER_SECONDS} seconds, {app.buffer.size/500000:.2f} megabytes")
     print(f"Sample Rate: {int(app.PRIMARY_IN_SAMPLERATE)} Hz; File Format: {app.config.PRIMARY_FILE_FORMAT}; Channels: {app.sound_in_chs}")
 
     # Check and create date-based directories
-    if not check_and_create_date_folders():
+    if not check_and_create_date_folders(app):
         print("Critical directories could not be created. Exiting.")
         sys.exit(1)
     
@@ -2626,14 +3068,14 @@ def main():
     print(f"  Plot files: {app.PLOT_DIRECTORY}")
     
     # Register cleanup handlers
-    atexit.register(cleanup)
+    atexit.register(lambda: cleanup(app))
     signal.signal(signal.SIGINT, emergency_cleanup)
     signal.signal(signal.SIGTERM, emergency_cleanup)
     
     # Start keyboard listener in a separate thread
     if hasattr(app, 'KB_or_CP') and app.KB_or_CP == 'KB':
         time.sleep(1)  # Give a small delay to ensure prints are visible
-        keyboard_thread = threading.Thread(target=keyboard_listener)
+        keyboard_thread = threading.Thread(target=keyboard_listener, args=(app,))
         keyboard_thread.daemon = True
         keyboard_thread.start()
         print("Keyboard listener started successfully!")
@@ -2643,7 +3085,7 @@ def main():
     
     try:
         # Start the audio stream
-        result = audio_stream()
+        result = audio_stream(app)
         if not result:
             print("Audio stream failed to start properly.")
     except KeyboardInterrupt:
@@ -2655,7 +3097,7 @@ def main():
     finally:
         # Ensure cleanup happens
         try:
-            cleanup()
+            cleanup(app)
         except SystemExit:
             pass  # Allow os._exit() to work
         except Exception as e:
