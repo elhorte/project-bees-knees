@@ -709,6 +709,7 @@ def safe_stty(command):
             os.system(f'stty {command}')
     except Exception as e:
         logging.warning(f"stty command failed: {e}")
+        
 
 def stop_all():
     """Stop all processes and threads."""
@@ -943,67 +944,110 @@ def print_all_input_devices():
     print()
     sys.stdout.flush()
 
-def prompt_with_timeout(prompt, timeout=3, default='n'):
+
+
+# #### version from BMAR_son.py ####
+
+def timed_input(prompt, timeout=3, default='n'):
     """
-    Prompts the user for input with a timeout. Returns the default value if the timeout is reached 
-    or if the user just presses Enter.
+    Get user input with a timeout and default value for headless operation.
+    
+    Args:
+        prompt: The prompt to display to the user
+        timeout: Timeout in seconds (default: 3)
+        default: Default response if timeout or Enter is pressed (default: 'n')
+        
+    Returns:
+        User input string or default value
     """
+    
+    # Print the prompt
     print(prompt, end='', flush=True)
     
-    # For Unix-like systems (macOS, Linux, WSL)
-    if platform_manager.termios:
-        rlist, _, _ = select.select([sys.stdin], [], [], timeout)
-        if rlist:
-            response = sys.stdin.readline().strip()
-            return response if response else default
-        else:
-            print() # Newline for clarity
-            return default
-
-    # For Windows
-    elif platform_manager.msvcrt:
-        start_time = time.time()
-        input_buffer = []
-        while True:
-            if time.time() - start_time > timeout:
-                print() # Newline
-                return default
-            if platform_manager.msvcrt.kbhit():
-                char_byte = platform_manager.msvcrt.getch()
-                # Handle Enter
-                if char_byte in (b'\r', b'\n'):
-                    print()
-                    return "".join(input_buffer) if input_buffer else default
-                # Handle Backspace
-                elif char_byte == b'\x08':
-                    if input_buffer:
-                        input_buffer.pop()
-                        # Erase character from console
-                        sys.stdout.write('\b \b')
-                        sys.stdout.flush()
-                else:
-                    try:
-                        char = char_byte.decode()
-                        input_buffer.append(char)
-                        sys.stdout.write(char)
-                        sys.stdout.flush()
-                    except UnicodeDecodeError:
-                        pass # Ignore non-decodeable characters
-            time.sleep(0.01)
+    # Check if stdin is available (not redirected/piped)
+    if not sys.stdin.isatty():
+        print(f"[Headless mode] Using default: '{default}'")
+        return default
     
-    # Fallback for unsupported platforms where timed input is not possible.
-    else:
+    start_time = time.time()
+    windows_method_failed = False
+    
+    # Platform-specific input handling
+    if sys.platform == 'win32' and not platform_manager.is_wsl():
+        # Windows implementation using msvcrt - import directly to avoid module issues
         try:
-            response = input()
-            return response if response else default
-        except EOFError:
-            return default
-
-def dummy_callback(indata, frames, time, status):
-    """A dummy callback that does nothing, to force non-blocking mode."""
-    pass
-
-
+            import msvcrt as local_msvcrt
+            user_input = ""
+            while (time.time() - start_time) < timeout:
+                try:
+                    if local_msvcrt.kbhit():
+                        char = local_msvcrt.getch().decode('utf-8', errors='ignore')
+                        if char == '\r':  # Enter key
+                            print()  # New line
+                            return user_input.strip().lower() if user_input.strip() else default
+                        elif char == '\b':  # Backspace
+                            if user_input:
+                                user_input = user_input[:-1]
+                                print('\b \b', end='', flush=True)
+                        elif char.isprintable():
+                            user_input += char
+                            print(char, end='', flush=True)
+                except Exception as e:
+                    # If msvcrt fails, fall back to Unix-style implementation
+                    print(f"\n[Windows input failed, using fallback]: {e}")
+                    windows_method_failed = True
+                    break
+                time.sleep(0.01)  # Small delay to prevent high CPU usage
+        except ImportError:
+            # msvcrt not available, use fallback
+            print(f"\n[msvcrt not available, using fallback]")
+            windows_method_failed = True
+    
+    # Unix/Linux/macOS implementation (or Windows fallback)
+    if (sys.platform != 'win32' or platform_manager.is_wsl() or windows_method_failed):
+        # Reset start time if we're falling back from Windows method
+        if windows_method_failed:
+            start_time = time.time()
+        
+        # Check if we can use select on this platform
+        try:
+            # On Windows (non-WSL), select doesn't work with stdin, so use a different approach
+            if sys.platform == 'win32' and not platform_manager.is_wsl():
+                # Windows fallback - use a different approach since input() blocks
+                # We'll use a simple loop that checks for available input without blocking
+                print(f"\n[Windows fallback method activated]")
+                
+                # For Windows, we'll just do a simple timeout since threading with input() 
+                # doesn't work properly for timeout scenarios
+                remaining_time = timeout - (time.time() - start_time)
+                if remaining_time <= 0:
+                    return default
+                    
+                # We can't implement proper non-blocking input on Windows easily,
+                # so we'll just wait for the timeout period
+                time.sleep(remaining_time)
+                return default
+                
+            else:
+                # Unix/Linux/macOS/WSL - use select
+                while (time.time() - start_time) < timeout:
+                    ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+                    if ready:
+                        try:
+                            user_input = sys.stdin.readline().strip()
+                            return user_input.lower() if user_input else default
+                        except:
+                            break
+        except Exception as e:
+            # If select fails, fall back to basic timeout
+            print(f"\n[Input method failed, using timeout fallback]: {e}")
+            remaining_time = timeout - (time.time() - start_time)
+            if remaining_time > 0:
+                time.sleep(remaining_time)
+    
+    # Timeout occurred
+    print(f"\n[Timeout after {timeout}s] Using default: '{default}'")
+    return default
 
 
 def set_input_device(app):
@@ -1038,7 +1082,7 @@ def set_input_device(app):
                         print(f"\nChannel mismatch detected:")
                         print(f"  Configuration requires: {original_channels} channels")
                         print(f"  Device supports: {device['max_input_channels']} channels")
-                        response = prompt_with_timeout(f"\nWould you like to proceed with {device['max_input_channels']} channel(s) instead? (y/N): ", timeout=3, default='n')
+                        response = timed_input(f"\nWould you like to proceed with {device['max_input_channels']} channel(s) instead? (y/N): ", timeout=3, default='n')
 
                         if response.lower() != 'y':
                             print("User declined to use fewer channels.")
@@ -1108,14 +1152,14 @@ def set_input_device(app):
                         except Exception as e:
                             print(f"\nERROR: Could not use specified device ID {app.device_id}")
                             print(f"Reason: {str(e)}")
-                            response = prompt_with_timeout("\nThe specified device could not be used. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
+                            response = timed_input("\nThe specified device could not be used. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
                             if response.lower() != 'y':
                                 print("Exiting as requested.")
                                 sys.exit(1)
                             print("Falling back to device search...")
                 else:
                     print(f"\nERROR: Specified device ID {app.device_id} is not an input device")
-                    response = prompt_with_timeout("\nThe specified device is not an input device. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
+                    response = timed_input("\nThe specified device is not an input device. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
                     if response.lower() != 'y':
                         print("Exiting as requested.")
                         sys.exit(1)
@@ -1123,7 +1167,7 @@ def set_input_device(app):
             except Exception as e:
                 print(f"\nERROR: Could not access specified device ID {app.device_id}")
                 print(f"Reason: {str(e)}")
-                response = prompt_with_timeout("\nThe specified device could not be accessed. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
+                response = timed_input("\nThe specified device could not be accessed. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
                 if response.lower() != 'y':
                     print("Exiting as requested.")
                     sys.exit(1)
@@ -1160,7 +1204,7 @@ def set_input_device(app):
                         print(f"\nChannel mismatch detected:")
                         print(f"  Configuration requires: {app.sound_in_chs} channels")
                         print(f"  Device supports: {actual_channels} channels")
-                        response = prompt_with_timeout(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ", timeout=3, default='n')
+                        response = timed_input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ", timeout=3, default='n')
                         if response.lower() != 'y':
                             print("Skipping this device...")
                             continue
@@ -1208,7 +1252,7 @@ def set_input_device(app):
                 print(f"\nChannel mismatch detected:")
                 print(f"  Configuration requires: {app.sound_in_chs} channels")
                 print(f"  Device supports: {actual_channels} channels")
-                response = prompt_with_timeout(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ", timeout=3, default='n')
+                response = timed_input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ", timeout=3, default='n')
                 if response.lower() != 'y':
                     print("Skipping this device...")
                     continue
