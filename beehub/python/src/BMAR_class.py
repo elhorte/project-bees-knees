@@ -74,6 +74,7 @@ try:
     import msvcrt
 except ImportError:
     msvcrt = None
+
 import librosa.display
 import resampy
 import atexit
@@ -1471,6 +1472,41 @@ def show_audio_device_list():
     sys.stdout.flush()
 
 
+def show_detailed_device_list():
+    """Display a detailed list of all audio devices with input/output indicators."""
+    print("\nAudio Device List:")
+    print("-" * 80)
+    
+    devices = sd.query_devices()
+    for i, device in enumerate(devices):
+        # Get API name
+        hostapi_info = sd.query_hostapis(index=device['hostapi'])
+        api_name = hostapi_info['name']
+        
+        # Determine if device is input, output, or both
+        in_channels = device['max_input_channels']
+        out_channels = device['max_output_channels']
+        
+        # Create prefix based on device type and whether it's the active device
+        if i == sound_in_id and in_channels > 0:
+            prefix = ">"
+        elif i == sound_out_id and out_channels > 0:
+            prefix = "<"
+        else:
+            prefix = " "
+            
+        # Format the device name to fit in 40 characters
+        device_name = device['name']
+        if len(device_name) > 40:
+            device_name = device_name[:37] + "..."
+            
+        # Print the device information
+        print(f"{prefix} {i:2d} {device_name:<40} {api_name} ({in_channels} in, {out_channels} out)")
+    
+    print("-" * 80)
+    sys.stdout.flush()
+
+
 def get_enabled_mic_locations():
     """
     Reads microphone enable states (MIC_1 to MIC_4) and maps to their corresponding locations.
@@ -1651,6 +1687,7 @@ def pcm_to_mp3_write(np_array, full_path):
         print(f"Error converting audio to MP3: {str(e)}")
         raise
 
+
 # downsample audio to a lower sample rate
 def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
     # Convert audio to float for processing
@@ -1684,9 +1721,11 @@ def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
     downsampled_audio = (downsampled_audio_float * np.iinfo(np.int16).max).astype(np.int16)
     return downsampled_audio
 
+
 # #############################################################
 # signal display functions
 # #############################################################
+
 
 def get_default_output_device():
     devices = sd.query_devices()
@@ -1697,12 +1736,10 @@ def get_default_output_device():
 
 def create_progress_bar(current, total, bar_length=50):
     """Create a progress bar string.
-    
     Args:
         current: Current progress value
         total: Total value
         bar_length: Length of the progress bar (default 50)
-        
     Returns:
         String representation of progress bar like [######     ]
     """
@@ -1715,6 +1752,7 @@ def create_progress_bar(current, total, bar_length=50):
     bar = '#' * filled_length + ' ' * (bar_length - filled_length)
     
     return f"[{bar}] {percent}%"
+
 
 def _record_audio_pyaudio(duration, sound_in_id, sound_in_chs, stop_queue, task_name="audio recording"):
     """
@@ -1800,6 +1838,7 @@ def _record_audio_pyaudio(duration, sound_in_id, sound_in_chs, stop_queue, task_
                 time.sleep(0.1) # Allow time for resources to be released
             except Exception as e:
                 logging.error(f"Error terminating PyAudio instance for {task_name}", exc_info=True)
+
 
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
 def plot_oscope(sound_in_id, sound_in_chs, queue): 
@@ -1922,6 +1961,7 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
         except:
             pass
 
+
 def trigger_oscope():
     """Trigger oscilloscope plot generation with proper cleanup."""
     try:
@@ -1979,6 +2019,7 @@ def trigger_oscope():
         clear_input_buffer()
         print("Oscilloscope process completed")
 
+
 def cleanup_process(command):
     """Clean up a specific command's process."""
     try:
@@ -2009,8 +2050,10 @@ def cleanup_process(command):
     except Exception as e:
         print(f"Error in cleanup_process for command '{command}': {e}")
 
+
 # Global variables for buffer management
 buffer_wrap_event = threading.Event()
+
 
 def callback(app, indata, frames, time, status):
     """Callback function for audio input stream."""
@@ -2033,9 +2076,9 @@ def callback(app, indata, frames, time, status):
 
     app.buffer_index = (app.buffer_index + data_len) % app.buffer_size
 
+
 def setup_audio_circular_buffer(app):
     """Set up the circular buffer for audio recording."""
-    
     # Calculate buffer size and initialize buffer
     app.buffer_size = int(app.BUFFER_SECONDS * app.PRIMARY_IN_SAMPLERATE)
     app.buffer = np.zeros((app.buffer_size, app.sound_in_chs), dtype=app._dtype)
@@ -2046,6 +2089,7 @@ def setup_audio_circular_buffer(app):
     
     print(f"\naudio buffer size: {sys.getsizeof(app.buffer)}\n")
     sys.stdout.flush()
+
 
 def recording_worker_thread(app, record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
     """Worker thread for recording audio to files."""
@@ -2060,7 +2104,7 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
             current_time = datetime.datetime.now().time()
             
             if start_tod is None or (start_tod <= current_time <= end_tod):        
-                print(f"{thread_id} started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec\r")
+                print(f"{thread_id} started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec\n\r")
 
                 period_start_index = app.buffer_index 
                 # wait PERIOD seconds to accumulate audio
@@ -2121,13 +2165,13 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
                         # Convert to MP3 using pydub
                         pcm_to_mp3_write(audio_data, file_path)
                     else:
-                        print(f"Unsupported file format: {file_format}")
+                        logging.error(f"Unsupported file format: {file_format}")
                         continue
                         
-                    print(f"{thread_id} saved: {filename}\r")
+                    logging.info(f"{thread_id} saved: {filename}\r")
                     
                 except Exception as e:
-                    print(f"Error saving {filename}: {e}")
+                    logging.error(f"Error saving {filename}: {e}")
                     continue
 
                 # Wait for the next recording interval
@@ -2138,17 +2182,16 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
                 interruptable_sleep(10, app.stop_recording_event)
                 
         except Exception as e:
-            print(f"Error in {thread_id}: {e}")
+            logging.error(f"Error in {thread_id}: {e}")
             if not app.stop_recording_event.is_set():
                 interruptable_sleep(30, app.stop_recording_event)  # Wait before retrying
+
 
 def ensure_directories_exist(directories):
     """
     Check if directories exist and create them if necessary.
-    
     Args:
         directories: List of directory paths to check and create
-        
     Returns:
         bool: True if all directories exist or were created, False otherwise
     """
@@ -2172,27 +2215,27 @@ def ensure_directories_exist(directories):
             
             # Verify directory was created
             if os.path.exists(d):
-                print(f"Created directory: {d}")
+                logging.info(f"Created directory: {d}")
             else:
-                print(f"Failed to create directory: {d} (Unknown error)")
+                logging.error(f"Failed to create directory: {d} (Unknown error)")
                 success = False
         except Exception as e:
-            print(f"Error creating directory {d}: {e}")
+            logging.error(f"Error creating directory {d}: {e}")
             success = False
-            
             # Additional debugging for permission issues
             if "Permission denied" in str(e):
-                print(f"  This appears to be a permissions issue. Current user may not have write access.")
-                print(f"  Current working directory: {os.getcwd()}")
+                logging.error(f"  This appears to be a permissions issue. Current user may not have write access.")
+                logging.error(f"  Current working directory: {os.getcwd()}")
                 try:
                     parent_dir = os.path.dirname(d)
-                    print(f"  Parent directory exists: {os.path.exists(parent_dir)}")
+                    logging.info(f"  Parent directory exists: {os.path.exists(parent_dir)}")
                     if os.path.exists(parent_dir):
-                        print(f"  Parent directory permissions: {oct(os.stat(parent_dir).st_mode)[-3:]}")
+                        logging.info(f"  Parent directory permissions: {oct(os.stat(parent_dir).st_mode)[-3:]}")
                 except Exception as e2:
-                    print(f"  Error checking parent directory: {e2}")
-    
-    return success
+                    logging.error(f"  Error checking parent directory: {e2}")
+        return success
+
+
 def reset_terminal_settings():
     """Reset terminal settings to default state without clearing the screen."""
     try:
@@ -2201,7 +2244,8 @@ def reset_terminal_settings():
             old_settings = platform_manager.termios.tcgetattr(fd)
             platform_manager.termios.tcsetattr(fd, platform_manager.termios.TCSANOW, old_settings)
     except Exception as e:
-        print(f"Warning: Could not reset terminal settings: {e}")
+        logging.warning(f"Could not reset terminal settings: {e}")
+
 
 def audio_stream(app):
     """Main audio streaming function."""
@@ -2210,20 +2254,20 @@ def audio_stream(app):
     reset_terminal_settings()
 
     # Print initialization info with forced output
-    print("Initializing audio stream...", flush=True)
-    print(f"Device ID: [{app.sound_in_id}]", end='\r', flush=True)
-    print(f"Channels: {app.sound_in_chs}", end='\r', flush=True)
-    print(f"Sample Rate: {int(app.PRIMARY_IN_SAMPLERATE)} Hz", end='\r', flush=True)
-    print(f"Bit Depth: {app.PRIMARY_BITDEPTH} bits", end='\r', flush=True)
-    print(f"Data Type: {app._dtype}", end='\r', flush=True)
+    logging.info("Initializing audio stream...")
+    logging.info(f"Device ID: [{app.sound_in_id}]")
+    logging.info(f"Channels: {app.sound_in_chs}")
+    logging.info(f"Sample Rate: {int(app.PRIMARY_IN_SAMPLERATE)} Hz")
+    logging.info(f"Bit Depth: {app.PRIMARY_BITDEPTH} bits")
+    logging.info(f"Data Type: {app._dtype}")
 
     try:
         # First verify the device configuration
         device_info = sd.query_devices(app.sound_in_id)
-        print("\nSelected device info:", flush=True)
-        print(f"Name: [{app.sound_in_id}] {device_info['name']}", end='\r', flush=True)
-        print(f"Max Input Channels: {device_info['max_input_channels']}", end='\r', flush=True)
-        print(f"Device Sample Rate: {int(device_info['default_samplerate'])} Hz", end='\r', flush=True)
+        logging.info("Selected device info:")
+        logging.info(f"Name: [{app.sound_in_id}] {device_info['name']}")
+        logging.info(f"Max Input Channels: {device_info['max_input_channels']}")
+        logging.info(f"Device Sample Rate: {int(device_info['default_samplerate'])} Hz")
 
         if device_info['max_input_channels'] < app.sound_in_chs:
             raise RuntimeError(f"Device only supports {device_info['max_input_channels']} channels, but {app.sound_in_chs} channels are required")
@@ -2244,14 +2288,14 @@ def audio_stream(app):
             callback=app_callback
         )
 
-        print("\nAudio stream initialized successfully\r", flush=True)
-        print(f"Stream sample rate: {stream.samplerate} Hz", end='\r', flush=True)
-        print(f"Stream bit depth: {app.PRIMARY_BITDEPTH} bits", end='\r', flush=True)
+        logging.info("Audio stream initialized successfully")
+        logging.info(f"Stream sample rate: {stream.samplerate} Hz")
+        logging.info(f"Stream bit depth: {app.PRIMARY_BITDEPTH} bits")
 
         with stream:
             # start the recording worker threads
             if hasattr(app.config, 'MODE_AUDIO_MONITOR') and app.config.MODE_AUDIO_MONITOR:
-                print("Starting recording_worker_thread for down sampling audio to 48k and saving mp3...\r")
+                logging.info("Starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
                 threading.Thread(target=recording_worker_thread, args=(
                     app,  # Pass app as first parameter
                     app.config.AUDIO_MONITOR_RECORD,
@@ -2264,7 +2308,7 @@ def audio_stream(app):
                 )).start()
 
             if hasattr(app.config, 'MODE_PERIOD') and app.config.MODE_PERIOD and not app.testmode:
-                print("Starting recording_worker_thread for caching period audio at primary sample rate and all channels...\r")
+                logging.info("Starting recording_worker_thread for caching period audio at primary sample rate and all channels...")
                 threading.Thread(target=recording_worker_thread, args=(
                     app,  # Pass app as first parameter
                     app.config.PERIOD_RECORD,
@@ -2277,7 +2321,7 @@ def audio_stream(app):
                 )).start()
 
             if hasattr(app.config, 'MODE_EVENT') and app.config.MODE_EVENT and not app.testmode:
-                print("Starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...\r")
+                logging.info("Starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...")
                 threading.Thread(target=recording_worker_thread, args=(
                     app,  # Pass app as first parameter
                     app.config.SAVE_BEFORE_EVENT,
@@ -2294,18 +2338,19 @@ def audio_stream(app):
                 time.sleep(0.1)
 
     except Exception as e:
-        print(f"\nError initializing audio stream: {str(e)}")
-        print("Please check your audio device configuration and ensure it supports the required settings")
+        logging.error(f"Error initializing audio stream: {str(e)}")
+        logging.info("Please check your audio device configuration and ensure it supports the required settings")
         sys.stdout.flush()
         return False
 
     return True
 
+
 def stop_all(app):
     """Stop all processes and threads."""
-    
-    print("\nStopping all processes and threads...")
-    
+
+    logging.info("Stopping all processes and threads...")
+
     # Set stop flags
     app.stop_program[0] = True
     app.keyboard_listener_running = False
@@ -2324,6 +2369,10 @@ def stop_all(app):
     if hasattr(app, 'stop_fft_periodic_plot_event'):
         app.stop_fft_periodic_plot_event.set()
     
+    # Stop performance monitor
+    global stop_performance_monitor_event
+    stop_performance_monitor_event.set()
+    
     # Signal buffer wrap event to unblock any waiting threads
     buffer_wrap_event.set()
     
@@ -2336,6 +2385,7 @@ def stop_all(app):
     time.sleep(0.5)
     
     print("All processes stopped.")
+
 
 def cleanup(app):
     """Clean up and exit."""
@@ -2364,6 +2414,10 @@ def cleanup(app):
     if hasattr(app, 'stop_fft_periodic_plot_event'):
         app.stop_fft_periodic_plot_event.set()
     
+    # Stop performance monitor
+    global stop_performance_monitor_event
+    stop_performance_monitor_event.set()
+    
     # Signal buffer wrap event to unblock any waiting threads
     buffer_wrap_event.set()
     
@@ -2377,19 +2431,20 @@ def cleanup(app):
         sd.stop()  # Stop all sounddevice streams
         time.sleep(0.1)
     except Exception as e:
-        print(f"Note: Error stopping sounddevice streams: {e}")
-    
+        logging.warning(f"Note: Error stopping sounddevice streams: {e}")
+
     # Restore terminal settings
     if original_terminal_settings:
         restore_terminal_settings(original_terminal_settings)
     else:
         reset_terminal_settings()
     
-    print("Cleanup completed.")
+    logging.info("Cleanup completed.")
     
     # Force exit to prevent hanging
     import os
     os._exit(0)
+
 
 def keyboard_listener(app):
     """Main keyboard listener loop."""
@@ -2398,7 +2453,7 @@ def keyboard_listener(app):
     # Reset terminal settings before starting
     reset_terminal_settings()
     
-    print("\nKeyboard listener started. Press 'h' for help.", end='\n', flush=True)
+    print("\nKeyboard listener started. Press 'h' for help.", end='\n\n', flush=True)
     
     while app.keyboard_listener_running:
         try:
@@ -2414,7 +2469,7 @@ def keyboard_listener(app):
                             
                             # Validate channel number is within range
                             if key_int < 0 or key_int >= app.sound_in_chs:
-                                print(f"\nInvalid channel selection: Device has only {app.sound_in_chs} channel(s) (1-{app.sound_in_chs})", end='\n', flush=True)
+                                logging.warning(f"\nInvalid channel selection: Device has only {app.sound_in_chs} channel(s) (1-{app.sound_in_chs})")
                                 continue
                                 
                             app.monitor_channel = key_int
@@ -2438,18 +2493,24 @@ def keyboard_listener(app):
                         change_monitor_channel(app)
                     elif key == "d":  
                         show_audio_device_list()
+                    elif key == "D":  
+                        show_detailed_device_list()
                     elif key == "f":  
                         try:
                             trigger_fft()
                         except Exception as e:
-                            print(f"Error in FFT trigger: {e}", end='\n', flush=True)
+                            logging.error(f"Error in FFT trigger: {e}")
                             cleanup_process('f')
                     elif key == "i":  
                         toggle_intercom_m()
                     elif key == "m":  
                         show_mic_locations()
                     elif key == "o":  
-                        trigger_oscope()        
+                        trigger_oscope() 
+                    elif key == "p":
+                        run_performance_monitor_once()
+                    elif key == "P":
+                        toggle_continuous_performance_monitor()                               
                     elif key == "q":  
                         print("\nQuitting...", end='\n', flush=True)
                         app.keyboard_listener_running = False
@@ -2464,7 +2525,7 @@ def keyboard_listener(app):
                         show_list_of_commands()
                 
         except Exception as e:
-            print(f"Error in keyboard listener: {e}", end='\n', flush=True)
+            logging.error(f"Error in keyboard listener: {e}")
             continue
             
         time.sleep(0.01)  # Small delay to prevent high CPU usage
@@ -2480,23 +2541,27 @@ def toggle_listening(app):
         stop_vu()
         stop_intercom_m()
 
+
 def show_list_of_commands():
-    """Display available keyboard commands."""
-    print("\nAvailable Commands:")
-    print("  a - Check audio stream status")
-    print("  c - Change monitor channel")
-    print("  d - Show audio device list")
-    print("  f - Generate FFT plot")
-    print("  h/? - Show this help")
-    print("  i - Toggle intercom")
-    print("  m - Show microphone locations")
-    print("  o - Generate oscilloscope plot")
-    print("  q - Quit application")
-    print("  s - Generate spectrogram")
-    print("  t - List active threads")
-    print("  v - Toggle VU meter")
-    print("  ^ - Toggle keyboard listener")
-    print("  1-4 - Direct channel selection")
+    print("\na  audio pathway--check for over/underflows")
+    print("c  channel--select channel to monitor, either before or during use of vu or intercom, '0' to exit")
+    print("d  selected devices in use data")
+    print("D  show all devices with active input/output indicator")
+    print("f  fft--show plot")
+    print("i  intercom: press i then press 1, 2, 3, ... to listen to that channel")
+    print("m  mic--show active positions")
+    print("o  oscilloscope--show trace of each active channel")
+    print("p  performance monitor--show CPU and RAM usage (one-shot)")
+    print("P  performance monitor--show CPU and RAM usage (continuous)")
+    print("q  quit--stop all processes and exit")
+    print("s  spectrogram--plot of last recording")
+    print("t  threads--see list of all threads")
+    print("v  vu meter--toggle--show vu meter on cli")
+    print()
+    print("1-'n' - Direct channel selection")
+    print("^  toggle keyboard listener on/off")
+    print("h or ?  show list of commands\n")
+
 
 def change_monitor_channel(app):
     """Change the monitor channel."""
@@ -2519,6 +2584,7 @@ def change_monitor_channel(app):
     except ValueError:
         print("Invalid input. Please enter a number.")
 
+
 def check_wsl_audio():
     """Check WSL audio configuration and provide setup instructions."""
     try:       
@@ -2528,7 +2594,7 @@ def check_wsl_audio():
         # Check if PulseAudio is running
         result = subprocess.run(['pulseaudio', '--check'], capture_output=True, text=True)
         if result.returncode != 0:
-            print("\nPulseAudio is not running. Starting it...")
+            logging.info("\nPulseAudio is not running. Starting it...")
             subprocess.run(['pulseaudio', '--start'], capture_output=True)
         
         # Check if ALSA is configured
@@ -2564,6 +2630,7 @@ def check_wsl_audio():
         print("\n5. Test audio:")
         print("   speaker-test -t sine -f 1000 -l 1")
         return False
+
 
 def vu_meter(sound_in_id, sound_in_chs, channel, stop_vu_queue, asterisks):
     """VU meter function for displaying audio levels."""
@@ -2679,6 +2746,7 @@ def vu_meter(sound_in_id, sound_in_chs, channel, stop_vu_queue, asterisks):
     finally:
         print("\nStopping VU meter...")
 
+
 def toggle_vu_meter():
     """Toggle VU meter display."""
     global vu_proc, asterisks, change_ch_event
@@ -2749,6 +2817,7 @@ def toggle_vu_meter():
     # Clear input buffer after toggling
     clear_input_buffer()
 
+
 def stop_vu():
     """Stop VU meter."""
     global vu_proc
@@ -2781,10 +2850,10 @@ def toggle_intercom_m():
     print("Intercom toggle placeholder - full implementation pending")
 
 
-
 def stop_intercom_m():
     """Stop intercom - PLACEHOLDER."""
     print("Stop intercom placeholder - full implementation pending")
+
 
 def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
     """Single-shot FFT plot of audio."""
@@ -3000,9 +3069,381 @@ def trigger_fft():
         clear_input_buffer()
         print("FFT process completed")
 
+def plot_spectrogram(channel, y_axis_type, file_offset, period):
+    """
+    Generate a spectrogram from an audio file and display/save it as an image.
+    Parameters:
+    - channel: Channel to use for multi-channel audio files
+    - y_axis_type: Type of Y axis for the spectrogram ('log' or 'linear')
+    - file_offset: Offset for finding the audio file
+    - period: Duration limit for spectrogram analysis
+    """
+    # Store original matplotlib backend to restore later
+    original_backend = None
+    plt_imported = False
+    
+    try:
+        # Force garbage collection before starting
+        gc.collect()
+        
+        # Force non-interactive backend before any plotting
+        import matplotlib
+        original_backend = matplotlib.get_backend()
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        plt_imported = True
+        
+        # Clear any existing figures to prevent interference
+        plt.close('all')
+        
+        next_spectrogram = find_file_of_type_with_offset(file_offset)
+        
+        if next_spectrogram is None:
+            print("No data available to see?")
+            return
+            
+        full_audio_path = os.path.join(PRIMARY_DIRECTORY, next_spectrogram)
+        print("Spectrogram source:", full_audio_path)
+
+        print("Loading audio file with librosa...")
+        # Variables to ensure cleanup
+        y = None
+        sr = None
+        D_db = None
+        
+        try:
+            # For spectrogram display, limit duration to avoid memory issues
+            max_duration = min(config.PERIOD_RECORD, period)  # Max duration for display
+            
+            # Load the audio file with duration limit
+            # Using mono=False to preserve channels, keeping native sample rate
+            y, sr = librosa.load(full_audio_path, sr=None, duration=max_duration, mono=False)
+            print(f"Audio loaded: shape={y.shape if hasattr(y, 'shape') else 'scalar'}, sample_rate={sr} Hz, duration={max_duration}s")
+            
+            # Keep the native sample rate to preserve high-frequency information
+            print(f"Using sample rate of {sr} Hz from native sample rate of {config.PRIMARY_IN_SAMPLERATE} Hz")
+        except Exception as e:
+            print(f"Error loading audio file: {e}")
+            return
+        
+        # If multi-channel audio, select the specified channel
+        if len(y.shape) > 1:
+            y = y[channel]
+            print(f"Selected channel {channel+1}")
+            
+        print("Computing spectrogram...")
+        try:
+            # Use larger hop length for long files or high sample rates to reduce spectrogram size
+            duration_seconds = len(y) / sr
+            
+            # Adaptive parameters based on duration and sample rate
+            if sr > 96000:  # Very high sample rate
+                if duration_seconds > 60:
+                    hop_length = 4096  # Very large hop for high SR + long duration
+                    n_fft = 8192
+                else:
+                    hop_length = 2048
+                    n_fft = 4096
+            elif duration_seconds > 60:  # Normal sample rate, long file
+                hop_length = 2048
+                n_fft = 4096
+            else:  # Normal sample rate, short file
+                hop_length = 512
+                n_fft = 2048
+                
+            # Compute the spectrogram with specified parameters
+            D = librosa.stft(y, n_fft=n_fft, hop_length=hop_length)
+            D_db = librosa.amplitude_to_db(abs(D), ref=np.max)
+            print(f"Spectrogram computed: shape={D_db.shape}, hop_length={hop_length}, n_fft={n_fft}")
+            print(f"Frequency resolution: {sr/n_fft:.1f} Hz/bin, Time resolution: {hop_length/sr*1000:.1f} ms/frame")
+        except Exception as e:
+            print(f"Error computing spectrogram: {e}")
+            return
+        finally:
+            # Clean up intermediate variables
+            try:
+                if 'D' in locals():
+                    del D
+                gc.collect()
+            except:
+                pass
+        
+        # Plot the spectrogram
+        fig = None
+        try:
+            fig = plt.figure(figsize=(12, 6))
+
+            if y_axis_type == 'log':
+                librosa.display.specshow(D_db, sr=sr, x_axis='time', y_axis='log', hop_length=hop_length)
+                y_decimal_places = 3
+            elif y_axis_type == 'lin':
+                librosa.display.specshow(D_db, sr=sr, x_axis='time', y_axis='linear', hop_length=hop_length)
+                y_decimal_places = 0
+            else:
+                raise ValueError("y_axis_type must be 'log' or 'linear'")
+            
+            # Adjust y-ticks to be in kilohertz and have the specified number of decimal places
+            y_ticks = plt.gca().get_yticks()
+            plt.gca().set_yticklabels(['{:.{}f} kHz'.format(tick/1000, y_decimal_places) for tick in y_ticks])
+            
+            # Extract filename from the audio path
+            filename = os.path.basename(full_audio_path)
+            root, _ = os.path.splitext(filename)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_{root}_spectrogram.png")
+
+            # Set title to include filename and channel
+            mic_location = config.MIC_LOCATION[channel] if channel < len(config.MIC_LOCATION) else f"Ch{channel+1}"
+            plt.title(f'Spectrogram from {config.LOCATION_ID}, hive:{config.HIVE_ID}, Mic Loc:{mic_location}\nfile:{filename}, Ch:{channel+1}')
+            plt.colorbar(format='%+2.0f dB')
+            plt.tight_layout()
+            print("\nSaving spectrogram to:", plotname)
+            
+            # Make sure the directory exists
+            os.makedirs(os.path.dirname(plotname), exist_ok=True)
+            
+            # Display the expanded path
+            expanded_path = os.path.abspath(os.path.expanduser(plotname))
+            print(f"Absolute path: {expanded_path}")
+            
+            print("Attempting to save plot...")
+            try:
+                # For large spectrograms, use rasterization to speed up saving
+                if D_db.shape[1] > 10000:  # If more than 10k time frames
+                    print("Using rasterized format for large spectrogram...")
+                    plt.gca().set_rasterized(True)
+                    
+                plt.savefig(expanded_path, dpi=72, format='png', bbox_inches='tight')  # Lower DPI for very large plots
+                print("Plot saved successfully")
+            except Exception as e:
+                print(f"Error saving plot: {e}")
+                return
+            finally:
+                # Always close the figure, even if save failed
+                if fig is not None:
+                    plt.close(fig)
+                    
+            # Open the saved image based on OS
+            try:
+                if platform_manager.is_wsl():
+                    print("Opening image in WSL...")
+                    try:
+                        subprocess.Popen(['xdg-open', expanded_path])
+                    except FileNotFoundError:
+                        subprocess.Popen(['wslview', expanded_path])
+                elif platform_manager.is_macos():
+                    print("Opening image in macOS...")
+                    subprocess.Popen(['open', expanded_path])
+                elif sys.platform == 'win32':
+                    print("Opening image in Windows...")
+                    os.startfile(expanded_path)
+                else:
+                    print("Opening image in Linux...")
+                    subprocess.Popen(['xdg-open', expanded_path])
+                print("Image viewer command executed")
+            except Exception as e:
+                print(f"Could not open image viewer: {e}")
+                print(f"Image saved at: {expanded_path}")
+                if not os.path.exists(expanded_path):
+                    print("Warning: The saved image file does not exist!")
+        except Exception as e:
+            print(f"Error in plotting: {e}")
+            if fig is not None:
+                plt.close(fig)
+            raise
+        
+    except Exception as e:
+        print(f"Error in plot_spectrogram: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # Force cleanup of all matplotlib and librosa resources
+        try:
+            if plt_imported:
+                plt.close('all')
+                # Clear matplotlib's internal state
+                plt.clf()
+                plt.cla()
+            
+            # Restore original matplotlib backend if it was changed
+            if original_backend is not None and plt_imported:
+                try:
+                    import matplotlib
+                    matplotlib.use(original_backend)
+                    print(f"Restored matplotlib backend to: {original_backend}")
+                except Exception as e:
+                    print(f"Warning: Could not restore matplotlib backend: {e}")
+            
+            # Force garbage collection to free memory
+            gc.collect()
+            
+            # Clear any remaining variables to free memory
+            try:
+                # Set large variables to None to help garbage collection
+                y = None
+                sr = None
+                D_db = None
+            except:
+                pass
+            
+            # Final garbage collection
+            gc.collect()
+        except Exception as e:
+            print(f"Warning during cleanup: {e}")
+            pass
+
 def trigger_spectrogram():
-    """Trigger spectrogram generation - PLACEHOLDER."""
-    print("Spectrogram trigger placeholder - full implementation pending")
+    """Trigger spectrogram generation."""
+    try:
+        # Clean up any existing spectrogram process
+        cleanup_process('s')
+        
+        # Clear input buffer before starting
+        clear_input_buffer()
+        
+        # Get file offset and time difference
+        global file_offset, monitor_channel, time_diff
+        time_since_last = time_diff()  # Store the time difference
+        
+        # Only increment offset if we're within the recording period
+        if time_since_last < (config.PERIOD_RECORD + config.PERIOD_INTERVAL):
+            file_offset = min(file_offset + 1, 0)  # Cap at 0 to prevent going negative
+        else:
+            file_offset = 0  # Reset to first file
+            
+        print(f"Time since last file: {time_since_last:.1f}s, using file offset: {file_offset}")
+            
+        # Create and start the spectrogram process
+        active_processes['s'] = multiprocessing.Process(
+            target=plot_spectrogram, 
+            args=(monitor_channel, 'lin', file_offset, spectrogram_period)
+        )
+        active_processes['s'].daemon = True  # Make it a daemon process
+        active_processes['s'].start()
+        
+        # Brief delay to allow the spectrogram process to initialize properly
+        # and prevent interference with subsequent audio operations
+        time.sleep(0.2)
+        
+        print("Plotting spectrogram...")
+        clear_input_buffer()
+        
+        # Wait for completion with timeout
+        active_processes['s'].join(timeout=240)  # Increased timeout for spectrogram generation
+        
+        # Cleanup if process is still running
+        if active_processes['s'].is_alive():
+            print("Spectrogram process taking too long, terminating...")
+            try:
+                active_processes['s'].terminate()
+                active_processes['s'].join(timeout=1)
+                if active_processes['s'].is_alive():
+                    # Force kill if still running
+                    active_processes['s'].kill()
+                    active_processes['s'].join(timeout=1)
+            except Exception as e:
+                print(f"Warning during process termination: {e}")
+        
+    except Exception as e:
+        print(f"Error in trigger_spectrogram: {e}")
+    finally:
+        # Always clean up
+        try:
+            cleanup_process('s')
+        except Exception as e:
+            print(f"Warning during cleanup: {e}")
+        clear_input_buffer()
+        print("Spectrogram process completed")
+
+def get_system_performance():
+    """Get a single snapshot of system performance."""
+    # Get CPU usage for each core
+    cpu_percents = psutil.cpu_percent(interval=1, percpu=True)
+    
+    # Get memory usage
+    memory = psutil.virtual_memory()
+    
+    # Build the output string
+    output = "\n=== System Performance Monitor ===\n"
+    
+    # Add CPU information
+    output += "CPU Usage by Core:\n"
+    for i, percent in enumerate(cpu_percents):
+        output += f"Core {i}: {percent:5.1f}%\n"
+    
+    # Add memory information
+    output += "\nMemory Usage:\n"
+    output += f"Total: {memory.total / (1024**3):5.1f} GB\n"
+    output += f"Used:  {memory.used / (1024**3):5.1f} GB\n"
+    output += f"Free:  {memory.available / (1024**3):5.1f} GB\n"
+    output += f"Used%: {memory.percent}%\n"
+    output += "=" * 30 + "\n"
+    
+    return output
+
+def monitor_system_performance_once():
+    """Display a single snapshot of system performance."""
+    try:
+        output = get_system_performance()
+        print(output, flush=True)
+    except Exception as e:
+        print(f"\nError in performance monitor: {e}", end='\r')
+
+def monitor_system_performance_continuous():
+    """Continuously monitor and display CPU and RAM usage."""
+    global stop_performance_monitor_event
+    
+    try:
+        while not stop_performance_monitor_event.is_set():
+            output = get_system_performance()
+            print(output, flush=True)
+            
+            # Use event wait with timeout instead of sleep for better responsiveness
+            if stop_performance_monitor_event.wait(timeout=2):
+                break
+    except Exception as e:
+        print(f"\nError in performance monitor: {e}", end='\r')
+    finally:
+        print("\nPerformance monitor stopped.", end='\r')
+
+def run_performance_monitor_once():
+    """Run the performance monitor once."""
+    cleanup_process('p')  # Clean up any existing process
+    proc = multiprocessing.Process(target=monitor_system_performance_once)
+    proc.daemon = True
+    active_processes['p'] = proc
+    proc.start()
+    proc.join()  # Wait for it to complete
+    cleanup_process('p')
+
+def toggle_continuous_performance_monitor():
+    """Toggle the continuous performance monitor on/off."""
+    global performance_monitor_proc, stop_performance_monitor_event
+    
+    if performance_monitor_proc is None or not performance_monitor_proc.is_alive():
+        cleanup_process('P')  # Clean up any existing process
+        print("\nStarting continuous performance monitor...", end='\r')
+        
+        # Reset the event before starting
+        stop_performance_monitor_event.clear()
+        
+        performance_monitor_proc = multiprocessing.Process(target=monitor_system_performance_continuous)
+        performance_monitor_proc.daemon = True
+        active_processes['P'] = performance_monitor_proc
+        performance_monitor_proc.start()
+    else:
+        print("\nStopping performance monitor...", end='\r')
+        stop_performance_monitor_event.set()
+        if performance_monitor_proc.is_alive():
+            performance_monitor_proc.join(timeout=3)
+            if performance_monitor_proc.is_alive():
+                performance_monitor_proc.terminate()
+                performance_monitor_proc.join(timeout=1)
+                if performance_monitor_proc.is_alive():
+                    performance_monitor_proc.kill()
+        performance_monitor_proc = None
+        cleanup_process('P')
+        print("Performance monitor stopped", end='\r')
 
 def emergency_cleanup(signum, frame):
     """Emergency cleanup handler for signals."""
@@ -3023,7 +3464,9 @@ buffer_wrap_event = threading.Event()
 # Global variables for processes and events
 vu_proc = None
 intercom_proc = None
+performance_monitor_proc = None
 change_ch_event = threading.Event()
+stop_performance_monitor_event = threading.Event()
 
 def main():
     """Main function to initialize and run the BmarApp."""
@@ -3032,14 +3475,14 @@ def main():
     app = BmarApp()
     app.initialize()
     
-    print("BmarApp initialized successfully!")
-    print(f"Primary directory: {app.PRIMARY_DIRECTORY}")
-    print(f"Monitor directory: {app.MONITOR_DIRECTORY}")
-    print(f"Plot directory: {app.PLOT_DIRECTORY}")
-    
+    logging.info("BmarApp initialized successfully!")
+    logging.info(f"Primary directory: {app.PRIMARY_DIRECTORY}")
+    logging.info(f"Monitor directory: {app.MONITOR_DIRECTORY}")
+    logging.info(f"Plot directory: {app.PLOT_DIRECTORY}")
+
     # Set up audio device
     if not set_input_device(app):
-        print("Failed to configure audio input device. Exiting.")
+        logging.error("Failed to configure audio input device. Exiting.")
         sys.exit(1)
     
     # Display selected device information
@@ -3048,25 +3491,25 @@ def main():
     # Set monitor channel with validation
     if app.monitor_channel >= app.sound_in_chs:
         app.monitor_channel = 0
-        print(f"Setting monitor channel to {app.monitor_channel+1}")
+        logging.info(f"Setting monitor channel to {app.monitor_channel+1}")
 
     # Set up audio circular buffer
     setup_audio_circular_buffer(app)
-    
-    print(f"Buffer size: {app.BUFFER_SECONDS} seconds, {app.buffer.size/500000:.2f} megabytes")
-    print(f"Sample Rate: {int(app.PRIMARY_IN_SAMPLERATE)} Hz; File Format: {app.config.PRIMARY_FILE_FORMAT}; Channels: {app.sound_in_chs}")
+
+    logging.info(f"Buffer size: {app.BUFFER_SECONDS} seconds, {app.buffer.size/500000:.2f} megabytes")
+    logging.info(f"Sample Rate: {int(app.PRIMARY_IN_SAMPLERATE)} Hz; File Format: {app.config.PRIMARY_FILE_FORMAT}; Channels: {app.sound_in_chs}")
 
     # Check and create date-based directories
     if not check_and_create_date_folders(app):
-        print("Critical directories could not be created. Exiting.")
+        logging.error("Critical directories could not be created. Exiting.")
         sys.exit(1)
     
     # Print directories for verification
-    print("Directory setup:")
-    print(f"  Primary recordings: {app.PRIMARY_DIRECTORY}")
-    print(f"  Monitor recordings: {app.MONITOR_DIRECTORY}")
-    print(f"  Plot files: {app.PLOT_DIRECTORY}")
-    
+    logging.info("Directory setup:")
+    logging.info(f"  Primary recordings: {app.PRIMARY_DIRECTORY}")
+    logging.info(f"  Monitor recordings: {app.MONITOR_DIRECTORY}")
+    logging.info(f"  Plot files: {app.PLOT_DIRECTORY}")
+
     # Register cleanup handlers
     atexit.register(lambda: cleanup(app))
     signal.signal(signal.SIGINT, emergency_cleanup)
@@ -3078,20 +3521,18 @@ def main():
         keyboard_thread = threading.Thread(target=keyboard_listener, args=(app,))
         keyboard_thread.daemon = True
         keyboard_thread.start()
-        print("Keyboard listener started successfully!")
-    
-    print("Application ready for use.")
-    print("Press 'h' for help with keyboard commands.")
-    
+        logging.info("Keyboard listener started successfully!")
     try:
         # Start the audio stream
         result = audio_stream(app)
         if not result:
-            print("Audio stream failed to start properly.")
+            logging.error("Audio stream failed to start properly.")
+            sys.exit(1)
+
     except KeyboardInterrupt:
-        print('\nCtrl-C: Recording process stopped by user.')
+        logging.info('Ctrl-C: Recording process stopped by user.')
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.error(f"An error occurred: {e}")
         import traceback
         traceback.print_exc()
     finally:
@@ -3101,7 +3542,7 @@ def main():
         except SystemExit:
             pass  # Allow os._exit() to work
         except Exception as e:
-            print(f"Error during final cleanup: {e}")
+            logging.error(f"Error during final cleanup: {e}")
             import os
             os._exit(1)
 
