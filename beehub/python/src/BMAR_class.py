@@ -52,6 +52,7 @@ import librosa
 import logging
 import pyaudio
 
+
 # Platform-specific imports with error handling
 try:
     import fcntl
@@ -223,9 +224,9 @@ class PlatformManager:
         return self._tty
 
 # Create global platform manager instance
-platform_manager = PlatformManager()
+##platform_manager = PlatformManager()
 # Initialize platform at startup
-platform_manager.initialize()
+##platform_manager.initialize()
 
 # #############################################################
 # #### BmarApp Class to contain globals #######################
@@ -262,6 +263,12 @@ class BmarApp:
         self.sound_out_chs = int(self.config.SOUND_OUT_CHS_DEFAULT) if hasattr(self.config, 'SOUND_OUT_CHS_DEFAULT') else 2                        
         self.sound_out_samplerate = int(self.config.SOUND_OUT_SR_DEFAULT) if hasattr(self.config, 'SOUND_OUT_SR_DEFAULT') else 44100    
         
+        # Verify the values are reasonable
+        if self.sound_in_chs <= 0 or self.sound_in_chs > 64:  # Sanity check for number of channels
+            print(f"Warning: Invalid SOUND_IN_CHS value in config: {self.config.SOUND_IN_CHS}")
+            print(f"Setting to default of 1 channel")
+            self.sound_in_chs = 1
+
         # Audio configuration
         self.PRIMARY_IN_SAMPLERATE = self.config.PRIMARY_IN_SAMPLERATE
         self.PRIMARY_SAVE_SAMPLERATE = getattr(self.config, 'PRIMARY_SAVE_SAMPLERATE', None)
@@ -282,6 +289,13 @@ class BmarApp:
         self.file_offset = 0
         self.stop_program = [False]  # Use list to allow modification by reference
         self.testmode = True
+
+        # init recording varibles
+        self.continuous_start_index = None
+        self.continuous_end_index = 0        
+        self.period_start_index = None
+        self.event_start_index = None
+        self.detected_level = None
 
         # Date and time stuff for file naming
         current_date = datetime.datetime.now()
@@ -316,11 +330,34 @@ class BmarApp:
         self.buffer_lock = threading.Lock()
         self.blocksize = 0 # Let driver choose optimal block size
         
-        self.blocksize = 0 # Let driver choose optimal block size
-        
+        self.recording_worker_thread = None
+        self.intercom_thread = None
+
         # Misc
         self.time_diff = self._create_time_diff_func()
         self.fft_interval = 30 # minutes
+
+        # procs
+        self.asterisks = None
+        self.vu_proc = None
+        self.stop_vu_queue = None
+        self.intercom_proc = None
+        self.oscope_proc = None
+        self.fft_periodic_plot_proc = None
+        self.one_shot_fft_proc = None
+        self.overflow_monitor_proc = None
+
+        # event flags
+        self.stop_recording_event = threading.Event()
+        self.stop_tod_event = threading.Event()
+        self.stop_vu_event = threading.Event()
+        self.stop_intercom_event = threading.Event()
+        self.stop_fft_periodic_plot_event = threading.Event()
+        self.plot_oscope_done = threading.Event()
+        self.plot_fft_done = threading.Event()
+        self.plot_spectrogram_done = threading.Event()
+        self.change_ch_event = threading.Event()
+
 
     def _create_time_diff_func(self):
         """Create a time difference function similar to time_between() in BMAR_son.py."""
@@ -344,12 +381,14 @@ class BmarApp:
         # Return the helper function, NOT A VALUE.
         return helper
 
+
     def initialize(self):
         """Run all setup methods to initialize the application state."""
         self._setup_audio_format()
         self._setup_paths_and_devices()
         self.check_and_create_date_folders() # This also sets the initial directory paths
-        self.original_terminal_settings = save_terminal_settings()
+        self.original_terminal_settings = self.save_terminal_settings()
+
 
     def _setup_audio_format(self):
         """Sets the internal audio data type and subtype based on config."""
@@ -365,6 +404,7 @@ class BmarApp:
         else:
             logging.critical(f"The bit depth is not supported: {self.config.PRIMARY_BITDEPTH}")
             sys.exit(-1)
+
 
     def _setup_paths_and_devices(self):
         """Sets up data paths and device names based on the operating system."""
@@ -389,6 +429,7 @@ class BmarApp:
             self.make_name, self.model_name, self.device_name, self.api_name, self.hostapi_name, self.hostapi_index, self.device_id = \
                 self.config.LINUX_MAKE_NAME, self.config.LINUX_MODEL_NAME, self.config.LINUX_DEVICE_NAME, self.config.LINUX_API_NAME, \
                 self.config.LINUX_HOSTAPI_NAME, self.config.LINUX_HOSTAPI_INDEX, self.config.LINUX_DEVICE_ID
+
 
     def check_and_create_date_folders(self):
         """Checks and creates date-stamped directories for data storage."""
@@ -415,7 +456,27 @@ class BmarApp:
         
         required_directories = [self.PRIMARY_DIRECTORY, self.MONITOR_DIRECTORY, self.PLOT_DIRECTORY]
         return ensure_directories_exist(required_directories)
+    
 
+    def save_terminal_settings(self):
+        """Save current terminal settings for later restoration."""
+        try:
+            if sys.platform == 'win32' and not self.platform_manager.is_wsl():
+                # Windows doesn't need to save terminal settings in the same way
+                return None
+            elif self.platform_manager.termios is not None:
+                # For Unix-like systems
+                return self.platform_manager.termios.tcgetattr(sys.stdin)
+            else:
+                return None
+        except Exception as e:
+            logging.warning(f"Could not save terminal settings: {e}")
+            return None
+    
+        # end class BmarApp
+
+
+'''
 # audio interface info
 make_name = None
 model_name = None
@@ -436,34 +497,10 @@ detected_level = None
 recording_worker_thread = None
 intercom_thread = None
 
-# procs
-vu_proc = None
-stop_vu_queue = None
-oscope_proc = None
-intercom_proc = None
-fft_periodic_plot_proc = None
-one_shot_fft_proc = None  
-overflow_monitor_proc = None
-
-# event flags
-stop_recording_event = threading.Event()
-stop_tod_event = threading.Event()
-stop_vu_event = threading.Event()
-stop_intercom_event = threading.Event()
-stop_fft_periodic_plot_event = threading.Event()
-
-plot_oscope_done = threading.Event()
-plot_fft_done = threading.Event()
-plot_spectrogram_done = threading.Event()
-change_ch_event = threading.Event()
-
-# queues
-stop_vu_queue = None
-
 # misc globals
 _dtype = None                   # parms sd lib cares about
 _subtype = None
-asterisks = '*'
+##asterisks = '*'
 device_ch = None                # total number of channels from device
 current_time = None
 timestamp = None
@@ -474,6 +511,8 @@ buffer = None
 buffer_index = None
 file_offset = 0
 
+
+# #############################################################
 # Dictionary to track active processes by key
 active_processes = {
     'v': None,  # VU meter
@@ -484,6 +523,7 @@ active_processes = {
     'p': None,  # Performance monitor (one-shot)
     'P': None   # Performance monitor (continuous)
 }
+'''
 
 # #############################################################
 # #### Control Panel ##########################################
@@ -506,7 +546,7 @@ FULL_SCALE = 2 ** 16                            # just for cli vu meter level re
 BUFFER_SECONDS = 1000                           # time length of circular buffer 
 
 # global: list of mics present in system
-MICS_ACTIVE = [config.MIC_1, config.MIC_2, config.MIC_3, config.MIC_4]
+##MICS_ACTIVE = [config.MIC_1, config.MIC_2, config.MIC_3, config.MIC_4]
 
 # translate human to machine
 if config.PRIMARY_BITDEPTH == 16:
@@ -522,7 +562,7 @@ else:
     print("The bit depth is not supported: ", config.PRIMARY_BITDEPTH)
     quit(-1)
 
-
+'''
 # Date and time stuff for file naming
 current_date = datetime.datetime.now()
 current_year = current_date.strftime('%Y')
@@ -535,9 +575,11 @@ yy = current_date.strftime('%y')  # 2-digit year (e.g., '23' for 2023)
 mm = current_date.strftime('%m')  # Month (01-12)
 dd = current_date.strftime('%d')  # Day (01-31)
 date_folder = f"{yy}{mm}{dd}"     # Format YYMMDD (e.g., '230516')
+'''
 
-spectrogram_period = config.PERIOD_SPECTROGRAM
+##spectrogram_period = config.PERIOD_SPECTROGRAM
 
+'''
 # Select the appropriate data drive and path based on OS
 if platform_manager.is_macos():
     data_drive = os.path.expanduser(config.mac_data_drive)  # Expand ~ if present
@@ -587,16 +629,7 @@ sound_out_samplerate = int(config.SOUND_OUT_SR_DEFAULT) if hasattr(config, 'SOUN
 if sound_in_chs <= 0 or sound_in_chs > 64:  # Sanity check for number of channels
     print(f"Warning: Invalid SOUND_IN_CHS value in config: {config.SOUND_IN_CHS}")
     print(f"Setting to default of 1 channel")
-    sound_in_chs = 1
-
-# Only print config values in the main process, not in subprocesses
-# This ensures they don't show up when starting the VU meter or intercom
-if is_main_process():
-    print(f"\nConfig values:")
-    print(f"  data_drive: '{data_drive}'")
-    print(f"  data_path: '{data_path}'")
-    print(f"  folders: {folders}")
-    print(f"  Date folder format: '{date_folder}' (YYMMDD)")
+    app.sound_in_chs = 1
 
 # Construct directory paths using the folders list and including the date subfolder
 # Ensure we have proper path joining by using os.path.join
@@ -611,6 +644,17 @@ PLOT_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.
 PRIMARY_DIRECTORY = os.path.join(PRIMARY_DIRECTORY, "")
 MONITOR_DIRECTORY = os.path.join(MONITOR_DIRECTORY, "")
 PLOT_DIRECTORY = os.path.join(PLOT_DIRECTORY, "")
+'''
+
+# Only print config values in the main process, not in subprocesses
+# This ensures they don't show up when starting the VU meter or intercom
+if is_main_process():
+    print(f"\nConfig values:")
+    print(f"  data_drive: '{data_drive}'")
+    print(f"  data_path: '{data_path}'")
+    print(f"  folders: {folders}")
+    print(f"  Date folder format: '{date_folder}' (YYMMDD)")
+
 
 testmode = False                            # True = run in test mode with lower than needed sample rate
 KB_or_CP = 'KB'                             # use keyboard or control panel (PyQT5) to control program
@@ -676,31 +720,18 @@ def ensure_directories_exist(directories):
     
     return success
 
-def save_terminal_settings():
-    """Save current terminal settings for later restoration."""
-    try:
-        if sys.platform == 'win32' and not platform_manager.is_wsl():
-            # Windows doesn't need to save terminal settings in the same way
-            return None
-        elif platform_manager.termios is not None:
-            # For Unix-like systems
-            return platform_manager.termios.tcgetattr(sys.stdin)
-        else:
-            return None
-    except Exception as e:
-        logging.warning(f"Could not save terminal settings: {e}")
-        return None
 
-def restore_terminal_settings(settings):
+
+def restore_terminal_settings(app, settings):
     """Restore terminal settings from saved state."""
     try:
         if settings is None:
             return
-        if sys.platform == 'win32' and not platform_manager.is_wsl():
+        if sys.platform == 'win32' and not app.platform_manager.is_wsl():
             # Windows doesn't need terminal restoration in the same way
             return
-        elif platform_manager.termios is not None:
-            platform_manager.termios.tcsetattr(sys.stdin, platform_manager.termios.TCSADRAIN, settings)
+        elif app.platform_manager.termios is not None:
+            app.platform_manager.termios.tcsetattr(sys.stdin, app.platform_manager.termios.TCSADRAIN, settings)
     except Exception as e:
         logging.warning(f"Could not restore terminal settings: {e}")
 
@@ -718,7 +749,7 @@ def stop_all():
     # This is a placeholder function that should be implemented based on your application's needs
     pass
 
-def check_and_create_date_folders(app=None):
+def check_and_create_date_folders(app):
     """
     Check if today's date folders exist and create them if necessary.
     This function should be called at startup and periodically during operation.
@@ -727,60 +758,33 @@ def check_and_create_date_folders(app=None):
         app: BmarApp instance containing configuration and directory paths.
              If None, uses global variables for backward compatibility.
     """
-    if app is not None:
-        # Use BmarApp instance
-        # Get current date components
-        current_date = datetime.datetime.now()
-        yy = current_date.strftime('%y')
-        mm = current_date.strftime('%m')
-        dd = current_date.strftime('%d')
-        date_folder = f"{yy}{mm}{dd}"
-        
-        print(f"\nChecking/creating date folders for {date_folder}...")
-        
-        # Update directory paths with current date using app properties
-        app.PRIMARY_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID, 
-                                        app.folders[0], "raw", date_folder, "")
-        app.MONITOR_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID, 
-                                        app.folders[0], "mp3", date_folder, "")
-        app.PLOT_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID, 
-                                     app.folders[1], date_folder, "")
-        
-        print(f"Primary directory: {app.PRIMARY_DIRECTORY}")
-        print(f"Monitor directory: {app.MONITOR_DIRECTORY}")
-        print(f"Plot directory: {app.PLOT_DIRECTORY}")
-        
-        # Create directories if they don't exist
-        required_directories = [app.PRIMARY_DIRECTORY, app.MONITOR_DIRECTORY, app.PLOT_DIRECTORY]
-        return ensure_directories_exist(required_directories)
-    else:
-        # Backward compatibility: use global variables
-        global PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOT_DIRECTORY
-        
-        # Get current date components
-        current_date = datetime.datetime.now()
-        yy = current_date.strftime('%y')
-        mm = current_date.strftime('%m')
-        dd = current_date.strftime('%d')
-        date_folder = f"{yy}{mm}{dd}"
-        
-        print(f"\nChecking/creating date folders for {date_folder}...")
-        
-        # Update directory paths with current date
-        PRIMARY_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
-                                        folders[0], "raw", date_folder, "")
-        MONITOR_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
-                                        folders[0], "mp3", date_folder, "")
-        PLOT_DIRECTORY = os.path.join(data_drive, data_path, config.LOCATION_ID, config.HIVE_ID, 
-                                     folders[1], date_folder, "")
-        
-        print(f"Primary directory: {PRIMARY_DIRECTORY}")
-        print(f"Monitor directory: {MONITOR_DIRECTORY}")
-        print(f"Plot directory: {PLOT_DIRECTORY}")
-        
-        # Create directories if they don't exist
-        required_directories = [PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOT_DIRECTORY]
-        return ensure_directories_exist(required_directories)
+
+    # Use BmarApp instance
+    # Get current date components
+    current_date = datetime.datetime.now()
+    yy = current_date.strftime('%y')
+    mm = current_date.strftime('%m')
+    dd = current_date.strftime('%d')
+    date_folder = f"{yy}{mm}{dd}"
+    
+    print(f"\nChecking/creating date folders for {date_folder}...")
+    
+    # Update directory paths with current date using app properties
+    app.PRIMARY_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID, 
+                                    app.folders[0], "raw", date_folder, "")
+    app.MONITOR_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID, 
+                                    app.folders[0], "mp3", date_folder, "")
+    app.PLOT_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID, 
+                                    app.folders[1], date_folder, "")
+    
+    print(f"Primary directory: {app.PRIMARY_DIRECTORY}")
+    print(f"Monitor directory: {app.MONITOR_DIRECTORY}")
+    print(f"Plot directory: {app.PLOT_DIRECTORY}")
+    
+    # Create directories if they don't exist
+    required_directories = [app.PRIMARY_DIRECTORY, app.MONITOR_DIRECTORY, app.PLOT_DIRECTORY]
+    return ensure_directories_exist(required_directories)
+    
 
 def signal_handler(sig, frame):
     print('\nStopping all threads...\r')
@@ -791,11 +795,11 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
-def reset_terminal():
+def reset_terminal(app):
     """Reset terminal settings to default state without clearing the screen."""
     try:
         # Check if we're on Windows
-        if sys.platform == 'win32' and not platform_manager.is_wsl():
+        if sys.platform == 'win32' and not app.platform_manager.is_wsl():
             # Windows-specific terminal reset (no termios needed)
             # Just flush the output
             sys.stdout.flush()
@@ -803,10 +807,10 @@ def reset_terminal():
             return
             
         # For Unix-like systems (macOS and Linux)
-        if platform_manager.termios is not None:
+        if app.platform_manager.termios is not None:
             # Reset terminal settings
-            platform_manager.termios.tcsetattr(sys.stdin, platform_manager.termios.TCSADRAIN, platform_manager.termios.tcgetattr(sys.stdin))
-            
+            app.platform_manager.termios.tcsetattr(sys.stdin, app.platform_manager.termios.TCSADRAIN, app.platform_manager.termios.tcgetattr(sys.stdin))
+
             # Reset terminal modes without clearing screen
             safe_stty('sane')
             
@@ -830,32 +834,32 @@ def reset_terminal():
         except:
             pass
 
-def getch():
+def getch(app):
     """Simple getch implementation for Linux."""
     try:
-        if platform_manager.termios is not None:
+        if app.platform_manager.termios is not None:
             fd = sys.stdin.fileno()
-            old = platform_manager.termios.tcgetattr(fd)
-            new = platform_manager.termios.tcgetattr(fd)
-            new[3] = new[3] & ~platform_manager.termios.ICANON & ~platform_manager.termios.ECHO
-            new[6][platform_manager.termios.VMIN] = 1
-            new[6][platform_manager.termios.VTIME] = 0
-            platform_manager.termios.tcsetattr(fd, platform_manager.termios.TCSANOW, new)
+            old = app.platform_manager.termios.tcgetattr(fd)
+            new = app.platform_manager.termios.tcgetattr(fd)
+            new[3] = new[3] & ~app.platform_manager.termios.ICANON & ~app.platform_manager.termios.ECHO
+            new[6][app.platform_manager.termios.VMIN] = 1
+            new[6][app.platform_manager.termios.VTIME] = 0
+            app.platform_manager.termios.tcsetattr(fd, app.platform_manager.termios.TCSANOW, new)
             try:
                 c = os.read(fd, 1)
                 return c.decode('utf-8')
             finally:
-                platform_manager.termios.tcsetattr(fd, platform_manager.termios.TCSAFLUSH, old)
+                app.platform_manager.termios.tcsetattr(fd, app.platform_manager.termios.TCSAFLUSH, old)
         else:
             return input()[:1]
     except:
         return None
 
-def get_key():
+def get_key(app):
     """Get a single keypress from the user."""
-    if platform_manager.msvcrt is not None:
+    if app.platform_manager.msvcrt is not None:
         try:
-            return platform_manager.msvcrt.getch().decode('utf-8')
+            return app.platform_manager.msvcrt.getch().decode('utf-8')
         except Exception as e:
             print(f"Error reading key in Windows: {e}")
             return None
@@ -870,7 +874,7 @@ def get_key():
                 except ImportError:
                     print("Warning: msvcrt module not available on this Windows system", end='\r\n', flush=True)
                 return None
-            elif platform_manager.is_macos() or sys.platform.startswith('linux'):
+            elif app.platform_manager.is_macos() or sys.platform.startswith('linux'):
                 # Use termios for macOS and Linux
                 try:
                     import termios
@@ -932,7 +936,7 @@ def get_windows_sample_rate(device_name):
         print(f"Error getting Windows sample rate: {e}")
         return None
 
-def get_current_device_sample_rate(device_id):
+def get_current_device_sample_rate(app,device_id):
     """Query the current sample rate of the device from the operating system."""
     try:
         # Get the current device configuration
@@ -946,7 +950,7 @@ def get_current_device_sample_rate(device_id):
             print(f"Audio API: {hostapi_info['name']}")
         
         # First try to get the rate from Windows using PyAudio
-        if not platform_manager.is_wsl():
+        if not app.platform_manager.is_wsl():
             windows_rate = get_windows_sample_rate(device_info['name'])
             if windows_rate:
                 print(f"Windows reported rate: {windows_rate} Hz")
@@ -982,7 +986,7 @@ def print_all_input_devices():
 
 # #### version from BMAR_son.py ####
 
-def timed_input(prompt, timeout=3, default='n'):
+def timed_input(app, prompt, timeout=3, default='n'):
     """
     Get user input with a timeout and default value for headless operation.
     
@@ -1007,7 +1011,7 @@ def timed_input(prompt, timeout=3, default='n'):
     windows_method_failed = False
     
     # Platform-specific input handling
-    if sys.platform == 'win32' and not platform_manager.is_wsl():
+    if sys.platform == 'win32' and not app.platform_manager.is_wsl():
         # Windows implementation using msvcrt - import directly to avoid module issues
         try:
             import msvcrt as local_msvcrt
@@ -1038,7 +1042,7 @@ def timed_input(prompt, timeout=3, default='n'):
             windows_method_failed = True
     
     # Unix/Linux/macOS implementation (or Windows fallback)
-    if (sys.platform != 'win32' or platform_manager.is_wsl() or windows_method_failed):
+    if (sys.platform != 'win32' or  app.platform_manager.is_wsl() or windows_method_failed):
         # Reset start time if we're falling back from Windows method
         if windows_method_failed:
             start_time = time.time()
@@ -1046,7 +1050,7 @@ def timed_input(prompt, timeout=3, default='n'):
         # Check if we can use select on this platform
         try:
             # On Windows (non-WSL), select doesn't work with stdin, so use a different approach
-            if sys.platform == 'win32' and not platform_manager.is_wsl():
+            if sys.platform == 'win32' and not app.platform_manager.is_wsl():
                 # Windows fallback - use a different approach since input() blocks
                 # We'll use a simple loop that checks for available input without blocking
                 print(f"\n[Windows fallback method activated]")
@@ -1116,7 +1120,7 @@ def set_input_device(app):
                         print(f"\nChannel mismatch detected:")
                         print(f"  Configuration requires: {original_channels} channels")
                         print(f"  Device supports: {device['max_input_channels']} channels")
-                        response = timed_input(f"\nWould you like to proceed with {device['max_input_channels']} channel(s) instead? (y/N): ", timeout=3, default='n')
+                        response = timed_input(app,f"\nWould you like to proceed with {device['max_input_channels']} channel(s) instead? (y/N): ", timeout=3, default='n')
 
                         if response.lower() != 'y':
                             print("User declined to use fewer channels.")
@@ -1129,7 +1133,7 @@ def set_input_device(app):
                     if user_approved:
                         try:
                             # Try to set the sample rate using PyAudio first
-                            if not platform_manager.is_wsl():
+                            if not app.platform_manager.is_wsl():
                                 try:
                                     p = pyaudio.PyAudio()
                                     device_info = p.get_device_info_by_index(app.device_id)
@@ -1186,14 +1190,14 @@ def set_input_device(app):
                         except Exception as e:
                             print(f"\nERROR: Could not use specified device ID {app.device_id}")
                             print(f"Reason: {str(e)}")
-                            response = timed_input("\nThe specified device could not be used. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
+                            response = timed_input(app,"\nThe specified device could not be used. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
                             if response.lower() != 'y':
                                 print("Exiting as requested.")
                                 sys.exit(1)
                             print("Falling back to device search...")
                 else:
                     print(f"\nERROR: Specified device ID {app.device_id} is not an input device")
-                    response = timed_input("\nThe specified device is not an input device. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
+                    response = timed_input(app,"\nThe specified device is not an input device. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
                     if response.lower() != 'y':
                         print("Exiting as requested.")
                         sys.exit(1)
@@ -1201,7 +1205,7 @@ def set_input_device(app):
             except Exception as e:
                 print(f"\nERROR: Could not access specified device ID {app.device_id}")
                 print(f"Reason: {str(e)}")
-                response = timed_input("\nThe specified device could not be accessed. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
+                response = timed_input(app,"\nThe specified device could not be accessed. Would you like to proceed with an alternative device? (y/N): ", timeout=3, default='n')
                 if response.lower() != 'y':
                     print("Exiting as requested.")
                     sys.exit(1)
@@ -1238,7 +1242,7 @@ def set_input_device(app):
                         print(f"\nChannel mismatch detected:")
                         print(f"  Configuration requires: {app.sound_in_chs} channels")
                         print(f"  Device supports: {actual_channels} channels")
-                        response = timed_input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ", timeout=3, default='n')
+                        response = timed_input(app,f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ", timeout=3, default='n')
                         if response.lower() != 'y':
                             print("Skipping this device...")
                             continue
@@ -1286,7 +1290,7 @@ def set_input_device(app):
                 print(f"\nChannel mismatch detected:")
                 print(f"  Configuration requires: {app.sound_in_chs} channels")
                 print(f"  Device supports: {actual_channels} channels")
-                response = timed_input(f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ", timeout=3, default='n')
+                response = timed_input(app,f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ", timeout=3, default='n')
                 if response.lower() != 'y':
                     print("Skipping this device...")
                     continue
@@ -1345,25 +1349,25 @@ def list_all_threads():
         print(f"Thread name: {thread.name}, Thread ID: {thread.ident}, Alive: {thread.is_alive()}")
 
 
-def clear_input_buffer():
+def clear_input_buffer(app):
     """Clear the keyboard input buffer. Handles both Windows and non-Windows platforms."""
-    if sys.platform == 'win32' and not platform_manager.is_wsl():
+    if sys.platform == 'win32' and not app.platform_manager.is_wsl():
         try:
-            while platform_manager.msvcrt is not None and platform_manager.msvcrt.kbhit():
-                platform_manager.msvcrt.getch()
+            while app.platform_manager.msvcrt is not None and app.platform_manager.msvcrt.kbhit():
+                app.platform_manager.msvcrt.getch()
         except Exception as e:
             print(f"Warning: Could not clear input buffer: {e}")
     else:
         # For macOS and Linux/WSL
-        if platform_manager.termios is not None and platform_manager.tty is not None:
+        if app.platform_manager.termios is not None and app.platform_manager.tty is not None:
             fd = sys.stdin.fileno()
             try:
                 # Save old terminal settings
-                old_settings = platform_manager.termios.tcgetattr(fd)
-                
+                old_settings = app.platform_manager.termios.tcgetattr(fd)
+
                 # Set non-blocking mode
-                platform_manager.tty.setraw(fd, platform_manager.termios.TCSANOW)
-                
+                app.platform_manager.tty.setraw(fd, app.platform_manager.termios.TCSANOW)
+
                 # Read all pending input
                 while select.select([sys.stdin], [], [], 0)[0]:
                     sys.stdin.read(1)
@@ -1375,7 +1379,7 @@ def clear_input_buffer():
             finally:
                 # Restore settings
                 try:
-                    platform_manager.termios.tcsetattr(fd, platform_manager.termios.TCSADRAIN, old_settings)
+                    app.platform_manager.termios.tcsetattr(fd, app.platform_manager.termios.TCSADRAIN, old_settings)
                 except Exception as e:
                     print(f"Warning during terminal reset: {e}")
         else:
@@ -1434,7 +1438,7 @@ def show_audio_device_info_for_defaults():
     print(f"Default Output Device: [{default_output_info['index']}] {default_output_info['name']}\n")
 
 
-def show_audio_device_list():
+def show_audio_device_list(app):
     """Display detailed information about the selected audio input and output devices."""
     print("\nSelected Audio Device Information:")
     print("-" * 50)
@@ -1443,28 +1447,28 @@ def show_audio_device_list():
     try:
         input_info = sd.query_devices(sound_in_id)
         print("\nInput Device:")
-        print(f"Name: [{sound_in_id}] {input_info['name']}")
+        print(f"Name: [{app.sound_in_id}] {input_info['name']}")
         print(f"Default Sample Rate: {int(input_info['default_samplerate'])} Hz")
-        print(f"Bit Depth: {config.PRIMARY_BITDEPTH} bits")
+        print(f"Bit Depth: {app.config.PRIMARY_BITDEPTH} bits")
         print(f"Max Input Channels: {input_info['max_input_channels']}")
-        print(f"Current Sample Rate: {int(config.PRIMARY_IN_SAMPLERATE)} Hz")
-        print(f"Current Channels: {sound_in_chs}")
+        print(f"Current Sample Rate: {int(app.config.PRIMARY_IN_SAMPLERATE)} Hz")
+        print(f"Current Channels: {app.sound_in_chs}")
         if 'hostapi' in input_info:
-            hostapi_info = sd.query_hostapis(index=input_info['hostapi'])
-            print(f"Audio API: {hostapi_info['name']}")
+            app.hostapi_info = sd.query_hostapis(index=input_info['hostapi'])
+            print(f"Audio API: {app.hostapi_info['name']}")
     except Exception as e:
         print(f"Error getting input device info: {e}")
     
     # Get and display output device info
     try:
-        output_info = sd.query_devices(sound_out_id)
+        app.output_info = sd.query_devices(app.sound_out_id)
         print("\nOutput Device:")
-        print(f"Name: [{sound_out_id}] {output_info['name']}")
-        print(f"Default Sample Rate: {int(output_info['default_samplerate'])} Hz")
-        print(f"Max Output Channels: {output_info['max_output_channels']}")
-        if 'hostapi' in output_info:
-            hostapi_info = sd.query_hostapis(index=output_info['hostapi'])
-            print(f"Audio API: {hostapi_info['name']}")
+        print(f"Name: [{app.sound_out_id}] {app.output_info['name']}")
+        print(f"Default Sample Rate: {int(app.output_info['default_samplerate'])} Hz")
+        print(f"Max Output Channels: {app.output_info['max_output_channels']}")
+        if 'hostapi' in app.output_info:
+            app.hostapi_info = sd.query_hostapis(index=app.output_info['hostapi'])
+            print(f"Audio API: {app.hostapi_info['name']}")
     except Exception as e:
         print(f"Error getting output device info: {e}")
     
@@ -1472,52 +1476,52 @@ def show_audio_device_list():
     sys.stdout.flush()
 
 
-def show_detailed_device_list():
+def show_detailed_device_list(app):
     """Display a detailed list of all audio devices with input/output indicators."""
     print("\nAudio Device List:")
     print("-" * 80)
     
-    devices = sd.query_devices()
-    for i, device in enumerate(devices):
+    app.devices = sd.query_devices()
+    for i, device in enumerate(app.devices):
         # Get API name
-        hostapi_info = sd.query_hostapis(index=device['hostapi'])
-        api_name = hostapi_info['name']
-        
+        app.hostapi_info = sd.query_hostapis(index=device['hostapi'])
+        api_name = app.hostapi_info['name']
+
         # Determine if device is input, output, or both
         in_channels = device['max_input_channels']
         out_channels = device['max_output_channels']
         
         # Create prefix based on device type and whether it's the active device
-        if i == sound_in_id and in_channels > 0:
+        if i == app.sound_in_id and in_channels > 0:
             prefix = ">"
-        elif i == sound_out_id and out_channels > 0:
+        elif i == app.sound_out_id and out_channels > 0:
             prefix = "<"
         else:
             prefix = " "
             
         # Format the device name to fit in 40 characters
-        device_name = device['name']
-        if len(device_name) > 40:
-            device_name = device_name[:37] + "..."
-            
+        app.device_name = device['name']
+        if len(app.device_name) > 40:
+            app.device_name = app.device_name[:37] + "..."
+
         # Print the device information
-        print(f"{prefix} {i:2d} {device_name:<40} {api_name} ({in_channels} in, {out_channels} out)")
-    
+        print(f"{prefix} {i:2d} {app.device_name:<40} {api_name} ({in_channels} in, {out_channels} out)")
+
     print("-" * 80)
     sys.stdout.flush()
 
 
-def get_enabled_mic_locations():
+def get_enabled_mic_locations(app):
     """
     Reads microphone enable states (MIC_1 to MIC_4) and maps to their corresponding locations.
     """
     # Define microphone states and corresponding locations
-    mic_location_names = [config.MIC_LOCATION[i] for i, enabled in enumerate(MICS_ACTIVE) if enabled]
+    mic_location_names = [app.config.MIC_LOCATION[i] for i, enabled in enumerate(app.MICS_ACTIVE) if enabled]
     return mic_location_names
 
 ##mic_location_names = get_enabled_mic_locations()
-def show_mic_locations():
-    print("Enabled microphone locations:", get_enabled_mic_locations())
+def show_mic_locations(app):
+    print("Enabled microphone locations:", get_enabled_mic_locations(app))
 
 
 def is_mic_position_in_bounds(mic_list, position):
@@ -1562,9 +1566,9 @@ def check_stream_status(app, stream_duration):
 
 
 # fetch the most recent audio file in the directory
-def find_file_of_type_with_offset_1(directory=PRIMARY_DIRECTORY, file_type=config.PRIMARY_FILE_FORMAT, offset=0):
+def find_file_of_type_with_offset_1(app, offset=0):
     # Expand path if it contains a tilde
-    expanded_dir = os.path.expanduser(directory)
+    expanded_dir = os.path.expanduser(app.config.PRIMARY_DIRECTORY)
     
     # Ensure directory exists
     if not os.path.exists(expanded_dir):
@@ -1573,7 +1577,7 @@ def find_file_of_type_with_offset_1(directory=PRIMARY_DIRECTORY, file_type=confi
         
     try:
         matching_files = [os.path.join(expanded_dir, f) for f in os.listdir(expanded_dir) \
-                          if os.path.isfile(os.path.join(expanded_dir, f)) and f.endswith(f".{file_type.lower()}")]
+                          if os.path.isfile(os.path.join(expanded_dir, f)) and f.endswith(f".{app.config.PRIMARY_FILE_FORMAT.lower()}")]
         if offset < len(matching_files):
             return matching_files[offset]
     except Exception as e:
@@ -1582,11 +1586,11 @@ def find_file_of_type_with_offset_1(directory=PRIMARY_DIRECTORY, file_type=confi
     return None
 
 # return the most recent audio file in the directory minus offset (next most recent, etc.)
-def find_file_of_type_with_offset(offset, directory=PRIMARY_DIRECTORY, file_type=config.PRIMARY_FILE_FORMAT):
+def find_file_of_type_with_offset(app, offset):
     # Expand path if it contains a tilde
-    expanded_dir = os.path.expanduser(directory)
+    expanded_dir = os.path.expanduser(app.config.PRIMARY_DIRECTORY)
     
-    print(f"\nSearching for {file_type} files in: {expanded_dir}")
+    print(f"\nSearching for {app.config.PRIMARY_FILE_FORMAT} files in: {expanded_dir}")
     
     # Ensure directory exists
     if not os.path.exists(expanded_dir):
@@ -1602,20 +1606,20 @@ def find_file_of_type_with_offset(offset, directory=PRIMARY_DIRECTORY, file_type
         files_of_type = [f for f in all_files if os.path.isfile(os.path.join(expanded_dir, f)) and f.lower().endswith(f".{file_type.lower()}")]
         
         if not files_of_type:
-            print(f"No {file_type} files found in directory: {expanded_dir}")
-            print(f"Looking for files ending with: .{file_type.lower()} (case-insensitive)")
+            print(f"No {app.config.PRIMARY_FILE_FORMAT} files found in directory: {expanded_dir}")
+            print(f"Looking for files ending with: .{app.config.PRIMARY_FILE_FORMAT.lower()} (case-insensitive)")
             return None
             
         # Sort files alphabetically - most recent first
         files_of_type.sort(reverse=True)
-        print(f"Found {len(files_of_type)} {file_type} files: {files_of_type}")
+        print(f"Found {len(files_of_type)} {app.config.PRIMARY_FILE_FORMAT} files: {files_of_type}")
         
         if offset < len(files_of_type):
             selected_file = files_of_type[offset]
             print(f"Selected file at offset {offset}: {selected_file}")
             return selected_file
         else:
-            print(f"Offset {offset} is out of range. Found {len(files_of_type)} {file_type} files.")
+            print(f"Offset {offset} is out of range. Found {len(files_of_type)} {app.config.PRIMARY_FILE_FORMAT} files.")
             return None
     except Exception as e:
         print(f"Error listing files in {expanded_dir}: {e}")
@@ -1839,9 +1843,43 @@ def _record_audio_pyaudio(duration, sound_in_id, sound_in_chs, stop_queue, task_
             except Exception as e:
                 logging.error(f"Error terminating PyAudio instance for {task_name}", exc_info=True)
 
+# #############################################################
+# Plotting functions    
+# #############################################################
+
+def cleanup_process(app, command):
+    """Clean up a specific command's process."""
+    try:
+        # Check if the command key exists in active_processes
+        if command in app.active_processes:
+            process = app.active_processes[command]
+            if process is not None:
+                try:
+                    # Check if it's still alive without raising an exception
+                    if hasattr(process, 'is_alive') and process.is_alive():
+                        try:
+                            process.terminate()
+                            process.join(timeout=1)
+                            if process.is_alive():
+                                process.kill()
+                        except Exception as e:
+                            print(f"Error terminating process for command '{command}': {e}")
+                except Exception as e:
+                    # Process may no longer exist or be accessible
+                    print(f"Warning: Could not check process status for command '{command}': {e}")
+                
+                # Reset the process reference
+                app.active_processes[command] = None
+                print(f"Process for command '{command}' has been cleaned up")
+        else:
+            # The command doesn't exist in our tracking dictionary
+            print(f"Warning: No process tracking for command '{command}'")
+    except Exception as e:
+        print(f"Error in cleanup_process for command '{command}': {e}")
+
 
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
-def plot_oscope(sound_in_id, sound_in_chs, queue): 
+def plot_oscope(app, queue): 
     try:
         # Force garbage collection before starting
         gc.collect()
@@ -1856,7 +1894,7 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
         time.sleep(0.1)
             
         recording, actual_channels = _record_audio_pyaudio(
-            config.TRACE_DURATION, sound_in_id, sound_in_chs, queue, "oscilloscope traces"
+            config.TRACE_DURATION, app.sound_in_id, app.sound_in_chs, queue, "oscilloscope traces"
         )
         
         if recording is None:
@@ -1864,8 +1902,8 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
             return
 
         # Apply gain if needed
-        if config.OSCOPE_GAIN_DB > 0:
-            gain = 10 ** (config.OSCOPE_GAIN_DB / 20)      
+        if app.config.OSCOPE_GAIN_DB > 0:
+            gain = 10 ** (app.config.OSCOPE_GAIN_DB / 20)      
             logging.info(f"Applying gain of: {gain:.1f}") 
             recording *= gain
 
@@ -1875,13 +1913,13 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
         
         # Optimize plotting by downsampling for display
         downsample_factor = max(1, len(recording) // 5000)  # Limit points to ~5k for better performance
-        time_points = np.arange(0, len(recording), downsample_factor) / config.PRIMARY_IN_SAMPLERATE
+        time_points = np.arange(0, len(recording), downsample_factor) / app.config.PRIMARY_IN_SAMPLERATE
         
         # Plot each channel
         for i in range(actual_channels):
             ax = plt.subplot(actual_channels, 1, i+1)
             ax.plot(time_points, recording[::downsample_factor, i], linewidth=0.5)
-            ax.set_title(f"Oscilloscope Traces w/{config.OSCOPE_GAIN_DB}dB Gain--Ch{i+1}")
+            ax.set_title(f"Oscilloscope Traces w/{app.config.OSCOPE_GAIN_DB}dB Gain--Ch{i+1}")
             ax.set_xlabel('Time (seconds)')
             ax.set_ylim(-1.0, 1.0)
             
@@ -1907,7 +1945,7 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
 
         # Save the plot
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_oscope_{int(config.PRIMARY_IN_SAMPLERATE/1000)}_kHz_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
+        plotname = os.path.join(app.PLOT_DIRECTORY, f"{timestamp}_oscope_{int(app.config.PRIMARY_IN_SAMPLERATE/1000)}_kHz_{app.config.PRIMARY_BITDEPTH}_{app.config.LOCATION_ID}_{app.config.HIVE_ID}.png")
         logging.info(f"Saving oscilloscope plot to: {plotname}")
         
         # Make sure the directory exists
@@ -1925,14 +1963,14 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
 
         # Open the saved image based on OS
         try:
-            if platform_manager.is_wsl():
+            if app.platform_manager.is_wsl():
                 logging.info("Opening image in WSL...")
                 try:
                     subprocess.Popen(['xdg-open', expanded_path])
                 except FileNotFoundError:
                     subprocess.Popen(['wslview', expanded_path])
                 logging.info("Image viewer command executed")
-            elif platform_manager.is_macos():
+            elif app.platform_manager.is_macos():
                 logging.info("Opening image in macOS...")
                 subprocess.Popen(['open', expanded_path])
                 logging.info("Image viewer command executed")
@@ -1962,38 +2000,38 @@ def plot_oscope(sound_in_id, sound_in_chs, queue):
             pass
 
 
-def trigger_oscope():
+def trigger_oscope(app):
     """Trigger oscilloscope plot generation with proper cleanup."""
     try:
         # Clean up any existing process
-        cleanup_process('o')
-        clear_input_buffer()
-        
+        cleanup_process(app,'o')
+        clear_input_buffer(app)
+
         # Create a queue for communication
         stop_queue = multiprocessing.Queue()
         
         # Create and configure the process
-        oscope_process = multiprocessing.Process(
+        app.oscope_process = multiprocessing.Process(
             target=plot_oscope, 
-            args=(sound_in_id, sound_in_chs, stop_queue)
+            args=(app.sound_in_id, app.sound_in_chs, stop_queue)
         )
         
         # Set process as daemon
-        oscope_process.daemon = True
+        app.oscope_process.daemon = True
         
         # Store in active processes
-        active_processes['o'] = oscope_process
+        app.active_processes['o'] = app.oscope_process
         
         print("Starting oscilloscope process...")
         # Start the process
-        oscope_process.start()
-        
+        app.oscope_process.start()
+
         # Wait for completion with timeout
         timeout = config.TRACE_DURATION + 30  # Reduced timeout to be more responsive
-        oscope_process.join(timeout=timeout)
-        
+        app.oscope_process.join(timeout=timeout)
+
         # Check if process is still running
-        if oscope_process.is_alive():
+        if app.oscope_process.is_alive():
             print("\nOscilloscope process taking too long, terminating...")
             try:
                 # Signal the process to stop
@@ -2001,54 +2039,25 @@ def trigger_oscope():
                 # Give it a moment to clean up
                 time.sleep(1)
                 # Then terminate if still running
-                if oscope_process.is_alive():
-                    oscope_process.terminate()
-                    oscope_process.join(timeout=2)
-                    if oscope_process.is_alive():
-                        oscope_process.kill()
+                if app.oscope_process.is_alive():
+                    app.oscope_process.terminate()
+                    app.oscope_process.join(timeout=2)
+                    if app.oscope_process.is_alive():
+                        app.oscope_process.kill()
             except Exception as e:
                 print(f"Error terminating oscilloscope process: {e}")
         
     except Exception as e:
         print(f"Error in trigger_oscope: {e}")
-        import traceback
         traceback.print_exc()
     finally:
         # Always ensure cleanup
-        cleanup_process('o')
-        clear_input_buffer()
+        cleanup_process(app,'o')
+        clear_input_buffer(app)
         print("Oscilloscope process completed")
 
 
-def cleanup_process(command):
-    """Clean up a specific command's process."""
-    try:
-        # Check if the command key exists in active_processes
-        if command in active_processes:
-            process = active_processes[command]
-            if process is not None:
-                try:
-                    # Check if it's still alive without raising an exception
-                    if hasattr(process, 'is_alive') and process.is_alive():
-                        try:
-                            process.terminate()
-                            process.join(timeout=1)
-                            if process.is_alive():
-                                process.kill()
-                        except Exception as e:
-                            print(f"Error terminating process for command '{command}': {e}")
-                except Exception as e:
-                    # Process may no longer exist or be accessible
-                    print(f"Warning: Could not check process status for command '{command}': {e}")
-                
-                # Reset the process reference
-                active_processes[command] = None
-                print(f"Process for command '{command}' has been cleaned up")
-        else:
-            # The command doesn't exist in our tracking dictionary
-            print(f"Warning: No process tracking for command '{command}'")
-    except Exception as e:
-        print(f"Error in cleanup_process for command '{command}': {e}")
+
 
 
 # Global variables for buffer management
@@ -2104,9 +2113,9 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
             current_time = datetime.datetime.now().time()
             
             if start_tod is None or (start_tod <= current_time <= end_tod):        
-                print(f"{thread_id} started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec\n\r")
+                print(f"{app.thread_id} started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec\n\r")
 
-                period_start_index = app.buffer_index 
+                app.period_start_index = app.buffer_index 
                 # wait PERIOD seconds to accumulate audio
                 interruptable_sleep(record_period, app.stop_recording_event)
 
@@ -2115,8 +2124,8 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
                     break
 
                 period_end_index = app.buffer_index 
-                save_start_index = period_start_index % app.buffer_size
-                save_end_index = period_end_index % app.buffer_size
+                save_start_index = app.period_start_index % app.buffer_size
+                save_end_index = app.period_end_index % app.buffer_size
 
                 # saving from a circular buffer so segments aren't necessarily contiguous
                 if save_end_index > save_start_index:   # indexing is contiguous
@@ -2236,13 +2245,13 @@ def ensure_directories_exist(directories):
         return success
 
 
-def reset_terminal_settings():
+def reset_terminal_settings(app):
     """Reset terminal settings to default state without clearing the screen."""
     try:
-        if platform_manager.termios is not None:
+        if app.platform_manager.termios is not None:
             fd = sys.stdin.fileno()
-            old_settings = platform_manager.termios.tcgetattr(fd)
-            platform_manager.termios.tcsetattr(fd, platform_manager.termios.TCSANOW, old_settings)
+            old_settings = app.platform_manager.termios.tcgetattr(fd)
+            app.platform_manager.termios.tcsetattr(fd, app.platform_manager.termios.TCSANOW, old_settings)
     except Exception as e:
         logging.warning(f"Could not reset terminal settings: {e}")
 
@@ -2251,7 +2260,7 @@ def audio_stream(app):
     """Main audio streaming function."""
     
     # Reset terminal settings before printing
-    reset_terminal_settings()
+    reset_terminal_settings(app)
 
     # Print initialization info with forced output
     logging.info("Initializing audio stream...")
@@ -2296,7 +2305,7 @@ def audio_stream(app):
             # start the recording worker threads
             if hasattr(app.config, 'MODE_AUDIO_MONITOR') and app.config.MODE_AUDIO_MONITOR:
                 logging.info("Starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
-                threading.Thread(target=recording_worker_thread, args=(
+                threading.Thread(target=app.recording_worker_thread, args=(
                     app,  # Pass app as first parameter
                     app.config.AUDIO_MONITOR_RECORD,
                     app.config.AUDIO_MONITOR_INTERVAL,
@@ -2309,7 +2318,7 @@ def audio_stream(app):
 
             if hasattr(app.config, 'MODE_PERIOD') and app.config.MODE_PERIOD and not app.testmode:
                 logging.info("Starting recording_worker_thread for caching period audio at primary sample rate and all channels...")
-                threading.Thread(target=recording_worker_thread, args=(
+                threading.Thread(target=app.recording_worker_thread, args=(
                     app,  # Pass app as first parameter
                     app.config.PERIOD_RECORD,
                     app.config.PERIOD_INTERVAL,
@@ -2322,7 +2331,7 @@ def audio_stream(app):
 
             if hasattr(app.config, 'MODE_EVENT') and app.config.MODE_EVENT and not app.testmode:
                 logging.info("Starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...")
-                threading.Thread(target=recording_worker_thread, args=(
+                threading.Thread(target=app.recording_worker_thread, args=(
                     app,  # Pass app as first parameter
                     app.config.SAVE_BEFORE_EVENT,
                     app.config.SAVE_AFTER_EVENT,
@@ -2338,7 +2347,7 @@ def audio_stream(app):
                 time.sleep(0.1)
 
     except Exception as e:
-        logging.error(f"Error initializing audio stream: {str(e)}")
+        logging.error(f"Error initializing audio stream: {e}")
         logging.info("Please check your audio device configuration and ensure it supports the required settings")
         sys.stdout.flush()
         return False
@@ -2370,16 +2379,16 @@ def stop_all(app):
         app.stop_fft_periodic_plot_event.set()
     
     # Stop performance monitor
-    global stop_performance_monitor_event
-    stop_performance_monitor_event.set()
+    ##global stop_performance_monitor_event
+    app.stop_performance_monitor_event.set()
     
     # Signal buffer wrap event to unblock any waiting threads
     buffer_wrap_event.set()
     
     # Clean up active processes
-    if 'active_processes' in globals():
-        for key in active_processes:
-            cleanup_process(key)
+    if app.active_processes is not None:
+        for key in app.active_processes:
+            cleanup_process(app, key)
     
     # Give threads a moment to finish
     time.sleep(0.5)
@@ -2389,7 +2398,7 @@ def stop_all(app):
 
 def cleanup(app):
     """Clean up and exit."""
-    global original_terminal_settings
+    ##global original_terminal_settings
     
     print("\nPerforming cleanup...")
     
@@ -2415,17 +2424,17 @@ def cleanup(app):
         app.stop_fft_periodic_plot_event.set()
     
     # Stop performance monitor
-    global stop_performance_monitor_event
-    stop_performance_monitor_event.set()
+    ##global stop_performance_monitor_event
+    app.stop_performance_monitor_event.set()
     
     # Signal buffer wrap event to unblock any waiting threads
     buffer_wrap_event.set()
     
     # Clean up active processes
-    if 'active_processes' in globals():
-        for key in active_processes:
-            cleanup_process(key)
-    
+    if app.active_processes is not None:
+        for key in app.active_processes:
+            cleanup_process(app, key)
+
     # Force close any remaining sounddevice streams
     try:
         sd.stop()  # Stop all sounddevice streams
@@ -2434,10 +2443,10 @@ def cleanup(app):
         logging.warning(f"Note: Error stopping sounddevice streams: {e}")
 
     # Restore terminal settings
-    if original_terminal_settings:
-        restore_terminal_settings(original_terminal_settings)
+    if app.original_terminal_settings:
+        restore_terminal_settings(app.original_terminal_settings)
     else:
-        reset_terminal_settings()
+        reset_terminal_settings(app)
     
     logging.info("Cleanup completed.")
     
@@ -2448,23 +2457,23 @@ def cleanup(app):
 
 def keyboard_listener(app):
     """Main keyboard listener loop."""
-    global change_ch_event, vu_proc, intercom_proc
+    global change_ch_event, intercom_proc
     
     # Reset terminal settings before starting
-    reset_terminal_settings()
+    reset_terminal_settings(app)
     
     print("\nKeyboard listener started. Press 'h' for help.", end='\n\n', flush=True)
     
     while app.keyboard_listener_running:
         try:
-            key = get_key()
+            key = get_key(app)
             if key is not None:
                 if key == "^":  # Toggle listening
                     toggle_listening(app)
                 elif app.keyboard_listener_active:
                     if key.isdigit():
                         # Handle direct channel changes when in VU meter or Intercom mode
-                        if vu_proc is not None or intercom_proc is not None:
+                        if app.vu_proc is not None or app.intercom_proc is not None:
                             key_int = int(key) - 1  # Convert to 0-based index
                             
                             # Validate channel number is within range
@@ -2473,15 +2482,15 @@ def keyboard_listener(app):
                                 continue
                                 
                             app.monitor_channel = key_int
-                            if intercom_proc is not None:
-                                change_ch_event.set()
+                            if app.intercom_proc is not None:
+                                app.change_ch_event.set()
                             print(f"\nNow monitoring channel: {app.monitor_channel+1} (of {app.sound_in_chs})", end='\n', flush=True)
                             # Restart VU meter if running
-                            if vu_proc is not None:
+                            if app.vu_proc is not None:
                                 print(f"Restarting VU meter on channel: {app.monitor_channel+1}", end='\n', flush=True)
-                                toggle_vu_meter()
+                                toggle_vu_meter(app)
                                 time.sleep(0.1)
-                                toggle_vu_meter()
+                                toggle_vu_meter(app)
                         else:
                             if key == "0":
                                 print("Exiting channel change", end='\n', flush=True)
@@ -2492,35 +2501,35 @@ def keyboard_listener(app):
                     elif key == "c":  
                         change_monitor_channel(app)
                     elif key == "d":  
-                        show_audio_device_list()
+                        show_audio_device_list(app)
                     elif key == "D":  
-                        show_detailed_device_list()
+                        show_detailed_device_list(app)
                     elif key == "f":  
                         try:
-                            trigger_fft()
+                            trigger_fft(app)
                         except Exception as e:
                             logging.error(f"Error in FFT trigger: {e}")
-                            cleanup_process('f')
+                            cleanup_process(app, 'f')
                     elif key == "i":  
-                        toggle_intercom_m()
+                        toggle_intercom_m(app)
                     elif key == "m":  
-                        show_mic_locations()
+                        show_mic_locations(app)
                     elif key == "o":  
-                        trigger_oscope() 
+                        trigger_oscope(app) 
                     elif key == "p":
-                        run_performance_monitor_once()
+                        run_performance_monitor_once(app)
                     elif key == "P":
-                        toggle_continuous_performance_monitor()                               
+                        toggle_continuous_performance_monitor(app)                              
                     elif key == "q":  
                         print("\nQuitting...", end='\n', flush=True)
                         app.keyboard_listener_running = False
                         stop_all(app)
                     elif key == "s":  
-                        trigger_spectrogram()
+                        trigger_spectrogram(app)
                     elif key == "t":  
-                        list_all_threads()        
+                        list_all_threads(app)        
                     elif key == "v":  
-                        toggle_vu_meter()      
+                        toggle_vu_meter(app)      
                     elif key == "h" or key =="?":  
                         show_list_of_commands()
                 
@@ -2548,11 +2557,6 @@ def show_list_of_commands():
     print("d  selected devices in use data")
     print("D  show all devices with active input/output indicator")
     print("f  fft--show plot")
-    print("i  intercom: press i then press 1, 2, 3, ... to listen to that channel")
-    print("m  mic--show active positions")
-    print("o  oscilloscope--show trace of each active channel")
-    print("p  performance monitor--show CPU and RAM usage (one-shot)")
-    print("P  performance monitor--show CPU and RAM usage (continuous)")
     print("q  quit--stop all processes and exit")
     print("s  spectrogram--plot of last recording")
     print("t  threads--see list of all threads")
@@ -2632,36 +2636,43 @@ def check_wsl_audio():
         return False
 
 
-def vu_meter(sound_in_id, sound_in_chs, channel, stop_vu_queue, asterisks):
-    """VU meter function for displaying audio levels."""
+def vu_meter(app, app_config):
+    """VU meter function for displaying audio levels using BmarApp configuration."""
+    sound_in_id = app_config['sound_in_id']
+    sound_in_chs = app_config['sound_in_chs']
+    channel = app_config['monitor_channel']
+    sample_rate = app_config['PRIMARY_IN_SAMPLERATE']
+    app.platform_manager = app_config['platform_manager']
+    debug_verbose = app_config.get('DEBUG_VERBOSE', False)
+
     # Debug: Print incoming parameter types
-    if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE:
+    if debug_verbose:
         print(f"\n[VU Debug] Parameter types:")
         print(f"  sound_in_id: {sound_in_id} (type: {type(sound_in_id)})")
-        print(f"  config.PRIMARY_IN_SAMPLERATE: {config.PRIMARY_IN_SAMPLERATE} (type: {type(config.PRIMARY_IN_SAMPLERATE)})")
+        print(f"  sample_rate: {sample_rate} (type: {type(sample_rate)})")
         print(f"  sound_in_chs: {sound_in_chs} (type: {type(sound_in_chs)})")
         print(f"  channel: {channel} (type: {type(channel)})")
     
     # Ensure sample rate is an integer for buffer size calculation
-    buffer_size = int(config.PRIMARY_IN_SAMPLERATE)
-    buffer = np.zeros(buffer_size)
+    app.buffer_size = int(sample_rate)
+    app.buffer = np.zeros(buffer_size)
     last_print = ""
     
     # Validate the channel is valid for the device
-    if channel >= sound_in_chs:
-        print(f"\nError: Selected channel {channel+1} exceeds available channels ({sound_in_chs})", end='\r\n')
+    if app.channel >= app.sound_in_chs:
+        print(f"\nError: Selected channel {app.channel+1} exceeds available channels ({app.sound_in_chs})", end='\r\n')
         print(f"Defaulting to channel 1", end='\r\n')
-        channel = 0  # Default to first channel
+        app.channel = 0  # Default to first channel
 
     def callback_input(indata, frames, time, status):
         nonlocal last_print
         try:
             # Debug first callback
-            if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE and last_print == "":
+            if debug_verbose and last_print == "":
                 print(f"\n[VU Debug] First callback: frames={frames}, indata.shape={indata.shape}")
             
             # Always validate channel before accessing the data
-            selected_channel = int(min(channel, indata.shape[1] - 1))
+            selected_channel = int(min(app.channel, indata.shape[1] - 1))
             
             channel_data = indata[:, selected_channel]
             # Ensure frames is an integer for array slicing
@@ -2670,8 +2681,8 @@ def vu_meter(sound_in_id, sound_in_chs, channel, stop_vu_queue, asterisks):
             audio_level = np.max(np.abs(channel_data))
             normalized_value = int((audio_level / 1.0) * 50)
             
-            asterisks.value = '*' * normalized_value
-            current_print = ' ' * 11 + asterisks.value.ljust(50, ' ')
+            app.asterisks.value = '*' * normalized_value
+            current_print = ' ' * 11 + app.asterisks.value.ljust(50, ' ')
             
             # Only print if the value has changed
             if current_print != last_print:
@@ -2681,23 +2692,23 @@ def vu_meter(sound_in_id, sound_in_chs, channel, stop_vu_queue, asterisks):
         except Exception as e:
             # Log the error but don't crash
             print(f"\rVU meter callback error: {e}", end='\r\n')
-            if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE:
-                print(f"Error details: channel={channel}, frames={frames}, indata.shape={indata.shape}", end='\r\n')
+            if debug_verbose:
+                print(f"Error details: channel={app.channel}, frames={frames}, indata.shape={indata.shape}", end='\r\n')
                 import traceback
                 traceback.print_exc()
             time.sleep(0.1)  # Prevent too many messages
 
     try:
         # Debug platform detection
-        if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE:
+        if debug_verbose:
             print(f"\n[VU Debug] Platform detection:")
             print(f"  sys.platform: {sys.platform}")
-            print(f"  platform_manager.is_wsl(): {platform_manager.is_wsl()}")
-            print(f"  Platform OS info: {platform_manager.get_os_info()}")
-        
+            print(f"  app.platform_manager.is_wsl(): {app.platform_manager.is_wsl()}")
+            print(f"  app.platform_manager.get_os_info(): {app.platform_manager.get_os_info()}")
+
         # In WSL, we need to use different stream parameters
-        if platform_manager.is_wsl():
-            if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE:
+        if app.platform_manager.is_wsl():
+            if debug_verbose:
                 print("[VU Debug] Using WSL audio configuration")
             # Check audio configuration first
             if not check_wsl_audio():
@@ -2718,7 +2729,7 @@ def vu_meter(sound_in_id, sound_in_chs, channel, stop_vu_queue, asterisks):
                 print("\nPlease ensure your WSL audio is properly configured.")
                 raise
         else:
-            if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE:
+            if debug_verbose:
                 print("[VU Debug] Using standard audio configuration (non-WSL)")
             # Make sure we request at least as many channels as our selected channel
             # Ensure all parameters are integers for compatibility
@@ -2727,7 +2738,7 @@ def vu_meter(sound_in_id, sound_in_chs, channel, stop_vu_queue, asterisks):
                 with sd.InputStream(callback=callback_input,
                                   device=int(sound_in_id) if sound_in_id is not None else None,
                                   channels=int(sound_in_chs),
-                                  samplerate=int(config.PRIMARY_IN_SAMPLERATE),
+                                  samplerate=int(sample_rate),
                                   blocksize=1024,
                                   latency='low'):
                     while not stop_vu_queue.get():
@@ -2737,7 +2748,7 @@ def vu_meter(sound_in_id, sound_in_chs, channel, stop_vu_queue, asterisks):
                 print(f"Debug info:")
                 print(f"  sound_in_id={sound_in_id} (type: {type(sound_in_id)})")
                 print(f"  sound_in_chs={sound_in_chs} (type: {type(sound_in_chs)})")
-                print(f"  config.PRIMARY_IN_SAMPLERATE={config.PRIMARY_IN_SAMPLERATE} (type: {type(config.PRIMARY_IN_SAMPLERATE)})")
+                print(f"  sample_rate={sample_rate} (type: {type(sample_rate)})")
                 import traceback
                 traceback.print_exc()
                 raise
@@ -2747,103 +2758,99 @@ def vu_meter(sound_in_id, sound_in_chs, channel, stop_vu_queue, asterisks):
         print("\nStopping VU meter...")
 
 
-def toggle_vu_meter():
-    """Toggle VU meter display."""
-    global vu_proc, asterisks, change_ch_event
+def toggle_vu_meter(app):
+    """Toggle VU meter display using BmarApp instance."""
+    ##global vu_proc, asterisks
     
     # Clear any buffered input before toggling
-    clear_input_buffer()
+    clear_input_buffer(app)
 
-    if vu_proc is None:
-        cleanup_process('v')  # Clean up any existing process
-        
-        # Get current app instance from main (we'll need to pass this as parameter)
-        # For now, use global variables for compatibility
-        monitor_channel = globals().get('monitor_channel', 0)
-        sound_in_chs = globals().get('sound_in_chs', 1)
-        sound_in_id = globals().get('sound_in_id', 1)
+    if app.vu_proc is None:
+        cleanup_process(app,'v')  # Clean up any existing process
         
         # Validate channel before starting process
-        if monitor_channel >= sound_in_chs:
-            print(f"\nError: Selected channel {monitor_channel+1} exceeds available channels ({sound_in_chs})")
+        if app.monitor_channel >= app.sound_in_chs:
+            print(f"\nError: Selected channel {app.monitor_channel+1} exceeds available channels ({app.sound_in_chs})")
             print(f"Defaulting to channel 1")
-            monitor_channel = 0  # Default to first channel
+            app.monitor_channel = 0  # Default to first channel
             
-        print("\nVU meter monitoring channel:", monitor_channel+1)
+        print(f"\nVU meter monitoring channel: {app.monitor_channel+1}")
         vu_manager = multiprocessing.Manager()
-        stop_vu_queue = multiprocessing.Queue()
-        stop_vu_queue.put(False)  # Initialize with False to keep running
-        asterisks = vu_manager.Value(str, '*' * 50)
+        app.stop_vu_queue = multiprocessing.Queue()
+        app.stop_vu_queue.put(False)  # Initialize with False to keep running
+        app.asterisks = vu_manager.Value(str, '*' * 50)
 
         # Print initial state once
-        print("fullscale:", asterisks.value.ljust(50, ' '))
+        print("fullscale:", app.asterisks.value.ljust(50, ' '))
 
-        if hasattr(config, 'MODE_EVENT') and config.MODE_EVENT:
-            normalized_value = int(config.EVENT_THRESHOLD / 1000)
-            asterisks.value = '*' * normalized_value
-            print("threshold:", asterisks.value.ljust(50, ' '))
+        if hasattr(app.config, 'MODE_EVENT') and app.config.MODE_EVENT:
+            normalized_value = int(app.config.EVENT_THRESHOLD / 1000)
+            app.asterisks.value = '*' * normalized_value
+            print("threshold:", app.asterisks.value.ljust(50, ' '))
             
         # Debug and validate parameters before creating process
-        if hasattr(config, 'DEBUG_VERBOSE') and config.DEBUG_VERBOSE:
+        debug_verbose = hasattr(app.config, 'DEBUG_VERBOSE') and app.config.DEBUG_VERBOSE
+        if debug_verbose:
             print(f"\n[Toggle VU Debug] Parameter validation:")
-            print(f"  sound_in_id: {sound_in_id} (type: {type(sound_in_id)})")
-            print(f"  config.PRIMARY_IN_SAMPLERATE: {config.PRIMARY_IN_SAMPLERATE} (type: {type(config.PRIMARY_IN_SAMPLERATE)})")
-            print(f"  sound_in_chs: {sound_in_chs} (type: {type(sound_in_chs)})")
-            print(f"  monitor_channel: {monitor_channel} (type: {type(monitor_channel)})")
+            print(f"  sound_in_id: {app.sound_in_id} (type: {type(app.sound_in_id)})")
+            print(f"  PRIMARY_IN_SAMPLERATE: {app.PRIMARY_IN_SAMPLERATE} (type: {type(app.PRIMARY_IN_SAMPLERATE)})")
+            print(f"  sound_in_chs: {app.sound_in_chs} (type: {type(app.sound_in_chs)})")
+            print(f"  monitor_channel: {app.monitor_channel} (type: {type(app.monitor_channel)})")
         
-        # Ensure all parameters are the correct type
-        try:
-            proc_sound_in_id = int(sound_in_id) if sound_in_id is not None else None
-            proc_sound_in_chs = int(sound_in_chs)
-            proc_monitor_channel = int(monitor_channel)
-        except (ValueError, TypeError) as e:
-            print(f"Error converting parameters to integers: {e}")
-            return
+        # Create app configuration dictionary for the subprocess
+        app_config = {
+            'sound_in_id': int(app.sound_in_id) if app.sound_in_id is not None else None,
+            'sound_in_chs': int(app.sound_in_chs),
+            'monitor_channel': int(app.monitor_channel),
+            'PRIMARY_IN_SAMPLERATE': int(app.PRIMARY_IN_SAMPLERATE),
+            'platform_manager': app.platform_manager,
+            'DEBUG_VERBOSE': debug_verbose
+        }
             
         # Create the VU meter process
-        vu_proc = multiprocessing.Process(
+        app.vu_proc = multiprocessing.Process(
             target=vu_meter, 
-            args=(proc_sound_in_id, proc_sound_in_chs, proc_monitor_channel, stop_vu_queue, asterisks)
+            args=(app, app_config)
         )
         
         # Set the process to start in a clean environment
-        vu_proc.daemon = True
+        app.vu_proc.daemon = True
             
-        active_processes['v'] = vu_proc
-        vu_proc.start()
+        app.active_processes['v'] = app.vu_proc
+        app.vu_proc.start()
     else:
         stop_vu()
     
     # Clear input buffer after toggling
-    clear_input_buffer()
+    clear_input_buffer(app)
 
 
-def stop_vu():
+def stop_vu(app):
     """Stop VU meter."""
-    global vu_proc
+    ##global vu_proc
     
-    if vu_proc is not None:
+    if app.vu_proc is not None:
         try:
             # Try to get the stop_vu_queue and stop_vu_event that were created in toggle_vu_meter
             # For now, we'll terminate the process directly since we need better process management
             
             # Give the process a short time to stop gracefully
-            vu_proc.join(timeout=1)
+            app.vu_proc.join(timeout=1)
             
-            if vu_proc.is_alive():
+            if app.vu_proc.is_alive():
                 # If still running after timeout, terminate
-                vu_proc.terminate()
-                vu_proc.join(timeout=1)
-                if vu_proc.is_alive():
-                    vu_proc.kill()  # Force kill if still alive
-            
+                app.vu_proc.terminate()
+                app.vu_proc.join(timeout=1)
+                if app.vu_proc.is_alive():
+                    app.vu_proc.kill()  # Force kill if still alive
+
             print("\nvu stopped")
         except Exception as e:
             print(f"\nError stopping VU meter: {e}")
         finally:
-            vu_proc = None
-            cleanup_process('v')
-            clear_input_buffer()
+            app.vu_proc = None
+            cleanup_process(app,'v')
+            clear_input_buffer(app)
 
 def toggle_intercom_m():
     """Toggle intercom functionality - PLACEHOLDER."""
@@ -2952,7 +2959,7 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
                 
             logging.info(f"Plot file exists, size: {os.path.getsize(expanded_path)} bytes")
             
-            if platform_manager.is_wsl():
+            if app.platform_manager.is_wsl():
                 logging.info("Opening image in WSL...")
                 try:
                     proc = subprocess.Popen(['xdg-open', expanded_path])
@@ -2961,7 +2968,7 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
                     logging.info("xdg-open not found, trying wslview...")
                     proc = subprocess.Popen(['wslview', expanded_path])
                     logging.info(f"wslview launched with PID: {proc.pid}")
-            elif platform_manager.is_macos():
+            elif app.platform_manager.is_macos():
                 logging.info("Opening image in macOS...")
                 proc = subprocess.Popen(['open', expanded_path])
                 logging.info(f"open command launched with PID: {proc.pid}")
@@ -2981,9 +2988,9 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
             
             # Also print the command that can be run manually
             print(f"\nIf the image didn't open, you can manually run:")
-            if platform_manager.is_wsl() or not sys.platform == 'win32':
+            if app.platform_manager.is_wsl() or not sys.platform == 'win32':
                 print(f"  xdg-open '{expanded_path}'")
-            elif platform_manager.is_macos():
+            elif app.platform_manager.is_macos():
                 print(f"  open '{expanded_path}'")
                 
         except Exception as e:
@@ -3007,13 +3014,13 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
         except:
             pass
 
-def trigger_fft():
+def trigger_fft(app):
     """Trigger FFT plot generation with proper cleanup."""
     try:
         # Clean up any existing FFT process
-        cleanup_process('f')
-        clear_input_buffer()
-        
+        cleanup_process(app,'f')
+        clear_input_buffer(app)
+
         # Get current app instance parameters
         # For now, use global variables for compatibility
         monitor_channel = globals().get('monitor_channel', 0)
@@ -3033,7 +3040,7 @@ def trigger_fft():
         fft_process.daemon = True
         
         # Store process reference
-        active_processes['f'] = fft_process
+        app.active_processes['f'] = fft_process
         
         print("Starting FFT analysis process...")
         # Start process
@@ -3065,8 +3072,8 @@ def trigger_fft():
         traceback.print_exc()
     finally:
         # Always clean up
-        cleanup_process('f')
-        clear_input_buffer()
+        cleanup_process(app,'f')
+        clear_input_buffer(app)
         print("FFT process completed")
 
 def plot_spectrogram(channel, y_axis_type, file_offset, period):
@@ -3225,13 +3232,13 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
                     
             # Open the saved image based on OS
             try:
-                if platform_manager.is_wsl():
+                if app.platform_manager.is_wsl():
                     print("Opening image in WSL...")
                     try:
                         subprocess.Popen(['xdg-open', expanded_path])
                     except FileNotFoundError:
                         subprocess.Popen(['wslview', expanded_path])
-                elif platform_manager.is_macos():
+                elif app.platform_manager.is_macos():
                     print("Opening image in macOS...")
                     subprocess.Popen(['open', expanded_path])
                 elif sys.platform == 'win32':
@@ -3292,55 +3299,55 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
             print(f"Warning during cleanup: {e}")
             pass
 
-def trigger_spectrogram():
+def trigger_spectrogram(app):
     """Trigger spectrogram generation."""
     try:
         # Clean up any existing spectrogram process
-        cleanup_process('s')
+        cleanup_process(app,'s')
         
         # Clear input buffer before starting
-        clear_input_buffer()
+        clear_input_buffer(app)
         
         # Get file offset and time difference
-        global file_offset, monitor_channel, time_diff
+        ##global file_offset, monitor_channel, time_diff
         time_since_last = time_diff()  # Store the time difference
         
         # Only increment offset if we're within the recording period
         if time_since_last < (config.PERIOD_RECORD + config.PERIOD_INTERVAL):
-            file_offset = min(file_offset + 1, 0)  # Cap at 0 to prevent going negative
+            app.file_offset = min(app.file_offset + 1, 0)  # Cap at 0 to prevent going negative
         else:
-            file_offset = 0  # Reset to first file
-            
-        print(f"Time since last file: {time_since_last:.1f}s, using file offset: {file_offset}")
-            
+            app.file_offset = 0  # Reset to first file
+
+        print(f"Time since last file: {time_since_last:.1f}s, using file offset: {app.file_offset}")
+
         # Create and start the spectrogram process
-        active_processes['s'] = multiprocessing.Process(
-            target=plot_spectrogram, 
-            args=(monitor_channel, 'lin', file_offset, spectrogram_period)
+        app.active_processes['s'] = multiprocessing.Process(
+            target=plot_spectrogram,
+            args=(app.monitor_channel, 'lin', app.file_offset, config.spectrogram_period)
         )
-        active_processes['s'].daemon = True  # Make it a daemon process
-        active_processes['s'].start()
-        
+        app.active_processes['s'].daemon = True  # Make it a daemon process
+        app.active_processes['s'].start()
+
         # Brief delay to allow the spectrogram process to initialize properly
         # and prevent interference with subsequent audio operations
         time.sleep(0.2)
         
         print("Plotting spectrogram...")
-        clear_input_buffer()
-        
+        clear_input_buffer(app)
+
         # Wait for completion with timeout
-        active_processes['s'].join(timeout=240)  # Increased timeout for spectrogram generation
-        
+        app.active_processes['s'].join(timeout=240)  # Increased timeout for spectrogram generation
+
         # Cleanup if process is still running
-        if active_processes['s'].is_alive():
+        if app.active_processes['s'].is_alive():
             print("Spectrogram process taking too long, terminating...")
             try:
-                active_processes['s'].terminate()
-                active_processes['s'].join(timeout=1)
-                if active_processes['s'].is_alive():
+                app.active_processes['s'].terminate()
+                app.active_processes['s'].join(timeout=1)
+                if app.active_processes['s'].is_alive():
                     # Force kill if still running
-                    active_processes['s'].kill()
-                    active_processes['s'].join(timeout=1)
+                    app.active_processes['s'].kill()
+                    app.active_processes['s'].join(timeout=1)
             except Exception as e:
                 print(f"Warning during process termination: {e}")
         
@@ -3349,11 +3356,12 @@ def trigger_spectrogram():
     finally:
         # Always clean up
         try:
-            cleanup_process('s')
+            cleanup_process(app,'s')
         except Exception as e:
             print(f"Warning during cleanup: {e}")
-        clear_input_buffer()
+        clear_input_buffer(app)
         print("Spectrogram process completed")
+
 
 def get_system_performance():
     """Get a single snapshot of system performance."""
@@ -3389,60 +3397,60 @@ def monitor_system_performance_once():
     except Exception as e:
         print(f"\nError in performance monitor: {e}", end='\r')
 
-def monitor_system_performance_continuous():
+def monitor_system_performance_continuous(app):
     """Continuously monitor and display CPU and RAM usage."""
-    global stop_performance_monitor_event
+    ##global stop_performance_monitor_event
     
     try:
-        while not stop_performance_monitor_event.is_set():
+        while not app.stop_performance_monitor_event.is_set():
             output = get_system_performance()
             print(output, flush=True)
             
             # Use event wait with timeout instead of sleep for better responsiveness
-            if stop_performance_monitor_event.wait(timeout=2):
+            if app.stop_performance_monitor_event.wait(timeout=2):
                 break
     except Exception as e:
         print(f"\nError in performance monitor: {e}", end='\r')
     finally:
         print("\nPerformance monitor stopped.", end='\r')
 
-def run_performance_monitor_once():
+def run_performance_monitor_once(app):
     """Run the performance monitor once."""
-    cleanup_process('p')  # Clean up any existing process
+    cleanup_process(app,'p')  # Clean up any existing process
     proc = multiprocessing.Process(target=monitor_system_performance_once)
     proc.daemon = True
-    active_processes['p'] = proc
+    app.active_processes['p'] = proc
     proc.start()
     proc.join()  # Wait for it to complete
-    cleanup_process('p')
+    cleanup_process(app,'p')
 
-def toggle_continuous_performance_monitor():
+def toggle_continuous_performance_monitor(app):
     """Toggle the continuous performance monitor on/off."""
-    global performance_monitor_proc, stop_performance_monitor_event
-    
-    if performance_monitor_proc is None or not performance_monitor_proc.is_alive():
-        cleanup_process('P')  # Clean up any existing process
+    ##global performance_monitor_proc, stop_performance_monitor_event
+
+    if app.performance_monitor_proc is None or not app.performance_monitor_proc.is_alive():
+        cleanup_process(app,'P')  # Clean up any existing process
         print("\nStarting continuous performance monitor...", end='\r')
         
         # Reset the event before starting
-        stop_performance_monitor_event.clear()
-        
-        performance_monitor_proc = multiprocessing.Process(target=monitor_system_performance_continuous)
-        performance_monitor_proc.daemon = True
-        active_processes['P'] = performance_monitor_proc
-        performance_monitor_proc.start()
+        app.stop_performance_monitor_event.clear()
+
+        app.performance_monitor_proc = multiprocessing.Process(target=monitor_system_performance_continuous)
+        app.performance_monitor_proc.daemon = True
+        app.active_processes['P'] = app.performance_monitor_proc
+        app.performance_monitor_proc.start()
     else:
         print("\nStopping performance monitor...", end='\r')
-        stop_performance_monitor_event.set()
-        if performance_monitor_proc.is_alive():
-            performance_monitor_proc.join(timeout=3)
-            if performance_monitor_proc.is_alive():
-                performance_monitor_proc.terminate()
-                performance_monitor_proc.join(timeout=1)
-                if performance_monitor_proc.is_alive():
-                    performance_monitor_proc.kill()
-        performance_monitor_proc = None
-        cleanup_process('P')
+        app.stop_performance_monitor_event.set()
+        if app.performance_monitor_proc.is_alive():
+            app.performance_monitor_proc.join(timeout=3)
+            if app.performance_monitor_proc.is_alive():
+                app.performance_monitor_proc.terminate()
+                app.performance_monitor_proc.join(timeout=1)
+                if app.performance_monitor_proc.is_alive():
+                    app.performance_monitor_proc.kill()
+        app.performance_monitor_proc = None
+        cleanup_process(app,'P')
         print("Performance monitor stopped", end='\r')
 
 def emergency_cleanup(signum, frame):
@@ -3451,22 +3459,10 @@ def emergency_cleanup(signum, frame):
     cleanup(app)
     sys.exit(0)
 
-# Global variables for application control
-app = None
-fft_periodic_plot_proc = None
-oscope_proc = None
-one_shot_fft_proc = None
-original_terminal_settings = None
 
-# Global variables for buffer management
-buffer_wrap_event = threading.Event()
-
-# Global variables for processes and events
-vu_proc = None
-intercom_proc = None
-performance_monitor_proc = None
-change_ch_event = threading.Event()
-stop_performance_monitor_event = threading.Event()
+# ###################################################
+# # Main function to initialize and run the BmarApp
+# ###################################################
 
 def main():
     """Main function to initialize and run the BmarApp."""
