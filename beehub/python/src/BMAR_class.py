@@ -507,10 +507,16 @@ class BmarApp:
             
             # Directory paths
             'plot_directory': str(self.PLOT_DIRECTORY),
+            'primary_directory': str(self.PRIMARY_DIRECTORY),
+            
+            # File format and recording settings
+            'primary_file_format': str(self.config.PRIMARY_FILE_FORMAT),
+            'period_record': float(self.config.PERIOD_RECORD),
             
             # Location identifiers
             'location_id': str(self.config.LOCATION_ID),
             'hive_id': str(self.config.HIVE_ID),
+            'mic_locations': getattr(self.config, 'MIC_LOCATIONS', []) if hasattr(self.config, 'MIC_LOCATIONS') else [],
             
             # Platform information
             'is_wsl': self.platform_manager.is_wsl(),
@@ -2143,13 +2149,6 @@ def trigger_oscope(app):
         print("Oscilloscope process completed")
 
 
-
-
-
-# Global variables for buffer management
-buffer_wrap_event = threading.Event()
-
-
 def callback(app, indata, frames, time, status):
     """Callback function for audio input stream."""
     if status:
@@ -2162,12 +2161,12 @@ def callback(app, indata, frames, time, status):
     # managing the circular buffer
     if app.buffer_index + data_len <= app.buffer_size:
         app.buffer[app.buffer_index:app.buffer_index + data_len] = indata
-        buffer_wrap_event.clear()
+        app.buffer_wrap_event.clear()
     else:
         overflow = (app.buffer_index + data_len) - app.buffer_size
         app.buffer[app.buffer_index:] = indata[:-overflow]
         app.buffer[:overflow] = indata[-overflow:]
-        buffer_wrap_event.set()
+        app.buffer_wrap_event.set()
 
     app.buffer_index = (app.buffer_index + data_len) % app.buffer_size
 
@@ -2180,7 +2179,7 @@ def setup_audio_circular_buffer(app):
     app.buffer_index = 0
     app.buffer_wrap = False
     app.blocksize = 8196
-    buffer_wrap_event.clear()
+    app.buffer_wrap_event.clear()
     
     print(f"\naudio buffer size: {sys.getsizeof(app.buffer)}\n")
     sys.stdout.flush()
@@ -2473,7 +2472,7 @@ def stop_all(app):
     app.stop_performance_monitor_event.set()
     
     # Signal buffer wrap event to unblock any waiting threads
-    buffer_wrap_event.set()
+    app.buffer_wrap_event.set()
     
     # Clean up active processes
     if app.active_processes is not None:
@@ -2493,8 +2492,6 @@ def cleanup(app):
     print("\nPerforming cleanup...")
     
     # Stop all processes first (but don't print duplicate messages)
-    global buffer_wrap_event
-    
     # Set stop flags
     app.stop_program[0] = True
     app.keyboard_listener_running = False
@@ -2518,7 +2515,7 @@ def cleanup(app):
     app.stop_performance_monitor_event.set()
     
     # Signal buffer wrap event to unblock any waiting threads
-    buffer_wrap_event.set()
+    app.buffer_wrap_event.set()
     
     # Clean up active processes
     if app.active_processes is not None:
@@ -2642,6 +2639,7 @@ def keyboard_listener(app):
             continue
             
         time.sleep(0.01)  # Small delay to prevent high CPU usage
+
 
 def toggle_listening(app):
     """Toggle keyboard listener active state."""
@@ -3327,6 +3325,7 @@ def plot_fft(app_config, sound_in_id, sound_in_chs, channel, stop_queue):
         except:
             pass
 
+
 def trigger_fft(app):
     """Trigger FFT plot generation with proper cleanup."""
     try:
@@ -3391,11 +3390,12 @@ def trigger_fft(app):
         clear_input_buffer(app)
         print("FFT process completed")
 
-def plot_spectrogram(app, channel, y_axis_type, file_offset, period):
+
+def plot_spectrogram(app_config, channel, y_axis_type, file_offset, period):
     """
     Generate a spectrogram from an audio file and display/save it as an image.
     Parameters:
-    - app: BmarApp instance
+    - app_config: Configuration dictionary containing necessary parameters
     - channel: Channel to use for multi-channel audio files
     - y_axis_type: Type of Y axis for the spectrogram ('log' or 'linear')
     - file_offset: Offset for finding the audio file
@@ -3419,13 +3419,50 @@ def plot_spectrogram(app, channel, y_axis_type, file_offset, period):
         # Clear any existing figures to prevent interference
         plt.close('all')
         
-        next_spectrogram = find_file_of_type_with_offset(app, file_offset)
+        # Extract configuration values
+        primary_directory = app_config['primary_directory']
+        plot_directory = app_config['plot_directory']
+        primary_file_format = app_config['primary_file_format']
+        location_id = app_config['location_id']
+        hive_id = app_config['hive_id']
+        mic_locations = app_config['mic_locations']
+        period_record = app_config['period_record']
+        is_wsl = app_config['is_wsl']
+        is_macos = app_config['is_macos']
+        
+        # Find the audio file (need to implement a simpler version for subprocess)
+        expanded_dir = os.path.expanduser(primary_directory)
+        
+        if not os.path.exists(expanded_dir):
+            print(f"Directory does not exist: {expanded_dir}")
+            return
+            
+        try:
+            # List all files of the specified type in the directory (case-insensitive)
+            all_files = os.listdir(expanded_dir)
+            files_of_type = [f for f in all_files if os.path.isfile(os.path.join(expanded_dir, f)) and f.lower().endswith(f".{primary_file_format.lower()}")]
+            
+            if not files_of_type:
+                print(f"No {primary_file_format} files found in directory: {expanded_dir}")
+                return
+                
+            # Sort files alphabetically - most recent first
+            files_of_type.sort(reverse=True)
+            
+            if file_offset < len(files_of_type):
+                next_spectrogram = files_of_type[file_offset]
+            else:
+                print(f"Offset {file_offset} is out of range. Found {len(files_of_type)} {primary_file_format} files.")
+                return
+        except Exception as e:
+            print(f"Error listing files in {expanded_dir}: {e}")
+            return
         
         if next_spectrogram is None:
             print("No data available to see?")
             return
             
-        full_audio_path = os.path.join(app.PRIMARY_DIRECTORY, next_spectrogram)
+        full_audio_path = os.path.join(primary_directory, next_spectrogram)
         print("Spectrogram source:", full_audio_path)
 
         print("Loading audio file with librosa...")
@@ -3436,7 +3473,7 @@ def plot_spectrogram(app, channel, y_axis_type, file_offset, period):
         
         try:
             # For spectrogram display, limit duration to avoid memory issues
-            max_duration = min(app.config.PERIOD_RECORD, period)  # Max duration for display
+            max_duration = min(period_record, period)  # Max duration for display
             
             # Load the audio file with duration limit
             # Using mono=False to preserve channels, keeping native sample rate
@@ -3513,11 +3550,11 @@ def plot_spectrogram(app, channel, y_axis_type, file_offset, period):
             filename = os.path.basename(full_audio_path)
             root, _ = os.path.splitext(filename)
             timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            plotname = os.path.join(app.PLOT_DIRECTORY, f"{timestamp}_{root}_spectrogram.png")
+            plotname = os.path.join(plot_directory, f"{timestamp}_{root}_spectrogram.png")
 
             # Set title to include filename and channel
-            mic_location = app.config.MIC_LOCATION[channel] if channel < len(app.config.MIC_LOCATION) else f"Ch{channel+1}"
-            plt.title(f'Spectrogram from {app.config.LOCATION_ID}, hive:{app.config.HIVE_ID}, Mic Loc:{mic_location}\nfile:{filename}, Ch:{channel+1}')
+            mic_location = mic_locations[channel] if channel < len(mic_locations) else f"Ch{channel+1}"
+            plt.title(f'Spectrogram from {location_id}, hive:{hive_id}, Mic Loc:{mic_location}\nfile:{filename}, Ch:{channel+1}')
             plt.colorbar(format='%+2.0f dB')
             plt.tight_layout()
             print("\nSaving spectrogram to:", plotname)
@@ -3548,13 +3585,13 @@ def plot_spectrogram(app, channel, y_axis_type, file_offset, period):
                     
             # Open the saved image based on OS
             try:
-                if app.platform_manager.is_wsl():
+                if is_wsl:
                     print("Opening image in WSL...")
                     try:
                         subprocess.Popen(['xdg-open', expanded_path])
                     except FileNotFoundError:
                         subprocess.Popen(['wslview', expanded_path])
-                elif app.platform_manager.is_macos():
+                elif is_macos:
                     print("Opening image in macOS...")
                     subprocess.Popen(['open', expanded_path])
                 elif sys.platform == 'win32':
@@ -3615,6 +3652,7 @@ def plot_spectrogram(app, channel, y_axis_type, file_offset, period):
             print(f"Warning during cleanup: {e}")
             pass
 
+
 def trigger_spectrogram(app):
     """Trigger spectrogram generation."""
     try:
@@ -3639,7 +3677,7 @@ def trigger_spectrogram(app):
         # Create and start the spectrogram process
         app.active_processes['s'] = multiprocessing.Process(
             target=plot_spectrogram,
-            args=(app, app.monitor_channel, 'lin', app.file_offset, app.config.spectrogram_period)
+            args=(app.get_subprocess_config(), app.monitor_channel, 'lin', app.file_offset, config.PERIOD_SPECTROGRAM)
         )
         app.active_processes['s'].daemon = True  # Make it a daemon process
         app.active_processes['s'].start()
@@ -3705,6 +3743,7 @@ def get_system_performance():
     
     return output
 
+
 def monitor_system_performance_once():
     """Display a single snapshot of system performance."""
     try:
@@ -3712,6 +3751,7 @@ def monitor_system_performance_once():
         print(output, flush=True)
     except Exception as e:
         print(f"\nError in performance monitor: {e}", end='\r')
+
 
 def monitor_system_performance_continuous(app):
     """Continuously monitor and display CPU and RAM usage."""
@@ -3730,6 +3770,7 @@ def monitor_system_performance_continuous(app):
     finally:
         print("\nPerformance monitor stopped.", end='\r')
 
+
 def run_performance_monitor_once(app):
     """Run the performance monitor once."""
     cleanup_process(app,'p')  # Clean up any existing process
@@ -3739,6 +3780,7 @@ def run_performance_monitor_once(app):
     proc.start()
     proc.join()  # Wait for it to complete
     cleanup_process(app,'p')
+
 
 def toggle_continuous_performance_monitor(app):
     """Toggle the continuous performance monitor on/off."""
