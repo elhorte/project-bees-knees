@@ -498,6 +498,9 @@ class BmarApp:
             # Audio device settings
             'sound_in_id': int(self.sound_in_id) if self.sound_in_id is not None else None,
             'sound_in_chs': int(self.sound_in_chs),
+            'sound_out_id': int(self.sound_out_id) if hasattr(self, 'sound_out_id') and self.sound_out_id is not None else None,
+            'sound_out_chs': int(self.sound_out_chs) if hasattr(self, 'sound_out_chs') else 2,
+            'sound_out_samplerate': int(self.sound_out_samplerate) if hasattr(self, 'sound_out_samplerate') else int(self.config.PRIMARY_OUT_SAMPLERATE),
             'primary_in_samplerate': int(self.config.PRIMARY_IN_SAMPLERATE),
             'PRIMARY_IN_SAMPLERATE': int(self.PRIMARY_IN_SAMPLERATE),  # VU meter uses this key name
             'primary_bitdepth': int(self.config.PRIMARY_BITDEPTH),
@@ -2598,7 +2601,7 @@ def keyboard_listener(app):
                             logging.error(f"Error in FFT trigger: {e}")
                             cleanup_process(app, 'f')
                     elif key == "i":  
-                        toggle_intercom_m()  # Note: This function doesn't take app parameter yet
+                        toggle_intercom_m(app)  
                     elif key == "m":  
                         show_mic_locations(app)
                     elif key == "o":  
@@ -2648,8 +2651,8 @@ def toggle_listening(app):
         show_list_of_commands()
     else:
         print("\nKeyboard listener deactivated. Press '^' to reactivate.")
-        stop_vu()
-        stop_intercom_m()
+        stop_vu(app)
+        stop_intercom_m(app)
 
 
 def show_list_of_commands():
@@ -2658,6 +2661,7 @@ def show_list_of_commands():
     print("d  selected devices in use data")
     print("D  show all devices with active input/output indicator")
     print("f  fft--show plot")
+    print("i  intercom--toggle--monitor input and route to output")
     print("q  quit--stop all processes and exit")
     print("s  spectrogram--plot of last recording")
     print("t  threads--see list of all threads")
@@ -2954,14 +2958,206 @@ def stop_vu(app):
             cleanup_process(app, 'v')
             clear_input_buffer(app)
 
-def toggle_intercom_m():
-    """Toggle intercom functionality - PLACEHOLDER."""
-    print("Intercom toggle placeholder - full implementation pending")
+
+def intercom_m(app_config):
+    """Intercom function that receives configuration dictionary instead of app object."""
+    # Extract configuration from app_config dictionary
+    sound_in_id = app_config['sound_in_id']
+    sound_in_chs = app_config['sound_in_chs']
+    sound_out_id = app_config['sound_out_id']
+    sound_out_chs = app_config['sound_out_chs']
+    sound_out_samplerate = app_config['sound_out_samplerate']
+    monitor_channel = app_config['monitor_channel']
+    primary_in_samplerate = app_config['primary_in_samplerate']
+    
+    # Create events for this subprocess
+    stop_intercom_event = multiprocessing.Event()
+    change_ch_event = multiprocessing.Event()
+    
+    print(f"[Intercom] Monitoring channel: {monitor_channel+1}", end='\r\n')
+    # Create a buffer to hold the audio data at input sample rate
+    buffer = np.zeros((int(primary_in_samplerate),))
+    
+    # Validate the channel is valid for the device
+    if monitor_channel >= sound_in_chs:
+        print(f"\nError: Selected channel {monitor_channel+1} exceeds available channels ({sound_in_chs})", end='\r\n')
+        print(f"Defaulting to channel 1", end='\r\n')
+        channel = 0  # Default to first channel
+    else:
+        channel = monitor_channel
+
+    last_error_time = 0
+    error_count = 0
+
+    # Callback function to handle audio input
+    def callback_input(indata, frames, time, status):
+        nonlocal channel, last_error_time, error_count
+        if status:
+            current_time = time.time()
+            if current_time - last_error_time > 1:  # Only print errors once per second
+                print(f"Input status: {status}")
+                last_error_time = current_time
+                error_count += 1
+                if error_count > 10:  # If too many errors, raise an exception
+                    raise RuntimeError("Too many audio input errors")
+
+        try:
+            # Safely check if channel is in bounds
+            if channel < indata.shape[1]:
+                channel_data = indata[:, channel]
+                buffer[:frames] = channel_data
+            else:
+                # Handle case where channel is out of bounds
+                print(f"Channel {channel+1} not available. Device has {indata.shape[1]} channels.")
+                # Use the first channel as fallback
+                buffer[:frames] = indata[:, 0]
+        except Exception as e:
+            logging.error(f"Error in callback_input: {e}")
+            logging.error(f"Channel: {channel}, Frames: {frames}, Buffer shape: {buffer.shape}, Input shape: {indata.shape}")
+            # Attempt graceful recovery without raising
+            buffer[:frames] = 0  # Fill with silence
 
 
-def stop_intercom_m():
-    """Stop intercom - PLACEHOLDER."""
-    print("Stop intercom placeholder - full implementation pending")
+    # Callback function to handle audio output
+    def callback_output(outdata, frames, time, status):
+        if status:
+            print(f"Output status: {status}")
+        try:
+            # Calculate how many input samples we need based on the output frames
+            input_frames = int(frames * primary_in_samplerate / sound_out_samplerate)
+            
+            # Get the input samples and resample them to output rate
+            input_samples = buffer[:input_frames]
+            if len(input_samples) > 0:
+                # Resample the audio data to match output sample rate
+                output_samples = resample(input_samples, frames)
+                outdata[:, 0] = output_samples  # Play back on the first channel
+                if outdata.shape[1] > 1:
+                    outdata[:, 1] = output_samples  # Play back on the second channel if available
+            else:
+                outdata.fill(0)  # Fill with silence if no input data
+        except Exception as e:
+            logging.error(f"Error in callback_output: {e}")
+            logging.error(f"Frames: {frames}, Buffer shape: {buffer.shape}, Output shape: {outdata.shape}")
+            raise
+
+    print("Starting audio streams...", end='\r\n')
+    try:
+        # Open an input stream and an output stream with the callback function
+        with sd.InputStream(callback=callback_input, 
+                          device=sound_in_id, 
+                          channels=sound_in_chs, 
+                          samplerate=primary_in_samplerate,
+                          blocksize=1024,
+                          latency='low'), \
+             sd.OutputStream(callback=callback_output, 
+                           device=sound_out_id, 
+                           channels=sound_out_chs, 
+                           samplerate=sound_out_samplerate,
+                           blocksize=1024,
+                           latency='low'):
+            print("Audio streams opened successfully", end='\r\n')
+            
+            # Only show device information in the main process
+            if is_main_process():
+                print(f"Input device: {sd.query_devices(sound_in_id)['name']} ({primary_in_samplerate} Hz)")
+                print(f"Output device: {sd.query_devices(sound_out_id)['name']} ({sound_out_samplerate} Hz)")
+
+            # The streams are now open and the callback function will be called every time there is audio input and output
+            # Keep running until the process is terminated from the main process
+            try:
+                while True:
+                    # In subprocess, we can't access the main process events directly
+                    # The process will be terminated externally
+                    sd.sleep(1000)  # Sleep for 1 second intervals
+            except KeyboardInterrupt:
+                print("Intercom interrupted")
+            
+            print("Stopping intercom...")
+    except Exception as e:
+        print(f"Error in intercom_m: {e}")
+        print("Device configuration:")
+        print(f"Input device: {sd.query_devices(sound_in_id)}")
+        print(f"Output device: {sd.query_devices(sound_out_id)}")
+        raise
+    except Exception as e:
+        print(f"Error in intercom_m: {e}")
+        print("Device configuration:")
+        print(f"Input device: {sd.query_devices(sound_in_id)}")
+        print(f"Output device: {sd.query_devices(sound_out_id)}")
+        raise
+
+
+def stop_intercom_m(app):
+    ##global intercom_proc, stop_intercom_event
+    
+    if app.intercom_proc is not None:
+        print("\nStopping intercom...")
+        app.stop_intercom_event.set()
+        if app.intercom_proc.is_alive():
+            app.intercom_proc.join(timeout=2)  # Wait up to 2 seconds for clean shutdown
+            if app.intercom_proc.is_alive():
+                app.intercom_proc.terminate()  # Force terminate if still running
+                app.intercom_proc.join(timeout=1)
+        app.intercom_proc = None
+        app.stop_intercom_event.clear()  # Reset the event for next use
+        
+        # Clean up from active processes
+        cleanup_process(app, 'i')
+        
+        print("Intercom stopped")
+
+
+def toggle_intercom_m(app):
+    ##global intercom_proc, sound_in_id, sound_in_chs, sound_out_id, sound_out_samplerate, sound_out_chs, monitor_channel, change_ch_event
+
+    if app.intercom_proc is None:
+        # Validate channel before starting
+        if app.monitor_channel >= app.sound_in_chs:
+            print(f"\nError: Selected channel {app.monitor_channel+1} exceeds available channels ({app.sound_in_chs})")
+            print(f"Defaulting to channel 1")
+            app.monitor_channel = 0  # Default to first channel
+
+        print("Starting intercom on channel:", app.monitor_channel + 1)
+        try:
+            # Initialize the change channel event if it doesn't exist
+            if not hasattr(app, 'change_ch_event'):
+                app.change_ch_event = multiprocessing.Event()
+
+            # Verify device configuration before starting
+            input_device = sd.query_devices(app.sound_in_id)
+            output_device = sd.query_devices(app.sound_out_id)
+
+            # Only show device configuration in the main process
+            if is_main_process():
+                print("\nDevice configuration:")
+                print(f"Input device: [{app.sound_in_id}] {input_device['name']}")
+                print(f"Input channels: {input_device['max_input_channels']}")
+                print(f"Input sample rate: {int(app.config.PRIMARY_IN_SAMPLERATE)} Hz")
+                print(f"Output device: [{app.sound_out_id}] {output_device['name']}")
+                print(f"Output channels: {output_device['max_output_channels']}")
+                print(f"Output sample rate: {int(app.config.PRIMARY_OUT_SAMPLERATE)} Hz")
+
+            # Create the process with daemon setting to ensure proper cleanup
+            # Get configuration dictionary for intercom subprocess
+            app_config = app.get_subprocess_config()
+            
+            app.intercom_proc = multiprocessing.Process(
+                target=intercom_m, 
+                args=(app_config,)
+            )
+            app.intercom_proc.daemon = True  # Make the process a daemon so it exits when the main program exits
+            
+            # Store in active processes
+            app.active_processes['i'] = app.intercom_proc
+            
+            app.intercom_proc.start()
+            print("Intercom process started successfully")
+        except Exception as e:
+            print(f"Error starting intercom process: {e}")
+            app.intercom_proc = None
+    else:
+        stop_intercom_m(app)
 
 
 def plot_fft(app_config, sound_in_id, sound_in_chs, channel, stop_queue):
