@@ -15,11 +15,349 @@ import threading
 import os
 from scipy import signal
 
-# Set matplotlib to use non-interactive backend
-matplotlib.use('Agg')
+# Try to set matplotlib to use interactive backend for GUI display
+GUI_AVAILABLE = False
+try:
+    # On Windows, try TkAgg first as it's most reliable
+    import sys
+    if sys.platform == 'win32':
+        matplotlib.use('TkAgg')
+        print("Using TkAgg backend for GUI display")
+    else:
+        # For Linux/macOS, try Qt5Agg first
+        try:
+            matplotlib.use('Qt5Agg')
+            print("Using Qt5Agg backend for GUI display")
+        except ImportError:
+            matplotlib.use('TkAgg')
+            print("Using TkAgg backend for GUI display")
+    
+    # Test if the backend is working
+    fig_test = plt.figure()
+    plt.close(fig_test)
+    GUI_AVAILABLE = True
+    
+except Exception as e:
+    print(f"Interactive backend not available: {e}")
+    matplotlib.use('Agg')  # Non-interactive fallback
+    GUI_AVAILABLE = False
+    print("Using non-interactive Agg backend")
+
+def create_progress_bar(current, total, bar_length=50):
+    """Create a progress bar string.
+    Args:
+        current: Current progress value
+        total: Total value
+        bar_length: Length of the progress bar (default 50)
+    Returns:
+        String representation of progress bar like [######     ]
+    """
+    if total == 0:
+        return f"[{'#' * bar_length}] 100%"
+    
+    # Ensure current doesn't exceed total
+    current = min(current, total)
+    
+    # Calculate percentage (0-100)
+    percent = int(current * 100 / total)
+    
+    # Calculate filled length, ensuring it can reach full bar_length
+    if current >= total:
+        filled_length = bar_length  # Force full bar when complete
+    else:
+        filled_length = int(bar_length * current / total)
+    
+    # Create the bar
+    bar = '#' * filled_length + ' ' * (bar_length - filled_length)
+    return f"[{bar}] {percent}%"
+
+def _record_audio_pyaudio(duration, device_index, channels, samplerate, blocksize, task_name="audio recording"):
+    """Record audio using PyAudio with progress bar (like original BMAR)."""
+    
+    try:
+        import pyaudio
+    except ImportError:
+        print("PyAudio not available, falling back to sounddevice")
+        return _record_audio_sounddevice(duration, device_index, channels, samplerate, blocksize, task_name)
+    
+    p = None
+    recording_complete = False
+    frames_recorded = 0
+    
+    try:
+        # Calculate recording parameters
+        num_frames = int(samplerate * duration)
+        chunk_size = blocksize
+        
+        # Validate device channels
+        p = pyaudio.PyAudio()
+        device_info = p.get_device_info_by_index(device_index)
+        max_input_channels = int(device_info['maxInputChannels'])
+        actual_channels = min(channels, max_input_channels)
+        
+        if actual_channels != channels:
+            print(f"Device only supports {max_input_channels} input channels, using {actual_channels}")
+        
+        # Create recording array
+        recording_array = np.zeros((num_frames, actual_channels), dtype=np.float32)
+        
+        print(f"Recording {duration}s of audio from device {device_index}...")
+        print(f"Sample rate: {samplerate}Hz, Channels: {actual_channels}, Block size: {chunk_size}")
+        
+        def callback(indata, frame_count, time_info, status):
+            nonlocal frames_recorded, recording_complete
+            try:
+                if status:
+                    print(f"PyAudio stream status: {status}")
+                if frames_recorded < num_frames and not recording_complete:
+                    data = np.frombuffer(indata, dtype=np.float32)
+                    if len(data) > 0:
+                        start_idx = frames_recorded
+                        end_idx = min(start_idx + len(data) // actual_channels, num_frames)
+                        data = data.reshape(-1, actual_channels)
+                        recording_array[start_idx:end_idx] = data[:(end_idx - start_idx)]
+                        frames_recorded += len(data) // actual_channels
+                        if frames_recorded >= num_frames:
+                            recording_complete = True
+                            return (None, pyaudio.paComplete)
+                return (None, pyaudio.paContinue)
+            except Exception as e:
+                print(f"Error in PyAudio callback: {e}")
+                recording_complete = True
+                return (None, pyaudio.paAbort)
+        
+        stream = p.open(format=pyaudio.paFloat32,
+                        channels=actual_channels,
+                        rate=int(samplerate),
+                        input=True,
+                        input_device_index=device_index,
+                        frames_per_buffer=chunk_size,
+                        stream_callback=callback)
+        
+        stream.start_stream()
+        
+        start_time = time.time()
+        timeout = duration + 10
+        
+        while not recording_complete and (time.time() - start_time) < timeout:
+            progress_bar = create_progress_bar(frames_recorded, num_frames)
+            print(f"Recording progress: {progress_bar}", end='\r')
+            time.sleep(0.1)
+        
+        # Ensure we show 100% completion when done
+        if recording_complete or frames_recorded >= num_frames:
+            progress_bar = create_progress_bar(num_frames, num_frames)  # Force 100%
+            print(f"Recording progress: {progress_bar}")
+        
+        stream.stop_stream()
+        stream.close()
+        
+        if frames_recorded < num_frames * 0.9:
+            print(f"Warning: Recording incomplete: only got {frames_recorded}/{num_frames} frames.")
+            return None, 0
+        
+        print(f"Finished {task_name}.")
+        return recording_array, actual_channels
+
+    except Exception as e:
+        print(f"Failed to record audio with PyAudio for {task_name}: {e}")
+        return None, 0
+    finally:
+        if p:
+            try:
+                p.terminate()
+                time.sleep(0.1)  # Allow time for resources to be released
+            except Exception as e:
+                print(f"Error terminating PyAudio instance for {task_name}: {e}")
+
+def _record_audio_sounddevice(duration, device_index, channels, samplerate, blocksize, task_name="audio recording"):
+    """Fallback recording using sounddevice with manual progress tracking."""
+    
+    try:
+        import sounddevice as sd
+        
+        # Calculate total samples needed
+        total_samples = int(samplerate * duration)
+        audio_data = []
+        samples_collected = 0
+        
+        print(f"Recording {duration}s of audio from device {device_index} using sounddevice...")
+        
+        # Progress tracking
+        progress_lock = threading.Lock()
+        
+        # Audio callback function
+        def audio_callback(indata, frames, time_info, status):
+            nonlocal audio_data, samples_collected
+            
+            if status:
+                print(f"Audio status: {status}")
+            
+            with progress_lock:
+                if samples_collected < total_samples:
+                    # Take only the first channel if multi-channel
+                    if channels > 1:
+                        data = indata[:, 0]  # First channel only
+                    else:
+                        data = indata.flatten()
+                    
+                    # Don't exceed total samples needed
+                    remaining_samples = total_samples - samples_collected
+                    samples_to_take = min(len(data), remaining_samples)
+                    
+                    if samples_to_take > 0:
+                        audio_data.extend(data[:samples_to_take])
+                        samples_collected += samples_to_take
+        
+        # Start audio stream
+        with sd.InputStream(
+            device=device_index,
+            channels=channels,
+            samplerate=samplerate,
+            blocksize=blocksize,
+            callback=audio_callback
+        ):
+            # Wait for capture to complete with progress
+            while samples_collected < total_samples:
+                progress_bar = create_progress_bar(samples_collected, total_samples)
+                print(f"Recording progress: {progress_bar}", end='\r')
+                time.sleep(0.1)
+        
+        # Final progress
+        progress_bar = create_progress_bar(total_samples, total_samples)
+        print(f"Recording progress: {progress_bar}")
+        
+        # Convert to numpy array
+        recording_array = np.array(audio_data).reshape(-1, 1)  # Single channel
+        
+        print(f"Finished {task_name}.")
+        return recording_array, 1
+
+    except Exception as e:
+        print(f"Failed to record audio with sounddevice for {task_name}: {e}")
+        return None, 0
 
 def plot_oscope(config):
-    """Oscilloscope plot subprocess function."""
+    """One-shot oscilloscope plot with GUI display and progress bar."""
+    
+    try:
+        # Extract configuration
+        device_index = config['device_index']
+        samplerate = config['samplerate']
+        channels = config.get('channels', 1)
+        blocksize = config.get('blocksize', 1024)
+        plot_duration = config.get('plot_duration', 10.0)  # Duration to capture
+        
+        print(f"Oscilloscope capturing {plot_duration}s from device {device_index} ({samplerate}Hz)")
+        
+        # Record audio using PyAudio with progress bar (like original BMAR)
+        recording_data, actual_channels = _record_audio_pyaudio(
+            duration=plot_duration,
+            device_index=device_index, 
+            channels=channels,
+            samplerate=samplerate,
+            blocksize=blocksize,
+            task_name="oscilloscope"
+        )
+        
+        if recording_data is None:
+            print("Failed to record audio for oscilloscope.")
+            return
+        
+        print(f"\nAudio capture complete! Recorded {len(recording_data)} samples")
+        
+        # Convert to numpy array if needed and take first channel
+        if len(recording_data.shape) > 1:
+            audio_data = recording_data[:, 0]  # First channel only
+        else:
+            audio_data = recording_data.flatten()
+        
+        # Create time axis
+        time_axis = np.linspace(0, plot_duration, len(audio_data))
+        
+        # Create the plot
+        print("Creating oscilloscope plot...")
+        fig, ax = plt.subplots(figsize=(12, 8))
+        
+        # Plot the waveform
+        ax.plot(time_axis, audio_data, 'b-', linewidth=0.8, alpha=0.8)
+        
+        # Set plot properties
+        ax.set_xlim(0, plot_duration)
+        ax.set_ylim(-1.0, 1.0)
+        ax.set_xlabel('Time (seconds)')
+        ax.set_ylabel('Amplitude')
+        ax.set_title(f'Oscilloscope - Device {device_index} ({samplerate}Hz, {plot_duration}s capture)')
+        ax.grid(True, alpha=0.3)
+        
+        # Calculate and display statistics
+        rms_level = np.sqrt(np.mean(audio_data**2))
+        peak_level = np.max(np.abs(audio_data))
+        zero_crossings = np.sum(np.diff(np.sign(audio_data)) != 0)
+        
+        # Add statistics text box
+        stats_text = f'RMS: {rms_level:.4f}\nPeak: {peak_level:.4f}\nZero Crossings: {zero_crossings}'
+        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
+                bbox=dict(boxstyle="round,pad=0.5", facecolor="lightblue", alpha=0.8),
+                verticalalignment='top', fontsize=10)
+        
+        # Add frequency estimation if possible
+        if len(audio_data) > samplerate:  # At least 1 second of data
+            try:
+                # Simple frequency estimation using zero crossings
+                estimated_freq = zero_crossings / (2 * plot_duration)
+                ax.text(0.02, 0.82, f'Est. Frequency: {estimated_freq:.1f} Hz', 
+                        transform=ax.transAxes,
+                        bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgreen", alpha=0.8),
+                        fontsize=10)
+            except:
+                pass
+        
+        plt.tight_layout()
+        
+        # Save the plot
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"oscope_{timestamp}.png"
+        
+        plots_dir = config.get('plots_dir', 'plots')
+        if not os.path.exists(plots_dir):
+            os.makedirs(plots_dir, exist_ok=True)
+        
+        filepath = os.path.join(plots_dir, filename)
+        
+        print(f"Saving plot: {filename}")
+        fig.savefig(filepath, dpi=150, bbox_inches='tight')
+        
+        # Try to show the plot in a GUI window
+        if GUI_AVAILABLE:
+            try:
+                print("Displaying oscilloscope plot...")
+                plt.show(block=True)  # Force blocking display
+                print("Oscilloscope plot window closed.")
+            except Exception as e:
+                print(f"Could not display GUI window: {e}")
+                print("Opening plot file instead...")
+                _try_open_plot_file(filepath)
+        else:
+            print("GUI not available. Opening plot file...")
+            _try_open_plot_file(filepath)
+        
+        print(f"Oscilloscope plot saved: {filepath}")
+        
+    except KeyboardInterrupt:
+        print("\nOscilloscope cancelled by user")
+    except Exception as e:
+        print(f"Oscilloscope error: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        plt.close('all')
+
+def plot_oscope_continuous(config):
+    """Continuous oscilloscope plot for background monitoring."""
+    
+    # Set matplotlib to non-interactive backend for background processes
+    matplotlib.use('Agg')
     
     def update_plot(frame_data):
         """Update the oscilloscope plot with new data."""
@@ -58,7 +396,7 @@ def plot_oscope(config):
         buffer_size = int(samplerate * plot_duration)
         audio_buffer = np.zeros(buffer_size)
         
-        print(f"Oscilloscope active (device {device_index}, {samplerate}Hz)")
+        print(f"Continuous oscilloscope active (device {device_index}, {samplerate}Hz)")
         print(f"Display duration: {plot_duration}s")
         
         # Create matplotlib figure
@@ -93,8 +431,9 @@ def plot_oscope(config):
             return []
         
         with stream:
-            # Create animation
-            ani = animation.FuncAnimation(fig, animate, interval=50, blit=False)
+            # Create animation with explicit save_count to avoid warning
+            ani = animation.FuncAnimation(fig, animate, interval=50, blit=False, 
+                                        save_count=100, cache_frame_data=False)
             
             # Save plots periodically
             plot_count = 0
@@ -120,25 +459,215 @@ def plot_oscope(config):
                         update_plot(audio_buffer)
                         fig.savefig(filepath, dpi=100, bbox_inches='tight')
                         
-                        print(f"Saved oscilloscope plot: {filename}")
+                        print(f"Saved continuous oscilloscope plot: {filename}")
                         plot_count += 1
                         last_save_time = current_time
                         
                     except Exception as e:
-                        print(f"Error saving oscilloscope plot: {e}")
+                        print(f"Error saving continuous oscilloscope plot: {e}")
                 
                 time.sleep(1.0)
                 
     except KeyboardInterrupt:
-        print("\nOscilloscope stopped by user")
+        print("\nContinuous oscilloscope stopped by user")
     except Exception as e:
-        print(f"Oscilloscope error: {e}")
-        logging.error(f"Oscilloscope error: {e}")
+        print(f"Continuous oscilloscope error: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         plt.close('all')
 
 def plot_spectrogram(config):
-    """Spectrogram plot subprocess function."""
+    """One-shot spectrogram plot with GUI display and progress bar."""
+    
+    try:
+        # Extract configuration
+        device_index = config['device_index']
+        samplerate = config['samplerate']
+        channels = config.get('channels', 1)
+        blocksize = config.get('blocksize', 1024)
+        fft_size = config.get('fft_size', 2048)
+        overlap = config.get('overlap', 0.75)
+        capture_duration = config.get('capture_duration', 5.0)  # Duration to capture
+        
+        print(f"Spectrogram capturing {capture_duration}s from device {device_index} ({samplerate}Hz)")
+        
+        # Calculate total samples needed
+        total_samples = int(samplerate * capture_duration)
+        audio_data = []
+        samples_collected = 0
+        
+        import sounddevice as sd
+        import threading
+        from scipy import signal as scipy_signal
+        
+        # Progress tracking
+        progress_lock = threading.Lock()
+        
+        # Audio callback function
+        def audio_callback(indata, frames, time_info, status):
+            nonlocal audio_data, samples_collected
+            
+            if status:
+                print(f"Audio status: {status}")
+            
+            with progress_lock:
+                if samples_collected < total_samples:
+                    # Take only the first channel if multi-channel
+                    if channels > 1:
+                        data = indata[:, 0]  # First channel only
+                    else:
+                        data = indata.flatten()
+                    
+                    # Don't exceed total samples needed
+                    remaining_samples = total_samples - samples_collected
+                    samples_to_take = min(len(data), remaining_samples)
+                    
+                    if samples_to_take > 0:
+                        audio_data.extend(data[:samples_to_take])
+                        samples_collected += samples_to_take
+                        
+                        # Show progress
+                        progress = (samples_collected / total_samples) * 100
+                        if samples_collected % (samplerate // 4) == 0:  # Update every 0.25 seconds
+                            print(f"\rCapturing audio: {progress:.1f}% complete", end='', flush=True)
+        
+        print("Starting audio capture...")
+        
+        # Start audio stream
+        with sd.InputStream(
+            device=device_index,
+            channels=channels,
+            samplerate=samplerate,
+            blocksize=blocksize,
+            callback=audio_callback
+        ):
+            # Wait for capture to complete
+            while samples_collected < total_samples:
+                time.sleep(0.1)
+        
+        print(f"\nAudio capture complete! Collected {len(audio_data)} samples")
+        
+        # Convert to numpy array
+        audio_data = np.array(audio_data)
+        
+        # Calculate spectrogram parameters
+        hop_length = int(fft_size * (1 - overlap))
+        
+        print("Computing spectrogram...")
+        
+        # Compute spectrogram using scipy
+        frequencies, times, Sxx = scipy_signal.spectrogram(
+            audio_data,
+            fs=samplerate,
+            window='hann',
+            nperseg=fft_size,
+            noverlap=int(fft_size * overlap),
+            scaling='density'
+        )
+        
+        # Convert to dB
+        Sxx_db = 10 * np.log10(Sxx + 1e-10)
+        
+        # Filter frequency range if specified
+        freq_range = config.get('freq_range', [0, samplerate // 2])
+        freq_mask = (frequencies >= freq_range[0]) & (frequencies <= freq_range[1])
+        display_freqs = frequencies[freq_mask]
+        display_Sxx = Sxx_db[freq_mask, :]
+        
+        # Create the plot
+        print("Creating spectrogram plot...")
+        fig, ax = plt.subplots(figsize=(14, 8))
+        
+        # Plot spectrogram
+        im = ax.imshow(
+            display_Sxx, 
+            aspect='auto', 
+            origin='lower',
+            extent=[0, capture_duration, display_freqs[0], display_freqs[-1]],
+            cmap='viridis',
+            vmin=np.percentile(display_Sxx, 5),  # Use percentiles for better contrast
+            vmax=np.percentile(display_Sxx, 95)
+        )
+        
+        # Set labels and title
+        ax.set_xlabel('Time (seconds)')
+        ax.set_ylabel('Frequency (Hz)')
+        ax.set_title(f'Spectrogram - Device {device_index} ({samplerate}Hz, {capture_duration}s capture)')
+        
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label('Power Spectral Density (dB/Hz)')
+        
+        # Add statistics
+        peak_freq_idx = np.unravel_index(np.argmax(display_Sxx), display_Sxx.shape)
+        peak_freq = display_freqs[peak_freq_idx[0]]
+        peak_time = times[peak_freq_idx[1]]
+        
+        # Calculate average power in different frequency bands
+        low_band = (display_freqs >= 0) & (display_freqs <= 1000)
+        mid_band = (display_freqs > 1000) & (display_freqs <= 5000)
+        high_band = (display_freqs > 5000)
+        
+        low_power = np.mean(display_Sxx[low_band, :]) if np.any(low_band) else 0
+        mid_power = np.mean(display_Sxx[mid_band, :]) if np.any(mid_band) else 0
+        high_power = np.mean(display_Sxx[high_band, :]) if np.any(high_band) else 0
+        
+        # Add statistics text box
+        stats_text = f'Peak: {peak_freq:.1f} Hz @ {peak_time:.2f}s\n'
+        stats_text += f'Low (0-1kHz): {low_power:.1f} dB\n'
+        stats_text += f'Mid (1-5kHz): {mid_power:.1f} dB\n'
+        stats_text += f'High (>5kHz): {high_power:.1f} dB'
+        
+        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
+                bbox=dict(boxstyle="round,pad=0.5", facecolor="lightblue", alpha=0.8),
+                verticalalignment='top', fontsize=10)
+        
+        plt.tight_layout()
+        
+        # Save the plot
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"spectrogram_{timestamp}.png"
+        
+        plots_dir = config.get('plots_dir', 'plots')
+        if not os.path.exists(plots_dir):
+            os.makedirs(plots_dir, exist_ok=True)
+        
+        filepath = os.path.join(plots_dir, filename)
+        
+        print(f"Saving plot: {filename}")
+        fig.savefig(filepath, dpi=150, bbox_inches='tight')
+        
+        # Try to show the plot in a GUI window
+        if GUI_AVAILABLE:
+            try:
+                print("Displaying spectrogram plot...")
+                plt.show(block=True)  # Force blocking display
+                print("Spectrogram plot window closed.")
+            except Exception as e:
+                print(f"Could not display GUI window: {e}")
+                print("Opening plot file instead...")
+                _try_open_plot_file(filepath)
+        else:
+            print("GUI not available. Opening plot file...")
+            _try_open_plot_file(filepath)
+        
+        print(f"Spectrogram plot saved: {filepath}")
+        
+    except KeyboardInterrupt:
+        print("\nSpectrogram cancelled by user")
+    except Exception as e:
+        print(f"Spectrogram error: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        plt.close('all')
+
+def plot_spectrogram_continuous(config):
+    """Continuous spectrogram plot for background monitoring."""
+    
+    # Set matplotlib to non-interactive backend for background processes
+    matplotlib.use('Agg')
     
     try:
         # Extract configuration
@@ -162,7 +691,7 @@ def plot_spectrogram(config):
         # Audio buffer for windowing
         audio_buffer = np.zeros(fft_size)
         
-        print(f"Spectrogram active (device {device_index}, {samplerate}Hz)")
+        print(f"Continuous spectrogram active (device {device_index}, {samplerate}Hz)")
         print(f"FFT size: {fft_size}, Overlap: {overlap*100:.0f}%")
         print(f"Frequency range: {freq_range[0]}-{freq_range[1]} Hz")
         
@@ -224,7 +753,7 @@ def plot_spectrogram(config):
             # Set labels and title
             ax.set_xlabel('Time (s)')
             ax.set_ylabel('Frequency (Hz)')
-            ax.set_title(f'Spectrogram - Device {device_index}')
+            ax.set_title(f'Continuous Spectrogram - Device {device_index}')
             
             # Add colorbar
             cbar = plt.colorbar(im, ax=ax)
@@ -266,20 +795,20 @@ def plot_spectrogram(config):
                         update_spectrogram()
                         fig.savefig(filepath, dpi=100, bbox_inches='tight')
                         
-                        print(f"Saved spectrogram plot: {filename}")
+                        print(f"Saved continuous spectrogram plot: {filename}")
                         plot_count += 1
                         last_save_time = current_time
                         
                     except Exception as e:
-                        print(f"Error saving spectrogram plot: {e}")
+                        print(f"Error saving continuous spectrogram plot: {e}")
                 
                 time.sleep(2.0)
                 
     except KeyboardInterrupt:
-        print("\nSpectrogram stopped by user")
+        print("\nContinuous spectrogram stopped by user")
     except Exception as e:
-        print(f"Spectrogram error: {e}")
-        logging.error(f"Spectrogram error: {e}")
+        print(f"Continuous spectrogram error: {e}")
+        logging.error(f"Continuous spectrogram error: {e}")
     finally:
         plt.close('all')
 
@@ -557,3 +1086,30 @@ def create_comparison_plot(audio_data_list, labels, samplerate, output_path="com
     except Exception as e:
         print(f"Error creating comparison plot: {e}")
         return False
+
+def _try_open_plot_file(filepath):
+    """Try to open a plot file using the system's default image viewer."""
+    try:
+        import subprocess
+        import sys
+        
+        if sys.platform == 'win32':
+            # Windows
+            subprocess.run(['start', filepath], shell=True, check=False)
+        elif sys.platform == 'darwin':
+            # macOS
+            subprocess.run(['open', filepath], check=False)
+        else:
+            # Linux/Unix
+            try:
+                subprocess.run(['xdg-open', filepath], check=False)
+            except FileNotFoundError:
+                # Fallback for WSL
+                try:
+                    subprocess.run(['wslview', filepath], check=False)
+                except FileNotFoundError:
+                    print(f"Cannot automatically open file. Please open manually: {filepath}")
+                    
+    except Exception as e:
+        print(f"Could not open plot file automatically: {e}")
+        print(f"Please open manually: {filepath}")

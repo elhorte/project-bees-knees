@@ -40,7 +40,7 @@ Examples:
     parser.add_argument(
         "--samplerate", "-r",
         type=int,
-        choices=[8000, 16000, 22050, 44100, 48000, 96000],
+        choices=[8000, 16000, 22050, 44100, 48000, 96000, 192000],
         help="Audio sample rate in Hz"
     )
     

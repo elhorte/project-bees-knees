@@ -19,8 +19,8 @@ def keyboard_listener(app):
     try:
         print("\nBMAR Controls:")
         print("  'r' - Start/stop recording")
-        print("  's' - Spectrogram")
-        print("  'o' - Oscilloscope")
+        print("  's' - Spectrogram (one-shot with GUI)")
+        print("  'o' - Oscilloscope (10s capture with GUI)")
         print("  't' - Trigger plot")
         print("  'v' - VU meter")
         print("  'i' - Intercom")
@@ -66,6 +66,14 @@ def process_command(app, command):
     from .audio_devices import list_audio_devices_detailed
     
     try:
+        # Ensure app has basic attributes for command processing
+        if not hasattr(app, 'active_processes'):
+            app.active_processes = {}
+        if not hasattr(app, 'stop_program'):
+            app.stop_program = [False]
+        if not hasattr(app, 'keyboard_listener_running'):
+            app.keyboard_listener_running = True
+            
         if command == 'q' or command == 'Q':
             print("\nQuitting...")
             app.stop_program[0] = True
@@ -121,6 +129,9 @@ def process_command(app, command):
             
     except Exception as e:
         print(f"Error processing command '{command}': {e}")
+        import traceback
+        print(f"Traceback: ")
+        traceback.print_exc()
         logging.error(f"Error processing command '{command}': {e}")
 
 def handle_recording_command(app):
@@ -203,27 +214,41 @@ def handle_spectrogram_command(app):
             
     except Exception as e:
         print(f"Spectrogram command error: {e}")
+        import traceback
+        traceback.print_exc()
 
 def start_spectrogram(app):
-    """Start spectrogram plotting."""
+    """Start one-shot spectrogram plotting."""
     
     from .process_manager import create_subprocess
     from .plotting import plot_spectrogram
     
     try:
-        # Create spectrogram configuration
+        # Ensure app has all required attributes
+        ensure_app_attributes(app)
+        
+        # Ensure required directory exists
+        plots_dir = os.path.join(app.today_dir, 'plots')
+        if not os.path.exists(plots_dir):
+            os.makedirs(plots_dir, exist_ok=True)
+            
+        # Create spectrogram configuration for one-shot capture
         spectrogram_config = {
             'device_index': app.device_index,
             'samplerate': app.samplerate,
-            'channels': 1,
+            'channels': app.channels,
             'blocksize': app.blocksize,
             'fft_size': 2048,
             'overlap': 0.75,
+            'capture_duration': 5.0,  # Capture 5 seconds of audio
             'freq_range': [0, app.samplerate // 2],
-            'plots_dir': os.path.join(app.today_dir, 'plots')
+            'plots_dir': plots_dir
         }
         
+        print(f"Starting one-shot spectrogram (device {app.device_index}, {app.samplerate}Hz)")
+        
         # Create and start spectrogram process
+        # Note: This will be a short-lived process that captures, analyzes, and exits
         process = create_subprocess(
             target_function=plot_spectrogram,
             args=(spectrogram_config,),
@@ -235,8 +260,12 @@ def start_spectrogram(app):
         process.start()
         print(f"Spectrogram started (PID: {process.pid})")
         
+        # Note: The process will finish automatically after capturing and displaying
+        
     except Exception as e:
         print(f"Error starting spectrogram: {e}")
+        import traceback
+        traceback.print_exc()
 
 def handle_oscilloscope_command(app):
     """Handle oscilloscope command."""
@@ -259,25 +288,38 @@ def handle_oscilloscope_command(app):
             
     except Exception as e:
         print(f"Oscilloscope command error: {e}")
+        import traceback
+        traceback.print_exc()
 
 def start_oscilloscope(app):
-    """Start oscilloscope plotting."""
+    """Start one-shot oscilloscope plotting."""
     
     from .process_manager import create_subprocess
     from .plotting import plot_oscope
     
     try:
-        # Create oscilloscope configuration
+        # Ensure app has all required attributes
+        ensure_app_attributes(app)
+        
+        # Ensure required directory exists
+        plots_dir = os.path.join(app.today_dir, 'plots')
+        if not os.path.exists(plots_dir):
+            os.makedirs(plots_dir, exist_ok=True)
+            
+        # Create oscilloscope configuration for one-shot capture
         oscope_config = {
             'device_index': app.device_index,
             'samplerate': app.samplerate,
-            'channels': 1,
+            'channels': app.channels,
             'blocksize': app.blocksize,
-            'plot_duration': 2.0,
-            'plots_dir': os.path.join(app.today_dir, 'plots')
+            'plot_duration': 10.0,  # Capture 10 seconds of audio
+            'plots_dir': plots_dir
         }
         
+        print(f"Starting one-shot oscilloscope (device {app.device_index}, {app.samplerate}Hz)")
+        
         # Create and start oscilloscope process
+        # Note: This will be a short-lived process that captures, plots, and exits
         process = create_subprocess(
             target_function=plot_oscope,
             args=(oscope_config,),
@@ -289,8 +331,12 @@ def start_oscilloscope(app):
         process.start()
         print(f"Oscilloscope started (PID: {process.pid})")
         
+        # Note: The process will finish automatically after capturing and displaying
+        
     except Exception as e:
         print(f"Error starting oscilloscope: {e}")
+        import traceback
+        traceback.print_exc()
 
 def handle_trigger_command(app):
     """Handle trigger plotting command."""
@@ -321,18 +367,28 @@ def start_trigger_plotting(app):
     from .plotting import trigger
     
     try:
+        # Ensure app has all required attributes
+        ensure_app_attributes(app)
+        
+        # Ensure required directory exists
+        plots_dir = os.path.join(app.today_dir, 'plots')
+        if not os.path.exists(plots_dir):
+            os.makedirs(plots_dir, exist_ok=True)
+            
         # Create trigger configuration
         trigger_config = {
             'device_index': app.device_index,
             'samplerate': app.samplerate,
-            'channels': 1,
+            'channels': app.channels,
             'blocksize': app.blocksize,
             'trigger_level': 0.1,
             'trigger_mode': 'rising',
             'pre_trigger_samples': 1024,
             'post_trigger_samples': 2048,
-            'plots_dir': os.path.join(app.today_dir, 'plots')
+            'plots_dir': plots_dir
         }
+        
+        print(f"Starting trigger plotting (device {app.device_index}, {app.samplerate}Hz)")
         
         # Create and start trigger process
         process = create_subprocess(
@@ -348,6 +404,8 @@ def start_trigger_plotting(app):
         
     except Exception as e:
         print(f"Error starting trigger plotting: {e}")
+        import traceback
+        traceback.print_exc()
 
 def handle_vu_meter_command(app):
     """Handle VU meter command."""
@@ -378,17 +436,22 @@ def start_vu_meter(app):
     from .audio_tools import vu_meter
     
     try:
+        # Ensure app has all required attributes
+        ensure_app_attributes(app)
+        
         # Create VU meter configuration to match original BMAR_class.py format
         vu_config = {
             'sound_in_id': app.device_index,
             'sound_in_chs': app.channels,
-            'monitor_channel': app.monitor_channel if hasattr(app, 'monitor_channel') else 0,
+            'monitor_channel': app.monitor_channel,
             'PRIMARY_IN_SAMPLERATE': app.samplerate,
             'is_wsl': app.is_wsl,
             'is_macos': app.is_macos,
             'os_info': app.os_info,
-            'DEBUG_VERBOSE': getattr(app, 'DEBUG_VERBOSE', False)
+            'DEBUG_VERBOSE': app.DEBUG_VERBOSE
         }
+        
+        print(f"Starting VU meter on channel {app.monitor_channel + 1} of {app.channels}")
         
         # Create and start VU meter process
         process = create_subprocess(
@@ -404,6 +467,8 @@ def start_vu_meter(app):
         
     except Exception as e:
         print(f"Error starting VU meter: {e}")
+        import traceback
+        traceback.print_exc()
 
 def handle_intercom_command(app):
     """Handle intercom command."""
@@ -434,6 +499,9 @@ def start_intercom(app):
     from .audio_tools import intercom_m
     
     try:
+        # Ensure app has all required attributes
+        ensure_app_attributes(app)
+        
         # Create intercom configuration
         intercom_config = {
             'input_device': app.device_index,
@@ -443,6 +511,8 @@ def start_intercom(app):
             'blocksize': app.blocksize,
             'gain': 1.0
         }
+        
+        print(f"Starting intercom (device {app.device_index}, {app.samplerate}Hz)")
         
         # Create and start intercom process
         process = create_subprocess(
@@ -458,6 +528,8 @@ def start_intercom(app):
         
     except Exception as e:
         print(f"Error starting intercom: {e}")
+        import traceback
+        traceback.print_exc()
 
 def handle_performance_monitor_command(app):
     """Handle performance monitor command."""
@@ -572,8 +644,8 @@ def show_help():
     print("=" * 60)
     print("Commands:")
     print("  r - Recording:     Start/stop audio recording")
-    print("  s - Spectrogram:   Display real-time frequency analysis")
-    print("  o - Oscilloscope:  Display real-time waveform")
+    print("  s - Spectrogram:   One-shot frequency analysis with GUI window")
+    print("  o - Oscilloscope:  10-second waveform capture with GUI window")
     print("  t - Trigger:       Triggered waveform capture")
     print("  v - VU Meter:      Audio level monitoring")
     print("  i - Intercom:      Audio monitoring/loopback")
@@ -780,6 +852,9 @@ def handle_channel_switch_command(app, command):
     """Handle channel switching command (1-9)."""
     
     try:
+        # Ensure app has required attributes
+        ensure_app_attributes(app)
+        
         # Convert to zero-based channel index
         key_int = int(command) - 1
         
@@ -794,21 +869,24 @@ def handle_channel_switch_command(app, command):
         print(f"\nNow monitoring channel: {app.monitor_channel+1} (of {app.channels})")
         
         # Restart VU meter if running
-        if 'v' in app.active_processes and app.active_processes['v'] is not None:
+        if hasattr(app, 'active_processes') and 'v' in app.active_processes and app.active_processes['v'] is not None:
             if app.active_processes['v'].is_alive():
                 print(f"Restarting VU meter on channel: {app.monitor_channel+1}")
                 
-                # Stop current VU meter
-                app.active_processes['v'].terminate()
-                app.active_processes['v'].join(timeout=1)
-                app.active_processes['v'] = None
-                
-                # Start VU meter with new channel
-                time.sleep(0.1)
-                start_vu_meter(app)
+                try:
+                    # Stop current VU meter
+                    app.active_processes['v'].terminate()
+                    app.active_processes['v'].join(timeout=1)
+                    app.active_processes['v'] = None
+                    
+                    # Start VU meter with new channel
+                    time.sleep(0.1)
+                    start_vu_meter(app)
+                except Exception as e:
+                    print(f"Error restarting VU meter: {e}")
         
         # Handle intercom channel change if running
-        if 'i' in app.active_processes and app.active_processes['i'] is not None:
+        if hasattr(app, 'active_processes') and 'i' in app.active_processes and app.active_processes['i'] is not None:
             if app.active_processes['i'].is_alive():
                 print(f"Channel change for intercom on channel: {app.monitor_channel+1}")
                 # For intercom, we would need to implement channel change signaling
@@ -818,6 +896,8 @@ def handle_channel_switch_command(app, command):
         print(f"Invalid channel number: {command}")
     except Exception as e:
         print(f"Channel switch error: {e}")
+        import traceback
+        traceback.print_exc()
         logging.error(f"Channel switch error: {e}")
 
 def timed_input(app, prompt, timeout=3, default='n'):
@@ -899,3 +979,37 @@ def timed_input(app, prompt, timeout=3, default='n'):
     # Timeout occurred
     print(f"\n[Timeout after {timeout}s] Using default: '{default}'")
     return default
+
+def ensure_app_attributes(app):
+    """Ensure the app object has all required attributes for audio processing."""
+    
+    try:
+        # Set default values for missing attributes
+        if not hasattr(app, 'monitor_channel'):
+            app.monitor_channel = 0
+        if not hasattr(app, 'is_wsl'):
+            from .platform_manager import PlatformManager
+            platform_manager = PlatformManager()
+            app.is_wsl = platform_manager.is_wsl()
+        if not hasattr(app, 'is_macos'):
+            from .platform_manager import PlatformManager
+            platform_manager = PlatformManager()
+            app.is_macos = platform_manager.is_macos()
+        if not hasattr(app, 'os_info'):
+            from .platform_manager import PlatformManager
+            platform_manager = PlatformManager()
+            app.os_info = platform_manager.get_os_info()
+        if not hasattr(app, 'channels'):
+            app.channels = 1
+        if not hasattr(app, 'blocksize'):
+            app.blocksize = 1024
+        if not hasattr(app, 'DEBUG_VERBOSE'):
+            app.DEBUG_VERBOSE = False
+            
+        # Validate monitor channel is within bounds
+        if hasattr(app, 'channels') and app.monitor_channel >= app.channels:
+            print(f"Warning: Monitor channel {app.monitor_channel + 1} exceeds available channels ({app.channels}). Using channel 1.")
+            app.monitor_channel = 0
+            
+    except Exception as e:
+        print(f"Warning: Error setting app attributes: {e}")

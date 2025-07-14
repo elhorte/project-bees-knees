@@ -1,6 +1,21 @@
 # BMAR - Bioacoustic Monitoring and Recording System
 
-A modular Python application for real-time audio monitoring, recording, and analysis.
+A modular Python app| Key | Function | Description |
+|-----|----------|-------------|
+| `r` | Recording | Start/stop audio recording |
+| `s` | Spectrogram | One-shot frequency analysis with GUI window |
+| `o` | Oscilloscope | 10-second waveform capture with GUI window |
+| `t` | Trigger | Triggered waveform capture |
+| `v` | VU Meter | Audio level monitoring |
+| `i` | Intercom | Audio monitoring/loopback |
+| `d` | Current Device | Show currently selected audio device |
+| `D` | All Devices | List all available audio devices with details |
+| `p` | Performance | System performance monitor (one-time) |
+| `P` | Performance | Continuous system performance monitor |
+| `f` | Files | File browser and directory info |
+| `c` | Configuration | Display current settings |
+| `h` | Help | Show help message |
+| `q` | Quit | Exit the application |l-time audio monitoring, recording, and analysis.
 
 ## 🚀 Quick Start
 
@@ -8,6 +23,7 @@ A modular Python application for real-time audio monitoring, recording, and anal
 Make sure you have Python 3.7+ and the required packages installed:
 
 ```bash
+run requirement.txt
 pip install numpy scipy matplotlib sounddevice librosa pydub psutil
 ```
 
@@ -78,7 +94,7 @@ Once the application is running, use these keyboard commands:
 |-----|----------|-------------|
 | `r` | Recording | Start/stop audio recording |
 | `s` | Spectrogram | Real-time frequency analysis |
-| `o` | Oscilloscope | Real-time waveform display |
+| `o` | Oscilloscope | 10-second waveform capture with GUI window |
 | `t` | Trigger | Triggered waveform capture |
 | `v` | VU Meter | Audio level monitoring |
 | `i` | Intercom | Audio monitoring/loopback |
