@@ -388,6 +388,14 @@ class BmarApp:
         self._setup_paths_and_devices()
         self.check_and_create_date_folders() # This also sets the initial directory paths
         self.original_terminal_settings = self.save_terminal_settings()
+        
+        # Print configuration values only in main process
+        if is_main_process():
+            print(f"\nConfig values:")
+            print(f"  data_drive: '{self.data_drive}'")
+            print(f"  data_path: '{self.data_path}'")
+            print(f"  folders: {self.folders}")
+            print(f"  Date folder format: '{self.date_folder}' (YYMMDD)")
 
 
     def _setup_audio_format(self):
@@ -472,6 +480,57 @@ class BmarApp:
         except Exception as e:
             logging.warning(f"Could not save terminal settings: {e}")
             return None
+
+    def get_subprocess_config(self, **kwargs):
+        """
+        Create a comprehensive configuration dictionary for subprocess communication.
+        This centralizes the configuration creation to avoid code duplication.
+        Each subprocess function will use only the keys it needs.
+        
+        Args:
+            **kwargs: Additional parameters to include or override defaults
+            
+        Returns:
+            Dictionary containing all configuration values safe for multiprocessing
+        """
+        # Comprehensive configuration with all values that any subprocess might need
+        config = {
+            # Audio device settings
+            'sound_in_id': int(self.sound_in_id) if self.sound_in_id is not None else None,
+            'sound_in_chs': int(self.sound_in_chs),
+            'primary_in_samplerate': int(self.config.PRIMARY_IN_SAMPLERATE),
+            'PRIMARY_IN_SAMPLERATE': int(self.PRIMARY_IN_SAMPLERATE),  # VU meter uses this key name
+            'primary_bitdepth': int(self.config.PRIMARY_BITDEPTH),
+            
+            # Directory paths
+            'plot_directory': str(self.PLOT_DIRECTORY),
+            
+            # Location identifiers
+            'location_id': str(self.config.LOCATION_ID),
+            'hive_id': str(self.config.HIVE_ID),
+            
+            # Platform information
+            'is_wsl': self.platform_manager.is_wsl(),
+            'is_macos': self.platform_manager.is_macos(),
+            'os_info': self.platform_manager.get_os_info(),
+            
+            # Oscilloscope settings
+            'trace_duration': float(self.config.TRACE_DURATION),
+            'oscope_gain_db': float(self.config.OSCOPE_GAIN_DB),
+            
+            # FFT settings
+            'fft_duration': float(self.config.FFT_DURATION),
+            'fft_gain': float(getattr(self.config, 'FFT_GAIN', 0)),
+            'fft_bw': float(getattr(self.config, 'FFT_BW', 100)),  # Default bucket width
+            
+            # VU meter settings
+            'monitor_channel': int(self.monitor_channel),
+        }
+        
+        # Add any additional kwargs (allows for override or additional values)
+        config.update(kwargs)
+        
+        return config
     
         # end class BmarApp
 
@@ -646,14 +705,8 @@ MONITOR_DIRECTORY = os.path.join(MONITOR_DIRECTORY, "")
 PLOT_DIRECTORY = os.path.join(PLOT_DIRECTORY, "")
 '''
 
-# Only print config values in the main process, not in subprocesses
-# This ensures they don't show up when starting the VU meter or intercom
-if is_main_process():
-    print(f"\nConfig values:")
-    print(f"  data_drive: '{data_drive}'")
-    print(f"  data_path: '{data_path}'")
-    print(f"  folders: {folders}")
-    print(f"  Date folder format: '{date_folder}' (YYMMDD)")
+# Config values are now printed from within BmarApp.initialize() method
+# No global config printing needed here
 
 
 testmode = False                            # True = run in test mode with lower than needed sample rate
@@ -1392,21 +1445,21 @@ def clear_input_buffer(app):
                     pass
 
 
-def show_audio_device_info_for_SOUND_IN_OUT():
+def show_audio_device_info_for_SOUND_IN_OUT(app):
     """Display detailed information about the selected audio input and output devices."""
     print("\nSelected Audio Device Information:")
     print("-" * 50)
     
     # Get and display input device info
     try:
-        input_info = sd.query_devices(sound_in_id)
+        input_info = sd.query_devices(app.sound_in_id)
         print("\nInput Device:")
-        print(f"Name: [{sound_in_id}] {input_info['name']}")
+        print(f"Name: [{app.sound_in_id}] {input_info['name']}")
         print(f"Default Sample Rate: {int(input_info['default_samplerate'])} Hz")
-        print(f"Bit Depth: {config.PRIMARY_BITDEPTH} bits")
+        print(f"Bit Depth: {app.config.PRIMARY_BITDEPTH} bits")
         print(f"Max Input Channels: {input_info['max_input_channels']}")
-        print(f"Current Sample Rate: {int(config.PRIMARY_IN_SAMPLERATE)} Hz")
-        print(f"Current Channels: {sound_in_chs}")
+        print(f"Current Sample Rate: {int(app.config.PRIMARY_IN_SAMPLERATE)} Hz")
+        print(f"Current Channels: {app.sound_in_chs}")
         if 'hostapi' in input_info:
             hostapi_info = sd.query_hostapis(index=input_info['hostapi'])
             print(f"Audio API: {hostapi_info['name']}")
@@ -1415,9 +1468,9 @@ def show_audio_device_info_for_SOUND_IN_OUT():
     
     # Get and display output device info
     try:
-        output_info = sd.query_devices(sound_out_id)
+        output_info = sd.query_devices(app.sound_out_id)
         print("\nOutput Device:")
-        print(f"Name: [{sound_out_id}] {output_info['name']}")
+        print(f"Name: [{app.sound_out_id}] {output_info['name']}")
         print(f"Default Sample Rate: {int(output_info['default_samplerate'])} Hz")
         print(f"Max Output Channels: {output_info['max_output_channels']}")
         if 'hostapi' in output_info:
@@ -1445,7 +1498,7 @@ def show_audio_device_list(app):
     
     # Get and display input device info
     try:
-        input_info = sd.query_devices(sound_in_id)
+        input_info = sd.query_devices(app.sound_in_id)
         print("\nInput Device:")
         print(f"Name: [{app.sound_in_id}] {input_info['name']}")
         print(f"Default Sample Rate: {int(input_info['default_samplerate'])} Hz")
@@ -1562,7 +1615,7 @@ def check_stream_status(app, stream_duration):
             time.sleep(0.1)  # Sleep for a short duration before checking again
 
     print("Stream checking finished at", datetime.datetime.now())
-    show_audio_device_info_for_SOUND_IN_OUT()
+    show_audio_device_info_for_SOUND_IN_OUT(app)
 
 
 # fetch the most recent audio file in the directory
@@ -1603,7 +1656,7 @@ def find_file_of_type_with_offset(app, offset):
         print(f"All files in directory: {all_files}")
         
         # List all files of the specified type in the directory (case-insensitive)
-        files_of_type = [f for f in all_files if os.path.isfile(os.path.join(expanded_dir, f)) and f.lower().endswith(f".{file_type.lower()}")]
+        files_of_type = [f for f in all_files if os.path.isfile(os.path.join(expanded_dir, f)) and f.lower().endswith(f".{app.config.PRIMARY_FILE_FORMAT.lower()}")]
         
         if not files_of_type:
             print(f"No {app.config.PRIMARY_FILE_FORMAT} files found in directory: {expanded_dir}")
@@ -1748,11 +1801,20 @@ def create_progress_bar(current, total, bar_length=50):
         String representation of progress bar like [######     ]
     """
     if total == 0:
-        return f"[{'#' * bar_length}]"
+        return f"[{'#' * bar_length}] 100%"
     
+    # Ensure current doesn't exceed total
+    current = min(current, total)
     
-    percent = min(100, int(current * 100 / total))
-    filled_length = int(bar_length * current // total)
+    # Calculate percentage (0-100)
+    percent = int(current * 100 / total)
+    
+    # Calculate filled length, ensuring it can reach full bar_length
+    if current >= total:
+        filled_length = bar_length  # Force full bar when complete
+    else:
+        filled_length = int(bar_length * current / total)
+    
     bar = '#' * filled_length + ' ' * (bar_length - filled_length)
     
     return f"[{bar}] {percent}%"
@@ -1821,6 +1883,11 @@ def _record_audio_pyaudio(duration, sound_in_id, sound_in_chs, stop_queue, task_
             print(f"Recording progress: {progress_bar}", end='\r')
             time.sleep(0.1)
         
+        # Ensure we show 100% completion when done
+        if recording_complete or frames_recorded >= num_frames:
+            progress_bar = create_progress_bar(num_frames, num_frames)  # Force 100%
+            print(f"Recording progress: {progress_bar}", end='\r')
+        
         stream.stop_stream()
         stream.close()
         
@@ -1879,7 +1946,7 @@ def cleanup_process(app, command):
 
 
 # single-shot plot of 'n' seconds of audio of each channels for an oscope view
-def plot_oscope(app, queue): 
+def plot_oscope(app_config, queue): 
     try:
         # Force garbage collection before starting
         gc.collect()
@@ -1892,9 +1959,22 @@ def plot_oscope(app, queue):
         
         # Brief delay to ensure clean audio device state
         time.sleep(0.1)
+        
+        # Extract configuration from app_config dictionary
+        sound_in_id = app_config['sound_in_id']
+        sound_in_chs = app_config['sound_in_chs']
+        trace_duration = app_config['trace_duration']
+        oscope_gain_db = app_config['oscope_gain_db']
+        primary_in_samplerate = app_config['primary_in_samplerate']
+        plot_directory = app_config['plot_directory']
+        primary_bitdepth = app_config['primary_bitdepth']
+        location_id = app_config['location_id']
+        hive_id = app_config['hive_id']
+        is_wsl = app_config['is_wsl']
+        is_macos = app_config['is_macos']
             
         recording, actual_channels = _record_audio_pyaudio(
-            config.TRACE_DURATION, app.sound_in_id, app.sound_in_chs, queue, "oscilloscope traces"
+            trace_duration, sound_in_id, sound_in_chs, queue, "oscilloscope traces"
         )
         
         if recording is None:
@@ -1902,8 +1982,8 @@ def plot_oscope(app, queue):
             return
 
         # Apply gain if needed
-        if app.config.OSCOPE_GAIN_DB > 0:
-            gain = 10 ** (app.config.OSCOPE_GAIN_DB / 20)      
+        if oscope_gain_db > 0:
+            gain = 10 ** (oscope_gain_db / 20)      
             logging.info(f"Applying gain of: {gain:.1f}") 
             recording *= gain
 
@@ -1913,13 +1993,13 @@ def plot_oscope(app, queue):
         
         # Optimize plotting by downsampling for display
         downsample_factor = max(1, len(recording) // 5000)  # Limit points to ~5k for better performance
-        time_points = np.arange(0, len(recording), downsample_factor) / app.config.PRIMARY_IN_SAMPLERATE
+        time_points = np.arange(0, len(recording), downsample_factor) / primary_in_samplerate
         
         # Plot each channel
         for i in range(actual_channels):
             ax = plt.subplot(actual_channels, 1, i+1)
             ax.plot(time_points, recording[::downsample_factor, i], linewidth=0.5)
-            ax.set_title(f"Oscilloscope Traces w/{app.config.OSCOPE_GAIN_DB}dB Gain--Ch{i+1}")
+            ax.set_title(f"Oscilloscope Traces w/{oscope_gain_db}dB Gain--Ch{i+1}")
             ax.set_xlabel('Time (seconds)')
             ax.set_ylim(-1.0, 1.0)
             
@@ -1945,7 +2025,7 @@ def plot_oscope(app, queue):
 
         # Save the plot
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        plotname = os.path.join(app.PLOT_DIRECTORY, f"{timestamp}_oscope_{int(app.config.PRIMARY_IN_SAMPLERATE/1000)}_kHz_{app.config.PRIMARY_BITDEPTH}_{app.config.LOCATION_ID}_{app.config.HIVE_ID}.png")
+        plotname = os.path.join(plot_directory, f"{timestamp}_oscope_{int(primary_in_samplerate/1000)}_kHz_{primary_bitdepth}_{location_id}_{hive_id}.png")
         logging.info(f"Saving oscilloscope plot to: {plotname}")
         
         # Make sure the directory exists
@@ -1963,14 +2043,14 @@ def plot_oscope(app, queue):
 
         # Open the saved image based on OS
         try:
-            if app.platform_manager.is_wsl():
+            if is_wsl:
                 logging.info("Opening image in WSL...")
                 try:
                     subprocess.Popen(['xdg-open', expanded_path])
                 except FileNotFoundError:
                     subprocess.Popen(['wslview', expanded_path])
                 logging.info("Image viewer command executed")
-            elif app.platform_manager.is_macos():
+            elif is_macos:
                 logging.info("Opening image in macOS...")
                 subprocess.Popen(['open', expanded_path])
                 logging.info("Image viewer command executed")
@@ -2010,10 +2090,13 @@ def trigger_oscope(app):
         # Create a queue for communication
         stop_queue = multiprocessing.Queue()
         
+        # Get configuration dictionary for oscilloscope subprocess
+        app_config = app.get_subprocess_config()
+        
         # Create and configure the process
         app.oscope_process = multiprocessing.Process(
             target=plot_oscope, 
-            args=(app.sound_in_id, app.sound_in_chs, stop_queue)
+            args=(app_config, stop_queue)
         )
         
         # Set process as daemon
@@ -2027,7 +2110,7 @@ def trigger_oscope(app):
         app.oscope_process.start()
 
         # Wait for completion with timeout
-        timeout = config.TRACE_DURATION + 30  # Reduced timeout to be more responsive
+        timeout = app.config.TRACE_DURATION + 30  # Reduced timeout to be more responsive
         app.oscope_process.join(timeout=timeout)
 
         # Check if process is still running
@@ -2345,14 +2428,18 @@ def audio_stream(app):
             # Wait for keyboard input to stop
             while not app.stop_program[0]:
                 time.sleep(0.1)
+            
+            # Normal exit - return True
+            logging.info("Audio stream stopped normally")
+            return True
 
     except Exception as e:
-        logging.error(f"Error initializing audio stream: {e}")
+        logging.error(f"Error in audio stream: {e}")
         logging.info("Please check your audio device configuration and ensure it supports the required settings")
         sys.stdout.flush()
         return False
 
-    return True
+    return True  # Normal exit path
 
 
 def stop_all(app):
@@ -2511,7 +2598,7 @@ def keyboard_listener(app):
                             logging.error(f"Error in FFT trigger: {e}")
                             cleanup_process(app, 'f')
                     elif key == "i":  
-                        toggle_intercom_m(app)
+                        toggle_intercom_m()  # Note: This function doesn't take app parameter yet
                     elif key == "m":  
                         show_mic_locations(app)
                     elif key == "o":  
@@ -2527,9 +2614,23 @@ def keyboard_listener(app):
                     elif key == "s":  
                         trigger_spectrogram(app)
                     elif key == "t":  
-                        list_all_threads(app)        
+                        list_all_threads()  # Note: This function doesn't take app parameter        
                     elif key == "v":  
-                        toggle_vu_meter(app)      
+                        try:
+                            toggle_vu_meter(app)
+                        except Exception as e:
+                            logging.error(f"Error in VU meter toggle: {e}")
+                            print(f"\nError starting VU meter: {e}")
+                            # Clean up any partial state
+                            if hasattr(app, 'vu_proc') and app.vu_proc is not None:
+                                try:
+                                    if app.vu_proc.is_alive():
+                                        app.vu_proc.terminate()
+                                        app.vu_proc.join(timeout=1)
+                                except:
+                                    pass
+                                app.vu_proc = None
+                            cleanup_process(app, 'v')      
                     elif key == "h" or key =="?":  
                         show_list_of_commands()
                 
@@ -2636,13 +2737,16 @@ def check_wsl_audio():
         return False
 
 
-def vu_meter(app, app_config):
+def vu_meter(app_instance, app_config):
     """VU meter function for displaying audio levels using BmarApp configuration."""
+    # Note: app_instance is None when called from subprocess to avoid pickling issues
     sound_in_id = app_config['sound_in_id']
     sound_in_chs = app_config['sound_in_chs']
     channel = app_config['monitor_channel']
     sample_rate = app_config['PRIMARY_IN_SAMPLERATE']
-    app.platform_manager = app_config['platform_manager']
+    is_wsl = app_config['is_wsl']
+    is_macos = app_config['is_macos']
+    os_info = app_config['os_info']
     debug_verbose = app_config.get('DEBUG_VERBOSE', False)
 
     # Debug: Print incoming parameter types
@@ -2652,17 +2756,19 @@ def vu_meter(app, app_config):
         print(f"  sample_rate: {sample_rate} (type: {type(sample_rate)})")
         print(f"  sound_in_chs: {sound_in_chs} (type: {type(sound_in_chs)})")
         print(f"  channel: {channel} (type: {type(channel)})")
+        print(f"  is_wsl: {is_wsl}")
+        print(f"  is_macos: {is_macos}")
     
     # Ensure sample rate is an integer for buffer size calculation
-    app.buffer_size = int(sample_rate)
-    app.buffer = np.zeros(buffer_size)
+    buffer_size = int(sample_rate)
+    buffer = np.zeros(buffer_size)
     last_print = ""
     
     # Validate the channel is valid for the device
-    if app.channel >= app.sound_in_chs:
-        print(f"\nError: Selected channel {app.channel+1} exceeds available channels ({app.sound_in_chs})", end='\r\n')
+    if channel >= sound_in_chs:
+        print(f"\nError: Selected channel {channel+1} exceeds available channels ({sound_in_chs})", end='\r\n')
         print(f"Defaulting to channel 1", end='\r\n')
-        app.channel = 0  # Default to first channel
+        channel = 0  # Default to first channel
 
     def callback_input(indata, frames, time, status):
         nonlocal last_print
@@ -2672,7 +2778,7 @@ def vu_meter(app, app_config):
                 print(f"\n[VU Debug] First callback: frames={frames}, indata.shape={indata.shape}")
             
             # Always validate channel before accessing the data
-            selected_channel = int(min(app.channel, indata.shape[1] - 1))
+            selected_channel = int(min(channel, indata.shape[1] - 1))
             
             channel_data = indata[:, selected_channel]
             # Ensure frames is an integer for array slicing
@@ -2681,8 +2787,8 @@ def vu_meter(app, app_config):
             audio_level = np.max(np.abs(channel_data))
             normalized_value = int((audio_level / 1.0) * 50)
             
-            app.asterisks.value = '*' * normalized_value
-            current_print = ' ' * 11 + app.asterisks.value.ljust(50, ' ')
+            asterisks = '*' * normalized_value
+            current_print = ' ' * 11 + asterisks.ljust(50, ' ')
             
             # Only print if the value has changed
             if current_print != last_print:
@@ -2693,7 +2799,7 @@ def vu_meter(app, app_config):
             # Log the error but don't crash
             print(f"\rVU meter callback error: {e}", end='\r\n')
             if debug_verbose:
-                print(f"Error details: channel={app.channel}, frames={frames}, indata.shape={indata.shape}", end='\r\n')
+                print(f"Error details: channel={channel}, frames={frames}, indata.shape={indata.shape}", end='\r\n')
                 import traceback
                 traceback.print_exc()
             time.sleep(0.1)  # Prevent too many messages
@@ -2703,11 +2809,12 @@ def vu_meter(app, app_config):
         if debug_verbose:
             print(f"\n[VU Debug] Platform detection:")
             print(f"  sys.platform: {sys.platform}")
-            print(f"  app.platform_manager.is_wsl(): {app.platform_manager.is_wsl()}")
-            print(f"  app.platform_manager.get_os_info(): {app.platform_manager.get_os_info()}")
+            print(f"  is_wsl: {is_wsl}")
+            print(f"  is_macos: {is_macos}")
+            print(f"  os_info: {os_info}")
 
         # In WSL, we need to use different stream parameters
-        if app.platform_manager.is_wsl():
+        if is_wsl:
             if debug_verbose:
                 print("[VU Debug] Using WSL audio configuration")
             # Check audio configuration first
@@ -2722,8 +2829,9 @@ def vu_meter(app, app_config):
                                   samplerate=48000,  # Use standard rate
                                   blocksize=1024,    # Use smaller block size
                                   latency='low'):
-                    while not stop_vu_queue.get():
-                        sd.sleep(100)  # Changed from 0.1 to 100 milliseconds
+                    # Simple loop - run until process is terminated externally
+                    while True:
+                        sd.sleep(100)  # Sleep for 100ms
             except Exception as e:
                 print(f"\nError with default configuration: {e}")
                 print("\nPlease ensure your WSL audio is properly configured.")
@@ -2741,8 +2849,9 @@ def vu_meter(app, app_config):
                                   samplerate=int(sample_rate),
                                   blocksize=1024,
                                   latency='low'):
-                    while not stop_vu_queue.get():
-                        sd.sleep(100)  # Changed from 0.1 to 100 milliseconds
+                    # Simple loop - run until process is terminated externally
+                    while True:
+                        sd.sleep(100)  # Sleep for 100ms
             except Exception as e:
                 print(f"\nError in VU meter InputStream: {e}")
                 print(f"Debug info:")
@@ -2775,9 +2884,9 @@ def toggle_vu_meter(app):
             app.monitor_channel = 0  # Default to first channel
             
         print(f"\nVU meter monitoring channel: {app.monitor_channel+1}")
+        
+        # Create shared values for display (but don't use them in subprocess to avoid pickling issues)
         vu_manager = multiprocessing.Manager()
-        app.stop_vu_queue = multiprocessing.Queue()
-        app.stop_vu_queue.put(False)  # Initialize with False to keep running
         app.asterisks = vu_manager.Value(str, '*' * 50)
 
         # Print initial state once
@@ -2797,20 +2906,13 @@ def toggle_vu_meter(app):
             print(f"  sound_in_chs: {app.sound_in_chs} (type: {type(app.sound_in_chs)})")
             print(f"  monitor_channel: {app.monitor_channel} (type: {type(app.monitor_channel)})")
         
-        # Create app configuration dictionary for the subprocess
-        app_config = {
-            'sound_in_id': int(app.sound_in_id) if app.sound_in_id is not None else None,
-            'sound_in_chs': int(app.sound_in_chs),
-            'monitor_channel': int(app.monitor_channel),
-            'PRIMARY_IN_SAMPLERATE': int(app.PRIMARY_IN_SAMPLERATE),
-            'platform_manager': app.platform_manager,
-            'DEBUG_VERBOSE': debug_verbose
-        }
+        # Get configuration dictionary for VU meter subprocess
+        app_config = app.get_subprocess_config(DEBUG_VERBOSE=debug_verbose)
             
         # Create the VU meter process
         app.vu_proc = multiprocessing.Process(
             target=vu_meter, 
-            args=(app, app_config)
+            args=(None, app_config)  # Don't pass the app object - it may contain unpicklable items
         )
         
         # Set the process to start in a clean environment
@@ -2819,7 +2921,7 @@ def toggle_vu_meter(app):
         app.active_processes['v'] = app.vu_proc
         app.vu_proc.start()
     else:
-        stop_vu()
+        stop_vu(app)
     
     # Clear input buffer after toggling
     clear_input_buffer(app)
@@ -2849,7 +2951,7 @@ def stop_vu(app):
             print(f"\nError stopping VU meter: {e}")
         finally:
             app.vu_proc = None
-            cleanup_process(app,'v')
+            cleanup_process(app, 'v')
             clear_input_buffer(app)
 
 def toggle_intercom_m():
@@ -2862,21 +2964,35 @@ def stop_intercom_m():
     print("Stop intercom placeholder - full implementation pending")
 
 
-def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
+def plot_fft(app_config, sound_in_id, sound_in_chs, channel, stop_queue):
     """Single-shot FFT plot of audio."""
     try:
         # Force garbage collection before starting
         gc.collect()
         
         # Ensure clean matplotlib state for this process
+        import matplotlib
         matplotlib.use('Agg', force=True)
+        import matplotlib.pyplot as plt
         plt.close('all')  # Close any existing figures
         
         # Brief delay to ensure clean audio device state
         time.sleep(0.1)
         
+        # Extract configuration from app_config dictionary
+        fft_duration = app_config['fft_duration']
+        fft_gain = app_config.get('fft_gain', 0)
+        primary_in_samplerate = app_config['primary_in_samplerate']
+        plot_directory = app_config['plot_directory']
+        primary_bitdepth = app_config['primary_bitdepth']
+        location_id = app_config['location_id']
+        hive_id = app_config['hive_id']
+        fft_bw = app_config['fft_bw']
+        is_wsl = app_config['is_wsl']
+        is_macos = app_config['is_macos']
+        
         recording, actual_channels = _record_audio_pyaudio(
-            config.FFT_DURATION, sound_in_id, sound_in_chs, stop_queue, "FFT analysis"
+            fft_duration, sound_in_id, sound_in_chs, stop_queue, "FFT analysis"
         )
         
         if recording is None:
@@ -2894,19 +3010,20 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
         single_channel_audio = recording[:, monitor_channel]
         
         # Apply gain if needed
-        if hasattr(config, 'FFT_GAIN') and config.FFT_GAIN > 0:
-            gain = 10 ** (config.FFT_GAIN / 20)
+        if fft_gain > 0:
+            gain = 10 ** (fft_gain / 20)
             logging.info(f"Applying FFT gain of: {gain:.1f}")
             single_channel_audio *= gain
 
         logging.info("Performing FFT...")
         # Perform FFT
+        from scipy.fft import rfft, rfftfreq
         yf = rfft(single_channel_audio.flatten())
-        xf = rfftfreq(len(single_channel_audio), 1 / config.PRIMARY_IN_SAMPLERATE)
+        xf = rfftfreq(len(single_channel_audio), 1 / primary_in_samplerate)
 
         # Define bucket width
-        bucket_width = FFT_BW  # Hz
-        bucket_size = int(bucket_width * len(single_channel_audio) / config.PRIMARY_IN_SAMPLERATE)  # Number of indices per bucket
+        bucket_width = fft_bw  # Hz
+        bucket_size = int(bucket_width * len(single_channel_audio) / primary_in_samplerate)  # Number of indices per bucket
 
         # Calculate the number of complete buckets
         num_buckets = len(yf) // bucket_size
@@ -2934,7 +3051,7 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
 
         # Save the plot
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_fft_{int(config.PRIMARY_IN_SAMPLERATE/1000)}_kHz_{config.PRIMARY_BITDEPTH}_{config.LOCATION_ID}_{config.HIVE_ID}.png")
+        plotname = os.path.join(plot_directory, f"{timestamp}_fft_{int(primary_in_samplerate/1000)}_kHz_{primary_bitdepth}_{location_id}_{hive_id}.png")
         logging.info(f"Saving FFT plot to: {plotname}")
         
         # Make sure the directory exists
@@ -2959,7 +3076,7 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
                 
             logging.info(f"Plot file exists, size: {os.path.getsize(expanded_path)} bytes")
             
-            if app.platform_manager.is_wsl():
+            if is_wsl:
                 logging.info("Opening image in WSL...")
                 try:
                     proc = subprocess.Popen(['xdg-open', expanded_path])
@@ -2968,7 +3085,7 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
                     logging.info("xdg-open not found, trying wslview...")
                     proc = subprocess.Popen(['wslview', expanded_path])
                     logging.info(f"wslview launched with PID: {proc.pid}")
-            elif app.platform_manager.is_macos():
+            elif is_macos:
                 logging.info("Opening image in macOS...")
                 proc = subprocess.Popen(['open', expanded_path])
                 logging.info(f"open command launched with PID: {proc.pid}")
@@ -2988,9 +3105,9 @@ def plot_fft(sound_in_id, sound_in_chs, channel, stop_queue):
             
             # Also print the command that can be run manually
             print(f"\nIf the image didn't open, you can manually run:")
-            if app.platform_manager.is_wsl() or not sys.platform == 'win32':
+            if is_wsl or not sys.platform == 'win32':
                 print(f"  xdg-open '{expanded_path}'")
-            elif app.platform_manager.is_macos():
+            elif is_macos:
                 print(f"  open '{expanded_path}'")
                 
         except Exception as e:
@@ -3022,18 +3139,20 @@ def trigger_fft(app):
         clear_input_buffer(app)
 
         # Get current app instance parameters
-        # For now, use global variables for compatibility
-        monitor_channel = globals().get('monitor_channel', 0)
-        sound_in_chs = globals().get('sound_in_chs', 1)
-        sound_in_id = globals().get('sound_in_id', 1)
+        monitor_channel = app.monitor_channel
+        sound_in_chs = app.sound_in_chs
+        sound_in_id = app.sound_in_id
         
         # Create a queue for communication
         stop_queue = multiprocessing.Queue()
         
+        # Get configuration dictionary for FFT subprocess
+        app_config = app.get_subprocess_config()
+        
         # Create new process
         fft_process = multiprocessing.Process(
             target=plot_fft,
-            args=(sound_in_id, sound_in_chs, monitor_channel, stop_queue)
+            args=(app_config, sound_in_id, sound_in_chs, monitor_channel, stop_queue)
         )
         
         # Set process as daemon
@@ -3047,7 +3166,7 @@ def trigger_fft(app):
         fft_process.start()
         
         # Wait for completion with timeout
-        timeout = config.FFT_DURATION + 30  # Recording duration plus extra time for processing
+        timeout = app.config.FFT_DURATION + 30  # Recording duration plus extra time for processing
         fft_process.join(timeout=timeout)
         
         # Check if process is still running
@@ -3076,10 +3195,11 @@ def trigger_fft(app):
         clear_input_buffer(app)
         print("FFT process completed")
 
-def plot_spectrogram(channel, y_axis_type, file_offset, period):
+def plot_spectrogram(app, channel, y_axis_type, file_offset, period):
     """
     Generate a spectrogram from an audio file and display/save it as an image.
     Parameters:
+    - app: BmarApp instance
     - channel: Channel to use for multi-channel audio files
     - y_axis_type: Type of Y axis for the spectrogram ('log' or 'linear')
     - file_offset: Offset for finding the audio file
@@ -3103,13 +3223,13 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
         # Clear any existing figures to prevent interference
         plt.close('all')
         
-        next_spectrogram = find_file_of_type_with_offset(file_offset)
+        next_spectrogram = find_file_of_type_with_offset(app, file_offset)
         
         if next_spectrogram is None:
             print("No data available to see?")
             return
             
-        full_audio_path = os.path.join(PRIMARY_DIRECTORY, next_spectrogram)
+        full_audio_path = os.path.join(app.PRIMARY_DIRECTORY, next_spectrogram)
         print("Spectrogram source:", full_audio_path)
 
         print("Loading audio file with librosa...")
@@ -3120,7 +3240,7 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
         
         try:
             # For spectrogram display, limit duration to avoid memory issues
-            max_duration = min(config.PERIOD_RECORD, period)  # Max duration for display
+            max_duration = min(app.config.PERIOD_RECORD, period)  # Max duration for display
             
             # Load the audio file with duration limit
             # Using mono=False to preserve channels, keeping native sample rate
@@ -3197,11 +3317,11 @@ def plot_spectrogram(channel, y_axis_type, file_offset, period):
             filename = os.path.basename(full_audio_path)
             root, _ = os.path.splitext(filename)
             timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            plotname = os.path.join(PLOT_DIRECTORY, f"{timestamp}_{root}_spectrogram.png")
+            plotname = os.path.join(app.PLOT_DIRECTORY, f"{timestamp}_{root}_spectrogram.png")
 
             # Set title to include filename and channel
-            mic_location = config.MIC_LOCATION[channel] if channel < len(config.MIC_LOCATION) else f"Ch{channel+1}"
-            plt.title(f'Spectrogram from {config.LOCATION_ID}, hive:{config.HIVE_ID}, Mic Loc:{mic_location}\nfile:{filename}, Ch:{channel+1}')
+            mic_location = app.config.MIC_LOCATION[channel] if channel < len(app.config.MIC_LOCATION) else f"Ch{channel+1}"
+            plt.title(f'Spectrogram from {app.config.LOCATION_ID}, hive:{app.config.HIVE_ID}, Mic Loc:{mic_location}\nfile:{filename}, Ch:{channel+1}')
             plt.colorbar(format='%+2.0f dB')
             plt.tight_layout()
             print("\nSaving spectrogram to:", plotname)
@@ -3323,7 +3443,7 @@ def trigger_spectrogram(app):
         # Create and start the spectrogram process
         app.active_processes['s'] = multiprocessing.Process(
             target=plot_spectrogram,
-            args=(app.monitor_channel, 'lin', app.file_offset, config.spectrogram_period)
+            args=(app, app.monitor_channel, 'lin', app.file_offset, app.config.spectrogram_period)
         )
         app.active_processes['s'].daemon = True  # Make it a daemon process
         app.active_processes['s'].start()
@@ -3456,7 +3576,8 @@ def toggle_continuous_performance_monitor(app):
 def emergency_cleanup(signum, frame):
     """Emergency cleanup handler for signals."""
     print(f"\nEmergency cleanup triggered by signal {signum}")
-    cleanup(app)
+    # Note: app instance not available in signal handler context
+    # TODO: Implement global cleanup for signal handlers
     sys.exit(0)
 
 
@@ -3482,7 +3603,7 @@ def main():
         sys.exit(1)
     
     # Display selected device information
-    show_audio_device_info_for_SOUND_IN_OUT()
+    show_audio_device_info_for_SOUND_IN_OUT(app)
     
     # Set monitor channel with validation
     if app.monitor_channel >= app.sound_in_chs:
@@ -3524,6 +3645,8 @@ def main():
         if not result:
             logging.error("Audio stream failed to start properly.")
             sys.exit(1)
+        else:
+            logging.info("Program exited normally")
 
     except KeyboardInterrupt:
         logging.info('Ctrl-C: Recording process stopped by user.')
