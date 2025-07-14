@@ -819,3 +819,83 @@ def handle_channel_switch_command(app, command):
     except Exception as e:
         print(f"Channel switch error: {e}")
         logging.error(f"Channel switch error: {e}")
+
+def timed_input(app, prompt, timeout=3, default='n'):
+    """
+    Get user input with a timeout and default value for headless operation.
+    
+    Args:
+        app: Application instance (contains headless flag)
+        prompt: The prompt to display to the user
+        timeout: Timeout in seconds (default: 3)
+        default: Default response if timeout or Enter is pressed (default: 'n')
+    
+    Returns:
+        str: User input or default value
+    """
+    
+    # Check if running in headless mode
+    if hasattr(app, 'headless') and app.headless:
+        print(f"[Headless mode] Using default: '{default}'")
+        return default
+    
+    print(prompt, end='', flush=True)
+    start_time = time.time()
+    
+    try:
+        import sys
+        import select
+        
+        if sys.platform == 'win32':
+            # Windows doesn't have select.select for stdin, use a different approach
+            try:
+                import msvcrt
+                
+                # Check for input character by character with timeout
+                while (time.time() - start_time) < timeout:
+                    if msvcrt.kbhit():
+                        char = msvcrt.getch().decode('utf-8', errors='ignore')
+                        if char == '\r' or char == '\n':
+                            print()  # New line after Enter
+                            return default
+                        elif char.isprintable():
+                            print(char)  # Echo the character
+                            # Read the rest of the line
+                            remaining = input()
+                            return char + remaining
+                    time.sleep(0.1)
+                
+                # Windows fallback - use a different approach since input() blocks
+                # If we can't get character input, just use the timeout
+                remaining_time = timeout - (time.time() - start_time)
+                
+                # For Windows, we'll just do a simple timeout since threading with input() 
+                # doesn't work properly for timeout scenarios
+                remaining_time = timeout - (time.time() - start_time)
+                if remaining_time > 0:
+                    # Just wait for timeout since Windows stdin handling is complex
+                    time.sleep(remaining_time)
+                    
+            except ImportError:
+                # If msvcrt is not available, fall back to basic timeout
+                while (time.time() - start_time) < timeout:
+                    time.sleep(0.1)
+                    
+        else:
+            # Unix/Linux - use select
+            while (time.time() - start_time) < timeout:
+                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+                if ready:
+                    response = sys.stdin.readline().strip()
+                    return response if response else default
+                    
+    except Exception as e:
+        # If select fails, fall back to basic timeout
+        print(f"\n[Input method failed, using timeout fallback]: {e}")
+        remaining_time = timeout - (time.time() - start_time)
+        if remaining_time > 0:
+            time.sleep(remaining_time)
+    
+    # Timeout occurred
+    print(f"\n[Timeout after {timeout}s] Using default: '{default}'")
+    return default

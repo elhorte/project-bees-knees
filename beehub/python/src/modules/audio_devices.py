@@ -340,6 +340,164 @@ def get_audio_device_config():
         logging.error(f"Error getting audio device config: {e}")
         return None
 
+def configure_audio_device_interactive(app):
+    """
+    Enhanced audio device configuration with user prompts.
+    
+    This function implements the interactive device configuration from BMAR_class.py
+    including channel count adjustments and user confirmation prompts.
+    
+    Args:
+        app: BmarApp instance with configuration settings
+        
+    Returns:
+        bool: True if device was successfully configured, False otherwise
+    """
+    from .user_interface import timed_input
+    
+    logging.info("Scanning for audio input devices...")
+    print("Configuring audio device...")
+    
+    # Initialize test mode - will be set to False upon success
+    app.testmode = True
+    
+    try:
+        devices = sd.query_devices()
+        input_devices = [(i, device) for i, device in enumerate(devices) 
+                        if device['max_input_channels'] > 0]
+        
+        if not input_devices:
+            print("No input devices found!")
+            return False
+        
+        # If a specific device is configured, try it first
+        if hasattr(app, 'device_index') and app.device_index is not None:
+            return _try_specific_device(app, app.device_index)
+        
+        # Try devices in order
+        for dev_id, device in input_devices:
+            print(f"\nTrying device [{dev_id}]: {device['name']}")
+            print(f"  API: {sd.query_hostapis(index=device['hostapi'])['name']}")
+            print(f"  Max Channels: {device['max_input_channels']}")
+            print(f"  Default Sample Rate: {device['default_samplerate']} Hz")
+            
+            # Check channel compatibility and ask user permission if needed
+            original_channels = app.channels
+            actual_channels = min(app.channels, device['max_input_channels'])
+            
+            if actual_channels != app.channels:
+                print(f"\nChannel mismatch detected:")
+                print(f"  Configuration requires: {app.channels} channels")
+                print(f"  Device supports: {actual_channels} channels")
+                
+                response = timed_input(app, 
+                    f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ", 
+                    timeout=3, default='n')
+                
+                if response.lower() != 'y':
+                    print("Skipping this device...")
+                    continue
+                    
+                app.channels = actual_channels
+                print(f"Adjusting channel count from {original_channels} to {app.channels}")
+            
+            # Try to configure the device
+            if _test_device_configuration(app, dev_id, device):
+                print(f"\nSuccessfully configured device [{dev_id}]")
+                print(f"Device Configuration:")
+                print(f"  Sample Rate: {app.samplerate} Hz")
+                print(f"  Channels: {app.channels}")
+                if original_channels != app.channels:
+                    print(f"  Note: Channel count was auto-adjusted from {original_channels} to {app.channels}")
+                
+                app.device_index = dev_id
+                app.testmode = False
+                return True
+        
+        print("\nNo suitable audio device could be configured.")
+        return False
+        
+    except Exception as e:
+        print(f"Error during device configuration: {e}")
+        logging.error(f"Error during device configuration: {e}")
+        return False
+
+def _try_specific_device(app, device_id):
+    """Try to configure a specific device with user prompts."""
+    from .user_interface import timed_input
+    
+    try:
+        device = sd.query_devices(device_id)
+        
+        if device['max_input_channels'] == 0:
+            print(f"\nSpecified device [{device_id}] is not an input device.")
+            response = timed_input(app, 
+                "\nThe specified device is not an input device. Would you like to proceed with an alternative device? (y/N): ", 
+                timeout=3, default='n')
+            return response.lower() == 'y'
+        
+        print(f"\nTrying specified device [{device_id}]: {device['name']}")
+        print(f"  API: {sd.query_hostapis(index=device['hostapi'])['name']}")
+        print(f"  Max Channels: {device['max_input_channels']}")
+        print(f"  Default Sample Rate: {device['default_samplerate']} Hz")
+        
+        # Check channel compatibility
+        original_channels = app.channels
+        user_approved = True
+        
+        if app.channels > device['max_input_channels']:
+            print(f"\nChannel mismatch detected:")
+            print(f"  Configuration requires: {original_channels} channels")
+            print(f"  Device supports: {device['max_input_channels']} channels")
+            
+            response = timed_input(app, 
+                f"\nWould you like to proceed with {device['max_input_channels']} channel(s) instead? (y/N): ", 
+                timeout=3, default='n')
+            
+            if response.lower() != 'y':
+                print("User declined to use fewer channels.")
+                print("Falling back to device search...")
+                user_approved = False
+            else:
+                app.channels = device['max_input_channels']
+                print(f"Adjusting channel count from {original_channels} to {app.channels}")
+        
+        if user_approved:
+            if _test_device_configuration(app, device_id, device):
+                app.device_index = device_id
+                app.testmode = False
+                return True
+            else:
+                response = timed_input(app, 
+                    "\nThe specified device could not be used. Would you like to proceed with an alternative device? (y/N): ", 
+                    timeout=3, default='n')
+                return response.lower() == 'y'
+        
+        return False
+        
+    except Exception as e:
+        print(f"Error accessing specified device: {e}")
+        response = timed_input(app, 
+            "\nThe specified device could not be accessed. Would you like to proceed with an alternative device? (y/N): ", 
+            timeout=3, default='n')
+        return response.lower() == 'y'
+
+def _test_device_configuration(app, device_id, device):
+    """Test if a device can be configured with the desired settings."""
+    
+    try:
+        # Try to open a stream with our desired settings
+        with sd.InputStream(device=device_id, 
+                          channels=app.channels,
+                          samplerate=app.samplerate,
+                          blocksize=1024) as stream:
+            # If we get here, the device works with our settings
+            return True
+            
+    except Exception as e:
+        logging.debug(f"Device {device_id} failed test: {e}")
+        return False
+
 def list_audio_devices_detailed():
     """List all available audio devices with detailed information."""
     try:

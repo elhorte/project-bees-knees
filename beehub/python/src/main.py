@@ -90,6 +90,12 @@ Examples:
     )
     
     parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run in headless mode (no interactive prompts, use defaults)"
+    )
+    
+    parser.add_argument(
         "--log-file",
         type=str,
         help="Log file path (default: logs to console)"
@@ -229,6 +235,11 @@ def main():
         if app is None:
             print("Failed to create BMAR application")
             return 1
+        
+        # Set headless mode if specified
+        if args.headless:
+            app.headless = True
+            print("Running in headless mode (no interactive prompts)")
         
         # Apply command line overrides
         if args.device is not None:

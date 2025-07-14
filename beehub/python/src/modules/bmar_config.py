@@ -14,6 +14,14 @@ import subprocess
 
 MONITOR_CH = 0                                  # channel to monitor for event (if > number of chs, all channels are monitored)
 
+# Audio input configuration
+MIC_1 = True
+MIC_2 = True
+MIC_3 = False
+MIC_4 = False
+
+SOUND_IN_CHS = MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
+
 # instrumentation parms
 FFT_BINS = 800                                  # number of bins for fft
 FFT_BW = 1000                                   # bandwidth of each bucket in hertz

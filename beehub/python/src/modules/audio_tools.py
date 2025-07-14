@@ -47,8 +47,12 @@ def vu_meter(config):
         channel = 0  # Default to first channel
     
     print(f"\nVU meter monitoring channel: {channel+1}")
+    
+    # Display reference bars (matches original BMAR_class.py)
+    fullscale_bar = '*' * 50
+    print("fullscale:", fullscale_bar.ljust(50, ' '))
 
-    def callback_input(indata, frames, time_info, status):
+    def callback_input(indata, frames, time, status):
         nonlocal last_print
         try:
             # Debug first callback

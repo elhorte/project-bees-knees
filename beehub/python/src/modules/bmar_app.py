@@ -16,7 +16,7 @@ from .bmar_config import *
 from .platform_manager import PlatformManager
 from .system_utils import setup_logging, setup_signal_handlers
 from .file_utils import setup_directories, get_today_dir
-from .audio_devices import get_audio_device_config
+from .audio_devices import get_audio_device_config, configure_audio_device_interactive
 from .process_manager import stop_all, cleanup
 from .user_interface import keyboard_listener, cleanup_ui
 
@@ -29,14 +29,15 @@ class BmarApp:
         # Core application state
         self.stop_program = multiprocessing.Array('i', [0])  # Shared stop flag
         self.keyboard_listener_running = True
+        self.headless = False  # Interactive mode by default
         
         # Audio configuration
         self.device_index = None
         self.samplerate = 44100  # Will be updated from config
         self.blocksize = 1024    # Will be updated from config
         self.max_file_size_mb = 100  # Will be updated from config
-        self.channels = 1  # Default to mono
-        self.monitor_channel = 0  # Monitor channel (0-based index)
+        self.channels = SOUND_IN_CHS  # Load from config
+        self.monitor_channel = MONITOR_CH  # Monitor channel from config
         
         # Platform-specific attributes
         self.is_wsl = False
@@ -98,15 +99,19 @@ class BmarApp:
             print(f"Recording directory: {self.recording_dir}")
             print(f"Today's directory: {self.today_dir}")
             
-            # Get audio device configuration
-            device_config = get_audio_device_config()
-            if device_config:
-                self.device_index = device_config['device_index']
-                self.samplerate = device_config['samplerate']
-                self.channels = device_config['channels']
+            # Get audio device configuration with interactive prompts
+            if configure_audio_device_interactive(self):
                 print(f"Audio device: {self.device_index} at {self.samplerate}Hz ({self.channels} channels)")
             else:
-                raise RuntimeError("No suitable audio device found")
+                # Fall back to simple configuration
+                device_config = get_audio_device_config()
+                if device_config:
+                    self.device_index = device_config['device_index']
+                    self.samplerate = device_config['samplerate']
+                    self.channels = device_config['channels']
+                    print(f"Audio device: {self.device_index} at {self.samplerate}Hz ({self.channels} channels)")
+                else:
+                    raise RuntimeError("No suitable audio device found")
             
             # Initialize circular buffer
             buffer_duration = 300  # 5 minutes default
