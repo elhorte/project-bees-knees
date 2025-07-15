@@ -202,6 +202,16 @@ def intercom_m(config):
         gain = config.get('gain', 1.0)
         monitor_channel = config.get('monitor_channel', 0)
         
+        # Validate channel count
+        if channels <= 0:
+            print(f"Error: Invalid channel count {channels}, setting to 1")
+            channels = 1
+        
+        # Validate monitor channel
+        if monitor_channel >= channels:
+            print(f"Warning: Monitor channel {monitor_channel} exceeds available channels ({channels}), using channel 0")
+            monitor_channel = 0
+        
         # Validate device capabilities
         try:
             import sounddevice as sd
@@ -210,16 +220,63 @@ def intercom_m(config):
             input_info = sd.query_devices(input_device)
             max_input_channels = int(input_info['max_input_channels'])
             
+            # If the selected input device has no input channels, try to find a better one
+            if max_input_channels == 0:
+                print(f"Warning: Device {input_device} ({input_info['name']}) has no input channels")
+                print("Searching for alternative input device...")
+                
+                # Find the first device with input channels
+                devices = sd.query_devices()
+                alternative_found = False
+                for i, device in enumerate(devices):
+                    device_input_channels = int(device['max_input_channels'])
+                    if device_input_channels >= channels:
+                        print(f"Found alternative input device {i}: {device['name']} ({device_input_channels} channels)")
+                        input_device = i
+                        input_info = device
+                        max_input_channels = device_input_channels
+                        alternative_found = True
+                        break
+                
+                if not alternative_found:
+                    print("No suitable input device found, intercom cannot function")
+                    return
+            
             # Check output device
             output_info = sd.query_devices(output_device)
             max_output_channels = int(output_info['max_output_channels'])
+            
+            # If output device has no output channels, try to find one or use input device
+            if max_output_channels == 0:
+                print(f"Warning: Output device {output_device} has no output channels")
+                # Try to use the input device for output if it supports output
+                if int(input_info['max_output_channels']) > 0:
+                    print(f"Using input device {input_device} for output as well")
+                    output_device = input_device
+                    output_info = input_info
+                    max_output_channels = int(input_info['max_output_channels'])
+                else:
+                    # Find a device with output channels
+                    devices = sd.query_devices()
+                    for i, device in enumerate(devices):
+                        if int(device['max_output_channels']) > 0:
+                            print(f"Found output device {i}: {device['name']}")
+                            output_device = i
+                            output_info = device
+                            max_output_channels = int(device['max_output_channels'])
+                            break
             
             # Adjust channels if necessary
             actual_channels = min(channels, max_input_channels, max_output_channels)
             
             if actual_channels != channels:
-                print(f"Warning: Requested {channels} channels, but devices support max {actual_channels}")
+                print(f"Warning: Requested {channels} channels, adjusted to {actual_channels} (input: {max_input_channels}, output: {max_output_channels})")
                 channels = actual_channels
+            
+            # Final validation
+            if channels <= 0:
+                print(f"Error: No usable channels available (input: {max_input_channels}, output: {max_output_channels})")
+                return
             
             # Validate monitor channel
             if monitor_channel >= channels:
@@ -228,6 +285,9 @@ def intercom_m(config):
                 
         except Exception as e:
             print(f"Warning: Could not validate device capabilities: {e}")
+            # Use a safe fallback
+            if channels <= 0:
+                channels = 1
         
         # Initialize monitoring variables
         peak_level = 0.0

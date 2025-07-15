@@ -500,23 +500,30 @@ def start_intercom(app):
     
     from .process_manager import create_subprocess
     from .audio_tools import intercom_m
+    from .bmar_config import SOUND_IN_CHS, MONITOR_CH
     
     try:
         # Ensure app has all required attributes
         ensure_app_attributes(app)
+        
+        # Use SOUND_IN_CHS from config instead of app.channels to ensure correct channel count
+        input_channels = SOUND_IN_CHS if SOUND_IN_CHS > 0 else 1
+        
+        # Validate and set monitor channel
+        monitor_channel = MONITOR_CH if MONITOR_CH < input_channels else 0
         
         # Create intercom configuration
         intercom_config = {
             'input_device': app.device_index,
             'output_device': app.device_index,  # Use same device for loopback
             'samplerate': app.samplerate,
-            'channels': app.channels,  # Use the same number of channels as the device
+            'channels': input_channels,  # Use SOUND_IN_CHS from config
             'blocksize': app.blocksize,
             'gain': 1.0,
-            'monitor_channel': getattr(app, 'monitor_channel', 0)  # Use monitor channel from config
+            'monitor_channel': monitor_channel
         }
         
-        print(f"Starting intercom (device {app.device_index}, {app.samplerate}Hz)")
+        print(f"Starting intercom (device {app.device_index}, {app.samplerate}Hz, {input_channels} channels)")
         
         # Create and start intercom process
         process = create_subprocess(
@@ -988,9 +995,12 @@ def ensure_app_attributes(app):
     """Ensure the app object has all required attributes for audio processing."""
     
     try:
+        # Import config values
+        from .bmar_config import SOUND_IN_CHS, MONITOR_CH
+        
         # Set default values for missing attributes
         if not hasattr(app, 'monitor_channel'):
-            app.monitor_channel = 0
+            app.monitor_channel = MONITOR_CH
         if not hasattr(app, 'is_wsl'):
             from .platform_manager import PlatformManager
             platform_manager = PlatformManager()
@@ -1003,8 +1013,8 @@ def ensure_app_attributes(app):
             from .platform_manager import PlatformManager
             platform_manager = PlatformManager()
             app.os_info = platform_manager.get_os_info()
-        if not hasattr(app, 'channels'):
-            app.channels = 1
+        if not hasattr(app, 'channels') or app.channels <= 0:
+            app.channels = SOUND_IN_CHS if SOUND_IN_CHS > 0 else 1
         if not hasattr(app, 'blocksize'):
             app.blocksize = 1024
         if not hasattr(app, 'DEBUG_VERBOSE'):
@@ -1017,6 +1027,11 @@ def ensure_app_attributes(app):
             
     except Exception as e:
         print(f"Warning: Error setting app attributes: {e}")
+        # Fallback values if config import fails
+        if not hasattr(app, 'channels') or app.channels <= 0:
+            app.channels = 1
+        if not hasattr(app, 'monitor_channel'):
+            app.monitor_channel = 0
 
 def list_all_threads():
     """List all currently running threads."""

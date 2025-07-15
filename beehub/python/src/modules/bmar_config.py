@@ -64,6 +64,11 @@ testmode = False                                # True = run in test mode with l
 KB_or_CP = 'KB'                                 # use keyboard or control panel (PyQT5) to control program
 DEBUG_VERBOSE = False                           # Enable verbose debug output (set to True for troubleshooting)
 
+# Enhanced audio configuration
+ENABLE_ENHANCED_AUDIO = True                    # Enable PyAudio-based enhanced audio device testing
+AUDIO_API_PREFERENCE = ["WASAPI", "DirectSound", "MME"]  # Preferred audio APIs in order
+AUDIO_FALLBACK_ENABLED = True                   # Allow fallback to sounddevice if PyAudio fails
+
 # input device parameters--linux:
 LINUX_MAKE_NAME = ""                             # Leave empty for Linux default
 LINUX_MODEL_NAME = ["pipewire"]                  # Use pipewire as the audio system
@@ -79,7 +84,7 @@ WINDOWS_MODEL_NAME = "UMC204HD"                 # Audio interface model
 WINDOWS_DEVICE_NAME = "UMC204HD"                # Device name
 WINDOWS_API_NAME = "WASAPI"                     # Windows audio API
 WINDOWS_HOSTAPI_NAME = "WASAPI"                 # Host API name
-WINDOWS_HOSTAPI_INDEX = 20                      # Default host API index
+WINDOWS_HOSTAPI_INDEX = 1                      # Default host API index
 WINDOWS_DEVICE_ID = None                        # Device ID for Focusrite
 
 # input device parameters--macos:

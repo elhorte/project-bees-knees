@@ -19,7 +19,7 @@ from .file_utils import setup_directories, get_today_dir
 from .audio_devices import get_audio_device_config, configure_audio_device_interactive
 from .process_manager import stop_all, cleanup
 from .user_interface import keyboard_listener, cleanup_ui
-from .setup_PyAudio import *
+from .class_PyAudio import *
 
 class BmarApp:
     """Main BMAR application class."""

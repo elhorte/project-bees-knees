@@ -10,16 +10,42 @@ import subprocess
 import datetime
 import time
 
+# Enhanced audio management imports
+try:
+    import pyaudio
+    PYAUDIO_AVAILABLE = True
+except ImportError:
+    PYAUDIO_AVAILABLE = False
+    logging.warning("PyAudio not available, enhanced device testing disabled")
+
+from .class_PyAudio import AudioPortManager
+
 def print_all_input_devices():
-    """Print a list of all available input devices."""
-    print("\nFull input device list (from sounddevice):\r")
+    """Print a list of all available input devices with enhanced information."""
+    print("\nFull input device list (enhanced with PyAudio capabilities):\r")
     devices = sd.query_devices()
+    
     for i, device in enumerate(devices):
         if device['max_input_channels'] > 0:
             hostapi_info = sd.query_hostapis(index=device['hostapi'])
-            print(f"  [{i}] {device['name']} - {hostapi_info['name']} "
-                  f"({device['max_input_channels']} ch, {int(device['default_samplerate'])} Hz)")
+            
+            # Basic device info
+            base_info = f"  [{i}] {device['name']} - {hostapi_info['name']} " \
+                       f"({device['max_input_channels']} ch, {int(device['default_samplerate'])} Hz)"
+            
+            # Add enhanced capabilities if PyAudio is available
+            if PYAUDIO_AVAILABLE:
+                enhanced_info = get_enhanced_device_info(i)
+                if enhanced_info and enhanced_info.get('pyaudio_compatible'):
+                    api_info = enhanced_info.get('api', 'Unknown')
+                    config_test = "✓" if enhanced_info.get('can_use_target_config') else "⚠"
+                    base_info += f" | {api_info} {config_test}"
+            
+            print(base_info)
+    
     print()
+    if PYAUDIO_AVAILABLE:
+        print("Legend: ✓ = Supports high-quality config, ⚠ = May need adjustment")
     sys.stdout.flush()
 
 def get_api_name_for_device(device_id):
@@ -89,6 +115,17 @@ def show_audio_device_info_for_SOUND_IN_OUT(app):
         if 'hostapi' in input_info:
             hostapi_info = sd.query_hostapis(index=input_info['hostapi'])
             print(f"Audio API: {hostapi_info['name']}")
+        
+        # Show enhanced capabilities if PyAudio is available
+        if PYAUDIO_AVAILABLE:
+            enhanced_info = get_enhanced_device_info(app.sound_in_id, 
+                                                   app.config.PRIMARY_IN_SAMPLERATE,
+                                                   app.config.PRIMARY_BITDEPTH)
+            if enhanced_info and enhanced_info.get('pyaudio_compatible'):
+                print(f"Enhanced API: {enhanced_info.get('api', 'Unknown')}")
+                can_use = "Yes" if enhanced_info.get('can_use_target_config') else "No"
+                print(f"Supports Target Config: {can_use}")
+            
     except Exception as e:
         print(f"Error getting input device info: {e}")
     
@@ -159,6 +196,15 @@ def set_input_device(app):
     # Initialize testmode to True. It will be set to False upon success.
     app.testmode = True
 
+    # Try enhanced audio configuration first
+    if PYAUDIO_AVAILABLE and not getattr(app, '_using_fallback', False):
+        logging.info("Attempting enhanced audio configuration with PyAudio...")
+        app._using_fallback = True  # Prevent recursion
+        if configure_audio_with_fallback(app):
+            return True
+        logging.info("Enhanced configuration failed, falling back to standard method")
+        app._using_fallback = False
+
     print_all_input_devices()
 
     try:
@@ -203,6 +249,16 @@ def set_input_device(app):
                 if actual_channels != app.sound_in_chs:
                     logging.warning(f"Device {dev_id} only supports {actual_channels} channels, "
                                   f"requested {app.sound_in_chs}")
+                
+                # Test device capabilities if PyAudio is available
+                if PYAUDIO_AVAILABLE:
+                    enhanced_test = test_audio_configuration(
+                        dev_id, app.config.PRIMARY_IN_SAMPLERATE, 
+                        app.config.PRIMARY_BITDEPTH, actual_channels
+                    )
+                    if not enhanced_test:
+                        logging.debug(f"Device {dev_id} failed enhanced capabilities test")
+                        continue
                 
                 # Try to test the device
                 try:
@@ -579,3 +635,92 @@ def show_current_audio_devices(app):
     except Exception as e:
         print(f"Error displaying current audio devices: {e}")
         logging.error(f"Error displaying current audio devices: {e}")
+
+def get_enhanced_device_info(device_id, sample_rate=44100, bit_depth=16):
+    """Get enhanced device information using PyAudio if available."""
+    if not PYAUDIO_AVAILABLE:
+        return None
+        
+    try:
+        # Create AudioPortManager for enhanced testing
+        manager = AudioPortManager(target_sample_rate=sample_rate, target_bit_depth=bit_depth)
+        
+        # Get device list from PyAudio
+        pyaudio_devices = manager.list_audio_devices()
+        
+        # Find matching device by index
+        for device in pyaudio_devices:
+            if device['index'] == device_id:
+                # Test device capabilities
+                can_use = manager.test_device_configuration(
+                    device_id, sample_rate, bit_depth, channels=2
+                )
+                
+                return {
+                    'pyaudio_compatible': True,
+                    'api': device['api'],
+                    'can_use_target_config': can_use,
+                    'max_input_channels': device['input_channels'],
+                    'max_output_channels': device['output_channels'],
+                    'default_sample_rate': device['default_sample_rate']
+                }
+        
+        return {'pyaudio_compatible': False}
+        
+    except Exception as e:
+        logging.warning(f"Enhanced device testing failed: {e}")
+        return {'pyaudio_compatible': False}
+
+def configure_audio_with_fallback(app):
+    """Configure audio input with PyAudio fallback for enhanced reliability."""
+    if not PYAUDIO_AVAILABLE:
+        logging.info("Using standard sounddevice configuration")
+        # Don't call set_input_device to avoid recursion
+        return False
+    
+    try:
+        # Create enhanced audio manager
+        manager = AudioPortManager(
+            target_sample_rate=app.PRIMARY_IN_SAMPLERATE, 
+            target_bit_depth=app.PRIMARY_BITDEPTH
+        )
+        
+        # Try hierarchical configuration (WASAPI -> DirectSound -> MME)
+        success, device_info, achieved_rate, achieved_depth = manager.configure_audio_input(
+            channels=app.sound_in_chs
+        )
+        
+        if success:
+            # Update app configuration with successful settings
+            app.sound_in_id = device_info['index']
+            app.PRIMARY_IN_SAMPLERATE = achieved_rate
+            app.PRIMARY_BITDEPTH = achieved_depth
+            app.testmode = False
+            
+            logging.info(f"Enhanced audio configuration successful:")
+            logging.info(f"  Device: {device_info['name']} ({device_info['api']})")
+            logging.info(f"  Sample Rate: {achieved_rate} Hz")
+            logging.info(f"  Bit Depth: {achieved_depth} bits")
+            logging.info(f"  Channels: {app.sound_in_chs}")
+            
+            return True
+        else:
+            logging.warning("Enhanced audio configuration failed, falling back to standard method")
+            return set_input_device(app)
+            
+    except Exception as e:
+        logging.error(f"Enhanced audio configuration error: {e}")
+        logging.info("Falling back to standard audio configuration")
+        return set_input_device(app)
+
+def test_audio_configuration(device_id, sample_rate, bit_depth, channels):
+    """Test if a specific audio configuration works using PyAudio."""
+    if not PYAUDIO_AVAILABLE:
+        return False
+        
+    try:
+        manager = AudioPortManager(target_sample_rate=sample_rate, target_bit_depth=bit_depth)
+        return manager.test_device_configuration(device_id, sample_rate, bit_depth, channels)
+    except Exception as e:
+        logging.warning(f"Audio configuration test failed: {e}")
+        return False
