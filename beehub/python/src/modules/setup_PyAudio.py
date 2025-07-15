@@ -80,11 +80,13 @@ class AudioPortManager:
             32: pyaudio.paInt32
         }
         
+        
     def __del__(self):
         """Clean up PyAudio instance"""
         if hasattr(self, 'pa'):
             self.pa.terminate()
     
+
     def list_audio_devices(self, api: Optional[str] = None) -> List[Dict]:
         """
         List all available audio devices, optionally filtered by API
@@ -126,6 +128,7 @@ class AudioPortManager:
                 continue
         
         return devices
+
 
     def print_device_list(self, active_input_device: Optional[int] = None, active_output_device: Optional[int] = None):
         """
@@ -170,6 +173,7 @@ class AudioPortManager:
         
         print("\n" + "=" * 80)
 
+
     def test_device_configuration(self, device_index: int, sample_rate: int, 
                                 bit_depth: int = 16, channels: int = 2) -> bool:
         """
@@ -180,7 +184,6 @@ class AudioPortManager:
             sample_rate: Target sample rate (e.g., 44100, 48000)
             bit_depth: Bit depth (8, 16, 24, 32)
             channels: Number of channels (1 for mono, 2 for stereo)
-        
         Returns:
             True if configuration is supported, False otherwise
         """
@@ -205,6 +208,7 @@ class AudioPortManager:
             print(f"Error testing configuration: {str(e)}")
             return False
     
+
     def test_and_configure_device(self, device: Dict, channels: int = 2) -> Tuple[bool, Optional[int], Optional[int]]:
         """
         Test and configure a device with the target sample rate and bit depth
@@ -237,6 +241,7 @@ class AudioPortManager:
         
         return False, None, None
     
+
     def configure_audio_input(self, channels: int = 2) -> Tuple[bool, Optional[Dict], Optional[int], Optional[int]]:
         """
         Configure audio input following the hierarchical strategy
@@ -276,6 +281,30 @@ class AudioPortManager:
         
         return False, None, None, None
 
+# Additional utility functions for PyAudio-specific features
+
+def list_host_apis():
+    """List all available host APIs"""
+    pa = pyaudio.PyAudio()
+    print("Available Host APIs:")
+    for i in range(pa.get_host_api_count()):
+        api_info = pa.get_host_api_info_by_index(i)
+        print(f"[{i}] {api_info['name']} - {api_info['deviceCount']} devices")
+    pa.terminate()
+
+def get_pyaudio_version_info():
+    """Get PyAudio and PortAudio version information"""
+    pa = pyaudio.PyAudio()
+    print("PyAudio Version Information:")
+    print(f"PyAudio Version: {pyaudio.__version__}")
+    try:
+        print(f"PortAudio Version: {pa.get_portaudio_version()}")
+        print(f"PortAudio Version Text: {pa.get_portaudio_version_text()}")
+    except AttributeError:
+        print("Note: PortAudio version information not available in this PyAudio version")
+    pa.terminate()
+
+
 def main():
     """Main function implementing the audio configuration strategy"""
     
@@ -306,28 +335,6 @@ def main():
     print()
     list_host_apis()
 
-# Additional utility functions for PyAudio-specific features
-
-def list_host_apis():
-    """List all available host APIs"""
-    pa = pyaudio.PyAudio()
-    print("Available Host APIs:")
-    for i in range(pa.get_host_api_count()):
-        api_info = pa.get_host_api_info_by_index(i)
-        print(f"[{i}] {api_info['name']} - {api_info['deviceCount']} devices")
-    pa.terminate()
-
-def get_pyaudio_version_info():
-    """Get PyAudio and PortAudio version information"""
-    pa = pyaudio.PyAudio()
-    print("PyAudio Version Information:")
-    print(f"PyAudio Version: {pyaudio.__version__}")
-    try:
-        print(f"PortAudio Version: {pa.get_portaudio_version()}")
-        print(f"PortAudio Version Text: {pa.get_portaudio_version_text()}")
-    except AttributeError:
-        print("Note: PortAudio version information not available in this PyAudio version")
-    pa.terminate()
 
 if __name__ == "__main__":
     # Show version info

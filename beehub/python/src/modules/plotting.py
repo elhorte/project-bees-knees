@@ -178,41 +178,60 @@ def _record_audio_sounddevice(duration, device_index, channels, samplerate, bloc
         
         # Calculate total samples needed
         total_samples = int(samplerate * duration)
-        audio_data = []
+        
+        # Validate device channels
+        try:
+            device_info = sd.query_devices(device_index)
+            max_input_channels = int(device_info['max_input_channels'])
+            actual_channels = min(channels, max_input_channels)
+            
+            if actual_channels != channels:
+                print(f"Device only supports {max_input_channels} input channels, using {actual_channels}")
+        except:
+            actual_channels = channels
+        
+        # Initialize multi-channel recording array
+        recording_array = np.zeros((total_samples, actual_channels), dtype=np.float32)
         samples_collected = 0
         
         print(f"Recording {duration}s of audio from device {device_index} using sounddevice...")
+        print(f"Sample rate: {samplerate}Hz, Channels: {actual_channels}, Block size: {blocksize}")
         
         # Progress tracking
         progress_lock = threading.Lock()
         
         # Audio callback function
         def audio_callback(indata, frames, time_info, status):
-            nonlocal audio_data, samples_collected
+            nonlocal recording_array, samples_collected
             
             if status:
                 print(f"Audio status: {status}")
             
             with progress_lock:
                 if samples_collected < total_samples:
-                    # Take only the first channel if multi-channel
-                    if channels > 1:
-                        data = indata[:, 0]  # First channel only
-                    else:
-                        data = indata.flatten()
+                    # Record all channels (not just first channel)
+                    data_frames = min(len(indata), total_samples - samples_collected)
                     
-                    # Don't exceed total samples needed
-                    remaining_samples = total_samples - samples_collected
-                    samples_to_take = min(len(data), remaining_samples)
-                    
-                    if samples_to_take > 0:
-                        audio_data.extend(data[:samples_to_take])
-                        samples_collected += samples_to_take
+                    if data_frames > 0:
+                        # Handle channel mismatch
+                        if indata.shape[1] >= actual_channels:
+                            # Take only the channels we need
+                            channel_data = indata[:data_frames, :actual_channels]
+                        else:
+                            # Pad with zeros if device has fewer channels than expected
+                            channel_data = np.zeros((data_frames, actual_channels), dtype=np.float32)
+                            available_channels = min(indata.shape[1], actual_channels)
+                            channel_data[:, :available_channels] = indata[:data_frames, :available_channels]
+                        
+                        # Store in recording array
+                        end_idx = samples_collected + data_frames
+                        recording_array[samples_collected:end_idx] = channel_data
+                        samples_collected += data_frames
         
         # Start audio stream
         with sd.InputStream(
             device=device_index,
-            channels=channels,
+            channels=actual_channels,
             samplerate=samplerate,
             blocksize=blocksize,
             callback=audio_callback
@@ -227,11 +246,8 @@ def _record_audio_sounddevice(duration, device_index, channels, samplerate, bloc
         progress_bar = create_progress_bar(total_samples, total_samples)
         print(f"Recording progress: {progress_bar}")
         
-        # Convert to numpy array
-        recording_array = np.array(audio_data).reshape(-1, 1)  # Single channel
-        
         print(f"Finished {task_name}.")
-        return recording_array, 1
+        return recording_array, actual_channels
 
     except Exception as e:
         print(f"Failed to record audio with sounddevice for {task_name}: {e}")
@@ -266,52 +282,87 @@ def plot_oscope(config):
         
         print(f"\nAudio capture complete! Recorded {len(recording_data)} samples")
         
-        # Convert to numpy array if needed and take first channel
+        # Determine actual number of channels recorded
         if len(recording_data.shape) > 1:
-            audio_data = recording_data[:, 0]  # First channel only
+            actual_channels = recording_data.shape[1]
+            print(f"Multi-channel recording: {actual_channels} channels")
         else:
-            audio_data = recording_data.flatten()
+            actual_channels = 1
+            # Reshape single channel data to 2D for consistent processing
+            recording_data = recording_data.reshape(-1, 1)
+            print(f"Single channel recording")
         
         # Create time axis
-        time_axis = np.linspace(0, plot_duration, len(audio_data))
+        time_axis = np.linspace(0, plot_duration, len(recording_data))
         
-        # Create the plot
+        # Create the plot with subplots for each channel
         print("Creating oscilloscope plot...")
-        fig, ax = plt.subplots(figsize=(12, 8))
+        fig_height = max(6, 3 * actual_channels)  # Minimum 6" height, 3" per channel
+        fig, axes = plt.subplots(actual_channels, 1, figsize=(12, fig_height))
         
-        # Plot the waveform
-        ax.plot(time_axis, audio_data, 'b-', linewidth=0.8, alpha=0.8)
+        # Handle single channel case (axes won't be a list)
+        if actual_channels == 1:
+            axes = [axes]
         
-        # Set plot properties
-        ax.set_xlim(0, plot_duration)
-        ax.set_ylim(-1.0, 1.0)
-        ax.set_xlabel('Time (seconds)')
-        ax.set_ylabel('Amplitude')
-        ax.set_title(f'Oscilloscope - Device {device_index} ({samplerate}Hz, {plot_duration}s capture)')
-        ax.grid(True, alpha=0.3)
-        
-        # Calculate and display statistics
-        rms_level = np.sqrt(np.mean(audio_data**2))
-        peak_level = np.max(np.abs(audio_data))
-        zero_crossings = np.sum(np.diff(np.sign(audio_data)) != 0)
-        
-        # Add statistics text box
-        stats_text = f'RMS: {rms_level:.4f}\nPeak: {peak_level:.4f}\nZero Crossings: {zero_crossings}'
-        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
-                bbox=dict(boxstyle="round,pad=0.5", facecolor="lightblue", alpha=0.8),
-                verticalalignment='top', fontsize=10)
-        
-        # Add frequency estimation if possible
-        if len(audio_data) > samplerate:  # At least 1 second of data
-            try:
-                # Simple frequency estimation using zero crossings
-                estimated_freq = zero_crossings / (2 * plot_duration)
-                ax.text(0.02, 0.82, f'Est. Frequency: {estimated_freq:.1f} Hz', 
-                        transform=ax.transAxes,
-                        bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgreen", alpha=0.8),
-                        fontsize=10)
-            except:
-                pass
+        # Plot each channel
+        for i in range(actual_channels):
+            ax = axes[i]
+            
+            # Get channel data
+            channel_data = recording_data[:, i]
+            
+            # Plot the waveform for this channel
+            ax.plot(time_axis, channel_data, 'b-', linewidth=0.8, alpha=0.8)
+            
+            # Set plot properties for this channel
+            ax.set_xlim(0, plot_duration)
+            ax.set_ylim(-1.0, 1.0)
+            ax.set_ylabel('Amplitude')
+            ax.set_title(f'Oscilloscope Ch{i+1} - Device {device_index} ({samplerate}Hz, {plot_duration}s)')
+            ax.grid(True, alpha=0.3)
+            
+            # Add graticule
+            # Horizontal line at 0
+            ax.axhline(y=0, color='gray', linewidth=0.5, alpha=0.7)
+            
+            # Vertical lines at each second
+            for t in range(0, int(plot_duration) + 1):
+                ax.axvline(x=t, color='gray', linewidth=0.5, alpha=0.5)
+            
+            # Add minor vertical lines at 0.5 second intervals
+            for t in np.arange(0.5, plot_duration, 0.5):
+                ax.axvline(x=t, color='gray', linewidth=0.3, alpha=0.3, linestyle='--')
+            
+            # Configure grid and ticks
+            ax.set_xticks(range(0, int(plot_duration) + 1))
+            ax.set_yticks([-1.0, -0.5, 0, 0.5, 1.0])
+            
+            # Calculate and display statistics for this channel
+            rms_level = np.sqrt(np.mean(channel_data**2))
+            peak_level = np.max(np.abs(channel_data))
+            zero_crossings = np.sum(np.diff(np.sign(channel_data)) != 0)
+            
+            # Add statistics text box for this channel
+            stats_text = f'RMS: {rms_level:.4f}\nPeak: {peak_level:.4f}\nZero X: {zero_crossings}'
+            ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.8),
+                    verticalalignment='top', fontsize=9)
+            
+            # Add frequency estimation for this channel if possible
+            if len(channel_data) > samplerate:  # At least 1 second of data
+                try:
+                    # Simple frequency estimation using zero crossings
+                    estimated_freq = zero_crossings / (2 * plot_duration)
+                    ax.text(0.02, 0.75, f'Est. Freq: {estimated_freq:.1f} Hz', 
+                            transform=ax.transAxes,
+                            bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgreen", alpha=0.8),
+                            fontsize=9)
+                except:
+                    pass
+            
+            # Only add X-axis label to the bottom subplot
+            if i == actual_channels - 1:
+                ax.set_xlabel('Time (seconds)')
         
         plt.tight_layout()
         

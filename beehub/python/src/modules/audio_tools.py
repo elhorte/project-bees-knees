@@ -158,18 +158,36 @@ def intercom_m(config):
     def audio_callback(indata, outdata, frames, time_info, status):
         nonlocal peak_level, avg_level, sample_count
         
-        # Calculate peak and average levels
-        current_peak = np.max(np.abs(indata))
-        current_avg = np.sqrt(np.mean(indata**2))
+        # Handle multi-channel input
+        if len(indata.shape) > 1 and indata.shape[1] > 1:
+            # For multi-channel, use the monitor channel or first channel
+            monitor_ch = config.get('monitor_channel', 0)
+            if monitor_ch < indata.shape[1]:
+                monitor_data = indata[:, monitor_ch]
+            else:
+                monitor_data = indata[:, 0]  # Fallback to first channel
+        else:
+            monitor_data = indata.flatten()
+        
+        # Calculate peak and average levels from monitor channel
+        current_peak = np.max(np.abs(monitor_data))
+        current_avg = np.sqrt(np.mean(monitor_data**2))
         
         # Update running statistics
         peak_level = max(peak_level, current_peak)
         avg_level = (avg_level * sample_count + current_avg) / (sample_count + 1)
         sample_count += 1
         
-        # Apply gain to input signal
+        # Apply gain to input signal for output
         gain = config.get('gain', 1.0)
-        outdata[:] = indata * gain
+        
+        # Handle multi-channel output
+        if len(outdata.shape) > 1 and outdata.shape[1] > 1:
+            # For multi-channel output, replicate monitor channel to all channels
+            for ch in range(outdata.shape[1]):
+                outdata[:, ch] = monitor_data * gain
+        else:
+            outdata[:] = monitor_data * gain
         
         if status:
             print(f"Intercom callback status: {status}")
@@ -177,11 +195,39 @@ def intercom_m(config):
     try:
         # Extract configuration
         input_device = config['input_device']
-        output_device = config['output_device']
+        output_device = config.get('output_device', input_device)
         samplerate = config['samplerate']
         channels = config.get('channels', 1)
         blocksize = config.get('blocksize', 1024)
         gain = config.get('gain', 1.0)
+        monitor_channel = config.get('monitor_channel', 0)
+        
+        # Validate device capabilities
+        try:
+            import sounddevice as sd
+            
+            # Check input device
+            input_info = sd.query_devices(input_device)
+            max_input_channels = int(input_info['max_input_channels'])
+            
+            # Check output device
+            output_info = sd.query_devices(output_device)
+            max_output_channels = int(output_info['max_output_channels'])
+            
+            # Adjust channels if necessary
+            actual_channels = min(channels, max_input_channels, max_output_channels)
+            
+            if actual_channels != channels:
+                print(f"Warning: Requested {channels} channels, but devices support max {actual_channels}")
+                channels = actual_channels
+            
+            # Validate monitor channel
+            if monitor_channel >= channels:
+                print(f"Warning: Monitor channel {monitor_channel} not available, using channel 0")
+                monitor_channel = 0
+                
+        except Exception as e:
+            print(f"Warning: Could not validate device capabilities: {e}")
         
         # Initialize monitoring variables
         peak_level = 0.0
@@ -190,8 +236,14 @@ def intercom_m(config):
         
         print(f"\nIntercom monitoring active")
         print(f"Input: device {input_device}, Output: device {output_device}")
-        print(f"Sample rate: {samplerate}Hz, Gain: {gain:.2f}")
+        print(f"Sample rate: {samplerate}Hz, Channels: {channels}, Gain: {gain:.2f}")
+        print(f"Monitoring channel: {monitor_channel}")
         print("Press Ctrl+C to stop")
+        
+        # Check if input and output devices are the same
+        if input_device == output_device:
+            print("WARNING: Using same device for input and output may cause feedback!")
+            print("Consider using headphones or separate input/output devices.")
         
         # Start duplex audio stream
         stream = sd.Stream(

@@ -507,9 +507,10 @@ def start_intercom(app):
             'input_device': app.device_index,
             'output_device': app.device_index,  # Use same device for loopback
             'samplerate': app.samplerate,
-            'channels': 1,
+            'channels': app.channels,  # Use the same number of channels as the device
             'blocksize': app.blocksize,
-            'gain': 1.0
+            'gain': 1.0,
+            'monitor_channel': getattr(app, 'monitor_channel', 0)  # Use monitor channel from config
         }
         
         print(f"Starting intercom (device {app.device_index}, {app.samplerate}Hz)")

@@ -82,7 +82,7 @@ import atexit
 import subprocess 
 import platform
 import pyaudio
-import Setup_Pyaudio as set_port
+import python.src.modules.setup_PyAudio as set_port
 import gc
 import psutil
 import struct
