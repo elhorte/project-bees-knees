@@ -14,80 +14,277 @@ import sys
 from .class_PyAudio import AudioPortManager
 
 def vu_meter(config):
-    """VU meter function using PyAudio exclusively."""
-    # Extract configuration
-    sound_in_id = config['sound_in_id']
-    sound_in_chs = config['sound_in_chs']
-    channel = config['monitor_channel']
-    sample_rate = config['PRIMARY_IN_SAMPLERATE']
-    is_wsl = config['is_wsl']
-    is_macos = config['is_macos']
-    debug_verbose = config.get('DEBUG_VERBOSE', False)
-
-    print(f"\nVU meter monitoring channel: {channel+1}")
-    fullscale_bar = '*' * 50
-    print("fullscale:", fullscale_bar.ljust(50, ' '))
-
-    last_print = ""
-
-    def callback_input(in_data, frame_count, time_info, status):
-        nonlocal last_print
-        try:
-            # Convert PyAudio bytes to numpy array
-            audio_data = np.frombuffer(in_data, dtype=np.float32)
-            
-            # Handle multi-channel
-            if sound_in_chs > 1:
-                audio_data = audio_data.reshape(-1, sound_in_chs)
-                selected_channel = min(channel, audio_data.shape[1] - 1)
-                channel_data = audio_data[:, selected_channel]
-            else:
-                channel_data = audio_data
-            
-            audio_level = np.max(np.abs(channel_data))
-            normalized_value = int((audio_level / 1.0) * 50)
-            
-            asterisks = '*' * normalized_value
-            current_print = ' ' * 11 + asterisks.ljust(50, ' ')
-            
-            if current_print != last_print:
-                print(current_print, end='\r')
-                last_print = current_print
-                sys.stdout.flush()
-                
-            return (None, 0)  # paContinue
-        except Exception as e:
-            print(f"\rVU meter error: {e}", end='\r\n')
-            return (None, 1)  # paAbort
-
+    """Real-time VU meter with virtual device support."""
+    
     try:
-        # Use PyAudio instead of sounddevice
-        manager = AudioPortManager(target_sample_rate=sample_rate, target_bit_depth=16)
+        # Extract configuration
+        device_index = config.get('device_index')
+        samplerate = config.get('samplerate', 44100)
+        channels = config.get('channels', 1)
+        blocksize = config.get('blocksize', 1024)
+        monitor_channel = config.get('monitor_channel', 0)
         
-        if is_wsl and debug_verbose:
-            print("[VU Debug] Using WSL audio configuration")
+        print(f"VU meter monitoring channel: {monitor_channel + 1}")
         
-        # Create PyAudio stream
-        stream = manager.create_input_stream(
-            device_index=sound_in_id,
-            sample_rate=sample_rate,
-            channels=sound_in_chs,
-            callback=callback_input,
-            frames_per_buffer=1024
-        )
+        # Check for virtual device
+        if device_index is None:
+            print("Virtual device detected - running VU meter with synthetic audio")
+            return _vu_meter_virtual(config)
         
-        stream.start_stream()
-        
-        # Keep running until externally terminated
-        while stream.is_active():
-            time.sleep(0.1)
+        # Try PyAudio first
+        try:
+            import pyaudio
+            return _vu_meter_pyaudio(config)
+        except ImportError:
+            print("PyAudio not available, trying sounddevice...")
+            
+        # Fall back to sounddevice
+        try:
+            import sounddevice as sd
+            return _vu_meter_sounddevice(config)
+        except ImportError:
+            print("No audio libraries available for VU meter")
+            return
             
     except Exception as e:
-        print(f"\nVU meter error: {e}")
+        print(f"VU meter error: {e}")
         import traceback
         traceback.print_exc()
-    finally:
-        print("\nStopping VU meter...")
+
+def _vu_meter_pyaudio(config):
+    """VU meter using PyAudio."""
+    
+    try:
+        import pyaudio
+        
+        device_index = config.get('device_index')
+        samplerate = config.get('samplerate', 44100)
+        channels = config.get('channels', 1)
+        blocksize = config.get('blocksize', 1024)
+        monitor_channel = config.get('monitor_channel', 0)
+        
+        print(f"Starting PyAudio VU meter (device {device_index}, channel {monitor_channel + 1})")
+        
+        # Initialize PyAudio
+        pa = pyaudio.PyAudio()
+        
+        # Validate device and channels
+        try:
+            device_info = pa.get_device_info_by_index(device_index)
+            max_input_channels = int(device_info['maxInputChannels'])
+            actual_channels = min(channels, max_input_channels)
+            
+            if monitor_channel >= actual_channels:
+                print(f"Channel {monitor_channel + 1} not available, using channel 1")
+                monitor_channel = 0
+                
+        except Exception as e:
+            print(f"Error getting device info: {e}")
+            actual_channels = channels
+        
+        # Audio callback for VU meter
+        def audio_callback(in_data, frame_count, time_info, status):
+            try:
+                if status:
+                    print(f"Audio status: {status}")
+                
+                # Convert audio data
+                audio_data = np.frombuffer(in_data, dtype=np.float32)
+                
+                if actual_channels > 1:
+                    audio_data = audio_data.reshape(-1, actual_channels)
+                    channel_data = audio_data[:, monitor_channel]
+                else:
+                    channel_data = audio_data
+                
+                # Calculate RMS level
+                rms_level = np.sqrt(np.mean(channel_data**2))
+                
+                # Convert to dB
+                if rms_level > 0:
+                    db_level = 20 * np.log10(rms_level)
+                else:
+                    db_level = -80
+                
+                # Create VU meter display
+                _display_vu_meter(db_level, rms_level)
+                
+                return (in_data, pyaudio.paContinue)
+                
+            except Exception as e:
+                print(f"VU meter callback error: {e}")
+                return (in_data, pyaudio.paAbort)
+        
+        # Open audio stream
+        stream = pa.open(
+            format=pyaudio.paFloat32,
+            channels=actual_channels,
+            rate=int(samplerate),
+            input=True,
+            input_device_index=device_index,
+            frames_per_buffer=blocksize,
+            stream_callback=audio_callback
+        )
+        
+        print("VU meter running... Press Ctrl+C to stop")
+        stream.start_stream()
+        
+        try:
+            while stream.is_active():
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            print("\nVU meter stopped by user")
+        
+        # Cleanup
+        stream.stop_stream()
+        stream.close()
+        pa.terminate()
+        
+    except Exception as e:
+        print(f"PyAudio VU meter error: {e}")
+        import traceback
+        traceback.print_exc()
+
+def _vu_meter_sounddevice(config):
+    """VU meter using sounddevice."""
+    
+    try:
+        import sounddevice as sd
+        
+        device_index = config.get('device_index')
+        samplerate = config.get('samplerate', 44100)
+        channels = config.get('channels', 1)
+        blocksize = config.get('blocksize', 1024)
+        monitor_channel = config.get('monitor_channel', 0)
+        
+        print(f"Starting sounddevice VU meter (device {device_index}, channel {monitor_channel + 1})")
+        
+        # Audio callback for VU meter
+        def audio_callback(indata, frames, time, status):
+            try:
+                if status:
+                    print(f"Audio status: {status}")
+                
+                # Extract monitor channel
+                if channels > 1 and monitor_channel < indata.shape[1]:
+                    channel_data = indata[:, monitor_channel]
+                else:
+                    channel_data = indata.flatten()
+                
+                # Calculate RMS level
+                rms_level = np.sqrt(np.mean(channel_data**2))
+                
+                # Convert to dB
+                if rms_level > 0:
+                    db_level = 20 * np.log10(rms_level)
+                else:
+                    db_level = -80
+                
+                # Create VU meter display
+                _display_vu_meter(db_level, rms_level)
+                
+            except Exception as e:
+                print(f"VU meter callback error: {e}")
+        
+        # Start audio stream
+        with sd.InputStream(
+            device=device_index,
+            channels=channels,
+            samplerate=samplerate,
+            blocksize=blocksize,
+            callback=audio_callback
+        ):
+            print("VU meter running... Press Ctrl+C to stop")
+            try:
+                while True:
+                    time.sleep(0.1)
+            except KeyboardInterrupt:
+                print("\nVU meter stopped by user")
+        
+    except Exception as e:
+        print(f"Sounddevice VU meter error: {e}")
+        import traceback
+        traceback.print_exc()
+
+def _vu_meter_virtual(config):
+    """VU meter with virtual/synthetic audio."""
+    
+    try:
+        monitor_channel = config.get('monitor_channel', 0)
+        
+        print(f"Starting virtual VU meter (synthetic audio, channel {monitor_channel + 1})")
+        print("VU meter running... Press Ctrl+C to stop")
+        
+        import random
+        
+        try:
+            while True:
+                # Generate synthetic audio levels
+                # Simulate varying audio levels
+                base_level = 0.1 + 0.4 * random.random()  # 0.1 to 0.5
+                
+                # Add some periodic variation
+                import time
+                t = time.time()
+                modulation = 0.3 * np.sin(2 * np.pi * 0.5 * t)  # 0.5 Hz modulation
+                rms_level = base_level + modulation
+                rms_level = max(0.001, min(1.0, rms_level))  # Clamp to valid range
+                
+                # Convert to dB
+                db_level = 20 * np.log10(rms_level)
+                
+                # Display VU meter
+                _display_vu_meter(db_level, rms_level)
+                
+                time.sleep(0.05)  # 20 updates per second
+                
+        except KeyboardInterrupt:
+            print("\nVirtual VU meter stopped by user")
+        
+    except Exception as e:
+        print(f"Virtual VU meter error: {e}")
+        import traceback
+        traceback.print_exc()
+
+def _display_vu_meter(db_level, rms_level):
+    """Display VU meter bar."""
+    
+    try:
+        # Clamp dB level to reasonable range
+        db_level = max(-60, min(0, db_level))
+        
+        # Create meter bar (50 characters wide)
+        meter_width = 50
+        
+        # Map dB level to meter position (-60dB to 0dB -> 0 to 50)
+        meter_pos = int((db_level + 60) / 60 * meter_width)
+        meter_pos = max(0, min(meter_width, meter_pos))
+        
+        # Create the meter bar
+        green_zone = int(meter_width * 0.7)   # 70% green
+        yellow_zone = int(meter_width * 0.9)  # 20% yellow
+        # Remaining 10% is red
+        
+        meter_bar = ""
+        for i in range(meter_width):
+            if i < meter_pos:
+                if i < green_zone:
+                    meter_bar += "█"  # Green zone
+                elif i < yellow_zone:
+                    meter_bar += "▆"  # Yellow zone  
+                else:
+                    meter_bar += "▅"  # Red zone
+            else:
+                meter_bar += "·"
+        
+        # Format the display
+        level_display = f"[{meter_bar}] {db_level:5.1f}dB (RMS: {rms_level:.4f})"
+        
+        # Print with carriage return to overwrite previous line
+        print(f"\rVU: {level_display}", end="", flush=True)
+        
+    except Exception as e:
+        print(f"Display error: {e}")
 
 def intercom_m(config):
     """Intercom monitoring using PyAudio."""
@@ -309,3 +506,15 @@ def audio_loopback_test(input_device, output_device, samplerate=44100, duration=
     """Simplified loopback test using PyAudio."""
     print(f"Loopback test not yet implemented for PyAudio")
     return 0.0
+
+def create_progress_bar(current, total, width=40):
+    """Create a text progress bar."""
+    if total == 0:
+        return "[" + "=" * width + "] 100%"
+    
+    progress = min(current / total, 1.0)
+    filled = int(width * progress)
+    bar = "=" * filled + "-" * (width - filled)
+    percentage = int(progress * 100)
+    
+    return f"[{bar}] {percentage}%"

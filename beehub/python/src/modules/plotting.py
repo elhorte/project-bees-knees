@@ -75,7 +75,197 @@ def create_progress_bar(current, total, bar_length=50):
     return f"[{bar}] {percent}%"
 
 def _record_audio_pyaudio(duration, device_index, channels, samplerate, blocksize, task_name="audio recording"):
-    """Record audio using PyAudio with progress bar (like original BMAR)."""
+    """Record audio using PyAudio with progress bar and virtual device support."""
+    
+    # Check for virtual device (device_index=None)
+    if device_index is None:
+        print(f"Virtual device detected for {task_name} - generating synthetic audio")
+        return _generate_synthetic_audio(duration, channels, samplerate, task_name)
+    
+    try:
+        import pyaudio
+    except ImportError:
+        print("PyAudio not available, falling back to sounddevice")
+        return _record_audio_sounddevice(duration, device_index, channels, samplerate, blocksize, task_name)
+    
+    p = None
+    recording_complete = False
+    frames_recorded = 0
+    
+    try:
+        # Calculate recording parameters
+        num_frames = int(samplerate * duration)
+        chunk_size = blocksize
+        
+        # Validate device channels
+        p = pyaudio.PyAudio()
+        device_info = p.get_device_info_by_index(device_index)
+        max_input_channels = int(device_info['maxInputChannels'])
+        actual_channels = min(channels, max_input_channels)
+        
+        if actual_channels != channels:
+            print(f"Device only supports {max_input_channels} input channels, using {actual_channels}")
+        
+        # Create recording array
+        recording_array = np.zeros((num_frames, actual_channels), dtype=np.float32)
+        
+        print(f"Recording {duration}s of audio from device {device_index}...")
+        print(f"Sample rate: {samplerate}Hz, Channels: {actual_channels}, Block size: {chunk_size}")
+        
+        def callback(indata, frame_count, time_info, status):
+            nonlocal frames_recorded, recording_complete
+            try:
+                if status:
+                    print(f"PyAudio stream status: {status}")
+                if frames_recorded < num_frames and not recording_complete:
+                    data = np.frombuffer(indata, dtype=np.float32)
+                    if len(data) > 0:
+                        start_idx = frames_recorded
+                        end_idx = min(start_idx + len(data) // actual_channels, num_frames)
+                        data = data.reshape(-1, actual_channels)
+                        recording_array[start_idx:end_idx] = data[:(end_idx - start_idx)]
+                        frames_recorded += len(data) // actual_channels
+                        if frames_recorded >= num_frames:
+                            recording_complete = True
+                            return (None, pyaudio.paComplete)
+                return (None, pyaudio.paContinue)
+            except Exception as e:
+                print(f"Error in PyAudio callback: {e}")
+                recording_complete = True
+                return (None, pyaudio.paAbort)
+        
+        stream = p.open(format=pyaudio.paFloat32,
+                        channels=actual_channels,
+                        rate=int(samplerate),
+                        input=True,
+                        input_device_index=device_index,
+                        frames_per_buffer=chunk_size,
+                        stream_callback=callback)
+        
+        stream.start_stream()
+        
+        start_time = time.time()
+        timeout = duration + 10
+        
+        while not recording_complete and (time.time() - start_time) < timeout:
+            progress_bar = create_progress_bar(frames_recorded, num_frames)
+            print(f"Recording progress: {progress_bar}", end='\r')
+            time.sleep(0.1)
+        
+        # Ensure we show 100% completion when done
+        if recording_complete or frames_recorded >= num_frames:
+            progress_bar = create_progress_bar(num_frames, num_frames)  # Force 100%
+            print(f"Recording progress: {progress_bar}")
+        
+        stream.stop_stream()
+        stream.close()
+        
+        if frames_recorded < num_frames * 0.9:
+            print(f"Warning: Recording incomplete: only got {frames_recorded}/{num_frames} frames.")
+            return None, 0
+        
+        print(f"Finished {task_name}.")
+        return recording_array, actual_channels
+
+    except Exception as e:
+        print(f"Failed to record audio with PyAudio for {task_name}: {e}")
+        return None, 0
+    finally:
+        if p:
+            try:
+                p.terminate()
+                time.sleep(0.1)  # Allow time for resources to be released
+            except Exception as e:
+                print(f"Error terminating PyAudio instance for {task_name}: {e}")
+
+def _generate_synthetic_audio(duration, channels, samplerate, task_name="synthetic audio"):
+    """Generate synthetic audio data for virtual devices."""
+    try:
+        print(f"Generating {duration}s of synthetic audio for {task_name}...")
+        
+        # Generate time array
+        t = np.linspace(0, duration, int(samplerate * duration))
+        
+        # Create a complex synthetic signal
+        # Base frequencies
+        freq1 = 440  # A4 note
+        freq2 = 880  # A5 note
+        freq3 = 1320  # E6 note
+        
+        # Generate signal with multiple components
+        signal = (0.6 * np.sin(2 * np.pi * freq1 * t) +      # Primary tone
+                 0.3 * np.sin(2 * np.pi * freq2 * t) +      # Harmonic
+                 0.2 * np.sin(2 * np.pi * freq3 * t) +      # Higher harmonic
+                 0.1 * np.sin(2 * np.pi * 100 * t) +        # Low frequency
+                 0.05 * np.random.randn(len(t)))            # Noise
+        
+        # Add some time-varying effects
+        # Amplitude modulation
+        am_freq = 2.0  # 2 Hz modulation
+        am_signal = signal * (0.7 + 0.3 * np.sin(2 * np.pi * am_freq * t))
+        
+        # Add frequency sweep
+        sweep_start = 200
+        sweep_end = 2000
+        sweep_freq = sweep_start + (sweep_end - sweep_start) * t / duration
+        sweep_signal = 0.2 * np.sin(2 * np.pi * sweep_freq * t)
+        
+        # Combine all components
+        final_signal = am_signal + sweep_signal
+        
+        # Convert to int16 range
+        max_amplitude = 0.8  # Leave some headroom
+        final_signal = final_signal / np.max(np.abs(final_signal)) * max_amplitude
+        synthetic_data = (final_signal * 32767).astype(np.int16)
+        
+        # Handle multi-channel
+        if channels > 1:
+            # Create slightly different signals for each channel
+            multi_channel_data = np.zeros((len(synthetic_data), channels), dtype=np.int16)
+            multi_channel_data[:, 0] = synthetic_data
+            
+            for ch in range(1, channels):
+                # Add phase shift and slight frequency variation for other channels
+                phase_shift = ch * np.pi / 4
+                freq_mult = 1.0 + ch * 0.1
+                
+                ch_signal = (0.6 * np.sin(2 * np.pi * freq1 * freq_mult * t + phase_shift) +
+                           0.3 * np.sin(2 * np.pi * freq2 * freq_mult * t + phase_shift) +
+                           0.05 * np.random.randn(len(t)))
+                
+                ch_signal = ch_signal / np.max(np.abs(ch_signal)) * max_amplitude
+                multi_channel_data[:, ch] = (ch_signal * 32767).astype(np.int16)
+            
+            print(f"Generated {duration}s synthetic audio ({channels} channels)")
+            return multi_channel_data, channels
+        else:
+            print(f"Generated {duration}s synthetic audio (mono)")
+            return synthetic_data, 1
+            
+    except Exception as e:
+        print(f"Error generating synthetic audio for {task_name}: {e}")
+        return None, 0
+
+# Add progress bar function if it doesn't exist
+def create_progress_bar(current, total, width=40):
+    """Create a text progress bar."""
+    if total == 0:
+        return "[" + "=" * width + "] 100%"
+    
+    progress = min(current / total, 1.0)
+    filled = int(width * progress)
+    bar = "=" * filled + "-" * (width - filled)
+    percentage = int(progress * 100)
+    
+    return f"[{bar}] {percentage}%"
+
+def _record_audio_pyaudio(duration, device_index, channels, samplerate, blocksize, task_name="audio recording"):
+    """Record audio using PyAudio with progress bar and virtual device support."""
+    
+    # Check for virtual device (device_index=None)
+    if device_index is None:
+        print(f"Virtual device detected for {task_name} - generating synthetic audio")
+        return _generate_synthetic_audio(duration, channels, samplerate, task_name)
     
     try:
         import pyaudio

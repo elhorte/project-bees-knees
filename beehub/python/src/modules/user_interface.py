@@ -662,35 +662,43 @@ def handle_configuration_command(app):
         print(f"Configuration display error: {e}")
 
 def show_help():
-    """Display help information."""
+    """Display help information with proper line endings for all platforms."""
     
-    print("\nBMAR (Bioacoustic Monitoring and Recording) Help")
-    print("=" * 60)
-    print("Commands:")
-    print("  r - Recording:     Start/stop audio recording")
-    print("  s - Spectrogram:   One-shot frequency analysis with GUI window")
-    print("  o - Oscilloscope:  10-second waveform capture with GUI window")
-    print("  t - Threads:       List all currently running threads")
-    print("  v - VU Meter:      Audio level monitoring")
-    print("  i - Intercom:      Audio monitoring of remote microphones")
-    print("  d - Current Device: Show currently selected audio device")
-    print("  D - All Devices:    List all available audio devices with details")
-    print("  p - Performance:   System performance monitor (once)")
-    print("  P - Performance:   Continuous system performance monitor")
-    print("  f - FFT:           Show frequency analysis plot")
-    print("  c - Configuration: Display current settings")
-    print("  h - Help:          This help message")
-    print("  q - Quit:          Exit the application")
-    print("  1-9 - Channel:     Switch monitoring channel (while VU/Intercom active)")
-    print()
-    print("Tips:")
-    print("  - Press any command key to toggle that function on/off")
-    print("  - Multiple functions can run simultaneously")
-    print("  - Files are automatically organized by date")
-    print("  - Use 'p' for one-time performance check, 'P' for continuous monitoring")
-    print("  - Use 'd' for current device info, 'D' for all available devices")
-    print("  - Press 1-9 to switch audio channel while VU meter or Intercom is running")
-    print("=" * 60)
+    # Clear any lingering progress indicators or status messages
+    print("\r" + " " * 120 + "\r", end="", flush=True)  # Clear wider area
+    print()  # Add a clean newline to separate from previous output
+    
+    # Print each line individually with explicit line endings for Linux/WSL
+    print("BMAR (Bioacoustic Monitoring and Recording) Help\r")
+    print("============================================================\r")
+    print("\r")
+    print("Commands:\r")
+    print("r - Recording:     Start/stop audio recording\r")
+    print("s - Spectrogram:   One-shot frequency analysis with GUI window\r")
+    print("o - Oscilloscope:  10-second waveform capture with GUI window\r")
+    print("t - Threads:       List all currently running threads\r")
+    print("v - VU Meter:      Audio level monitoring\r")
+    print("i - Intercom:      Audio monitoring of remote microphones\r")
+    print("d - Current Device: Show currently selected audio device\r")
+    print("D - All Devices:    List all available audio devices with details\r")
+    print("p - Performance:   System performance monitor (once)\r")
+    print("P - Performance:   Continuous system performance monitor\r")
+    print("f - FFT:           Show frequency analysis plot\r")
+    print("c - Configuration: Display current settings\r")
+    print("h - Help:          This help message\r")
+    print("q - Quit:          Exit the application\r")
+    print("\r")
+    print("1-9 - Channel:     Switch monitoring channel (while VU/Intercom active)\r")
+    print("\r")
+    print("Tips:\r")
+    print("- Press any command key to toggle that function on/off\r")
+    print("- Multiple functions can run simultaneously\r")
+    print("- Files are automatically organized by date\r")
+    print("- Use 'p' for one-time performance check, 'P' for continuous monitoring\r")
+    print("- Use 'd' for current device info, 'D' for all available devices\r")
+    print("- Press 1-9 to switch audio channel while VU meter or Intercom is running\r")
+    print("============================================================\r")
+    print()  # Add final newline for clean separation
 
 def get_user_input(prompt, default=None, input_type=str, validator=None):
     """Get validated user input with optional default value."""
