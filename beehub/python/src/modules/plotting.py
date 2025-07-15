@@ -58,8 +58,11 @@ def create_progress_bar(current, total, bar_length=50):
     # Ensure current doesn't exceed total
     current = min(current, total)
     
-    # Calculate percentage (0-100)
-    percent = int(current * 100 / total)
+    # Calculate percentage (0-100) with proper rounding
+    if current >= total:
+        percent = 100  # Force 100% when complete
+    else:
+        percent = round(current * 100 / total)
     
     # Calculate filled length, ensuring it can reach full bar_length
     if current >= total:
@@ -1164,3 +1167,145 @@ def _try_open_plot_file(filepath):
     except Exception as e:
         print(f"Could not open plot file automatically: {e}")
         print(f"Please open manually: {filepath}")
+
+def plot_fft(config):
+    """Single-shot FFT plot of audio with progress bar."""
+    
+    try:
+        # Force garbage collection before starting
+        import gc
+        gc.collect()
+        
+        # Ensure clean matplotlib state for this process
+        import matplotlib
+        matplotlib.use('Agg', force=True)
+        import matplotlib.pyplot as plt
+        plt.close('all')  # Close any existing figures
+        
+        # Brief delay to ensure clean audio device state
+        time.sleep(0.1)
+        
+        # Extract configuration
+        device_index = config['device_index']
+        samplerate = config['samplerate']
+        channels = config['channels']
+        blocksize = config.get('blocksize', 1024)
+        plots_dir = config['plots_dir']
+        monitor_channel = config.get('monitor_channel', 0)
+        
+        # Import configuration values
+        from .bmar_config import FFT_DURATION, FFT_GAIN, LOCATION_ID, HIVE_ID, PRIMARY_BITDEPTH
+        
+        # Record audio with progress bar
+        print(f"Starting FFT analysis on channel {monitor_channel + 1}...")
+        recording, actual_channels = _record_audio_pyaudio(
+            FFT_DURATION, device_index, channels, samplerate, blocksize, "FFT analysis"
+        )
+        
+        if recording is None:
+            logging.error("Failed to record audio for FFT.")
+            return
+
+        # Ensure channel index is valid
+        if monitor_channel >= actual_channels:
+            logging.warning(f"Channel {monitor_channel+1} not available for FFT, using channel 1.")
+            monitor_channel = 0
+            
+        # Extract the requested channel
+        if len(recording.shape) > 1:
+            single_channel_audio = recording[:, monitor_channel]
+        else:
+            single_channel_audio = recording.flatten()
+        
+        # Apply gain if needed
+        if FFT_GAIN > 0:
+            gain = 10 ** (FFT_GAIN / 20)
+            logging.info(f"Applying FFT gain of: {gain:.1f}")
+            single_channel_audio *= gain
+
+        logging.info("Performing FFT...")
+        
+        # Import FFT functions
+        from scipy.fft import rfft, rfftfreq
+        
+        # Perform FFT
+        yf = rfft(single_channel_audio.flatten())
+        xf = rfftfreq(len(single_channel_audio), 1 / samplerate)
+
+        # Define bucket width
+        FFT_BW = 1000  # bandwidth of each bucket in hertz
+        bucket_width = FFT_BW
+        bucket_size = int(bucket_width * len(single_channel_audio) / samplerate)
+
+        # Calculate the number of complete buckets
+        num_buckets = len(yf) // bucket_size
+        
+        # Average buckets - ensure both arrays have the same length
+        buckets = []
+        bucket_freqs = []
+        for i in range(num_buckets):
+            start_idx = i * bucket_size
+            end_idx = start_idx + bucket_size
+            buckets.append(yf[start_idx:end_idx].mean())
+            bucket_freqs.append(xf[start_idx:end_idx].mean())
+        
+        buckets = np.array(buckets)
+        bucket_freqs = np.array(bucket_freqs)
+
+        logging.info("Creating FFT plot...")
+        # Create figure with reduced DPI for better performance
+        fig = plt.figure(figsize=(10, 6), dpi=80)
+        plt.plot(bucket_freqs, np.abs(buckets), linewidth=1.0)
+        plt.xlabel('Frequency (Hz)')
+        plt.ylabel('Amplitude')
+        plt.title(f'FFT Plot monitoring ch: {monitor_channel + 1} of {actual_channels} channels')
+        plt.grid(True)
+
+        # Save the plot
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        plotname = os.path.join(plots_dir, f"{timestamp}_fft_{int(samplerate/1000)}_kHz_{PRIMARY_BITDEPTH}_{LOCATION_ID}_{HIVE_ID}.png")
+        logging.info(f"Saving FFT plot to: {plotname}")
+        
+        # Make sure the directory exists
+        os.makedirs(os.path.dirname(plotname), exist_ok=True)
+        
+        # Display the expanded path
+        expanded_path = os.path.abspath(os.path.expanduser(plotname))
+        logging.info(f"Absolute path: {expanded_path}")
+        
+        # Save with optimized settings
+        logging.info("Saving figure...")
+        plt.savefig(expanded_path, dpi=80, bbox_inches='tight', pad_inches=0.1, format='png')
+        logging.info("Plot saved successfully")
+        plt.close('all')  # Close all figures
+
+        # Open the saved image
+        try:
+            # First verify the file exists
+            if not os.path.exists(expanded_path):
+                logging.error(f"Plot file does not exist at: {expanded_path}")
+                return
+                
+            logging.info(f"Plot file exists, size: {os.path.getsize(expanded_path)} bytes")
+            print(f"FFT plot saved to: {expanded_path}")
+            
+            # Open the plot file
+            _try_open_plot_file(expanded_path)
+                
+        except Exception as e:
+            logging.error("Could not open image viewer", exc_info=True)
+            logging.info(f"Image saved at: {expanded_path}")
+            logging.info("You can manually open this file with your image viewer")
+            
+    except Exception as e:
+        logging.error("Error in FFT analysis", exc_info=True)
+        print(f"Error in FFT analysis: {e}")
+    finally:
+        # Ensure cleanup happens
+        try:
+            plt.close('all')
+            import gc
+            gc.collect()
+        except:
+            pass

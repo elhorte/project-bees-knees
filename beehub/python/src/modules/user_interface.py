@@ -21,14 +21,14 @@ def keyboard_listener(app):
         print("  'r' - Start/stop recording")
         print("  's' - Spectrogram (one-shot with GUI)")
         print("  'o' - Oscilloscope (10s capture with GUI)")
-        print("  't' - Trigger plot")
+        print("  't' - Threads (list all)")
         print("  'v' - VU meter")
         print("  'i' - Intercom")
         print("  'd' - Current audio device")
         print("  'D' - List detailed audio devices")
         print("  'p' - Performance monitor")
         print("  'P' - Continuous performance monitor")
-        print("  'f' - File browser")
+        print("  'f' - FFT analysis (10s with progress bar)")
         print("  'c' - Configuration")
         print("  'h' - Help")
         print("  'q' - Quit")
@@ -89,7 +89,7 @@ def process_command(app, command):
             handle_oscilloscope_command(app)
             
         elif command == 't' or command == 'T':
-            handle_trigger_command(app)
+            handle_thread_list_command(app)
             
         elif command == 'v' or command == 'V':
             handle_vu_meter_command(app)
@@ -112,7 +112,7 @@ def process_command(app, command):
             handle_continuous_performance_monitor_command(app)
             
         elif command == 'f' or command == 'F':
-            handle_file_browser_command(app)
+            handle_fft_command(app)
             
         elif command == 'c' or command == 'C':
             handle_configuration_command(app)
@@ -123,6 +123,9 @@ def process_command(app, command):
         elif command.isdigit():
             # Handle channel switching (1-9)
             handle_channel_switch_command(app, command)
+            
+        elif command == 'l' or command == 'L':
+            handle_thread_list_command(app)
             
         else:
             print(f"Unknown command: '{command}'. Press 'h' for help.")
@@ -647,14 +650,14 @@ def show_help():
     print("  r - Recording:     Start/stop audio recording")
     print("  s - Spectrogram:   One-shot frequency analysis with GUI window")
     print("  o - Oscilloscope:  10-second waveform capture with GUI window")
-    print("  t - Trigger:       Triggered waveform capture")
+    print("  t - Threads:       List all currently running threads")
     print("  v - VU Meter:      Audio level monitoring")
-    print("  i - Intercom:      Audio monitoring/loopback")
+    print("  i - Intercom:      Audio monitoring of remote microphones")
     print("  d - Current Device: Show currently selected audio device")
     print("  D - All Devices:    List all available audio devices with details")
     print("  p - Performance:   System performance monitor (once)")
     print("  P - Performance:   Continuous system performance monitor")
-    print("  f - Files:         File browser and directory info")
+    print("  f - FFT:           Show frequency analysis plot")
     print("  c - Configuration: Display current settings")
     print("  h - Help:          This help message")
     print("  q - Quit:          Exit the application")
@@ -1014,3 +1017,94 @@ def ensure_app_attributes(app):
             
     except Exception as e:
         print(f"Warning: Error setting app attributes: {e}")
+
+def list_all_threads():
+    """List all currently running threads."""
+    
+    import threading
+    
+    print("\n=== Currently Running Threads ===")
+    for thread in threading.enumerate():
+        print(f"Thread name: {thread.name}, Thread ID: {thread.ident}, Alive: {thread.is_alive()}")
+    print("=" * 35)
+
+def handle_thread_list_command(app):
+    """Handle thread listing command."""
+    
+    try:
+        list_all_threads()
+    except Exception as e:
+        print(f"Error listing threads: {e}")
+        logging.error(f"Error listing threads: {e}")
+
+def handle_fft_command(app):
+    """Handle FFT command."""
+    
+    from .process_manager import cleanup_process, create_subprocess
+    from .plotting import plot_fft
+    
+    try:
+        if 'f' in app.active_processes and app.active_processes['f'] is not None:
+            if app.active_processes['f'].is_alive():
+                print("Stopping FFT analysis...")
+                cleanup_process(app, 'f')
+            else:
+                print("Starting FFT analysis...")
+                app.active_processes['f'] = None
+                start_fft_analysis(app)
+        else:
+            print("Starting FFT analysis...")
+            start_fft_analysis(app)
+            
+    except Exception as e:
+        print(f"FFT command error: {e}")
+        import traceback
+        traceback.print_exc()
+
+def start_fft_analysis(app):
+    """Start one-shot FFT analysis."""
+    
+    from .process_manager import create_subprocess
+    from .plotting import plot_fft
+    
+    try:
+        # Ensure app has all required attributes
+        ensure_app_attributes(app)
+        
+        # Ensure required directory exists
+        plots_dir = os.path.join(app.today_dir, 'plots')
+        if not os.path.exists(plots_dir):
+            os.makedirs(plots_dir, exist_ok=True)
+            
+        # Create FFT configuration for one-shot analysis
+        fft_config = {
+            'device_index': app.device_index,
+            'samplerate': app.samplerate,
+            'channels': app.channels,
+            'blocksize': app.blocksize,
+            'plots_dir': plots_dir,
+            'monitor_channel': getattr(app, 'monitor_channel', 0)
+        }
+        
+        print(f"Starting FFT analysis (device {app.device_index}, {app.samplerate}Hz)")
+        print(f"  Channel: {app.monitor_channel + 1} of {app.channels}")
+        
+        # Create and start FFT process
+        # Note: This will be a short-lived process that captures, analyzes, and exits
+        process = create_subprocess(
+            target_function=plot_fft,
+            args=(fft_config,),
+            process_key='f',
+            app=app,
+            daemon=True
+        )
+        
+        process.start()
+        print(f"FFT analysis started (PID: {process.pid})")
+        
+        # Note: The process will finish automatically after capturing and displaying
+        
+    except Exception as e:
+        print(f"Error starting FFT analysis: {e}")
+        import traceback
+        traceback.print_exc()
