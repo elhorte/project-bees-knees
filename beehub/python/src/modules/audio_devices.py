@@ -1,726 +1,819 @@
 """
 BMAR Audio Devices Module
-Handles audio device discovery, configuration, and management.
+Handles audio device discovery, configuration, and management using PyAudio.
 """
 
-import sounddevice as sd
 import logging
 import sys
 import subprocess
 import datetime
 import time
+from typing import List, Dict, Optional, Tuple, Union
 
-# Enhanced audio management imports
-try:
-    import pyaudio
-    PYAUDIO_AVAILABLE = True
-except ImportError:
-    PYAUDIO_AVAILABLE = False
-    logging.warning("PyAudio not available, enhanced device testing disabled")
-
+# Use PyAudio exclusively
 from .class_PyAudio import AudioPortManager
 
 def print_all_input_devices():
-    """Print a list of all available input devices with enhanced information."""
-    print("\nFull input device list (enhanced with PyAudio capabilities):\r")
-    devices = sd.query_devices()
+    """Print a list of all available input devices using PyAudio."""
+    print("\nFull input device list (PyAudio):\r")
     
-    for i, device in enumerate(devices):
-        if device['max_input_channels'] > 0:
-            hostapi_info = sd.query_hostapis(index=device['hostapi'])
-            
-            # Basic device info
-            base_info = f"  [{i}] {device['name']} - {hostapi_info['name']} " \
-                       f"({device['max_input_channels']} ch, {int(device['default_samplerate'])} Hz)"
-            
-            # Add enhanced capabilities if PyAudio is available
-            if PYAUDIO_AVAILABLE:
-                enhanced_info = get_enhanced_device_info(i)
-                if enhanced_info and enhanced_info.get('pyaudio_compatible'):
-                    api_info = enhanced_info.get('api', 'Unknown')
-                    config_test = "✓" if enhanced_info.get('can_use_target_config') else "⚠"
-                    base_info += f" | {api_info} {config_test}"
-            
-            print(base_info)
-    
-    print()
-    if PYAUDIO_AVAILABLE:
-        print("Legend: ✓ = Supports high-quality config, ⚠ = May need adjustment")
-    sys.stdout.flush()
-
-def get_api_name_for_device(device_id):
-    """Get the API name for a specific device ID."""
-    device = sd.query_devices(device_id)
-    hostapi_info = sd.query_hostapis(index=device['hostapi'])
-    return hostapi_info['name']
-
-def get_windows_sample_rate(device_name):
-    """Get the actual sample rate from Windows using PyAudio."""
     try:
-        import pyaudio
-        p = pyaudio.PyAudio()
+        manager = AudioPortManager()
+        devices = manager.list_audio_devices()
         
-        # Find device by name
-        device_id = None
-        for i in range(p.get_device_count()):
-            info = p.get_device_info_by_index(i)
-            if device_name.lower() in info['name'].lower():
-                device_id = i
+        for device in devices:
+            if device['is_input']:
+                # Enhanced device info with PyAudio testing
+                base_info = f"  [{device['index']}] {device['name']} - {device['api']} " \
+                           f"({device['input_channels']} ch, {int(device['default_sample_rate'])} Hz)"
+                
+                # Test basic configuration
+                can_use_basic = manager.test_device_configuration(
+                    device['index'], 44100, 16, min(2, device['input_channels'])
+                )
+                
+                config_test = "✓" if can_use_basic else "⚠"
+                print(f"{base_info} {config_test}")
+        
+    except Exception as e:
+        logging.error(f"Error listing audio devices: {e}")
+        print("Error: Could not enumerate audio devices")
+
+def get_enhanced_device_info(device_index: int) -> Dict:
+    """Get enhanced device information using PyAudio testing."""
+    try:
+        manager = AudioPortManager()
+        devices = manager.list_audio_devices()
+        
+        # Find the device
+        device_info = None
+        for device in devices:
+            if device['index'] == device_index:
+                device_info = device
                 break
         
-        if device_id is not None:
-            device_info = p.get_device_info_by_index(device_id)
-            sample_rate = int(device_info['defaultSampleRate'])
-            p.terminate()
-            return sample_rate
+        if not device_info:
+            return {'pyaudio_compatible': False, 'error': 'Device not found'}
+        
+        # Test basic configuration
+        can_use_target = manager.test_device_configuration(
+            device_index, manager.target_sample_rate, manager.target_bit_depth, 
+            min(2, device_info['input_channels'])
+        )
+        
+        return {
+            'pyaudio_compatible': True,
+            'can_use_target_config': can_use_target,
+            'api': device_info['api'],
+            'max_channels': device_info['input_channels'],
+            'default_sample_rate': device_info['default_sample_rate']
+        }
+        
+    except Exception as e:
+        return {'pyaudio_compatible': False, 'error': str(e)}
+
+def configure_audio_with_fallback(app):
+    """Configure audio using PyAudio with hierarchical fallback strategy."""
+    try:
+        manager = AudioPortManager(
+            target_sample_rate=app.config.PRIMARY_IN_SAMPLERATE,
+            target_bit_depth=app.config.BIT_DEPTH
+        )
+        
+        # Use the hierarchical configuration
+        success, device, sample_rate, bit_depth = manager.configure_audio_input(
+            channels=app.config.CHANNELS
+        )
+        
+        if success:
+            # Update app configuration with working settings
+            app.sound_in_id = device['index']
+            app.sound_in_chs = device['input_channels']
+            app.PRIMARY_IN_SAMPLERATE = sample_rate
+            app._bit_depth = bit_depth
+            app.testmode = False
+            
+            logging.info(f"Audio configured successfully:")
+            logging.info(f"  Device: {device['name']} ({device['api']})")
+            logging.info(f"  Sample Rate: {sample_rate} Hz")
+            logging.info(f"  Bit Depth: {bit_depth} bits")
+            logging.info(f"  Channels: {device['input_channels']}")
+            
+            return True
         else:
-            p.terminate()
-            return None
-    except Exception as e:
-        logging.error(f"Error getting Windows sample rate: {e}")
-        return None
-
-def get_current_device_sample_rate(app, device_id):
-    """Query the current sample rate of the device from the operating system."""
-    try:
-        device_info = sd.query_devices(device_id)
-        sample_rate = int(device_info['default_samplerate'])
-        
-        # For Windows, try to get more accurate rate
-        if app.platform_manager.is_windows():
-            windows_rate = get_windows_sample_rate(device_info['name'])
-            if windows_rate:
-                sample_rate = windows_rate
-        
-        return sample_rate
-    except Exception as e:
-        logging.error(f"Error getting device sample rate: {e}")
-        return None
-
-def show_audio_device_info_for_SOUND_IN_OUT(app):
-    """Display detailed information about the selected audio input and output devices."""
-    print("\nSelected Audio Device Information:")
-    print("-" * 50)
-    
-    # Get and display input device info
-    try:
-        input_info = sd.query_devices(app.sound_in_id)
-        print("\nInput Device:")
-        print(f"Name: [{app.sound_in_id}] {input_info['name']}")
-        print(f"Default Sample Rate: {int(input_info['default_samplerate'])} Hz")
-        print(f"Bit Depth: {app.config.PRIMARY_BITDEPTH} bits")
-        print(f"Max Input Channels: {input_info['max_input_channels']}")
-        print(f"Current Sample Rate: {int(app.config.PRIMARY_IN_SAMPLERATE)} Hz")
-        print(f"Current Channels: {app.sound_in_chs}")
-        if 'hostapi' in input_info:
-            hostapi_info = sd.query_hostapis(index=input_info['hostapi'])
-            print(f"Audio API: {hostapi_info['name']}")
-        
-        # Show enhanced capabilities if PyAudio is available
-        if PYAUDIO_AVAILABLE:
-            enhanced_info = get_enhanced_device_info(app.sound_in_id, 
-                                                   app.config.PRIMARY_IN_SAMPLERATE,
-                                                   app.config.PRIMARY_BITDEPTH)
-            if enhanced_info and enhanced_info.get('pyaudio_compatible'):
-                print(f"Enhanced API: {enhanced_info.get('api', 'Unknown')}")
-                can_use = "Yes" if enhanced_info.get('can_use_target_config') else "No"
-                print(f"Supports Target Config: {can_use}")
+            logging.error("Could not configure any audio device")
+            return False
             
     except Exception as e:
-        print(f"Error getting input device info: {e}")
-    
-    # Get and display output device info
-    try:
-        output_info = sd.query_devices(app.sound_out_id)
-        print("\nOutput Device:")
-        print(f"Name: [{app.sound_out_id}] {output_info['name']}")
-        print(f"Default Sample Rate: {int(output_info['default_samplerate'])} Hz")
-        print(f"Max Output Channels: {output_info['max_output_channels']}")
-        if 'hostapi' in output_info:
-            hostapi_info = sd.query_hostapis(index=output_info['hostapi'])
-            print(f"Audio API: {hostapi_info['name']}")
-    except Exception as e:
-        print(f"Error getting output device info: {e}")
-    
-    print("-" * 50)
-    sys.stdout.flush()
-
-def show_audio_device_info_for_defaults():
-    """Show information about the default audio devices."""
-    print("\nsounddevices default device info:")
-    default_input_info = sd.query_devices(kind='input')
-    default_output_info = sd.query_devices(kind='output')
-    print(f"\nDefault Input Device: [{default_input_info['index']}] {default_input_info['name']}")
-    print(f"Default Output Device: [{default_output_info['index']}] {default_output_info['name']}\n")
-
-def show_detailed_device_list(app):
-    """Display a detailed list of all audio devices with input/output indicators."""
-    print("\nAudio Device List:")
-    print("-" * 80)
-    
-    devices = sd.query_devices()
-    for i, device in enumerate(devices):
-        # Get API name
-        hostapi_info = sd.query_hostapis(index=device['hostapi'])
-        api_name = hostapi_info['name']
-
-        # Determine if device is input, output, or both
-        in_channels = device['max_input_channels']
-        out_channels = device['max_output_channels']
-        
-        # Create prefix based on device type and whether it's the active device
-        if i == app.device_index:
-            prefix = "*"  # Active device (used by BMAR)
-        else:
-            prefix = " "
-            
-        # Format the device name to fit in 40 characters
-        device_name = device['name']
-        if len(device_name) > 40:
-            device_name = device_name[:37] + "..."
-
-        # Print the device information
-        print(f"{prefix} {i:2d} {device_name:<40} {api_name} ({in_channels} in, {out_channels} out)")
-
-    print("-" * 80)
-    print(f"* = Currently selected device (Index: {app.device_index})")
-    print(f"Sample Rate: {app.samplerate} Hz")
-    print(f"Block Size: {app.blocksize}")
-    sys.stdout.flush()
+        logging.error(f"Error configuring audio: {e}")
+        return False
 
 def set_input_device(app):
-    """Find and configure a suitable audio input device based on settings in the app object."""
+    """Find and configure a suitable audio input device using PyAudio."""
     logging.info("Scanning for audio input devices...")
     sys.stdout.flush()
 
     # Initialize testmode to True. It will be set to False upon success.
     app.testmode = True
 
-    # Try enhanced audio configuration first
-    if PYAUDIO_AVAILABLE and not getattr(app, '_using_fallback', False):
-        logging.info("Attempting enhanced audio configuration with PyAudio...")
-        app._using_fallback = True  # Prevent recursion
-        if configure_audio_with_fallback(app):
-            return True
-        logging.info("Enhanced configuration failed, falling back to standard method")
-        app._using_fallback = False
-
-    print_all_input_devices()
-
     try:
-        # Get all devices
-        devices = sd.query_devices()
-        
-        # First try the specified device_id if it exists
-        if app.device_id is not None and app.device_id >= 0:
-            try:
-                device = devices[app.device_id]
-                if device['max_input_channels'] >= app.sound_in_chs:
-                    app.sound_in_id = app.device_id
-                    logging.info(f"Using specified device ID {app.device_id}: {device['name']}")
-                    app.testmode = False
-                    return True
-            except IndexError:
-                logging.warning(f"Specified device ID {app.device_id} not found")
-        else:
-            logging.info("No specific device ID provided, scanning for suitable devices")
-        
-        # Create a list of input devices with their IDs
-        input_devices = [(i, device) for i, device in enumerate(devices) 
-                        if device['max_input_channels'] > 0]
-        
-        # Sort by device ID in descending order
-        input_devices.sort(reverse=True, key=lambda x: x[0])
-        
-        # If make_name is specified, try those devices first
-        if app.make_name and app.make_name.strip():
-            logging.info(f"Looking for devices matching make name: '{app.make_name}'")
-            matching_devices = [(dev_id, device) for dev_id, device in input_devices
-                              if app.make_name.lower() in device['name'].lower()]
-            if matching_devices:
-                input_devices = matching_devices + [(dev_id, device) for dev_id, device in input_devices 
-                                                  if (dev_id, device) not in matching_devices]
-        
-        # Try all devices if no matching devices were found or if make_name was empty
-        for dev_id, device in input_devices:
-            try:
-                # Check if device supports required channels
-                actual_channels = min(device['max_input_channels'], app.sound_in_chs)
-                if actual_channels != app.sound_in_chs:
-                    logging.warning(f"Device {dev_id} only supports {actual_channels} channels, "
-                                  f"requested {app.sound_in_chs}")
-                
-                # Test device capabilities if PyAudio is available
-                if PYAUDIO_AVAILABLE:
-                    enhanced_test = test_audio_configuration(
-                        dev_id, app.config.PRIMARY_IN_SAMPLERATE, 
-                        app.config.PRIMARY_BITDEPTH, actual_channels
-                    )
-                    if not enhanced_test:
-                        logging.debug(f"Device {dev_id} failed enhanced capabilities test")
-                        continue
-                
-                # Try to test the device
-                try:
-                    with sd.InputStream(device=dev_id, channels=actual_channels, 
-                                      samplerate=app.config.PRIMARY_IN_SAMPLERATE,
-                                      dtype=app._dtype, blocksize=1024):
-                        pass  # Just test if we can open the stream
-                    
-                    # If we get here, the device works
-                    app.sound_in_id = dev_id
-                    app.sound_in_chs = actual_channels
-                    logging.info(f"Successfully configured device {dev_id}: {device['name']}")
-                    logging.info(f"Using {actual_channels} channel(s) at {app.config.PRIMARY_IN_SAMPLERATE} Hz")
-                    app.testmode = False
-                    return True
-                    
-                except Exception as e:
-                    logging.debug(f"Device {dev_id} failed test: {e}")
-                    continue
-                    
-            except Exception as e:
-                logging.debug(f"Error testing device {dev_id}: {e}")
-                continue
-        
-        print("\nNo devices could be configured with acceptable settings.")
-        return False
-
+        print_all_input_devices()
     except Exception as e:
-        print(f"\nError during device selection: {str(e)}")
-        print("Please check your audio device configuration and ensure it supports the required settings")
-        sys.stdout.flush()
+        logging.error(f"Could not list audio devices: {e}")
         return False
 
-def check_stream_status(app, stream_duration):
-    """
-    Check the status of a sounddevice input stream for overflows and underflows.
+    # Try to configure with fallback strategy
+    if configure_audio_with_fallback(app):
+        logging.info(f"Audio device configured successfully: Device {app.sound_in_id}")
+        return True
     
-    Parameters:
-    - app: BmarApp instance containing audio device configuration
-    - stream_duration: Duration for which the stream should be open and checked (in seconds).
-    """
-    print(f"Checking input stream for overflow. Watching for {stream_duration} seconds")
-
-    # Define a callback function to process the audio stream
-    def callback(indata, frames, time, status):
-        if status and status.input_overflow:
-            print("Input overflow detected at:", datetime.datetime.now())
-
-    # Open an input stream
-    with sd.InputStream(callback=callback, device=app.sound_in_id) as stream:
-        # Run the stream for the specified duration
-        timeout = time.time() + stream_duration
-        while time.time() < timeout:
-            time.sleep(0.1)  # Sleep for a short duration before checking again
-
-    print("Stream checking finished at", datetime.datetime.now())
-    show_audio_device_info_for_SOUND_IN_OUT(app)
-
-def get_default_output_device():
-    """Get the name of the default output device."""
-    devices = sd.query_devices()
-    for device in devices:
-        if device['max_output_channels'] > 0:
-            return device['name']
-    return None
-
-def get_enabled_mic_locations(app):
-    """
-    Reads microphone enable states (MIC_1 to MIC_4) and maps to their corresponding locations.
-    """
-    # Define microphone states and corresponding locations
-    mic_location_names = [app.config.MIC_LOCATION[i] for i, enabled in enumerate(app.MICS_ACTIVE) if enabled]
-    return mic_location_names
-
-def show_mic_locations(app):
-    """Display enabled microphone locations."""
-    print("Enabled microphone locations:", get_enabled_mic_locations(app))
-
-def is_mic_position_in_bounds(mic_list, position):
-    """
-    Checks if the mic is present in the hive and powered on.
-    
-    Args:
-        mic_list: A list of boolean values (True/False) or integers (1/0).
-        position: The index of the element to check.
-        
-    Returns:
-        bool: Status of mic at position
-    """
-    try:
-        return bool(mic_list[position])
-    except IndexError:
-        print(f"Error: mic {position} is out of bounds.")
-        return False
-
-def get_audio_device_config():
-    """
-    Get a suitable audio device configuration.
-    
-    Returns:
-        dict: Audio device configuration with device_index and samplerate
-        None: If no suitable device found
-    """
-    try:
-        devices = sd.query_devices()
-        
-        # Look for a good input device
-        for i, device in enumerate(devices):
-            if device['max_input_channels'] > 0:
-                samplerate = int(device['default_samplerate'])
-                
-                # Prefer standard sample rates
-                if samplerate in [44100, 48000]:
-                    return {
-                        'device_index': i,
-                        'samplerate': samplerate,
-                        'channels': 1,
-                        'device_name': device['name']
-                    }
-        
-        # If no preferred device found, use default input
-        default_device = sd.default.device[0]  # Input device
-        if default_device is not None:
-            device = sd.query_devices(default_device)
-            return {
-                'device_index': default_device,
-                'samplerate': int(device['default_samplerate']),
-                'channels': 1,
-                'device_name': device['name']
-            }
-        
-        return None
-        
-    except Exception as e:
-        logging.error(f"Error getting audio device config: {e}")
-        return None
-
-def configure_audio_device_interactive(app):
-    """
-    Enhanced audio device configuration with user prompts.
-    
-    This function implements the interactive device configuration from BMAR_class.py
-    including channel count adjustments and user confirmation prompts.
-    
-    Args:
-        app: BmarApp instance with configuration settings
-        
-    Returns:
-        bool: True if device was successfully configured, False otherwise
-    """
-    from .user_interface import timed_input
-    
-    logging.info("Scanning for audio input devices...")
-    print("Configuring audio device...")
-    
-    # Initialize test mode - will be set to False upon success
-    app.testmode = True
+    # If automatic configuration failed, manual selection
+    logging.warning("Automatic audio configuration failed. Manual selection required.")
     
     try:
-        devices = sd.query_devices()
-        input_devices = [(i, device) for i, device in enumerate(devices) 
-                        if device['max_input_channels'] > 0]
+        manager = AudioPortManager()
+        devices = manager.list_audio_devices()
+        input_devices = [d for d in devices if d['is_input']]
         
         if not input_devices:
-            print("No input devices found!")
+            logging.critical("No input devices found.")
             return False
         
-        # If a specific device is configured, try it first
-        if hasattr(app, 'device_index') and app.device_index is not None:
-            return _try_specific_device(app, app.device_index)
+        print("\nAvailable input devices:")
+        for device in input_devices:
+            print(f"  [{device['index']}] {device['name']} - {device['api']}")
         
-        # Try devices in order
-        for dev_id, device in input_devices:
-            print(f"\nTrying device [{dev_id}]: {device['name']}")
-            print(f"  API: {sd.query_hostapis(index=device['hostapi'])['name']}")
-            print(f"  Max Channels: {device['max_input_channels']}")
-            print(f"  Default Sample Rate: {device['default_samplerate']} Hz")
+        # Try the first available input device
+        test_device = input_devices[0]
+        
+        if manager.test_device_configuration(
+            test_device['index'], 44100, 16, min(2, test_device['input_channels'])
+        ):
+            app.sound_in_id = test_device['index']
+            app.sound_in_chs = test_device['input_channels']
+            app.PRIMARY_IN_SAMPLERATE = 44100
+            app._bit_depth = 16
+            app.testmode = False
             
-            # Check channel compatibility and ask user permission if needed
-            original_channels = app.channels
-            actual_channels = min(app.channels, device['max_input_channels'])
-            
-            if actual_channels != app.channels:
-                print(f"\nChannel mismatch detected:")
-                print(f"  Configuration requires: {app.channels} channels")
-                print(f"  Device supports: {actual_channels} channels")
-                
-                response = timed_input(app, 
-                    f"\nWould you like to proceed with {actual_channels} channel(s) instead? (y/N): ", 
-                    timeout=3, default='n')
-                
-                if response.lower() != 'y':
-                    print("Skipping this device...")
-                    continue
-                    
-                app.channels = actual_channels
-                print(f"Adjusting channel count from {original_channels} to {app.channels}")
-            
-            # Try to configure the device
-            if _test_device_configuration(app, dev_id, device):
-                print(f"\nSuccessfully configured device [{dev_id}]")
-                print(f"Device Configuration:")
-                print(f"  Sample Rate: {app.samplerate} Hz")
-                print(f"  Channels: {app.channels}")
-                if original_channels != app.channels:
-                    print(f"  Note: Channel count was auto-adjusted from {original_channels} to {app.channels}")
-                
-                app.device_index = dev_id
-                app.testmode = False
-                return True
-        
-        print("\nNo suitable audio device could be configured.")
-        return False
-        
-    except Exception as e:
-        print(f"Error during device configuration: {e}")
-        logging.error(f"Error during device configuration: {e}")
-        return False
-
-def _try_specific_device(app, device_id):
-    """Try to configure a specific device with user prompts."""
-    from .user_interface import timed_input
-    
-    try:
-        device = sd.query_devices(device_id)
-        
-        if device['max_input_channels'] == 0:
-            print(f"\nSpecified device [{device_id}] is not an input device.")
-            response = timed_input(app, 
-                "\nThe specified device is not an input device. Would you like to proceed with an alternative device? (y/N): ", 
-                timeout=3, default='n')
-            return response.lower() == 'y'
-        
-        print(f"\nTrying specified device [{device_id}]: {device['name']}")
-        print(f"  API: {sd.query_hostapis(index=device['hostapi'])['name']}")
-        print(f"  Max Channels: {device['max_input_channels']}")
-        print(f"  Default Sample Rate: {device['default_samplerate']} Hz")
-        
-        # Check channel compatibility
-        original_channels = app.channels
-        user_approved = True
-        
-        if app.channels > device['max_input_channels']:
-            print(f"\nChannel mismatch detected:")
-            print(f"  Configuration requires: {original_channels} channels")
-            print(f"  Device supports: {device['max_input_channels']} channels")
-            
-            response = timed_input(app, 
-                f"\nWould you like to proceed with {device['max_input_channels']} channel(s) instead? (y/N): ", 
-                timeout=3, default='n')
-            
-            if response.lower() != 'y':
-                print("User declined to use fewer channels.")
-                print("Falling back to device search...")
-                user_approved = False
-            else:
-                app.channels = device['max_input_channels']
-                print(f"Adjusting channel count from {original_channels} to {app.channels}")
-        
-        if user_approved:
-            if _test_device_configuration(app, device_id, device):
-                app.device_index = device_id
-                app.testmode = False
-                return True
-            else:
-                response = timed_input(app, 
-                    "\nThe specified device could not be used. Would you like to proceed with an alternative device? (y/N): ", 
-                    timeout=3, default='n')
-                return response.lower() == 'y'
-        
-        return False
-        
-    except Exception as e:
-        print(f"Error accessing specified device: {e}")
-        response = timed_input(app, 
-            "\nThe specified device could not be accessed. Would you like to proceed with an alternative device? (y/N): ", 
-            timeout=3, default='n')
-        return response.lower() == 'y'
-
-def _test_device_configuration(app, device_id, device):
-    """Test if a device can be configured with the desired settings."""
-    
-    try:
-        # Try to open a stream with our desired settings
-        with sd.InputStream(device=device_id, 
-                          channels=app.channels,
-                          samplerate=app.samplerate,
-                          blocksize=1024) as stream:
-            # If we get here, the device works with our settings
+            logging.info(f"Using fallback device: {test_device['name']}")
             return True
+    
+    except Exception as e:
+        logging.error(f"Error in manual device selection: {e}")
+    
+    logging.critical("No suitable audio input device could be configured.")
+    return False
+
+def test_device_stream(device_index: int, sample_rate: int, channels: int) -> bool:
+    """Test if a device can stream audio with the given parameters."""
+    try:
+        manager = AudioPortManager()
+        return manager.test_device_configuration(device_index, sample_rate, 16, channels)
+    except Exception as e:
+        logging.error(f"Error testing device stream: {e}")
+        return False
+
+# Add the missing functions that bmar_app.py expects:
+
+def get_audio_device_config() -> Dict:
+    """Get current audio device configuration."""
+    try:
+        manager = AudioPortManager()
+        devices = manager.list_audio_devices()
+        input_devices = [d for d in devices if d['is_input']]
+        
+        if not input_devices:
+            return {'available_devices': [], 'default_device': None}
+        
+        # Try to find a good default device
+        default_device = None
+        for device in input_devices:
+            if manager.test_device_configuration(device['index'], 44100, 16, 2):
+                default_device = device
+                break
+        
+        return {
+            'available_devices': input_devices,
+            'default_device': default_device
+        }
+    except Exception as e:
+        logging.error(f"Error getting audio device config: {e}")
+        return {'available_devices': [], 'default_device': None}
+
+def configure_audio_device_interactive(app=None) -> Optional[Dict]:
+    """Interactive audio device configuration.
+    
+    Args:
+        app: Optional app instance for configuration storage
+        
+    Returns:
+        Dict with device configuration or None if failed
+    """
+    try:
+        manager = AudioPortManager()
+        devices = manager.list_audio_devices()
+        input_devices = [d for d in devices if d['is_input']]
+        
+        if not input_devices:
+            print("No input devices found.")
+            logging.error("No input devices found for interactive configuration")
+            return None
+        
+        print("\nAvailable audio input devices:")
+        for i, device in enumerate(input_devices):
+            # Test device compatibility
+            is_compatible = manager.test_device_configuration(
+                device['index'], 44100, 16, min(2, device['input_channels'])
+            )
+            status = "✓" if is_compatible else "⚠"
+            print(f"  {i}: [{device['index']}] {device['name']} - {device['api']} {status}")
+        
+        # Auto-select the first working device
+        selected_device = None
+        for device in input_devices:
+            if manager.test_device_configuration(device['index'], 44100, 16, 2):
+                selected_device = device
+                break
+        
+        if selected_device:
+            device_config = {
+                'device_index': selected_device['index'],
+                'device_name': selected_device['name'],
+                'sample_rate': 44100,
+                'channels': min(2, selected_device['input_channels']),
+                'bit_depth': 16,
+                'api': selected_device['api']
+            }
+            
+            print(f"Auto-selected: {selected_device['name']} ({selected_device['api']})")
+            logging.info(f"Interactive config selected device: {selected_device['name']}")
+            
+            # If app instance is provided, configure it
+            if app is not None:
+                try:
+                    app.sound_in_id = device_config['device_index']
+                    app.sound_in_chs = device_config['channels']
+                    app.PRIMARY_IN_SAMPLERATE = device_config['sample_rate']
+                    app._bit_depth = device_config['bit_depth']
+                    app.testmode = False
+                    logging.info(f"App configured with device {app.sound_in_id}")
+                except Exception as e:
+                    logging.error(f"Error configuring app with selected device: {e}")
+            
+            return device_config
+        else:
+            logging.error("No compatible devices found for interactive configuration")
+            return None
+        
+    except Exception as e:
+        logging.error(f"Error in interactive device configuration: {e}")
+        return None
+
+def get_device_info(device_index: int) -> Optional[Dict]:
+    """Get information about a specific device."""
+    try:
+        manager = AudioPortManager()
+        devices = manager.list_audio_devices()
+        
+        for device in devices:
+            if device['index'] == device_index:
+                return device
+        
+        return None
+    except Exception as e:
+        logging.error(f"Error getting device info: {e}")
+        return None
+
+def validate_device_configuration(device_index: int, sample_rate: int, 
+                                channels: int, bit_depth: int = 16) -> bool:
+    """Validate a specific device configuration."""
+    try:
+        manager = AudioPortManager()
+        return manager.test_device_configuration(device_index, sample_rate, bit_depth, channels)
+    except Exception as e:
+        logging.error(f"Error validating device configuration: {e}")
+        return False
+
+# Additional helper functions that might be expected
+
+def validate_audio_device(device_index: int) -> bool:
+    """Validate that an audio device exists and works."""
+    try:
+        manager = AudioPortManager()
+        devices = manager.list_audio_devices()
+        
+        # Check if device exists
+        device_found = False
+        for device in devices:
+            if device['index'] == device_index and device['is_input']:
+                device_found = True
+                break
+        
+        if not device_found:
+            logging.error(f"Audio device {device_index} not found or not an input device")
+            return False
+        
+        # Test basic configuration
+        if manager.test_device_configuration(device_index, 44100, 16, 2):
+            logging.info(f"Audio device {device_index} validated successfully")
+            return True
+        else:
+            logging.warning(f"Audio device {device_index} has limited capabilities")
+            return True  # Still allow usage but warn
             
     except Exception as e:
-        logging.debug(f"Device {device_id} failed test: {e}")
+        logging.error(f"Error validating audio device {device_index}: {e}")
         return False
+
+# Additional functions that may be expected by other modules
+
+def list_audio_devices():
+    """Simple device listing function (alias for print_all_input_devices)."""
+    print_all_input_devices()
 
 def list_audio_devices_detailed():
-    """List all available audio devices with detailed information."""
+    """Detailed audio device listing for menu systems using PyAudio."""
     try:
-        print("\nAvailable Audio Devices:")
-        print("=" * 50)
+        print("\n" + "="*80)
+        print("DETAILED AUDIO DEVICE INFORMATION (PyAudio)")
+        print("="*80)
         
-        devices = sd.query_devices()
+        manager = AudioPortManager()
+        devices = manager.list_audio_devices()
         
-        print("Input Devices:")
-        print("-" * 20)
-        for i, device in enumerate(devices):
-            if device['max_input_channels'] > 0:
-                hostapi_info = sd.query_hostapis(index=device['hostapi'])
-                print(f"  [{i:2d}] {device['name']}")
-                print(f"       API: {hostapi_info['name']}")
-                print(f"       Channels: {device['max_input_channels']} in")
-                print(f"       Sample Rate: {int(device['default_samplerate'])} Hz")
+        input_devices = [d for d in devices if d['is_input']]
+        output_devices = [d for d in devices if d['is_output']]
+        
+        print(f"\nFound {len(input_devices)} input devices and {len(output_devices)} output devices")
+        
+        # Show input devices
+        if input_devices:
+            print("\nINPUT DEVICES:")
+            print("-" * 60)
+            for device in input_devices:
+                print(f"[{device['index']}] {device['name']}")
+                print(f"    API: {device['api']}")
+                print(f"    Channels: {device['input_channels']}")
+                print(f"    Default Sample Rate: {device['default_sample_rate']:.0f} Hz")
+                
+                # Test different configurations
+                test_configs = [
+                    (44100, 16, 1),
+                    (44100, 16, 2),
+                    (48000, 16, 2),
+                    (96000, 24, 2)
+                ]
+                
+                working_configs = []
+                for sample_rate, bit_depth, channels in test_configs:
+                    max_channels = min(channels, device['input_channels'])
+                    if manager.test_device_configuration(device['index'], sample_rate, bit_depth, max_channels):
+                        working_configs.append(f"{sample_rate}Hz/{bit_depth}bit/{max_channels}ch")
+                
+                if working_configs:
+                    print(f"    Working configs: {', '.join(working_configs)}")
+                else:
+                    print("    ⚠ No standard configurations work")
+                
+                # Check if this device is currently configured
+                try:
+                    import modules.bmar_config as config
+                    if hasattr(config, 'sound_in_id') and config.sound_in_id == device['index']:
+                        print("    ★ CURRENTLY SELECTED")
+                except:
+                    pass
+                
                 print()
         
-        print("Output Devices:")
-        print("-" * 20)
-        for i, device in enumerate(devices):
-            if device['max_output_channels'] > 0:
-                hostapi_info = sd.query_hostapis(index=device['hostapi'])
-                print(f"  [{i:2d}] {device['name']}")
-                print(f"       API: {hostapi_info['name']}")
-                print(f"       Channels: {device['max_output_channels']} out")
-                print(f"       Sample Rate: {int(device['default_samplerate'])} Hz")
+        # Show output devices (for reference)
+        if output_devices:
+            print("OUTPUT DEVICES:")
+            print("-" * 60)
+            for device in output_devices:
+                print(f"[{device['index']}] {device['name']}")
+                print(f"    API: {device['api']}")
+                print(f"    Channels: {device['output_channels']}")
+                print(f"    Default Sample Rate: {device['default_sample_rate']:.0f} Hz")
                 print()
         
         # Show default devices
         try:
-            default_input = sd.default.device[0]
-            default_output = sd.default.device[1]
-            print(f"Default input device: {default_input}")
-            print(f"Default output device: {default_output}")
+            default_input = manager.pa.get_default_input_device_info()
+            default_output = manager.pa.get_default_output_device_info()
+            print("SYSTEM DEFAULTS:")
+            print("-" * 60)
+            print(f"Default Input: [{default_input['index']}] {default_input['name']}")
+            print(f"Default Output: [{default_output['index']}] {default_output['name']}")
         except:
-            pass
-            
+            print("System default devices: Not available")
+        
+        print("\n" + "="*80)
+        
     except Exception as e:
+        logging.error(f"Error in detailed device listing: {e}")
         print(f"Error listing audio devices: {e}")
-        logging.error(f"Error listing audio devices: {e}")
 
-def show_current_audio_devices(app):
-    """Display information about the currently selected audio devices."""
+def get_device_list() -> List[Dict]:
+    """Get a list of all audio devices."""
     try:
-        print("\nCurrently Selected Audio Devices:")
-        print("=" * 45)
-        
-        # Get current input device information
-        if app.device_index is not None:
-            try:
-                device_info = sd.query_devices(app.device_index)
-                hostapi_info = sd.query_hostapis(index=device_info['hostapi'])
-                
-                print(f"Input Device:")
-                print(f"  Index: {app.device_index}")
-                print(f"  Name: {device_info['name']}")
-                print(f"  API: {hostapi_info['name']}")
-                print(f"  Channels: {device_info['max_input_channels']} in, {device_info['max_output_channels']} out")
-                print(f"  Sample Rate: {app.samplerate} Hz")
-                print(f"  Block Size: {app.blocksize}")
-                
-                # Show if device supports both input and output
-                if device_info['max_input_channels'] > 0 and device_info['max_output_channels'] > 0:
-                    print(f"  Note: This device supports both input and output")
-                elif device_info['max_input_channels'] > 0:
-                    print(f"  Note: Input-only device")
-                elif device_info['max_output_channels'] > 0:
-                    print(f"  Note: Output-only device")
-                    
-            except Exception as e:
-                print(f"Error getting current device info: {e}")
-        else:
-            print("No audio device currently selected")
-        
-        print("=" * 45)
-        
+        manager = AudioPortManager()
+        return manager.list_audio_devices()
     except Exception as e:
-        print(f"Error displaying current audio devices: {e}")
-        logging.error(f"Error displaying current audio devices: {e}")
+        logging.error(f"Error getting device list: {e}")
+        return []
 
-def get_enhanced_device_info(device_id, sample_rate=44100, bit_depth=16):
-    """Get enhanced device information using PyAudio if available."""
-    if not PYAUDIO_AVAILABLE:
-        return None
-        
+def get_input_device_list() -> List[Dict]:
+    """Get a list of input audio devices only."""
     try:
-        # Create AudioPortManager for enhanced testing
-        manager = AudioPortManager(target_sample_rate=sample_rate, target_bit_depth=bit_depth)
+        manager = AudioPortManager()
+        devices = manager.list_audio_devices()
+        return [d for d in devices if d['is_input']]
+    except Exception as e:
+        logging.error(f"Error getting input device list: {e}")
+        return []
+
+def show_current_audio_devices(app=None):
+    """Show current audio device configuration and status."""
+    try:
+        print("\n" + "="*60)
+        print("CURRENT AUDIO DEVICE STATUS")
+        print("="*60)
         
-        # Get device list from PyAudio
-        pyaudio_devices = manager.list_audio_devices()
+        manager = AudioPortManager()
         
-        # Find matching device by index
-        for device in pyaudio_devices:
-            if device['index'] == device_id:
-                # Test device capabilities
-                can_use = manager.test_device_configuration(
-                    device_id, sample_rate, bit_depth, channels=2
+        # Try to get current configuration from different sources
+        current_device_id = None
+        current_sample_rate = None
+        current_channels = None
+        
+        # Method 1: Try to get from app parameter (if provided)
+        if app is not None:
+            try:
+                if hasattr(app, 'sound_in_id'):
+                    current_device_id = app.sound_in_id
+                if hasattr(app, 'PRIMARY_IN_SAMPLERATE'):
+                    current_sample_rate = app.PRIMARY_IN_SAMPLERATE
+                if hasattr(app, 'sound_in_chs'):
+                    current_channels = app.sound_in_chs
+            except:
+                pass
+        
+        # Method 2: Try to get from bmar_config (fallback)
+        if current_device_id is None:
+            try:
+                import modules.bmar_config as config
+                if hasattr(config, 'sound_in_id'):
+                    current_device_id = config.sound_in_id
+                if hasattr(config, 'PRIMARY_IN_SAMPLERATE'):
+                    current_sample_rate = config.PRIMARY_IN_SAMPLERATE
+                if hasattr(config, 'CHANNELS'):
+                    current_channels = config.CHANNELS
+            except:
+                pass
+        
+        # Method 3: Try to get from app instance (if available globally)
+        if current_device_id is None:
+            try:
+                import modules.bmar_app as app_module
+                if hasattr(app_module, 'app_instance') and app_module.app_instance:
+                    app_inst = app_module.app_instance
+                    if hasattr(app_inst, 'sound_in_id'):
+                        current_device_id = app_inst.sound_in_id
+                    if hasattr(app_inst, 'PRIMARY_IN_SAMPLERATE'):
+                        current_sample_rate = app_inst.PRIMARY_IN_SAMPLERATE
+                    if hasattr(app_inst, 'sound_in_chs'):
+                        current_channels = app_inst.sound_in_chs
+            except:
+                pass
+        
+        # Show current configuration
+        if current_device_id is not None:
+            print(f"Currently configured device: {current_device_id}")
+            
+            # Get device details
+            devices = manager.list_audio_devices()
+            current_device = None
+            for device in devices:
+                if device['index'] == current_device_id:
+                    current_device = device
+                    break
+            
+            if current_device:
+                print(f"Device name: {current_device['name']}")
+                print(f"API: {current_device['api']}")
+                print(f"Max input channels: {current_device['input_channels']}")
+                print(f"Default sample rate: {current_device['default_sample_rate']:.0f} Hz")
+                
+                if current_sample_rate:
+                    print(f"Configured sample rate: {current_sample_rate} Hz")
+                if current_channels:
+                    print(f"Configured channels: {current_channels}")
+                
+                # Test current configuration
+                test_channels = current_channels or min(2, current_device['input_channels'])
+                test_sample_rate = current_sample_rate or 44100
+                
+                is_working = manager.test_device_configuration(
+                    current_device_id, test_sample_rate, 16, test_channels
                 )
                 
-                return {
-                    'pyaudio_compatible': True,
-                    'api': device['api'],
-                    'can_use_target_config': can_use,
-                    'max_input_channels': device['input_channels'],
-                    'max_output_channels': device['output_channels'],
-                    'default_sample_rate': device['default_sample_rate']
-                }
+                status = "✓ WORKING" if is_working else "⚠ ISSUES DETECTED"
+                print(f"Status: {status}")
+                
+                if not is_working:
+                    print("  Note: Current configuration may have problems")
+                    print("  Try reconfiguring audio device if experiencing issues")
+                
+                # Show additional app-specific info if app is provided
+                if app is not None:
+                    try:
+                        testmode = getattr(app, 'testmode', None)
+                        if testmode is not None:
+                            mode_status = "TEST MODE" if testmode else "NORMAL MODE"
+                            print(f"Application mode: {mode_status}")
+                    except:
+                        pass
+                        
+            else:
+                print(f"⚠ Device {current_device_id} not found in current system")
+                print("  Device may have been disconnected or changed")
+        else:
+            print("No audio device currently configured")
+            print("Run audio device configuration to set up audio input")
         
-        return {'pyaudio_compatible': False}
+        print()
+        
+        # Show system defaults for reference
+        try:
+            default_input = manager.pa.get_default_input_device_info()
+            print("System default input device:")
+            print(f"  [{default_input['index']}] {default_input['name']}")
+            print(f"  API: {default_input.get('hostApi', 'Unknown')}")
+        except:
+            print("System default input: Not available")
+        
+        print("="*60)
         
     except Exception as e:
-        logging.warning(f"Enhanced device testing failed: {e}")
-        return {'pyaudio_compatible': False}
+        logging.error(f"Error showing current audio devices: {e}")
+        print(f"Error displaying current audio device status: {e}")
 
-def configure_audio_with_fallback(app):
-    """Configure audio input with PyAudio fallback for enhanced reliability."""
-    if not PYAUDIO_AVAILABLE:
-        logging.info("Using standard sounddevice configuration")
-        # Don't call set_input_device to avoid recursion
-        return False
-    
+def show_audio_device_status(app=None):
+    """Alias for show_current_audio_devices (for compatibility)."""
+    show_current_audio_devices(app)
+
+def show_detailed_device_list(app=None):
+    """Show detailed device list for menu systems (alias for list_audio_devices_detailed)."""
     try:
-        # Create enhanced audio manager
-        manager = AudioPortManager(
-            target_sample_rate=app.PRIMARY_IN_SAMPLERATE, 
-            target_bit_depth=app.PRIMARY_BITDEPTH
-        )
+        # Call the existing detailed listing function
+        list_audio_devices_detailed()
         
-        # Try hierarchical configuration (WASAPI -> DirectSound -> MME)
-        success, device_info, achieved_rate, achieved_depth = manager.configure_audio_input(
-            channels=app.sound_in_chs
-        )
+        # Add some additional context if app is provided
+        if app is not None:
+            print("\nCURRENT APPLICATION SETTINGS:")
+            print("-" * 40)
+            try:
+                if hasattr(app, 'sound_in_id'):
+                    print(f"Selected device ID: {app.sound_in_id}")
+                if hasattr(app, 'PRIMARY_IN_SAMPLERATE'):
+                    print(f"Sample rate: {app.PRIMARY_IN_SAMPLERATE} Hz")
+                if hasattr(app, 'sound_in_chs'):
+                    print(f"Channels: {app.sound_in_chs}")
+                if hasattr(app, 'testmode'):
+                    mode = "TEST MODE" if app.testmode else "NORMAL MODE"
+                    print(f"Mode: {mode}")
+            except Exception as e:
+                print(f"Could not read app settings: {e}")
+            print("-" * 40)
         
-        if success:
-            # Update app configuration with successful settings
-            app.sound_in_id = device_info['index']
-            app.PRIMARY_IN_SAMPLERATE = achieved_rate
-            app.PRIMARY_BITDEPTH = achieved_depth
-            app.testmode = False
+    except Exception as e:
+        logging.error(f"Error in detailed device list: {e}")
+        print(f"Error showing detailed device list: {e}")
+
+def show_device_list_detailed(app=None):
+    """Alternative alias for show_detailed_device_list (for compatibility)."""
+    show_detailed_device_list(app)
+
+def display_detailed_device_info(app=None):
+    """Another alias for show_detailed_device_list (for compatibility)."""
+    show_detailed_device_list(app)
+
+def ensure_valid_device_for_operation(app=None, operation_name="audio operation"):
+    """Ensure we have a valid device before starting an audio operation."""
+    try:
+        config = get_current_audio_config(app)
+        
+        if config['device_id'] is None:
+            print(f"No audio device configured for {operation_name}")
+            print("Attempting to configure a device automatically...")
             
-            logging.info(f"Enhanced audio configuration successful:")
-            logging.info(f"  Device: {device_info['name']} ({device_info['api']})")
-            logging.info(f"  Sample Rate: {achieved_rate} Hz")
-            logging.info(f"  Bit Depth: {achieved_depth} bits")
-            logging.info(f"  Channels: {app.sound_in_chs}")
+            # Try to auto-configure
+            if app is not None:
+                success = configure_audio_with_fallback(app)
+                if success:
+                    config = get_current_audio_config(app)
+                    print(f"Auto-configured device {config['device_id']} for {operation_name}")
+                    return config
             
+            # Manual fallback
+            device_id = get_current_audio_device_id(app)
+            if device_id is not None:
+                config['device_id'] = device_id
+                print(f"Using device {device_id} for {operation_name}")
+                return config
+            
+            print(f"Failed to configure audio device for {operation_name}")
+            return None
+        
+        # Validate the existing configuration
+        is_valid, message = validate_audio_config_for_recording(app)
+        if is_valid:
+            return config
+        else:
+            print(f"Current audio configuration invalid for {operation_name}: {message}")
+            return None
+            
+    except Exception as e:
+        logging.error(f"Error ensuring valid device for {operation_name}: {e}")
+        print(f"Error configuring audio for {operation_name}: {e}")
+        return None
+
+def sync_app_audio_attributes(app):
+    """Synchronize audio attributes between different naming conventions in the app."""
+    try:
+        # Get current audio configuration
+        config = get_current_audio_config(app)
+        
+        if config['device_id'] is not None:
+            # Map sound_in_id to device_index for compatibility
+            app.device_index = config['device_id']
+            app.sound_in_id = config['device_id']
+            
+            # Map sample rate
+            app.samplerate = config['sample_rate']
+            app.PRIMARY_IN_SAMPLERATE = config['sample_rate']
+            
+            # Map channels
+            app.channels = config['channels']
+            app.sound_in_chs = config['channels']
+            
+            # Set bit depth
+            app._bit_depth = config['bit_depth']
+            
+            # Ensure other required attributes exist
+            if not hasattr(app, 'blocksize'):
+                app.blocksize = 1024
+                
+            if not hasattr(app, 'monitor_channel'):
+                app.monitor_channel = 0
+                
+            if not hasattr(app, 'testmode'):
+                app.testmode = False
+                
+            # Ensure monitor channel is within bounds
+            if app.monitor_channel >= app.channels:
+                app.monitor_channel = 0
+                
+            logging.info(f"App audio attributes synchronized: device={app.device_index}, rate={app.samplerate}, channels={app.channels}")
             return True
         else:
-            logging.warning("Enhanced audio configuration failed, falling back to standard method")
-            return set_input_device(app)
+            logging.warning("Cannot sync app audio attributes - no valid device configured")
+            return False
             
     except Exception as e:
-        logging.error(f"Enhanced audio configuration error: {e}")
-        logging.info("Falling back to standard audio configuration")
-        return set_input_device(app)
+        logging.error(f"Error syncing app audio attributes: {e}")
+        return False
 
-def test_audio_configuration(device_id, sample_rate, bit_depth, channels):
-    """Test if a specific audio configuration works using PyAudio."""
-    if not PYAUDIO_AVAILABLE:
-        return False
-        
+def get_current_audio_device_id(app=None):
+    """Get the current audio device ID, trying multiple sources."""
     try:
-        manager = AudioPortManager(target_sample_rate=sample_rate, target_bit_depth=bit_depth)
-        return manager.test_device_configuration(device_id, sample_rate, bit_depth, channels)
+        # Method 1: Try from app parameter
+        if app is not None:
+            if hasattr(app, 'sound_in_id') and app.sound_in_id is not None:
+                return app.sound_in_id
+        
+        # Method 2: Try from bmar_config
+        try:
+            import modules.bmar_config as config
+            if hasattr(config, 'sound_in_id') and config.sound_in_id is not None:
+                return config.sound_in_id
+        except:
+            pass
+        
+        # Method 3: Try from global app instance
+        try:
+            import modules.bmar_app as app_module
+            if hasattr(app_module, 'app_instance') and app_module.app_instance:
+                app_inst = app_module.app_instance
+                if hasattr(app_inst, 'sound_in_id') and app_inst.sound_in_id is not None:
+                    return app_inst.sound_in_id
+        except:
+            pass
+        
+        # Method 4: Try to get system default and validate it
+        try:
+            manager = AudioPortManager()
+            default_input = manager.pa.get_default_input_device_info()
+            device_id = default_input['index']
+            
+            # Validate the default device works
+            if manager.test_device_configuration(device_id, 44100, 16, 2):
+                logging.info(f"Using system default device {device_id} for oscilloscope")
+                return device_id
+        except:
+            pass
+        
+        # Method 5: Find first working input device
+        try:
+            manager = AudioPortManager()
+            devices = manager.list_audio_devices()
+            input_devices = [d for d in devices if d['is_input']]
+            
+            for device in input_devices:
+                if manager.test_device_configuration(device['index'], 44100, 16, 2):
+                    logging.info(f"Using first available device {device['index']} for oscilloscope")
+                    return device['index']
+        except:
+            pass
+        
+        logging.error("No suitable audio device found for oscilloscope")
+        return None
+        
     except Exception as e:
-        logging.warning(f"Audio configuration test failed: {e}")
-        return False
+        logging.error(f"Error getting current audio device ID: {e}")
+        return None
+
+def get_current_audio_config(app=None):
+    """Get current audio configuration for functions that need it."""
+    try:
+        config = {
+            'device_id': None,
+            'sample_rate': 44100,
+            'channels': 2,
+            'bit_depth': 16
+        }
+        
+        # Get device ID
+        config['device_id'] = get_current_audio_device_id(app)
+        
+        # Get other parameters
+        if app is not None:
+            try:
+                if hasattr(app, 'PRIMARY_IN_SAMPLERATE'):
+                    config['sample_rate'] = app.PRIMARY_IN_SAMPLERATE
+                if hasattr(app, 'sound_in_chs'):
+                    config['channels'] = app.sound_in_chs
+                if hasattr(app, '_bit_depth'):
+                    config['bit_depth'] = app._bit_depth
+            except:
+                pass
+        
+        # Fallback to config module
+        if config['device_id'] is None or config['sample_rate'] == 44100:
+            try:
+                import modules.bmar_config as bmar_config
+                if hasattr(bmar_config, 'PRIMARY_IN_SAMPLERATE'):
+                    config['sample_rate'] = bmar_config.PRIMARY_IN_SAMPLERATE
+                if hasattr(bmar_config, 'CHANNELS'):
+                    config['channels'] = bmar_config.CHANNELS
+                if hasattr(bmar_config, 'BIT_DEPTH'):
+                    config['bit_depth'] = bmar_config.BIT_DEPTH
+            except:
+                pass
+        
+        return config
+        
+    except Exception as e:
+        logging.error(f"Error getting current audio config: {e}")
+        return {
+            'device_id': None,
+            'sample_rate': 44100,
+            'channels': 2,
+            'bit_depth': 16
+        }
+
+def validate_audio_config_for_recording(app=None):
+    """Validate that audio configuration is suitable for recording."""
+    try:
+        config = get_current_audio_config(app)
+        
+        if config['device_id'] is None:
+            return False, "No audio device configured"
+        
+        manager = AudioPortManager()
+        
+        # Test the configuration
+        is_working = manager.test_device_configuration(
+            config['device_id'], 
+            config['sample_rate'], 
+            config['bit_depth'], 
+            config['channels']
+        )
+        
+        if is_working:
+            return True, "Audio configuration is valid"
+        else:
+            return False, f"Device {config['device_id']} failed configuration test"
+            
+    except Exception as e:
+        return False, f"Error validating audio config: {e}"

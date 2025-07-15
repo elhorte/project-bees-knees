@@ -275,6 +275,7 @@ def handle_oscilloscope_command(app):
     
     from .process_manager import cleanup_process, create_subprocess
     from .plotting import plot_oscope
+    from .audio_devices import ensure_valid_device_for_operation
     
     try:
         if 'o' in app.active_processes and app.active_processes['o'] is not None:
@@ -299,10 +300,22 @@ def start_oscilloscope(app):
     
     from .process_manager import create_subprocess
     from .plotting import plot_oscope
+    from .audio_devices import ensure_valid_device_for_operation
     
     try:
         # Ensure app has all required attributes
         ensure_app_attributes(app)
+        
+        # Ensure we have a valid audio device for the oscilloscope
+        audio_config = ensure_valid_device_for_operation(app, "oscilloscope")
+        if audio_config is None:
+            print("Cannot start oscilloscope - no valid audio device available")
+            return
+        
+        # Use the validated configuration
+        device_index = audio_config['device_id']
+        samplerate = audio_config['sample_rate']
+        channels = audio_config['channels']
         
         # Ensure required directory exists
         plots_dir = os.path.join(app.today_dir, 'plots')
@@ -311,15 +324,15 @@ def start_oscilloscope(app):
             
         # Create oscilloscope configuration for one-shot capture
         oscope_config = {
-            'device_index': app.device_index,
-            'samplerate': app.samplerate,
-            'channels': app.channels,
-            'blocksize': app.blocksize,
+            'device_index': device_index,  # Use validated device ID
+            'samplerate': samplerate,
+            'channels': channels,
+            'blocksize': getattr(app, 'blocksize', 1024),
             'plot_duration': 10.0,  # Capture 10 seconds of audio
             'plots_dir': plots_dir
         }
         
-        print(f"Starting one-shot oscilloscope (device {app.device_index}, {app.samplerate}Hz)")
+        print(f"Starting one-shot oscilloscope (device {device_index}, {samplerate}Hz)")
         
         # Create and start oscilloscope process
         # Note: This will be a short-lived process that captures, plots, and exits
@@ -995,12 +1008,50 @@ def ensure_app_attributes(app):
     """Ensure the app object has all required attributes for audio processing."""
     
     try:
+        # Import audio device functions
+        from .audio_devices import sync_app_audio_attributes, get_current_audio_config
+        
         # Import config values
         from .bmar_config import SOUND_IN_CHS, MONITOR_CH
         
-        # Set default values for missing attributes
+        # First try to sync from existing audio configuration
+        if sync_app_audio_attributes(app):
+            logging.info("App attributes synced from audio configuration")
+        else:
+            # Set fallback values if no audio config is available
+            logging.warning("Using fallback audio configuration")
+            
+            # Try to get a working device
+            config = get_current_audio_config(app)
+            if config['device_id'] is not None:
+                app.device_index = config['device_id']
+                app.sound_in_id = config['device_id']
+                app.samplerate = config['sample_rate']
+                app.PRIMARY_IN_SAMPLERATE = config['sample_rate']
+                app.channels = config['channels']
+                app.sound_in_chs = config['channels']
+                app._bit_depth = config['bit_depth']
+            else:
+                # Last resort fallback values
+                app.device_index = None
+                app.sound_in_id = None
+                app.samplerate = 44100
+                app.PRIMARY_IN_SAMPLERATE = 44100
+                app.channels = SOUND_IN_CHS if SOUND_IN_CHS > 0 else 1
+                app.sound_in_chs = app.channels
+                app._bit_depth = 16
+        
+        # Set other required attributes with defaults
         if not hasattr(app, 'monitor_channel'):
             app.monitor_channel = MONITOR_CH
+        if not hasattr(app, 'blocksize'):
+            app.blocksize = 1024
+        if not hasattr(app, 'DEBUG_VERBOSE'):
+            app.DEBUG_VERBOSE = False
+        if not hasattr(app, 'testmode'):
+            app.testmode = False
+            
+        # Platform detection
         if not hasattr(app, 'is_wsl'):
             from .platform_manager import PlatformManager
             platform_manager = PlatformManager()
@@ -1013,12 +1064,6 @@ def ensure_app_attributes(app):
             from .platform_manager import PlatformManager
             platform_manager = PlatformManager()
             app.os_info = platform_manager.get_os_info()
-        if not hasattr(app, 'channels') or app.channels <= 0:
-            app.channels = SOUND_IN_CHS if SOUND_IN_CHS > 0 else 1
-        if not hasattr(app, 'blocksize'):
-            app.blocksize = 1024
-        if not hasattr(app, 'DEBUG_VERBOSE'):
-            app.DEBUG_VERBOSE = False
             
         # Validate monitor channel is within bounds
         if hasattr(app, 'channels') and app.monitor_channel >= app.channels:
@@ -1027,9 +1072,17 @@ def ensure_app_attributes(app):
             
     except Exception as e:
         print(f"Warning: Error setting app attributes: {e}")
-        # Fallback values if config import fails
+        logging.error(f"Error in ensure_app_attributes: {e}")
+        
+        # Emergency fallback values
+        if not hasattr(app, 'device_index'):
+            app.device_index = None
         if not hasattr(app, 'channels') or app.channels <= 0:
             app.channels = 1
+        if not hasattr(app, 'samplerate'):
+            app.samplerate = 44100
+        if not hasattr(app, 'blocksize'):
+            app.blocksize = 1024
         if not hasattr(app, 'monitor_channel'):
             app.monitor_channel = 0
 
