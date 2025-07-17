@@ -816,7 +816,7 @@ def handle_detailed_device_list_command(app):
         show_detailed_device_list(app)
         
     except Exception as e:
-        print(f"Detailed device list error: {e}")
+        logging.error(f"Detailed device list error: {e}")
 
 def handle_continuous_performance_monitor_command(app):
     """Handle continuous performance monitor command (uppercase P)."""

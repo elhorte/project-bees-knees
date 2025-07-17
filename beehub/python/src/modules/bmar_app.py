@@ -338,7 +338,7 @@ class BmarApp:
                 cleanup_ui(self)
                 print("User interface cleanup completed.")
             except Exception as e:
-                logging.warning(f"User interface cleanup error: {e}")
+                logging.error(f"User interface cleanup error: {e}")
             
             # Final cleanup
             print("Performing cleanup...")
@@ -393,6 +393,31 @@ class BmarApp:
             self.recording_dir = os.getcwd()
             self.today_dir = os.getcwd()
 
+    def print_line(self, text, prefix_newline=True, suffix_newline=False):
+        """Print with proper line endings for cross-platform compatibility."""
+        import os
+        
+        # Build the output string
+        output = ""
+        
+        # Add prefix newline if requested
+        if prefix_newline:
+            output += "\n"  # Use simple \n instead of os.linesep for now
+        
+        # Add the main text
+        output += text
+        
+        # Add suffix newline if requested
+        if suffix_newline:
+            output += "\n"
+        
+        # Print with explicit newline and flush
+        print(output)
+        
+        # Ensure output is flushed immediately
+        import sys
+        sys.stdout.flush()
+
 def create_bmar_app():
     """Create and initialize a BMAR application instance."""
     try:
@@ -418,7 +443,7 @@ def run_bmar_application():
         app = create_bmar_app()
         
         if app is None:
-            print("Failed to initialize application")
+            logging.error("Failed to initialize application")
             return 1
         
         # Run the application

@@ -1,3 +1,4 @@
 {
-    "julia.executablePath": "C:\\Users\\jamie\\AppData\\Local\\Programs\\Julia-1.9.2\\bin"
+    "julia.executablePath": "C:\\Users\\jamie\\AppData\\Local\\Programs\\Julia-1.9.2\\bin",
+    "specstory.showDeveloperTools": true
 }
