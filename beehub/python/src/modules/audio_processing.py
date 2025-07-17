@@ -351,14 +351,14 @@ def _record_audio_pyaudio(duration, sound_in_id, sound_in_chs, stop_queue, task_
         
         print()  # Newline after progress bar
         if frames_recorded < num_frames * 0.9:
-            logging.warning(f"Recording incomplete: only got {frames_recorded}/{num_frames} frames.")
+            logging.warning(f"Recording incomplete: only got {frames_recorded}/{num_frames} frames.\r")
             return None, 0
         
         logging.info(f"Finished {task_name}.")
         return recording_array, actual_channels
 
     except Exception as e:
-        logging.error(f"Failed to record audio with PyAudio for {task_name}", exc_info=True)
+        logging.error(f"Failed to record audio with PyAudio for {task_name}\r", exc_info=True)
         return None, 0
     finally:
         if p:
@@ -366,4 +366,4 @@ def _record_audio_pyaudio(duration, sound_in_id, sound_in_chs, stop_queue, task_
                 p.terminate()
                 time.sleep(0.1)  # Allow time for resources to be released
             except Exception as e:
-                logging.error(f"Error terminating PyAudio instance for {task_name}", exc_info=True)
+                logging.error(f"Error terminating PyAudio instance for {task_name}\r", exc_info=True)

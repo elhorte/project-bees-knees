@@ -18,31 +18,31 @@ def cleanup_process(app, command):
             if process is not None:
                 try:
                     if process.is_alive():
-                        logging.info(f"Terminating process for command '{command}'")
+                        logging.info(f"Terminating process for command '{command}'\r")
                         process.terminate()
                         process.join(timeout=5)  # Wait up to 5 seconds
                         
                         if process.is_alive():
-                            logging.warning(f"Force killing process for command '{command}'")
+                            logging.warning(f"Force killing process for command '{command}'\r")
                             process.kill()
                             process.join()
                             
                 except Exception as e:
-                    logging.error(f"Error terminating process for command '{command}': {e}")
+                    logging.error(f"Error terminating process for command '{command}': {e}\r")
                 
                 # Reset the process reference
                 app.active_processes[command] = None
                 print(f"Process for command '{command}' has been cleaned up")
         else:
             # The command doesn't exist in our tracking dictionary
-            print(f"Warning: No process tracking for command '{command}'")
+            logging.warning(f"Warning: No process tracking for command '{command}'\r")
     except Exception as e:
-        print(f"Error in cleanup_process for command '{command}': {e}")
+        logging.error(f"Error in cleanup_process for command '{command}': {e}\r")
 
 def stop_all(app):
     """Stop all processes and threads."""
     
-    logging.info("Stopping all processes and threads...")
+    logging.info("Stopping all processes and threads...\r")
 
     # Set stop flags
     app.stop_program[0] = True
@@ -78,7 +78,7 @@ def stop_all(app):
     # Give threads a moment to finish
     time.sleep(0.5)
     
-    print("All processes stopped.")
+    print("All processes stopped.\r")
 
 def cleanup(app):
     """Clean up and exit."""

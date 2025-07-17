@@ -88,7 +88,7 @@ def process_command(app, command):
         elif command == 'o' or command == 'O':
             handle_oscilloscope_command(app)
             
-        elif command == 't' or command == 'T':
+        elif command == 't':
             handle_thread_list_command(app)
             
         elif command == 'v' or command == 'V':
@@ -98,12 +98,14 @@ def process_command(app, command):
             handle_intercom_command(app)
             
         elif command == 'd':
-            print("\nShowing current audio device...")
+            print("\nShowing current audio device...\r")
             from .audio_devices import show_current_audio_devices
             show_current_audio_devices(app)
             
-        elif command == 'D':
-            handle_detailed_device_list_command(app)
+        elif command == 'D':  # List all available audio devices
+            print("\nShowing all available audio devices...\r")
+            from .audio_devices import list_audio_devices_detailed
+            list_audio_devices_detailed(app)
             
         elif command == 'p':
             handle_performance_monitor_command(app)
@@ -126,14 +128,16 @@ def process_command(app, command):
             
         elif command == 'l' or command == 'L':
             handle_thread_list_command(app)
-            
+
+        # No imports, no dependencies, just pure print statements
+
         else:
-            print(f"Unknown command: '{command}'. Press 'h' for help.")
+            print(f"Unknown command: '{command}'. Press 'h' for help.\r")  # Added \r
             
     except Exception as e:
-        print(f"Error processing command '{command}': {e}")
+        print(f"Error processing command '{command}': {e}\r")  # Added \r
         import traceback
-        print(f"Traceback: ")
+        print(f"Traceback: \r")  # Added \r
         traceback.print_exc()
         logging.error(f"Error processing command '{command}': {e}")
 
@@ -146,20 +150,20 @@ def handle_recording_command(app):
     try:
         if 'r' in app.active_processes and app.active_processes['r'] is not None:
             if app.active_processes['r'].is_alive():
-                print("Stopping recording...")
+                print("Stopping recording...\r")  # Added \r
                 cleanup_process(app, 'r')
                 if hasattr(app, 'stop_recording_event'):
                     app.stop_recording_event.set()
             else:
-                print("Starting recording...")
+                print("Starting recording...\r")  # Added \r
                 app.active_processes['r'] = None  # Clear dead process
                 start_new_recording(app)
         else:
-            print("Starting recording...")
+            print("Starting recording...\r")  # Added \r
             start_new_recording(app)
             
     except Exception as e:
-        print(f"Recording command error: {e}")
+        print(f"Recording command error: {e}\r")  # Added \r
 
 def start_new_recording(app):
     """Start a new recording session."""
@@ -191,10 +195,10 @@ def start_new_recording(app):
         )
         
         process.start()
-        print(f"Recording started (PID: {process.pid})")
+        print(f"Recording started (PID: {process.pid})\r")  # Added \r
         
     except Exception as e:
-        print(f"Error starting recording: {e}")
+        print(f"Error starting recording: {e}\r")  # Added \r
 
 def handle_spectrogram_command(app):
     """Handle spectrogram command."""
@@ -205,31 +209,28 @@ def handle_spectrogram_command(app):
     try:
         if 's' in app.active_processes and app.active_processes['s'] is not None:
             if app.active_processes['s'].is_alive():
-                print("Stopping spectrogram...")
+                print("Stopping spectrogram...\r")  # Added \r
                 cleanup_process(app, 's')
             else:
-                print("Starting spectrogram...")
+                print("Starting spectrogram...\r")  # Added \r
                 app.active_processes['s'] = None
                 start_spectrogram(app)
         else:
-            print("Starting spectrogram...")
+            print("Starting spectrogram...\r")  # Added \r
             start_spectrogram(app)
             
     except Exception as e:
-        print(f"Spectrogram command error: {e}")
+        print(f"Spectrogram command error: {e}\r")  # Added \r
         import traceback
         traceback.print_exc()
 
 def start_spectrogram(app):
-    """Start one-shot spectrogram plotting."""
+    """Start spectrogram plotting."""
     
     from .process_manager import create_subprocess
     from .plotting import plot_spectrogram
     
     try:
-        # Ensure app has all required attributes
-        ensure_app_attributes(app)
-        
         # Ensure required directory exists
         plots_dir = os.path.join(app.today_dir, 'plots')
         if not os.path.exists(plots_dir):
@@ -243,12 +244,12 @@ def start_spectrogram(app):
             'blocksize': app.blocksize,
             'fft_size': 2048,
             'overlap': 0.75,
-            'capture_duration': 5.0,  # Capture 5 seconds of audio
+            'capture_duration': 5.0,
             'freq_range': [0, app.samplerate // 2],
             'plots_dir': plots_dir
         }
         
-        print(f"Starting one-shot spectrogram (device {app.device_index}, {app.samplerate}Hz)")
+        print(f"Starting spectrogram (device {app.device_index}, {app.samplerate}Hz)\r")  # Added \r
         
         # Create and start spectrogram process
         # Note: This will be a short-lived process that captures, analyzes, and exits
@@ -261,12 +262,12 @@ def start_spectrogram(app):
         )
         
         process.start()
-        print(f"Spectrogram started (PID: {process.pid})")
+        print(f"Spectrogram started (PID: {process.pid})\r")  # Added \r
         
         # Note: The process will finish automatically after capturing and displaying
         
     except Exception as e:
-        print(f"Error starting spectrogram: {e}")
+        print(f"Error starting spectrogram: {e}\r")  # Added \r
         import traceback
         traceback.print_exc()
 
@@ -275,23 +276,22 @@ def handle_oscilloscope_command(app):
     
     from .process_manager import cleanup_process, create_subprocess
     from .plotting import plot_oscope
-    from .audio_devices import ensure_valid_device_for_operation
     
     try:
         if 'o' in app.active_processes and app.active_processes['o'] is not None:
             if app.active_processes['o'].is_alive():
-                print("Stopping oscilloscope...")
+                print("Stopping oscilloscope...\r")
                 cleanup_process(app, 'o')
             else:
-                print("Starting oscilloscope...")
+                print("Starting oscilloscope...\r")
                 app.active_processes['o'] = None
                 start_oscilloscope(app)
         else:
-            print("Starting oscilloscope...")
+            print("Starting oscilloscope...\r")
             start_oscilloscope(app)
             
     except Exception as e:
-        print(f"Oscilloscope command error: {e}")
+        print(f"Oscilloscope command error: {e}\r")
         import traceback
         traceback.print_exc()
 
@@ -300,23 +300,8 @@ def start_oscilloscope(app):
     
     from .process_manager import create_subprocess
     from .plotting import plot_oscope
-    from .audio_devices import ensure_valid_device_for_operation
     
     try:
-        # Ensure app has all required attributes
-        ensure_app_attributes(app)
-        
-        # Ensure we have a valid audio device for the oscilloscope
-        audio_config = ensure_valid_device_for_operation(app, "oscilloscope")
-        if audio_config is None:
-            print("Cannot start oscilloscope - no valid audio device available")
-            return
-        
-        # Use the validated configuration
-        device_index = audio_config['device_id']
-        samplerate = audio_config['sample_rate']
-        channels = audio_config['channels']
-        
         # Ensure required directory exists
         plots_dir = os.path.join(app.today_dir, 'plots')
         if not os.path.exists(plots_dir):
@@ -324,18 +309,17 @@ def start_oscilloscope(app):
             
         # Create oscilloscope configuration for one-shot capture
         oscope_config = {
-            'device_index': device_index,  # Use validated device ID
-            'samplerate': samplerate,
-            'channels': channels,
+            'device_index': app.device_index,
+            'samplerate': app.samplerate,
+            'channels': app.channels,
             'blocksize': getattr(app, 'blocksize', 1024),
             'plot_duration': 10.0,  # Capture 10 seconds of audio
             'plots_dir': plots_dir
         }
         
-        print(f"Starting one-shot oscilloscope (device {device_index}, {samplerate}Hz)")
+        print(f"Starting oscilloscope (device {app.device_index}, {app.samplerate}Hz)\r")
         
         # Create and start oscilloscope process
-        # Note: This will be a short-lived process that captures, plots, and exits
         process = create_subprocess(
             target_function=plot_oscope,
             args=(oscope_config,),
@@ -345,12 +329,10 @@ def start_oscilloscope(app):
         )
         
         process.start()
-        print(f"Oscilloscope started (PID: {process.pid})")
-        
-        # Note: The process will finish automatically after capturing and displaying
+        print(f"Oscilloscope started (PID: {process.pid})\r")
         
     except Exception as e:
-        print(f"Error starting oscilloscope: {e}")
+        print(f"Error starting oscilloscope: {e}\r")
         import traceback
         traceback.print_exc()
 
@@ -363,18 +345,18 @@ def handle_trigger_command(app):
     try:
         if 't' in app.active_processes and app.active_processes['t'] is not None:
             if app.active_processes['t'].is_alive():
-                print("Stopping trigger plotting...")
+                print("Stopping trigger plotting...\r")  # Added \r
                 cleanup_process(app, 't')
             else:
-                print("Starting trigger plotting...")
+                print("Starting trigger plotting...\r")  # Added \r
                 app.active_processes['t'] = None
                 start_trigger_plotting(app)
         else:
-            print("Starting trigger plotting...")
+            print("Starting trigger plotting...\r")  # Added \r
             start_trigger_plotting(app)
             
     except Exception as e:
-        print(f"Trigger command error: {e}")
+        print(f"Trigger command error: {e}\r")  # Added \r
 
 def start_trigger_plotting(app):
     """Start trigger plotting."""
@@ -404,7 +386,7 @@ def start_trigger_plotting(app):
             'plots_dir': plots_dir
         }
         
-        print(f"Starting trigger plotting (device {app.device_index}, {app.samplerate}Hz)")
+        print(f"Starting trigger plotting (device {app.device_index}, {app.samplerate}Hz)\r")  # Added \r
         
         # Create and start trigger process
         process = create_subprocess(
@@ -416,10 +398,10 @@ def start_trigger_plotting(app):
         )
         
         process.start()
-        print(f"Trigger plotting started (PID: {process.pid})")
+        print(f"Trigger plotting started (PID: {process.pid})\r")  # Added \r
         
     except Exception as e:
-        print(f"Error starting trigger plotting: {e}")
+        print(f"Error starting trigger plotting: {e}\r")  # Added \r
         import traceback
         traceback.print_exc()
 
@@ -432,18 +414,18 @@ def handle_vu_meter_command(app):
     try:
         if 'v' in app.active_processes and app.active_processes['v'] is not None:
             if app.active_processes['v'].is_alive():
-                print("Stopping VU meter...")
+                print("Stopping VU meter...\r")  # Added \r
                 cleanup_process(app, 'v')
             else:
-                print("Starting VU meter...")
+                print("Starting VU meter...\r")  # Added \r
                 app.active_processes['v'] = None
                 start_vu_meter(app)
         else:
-            print("Starting VU meter...")
+            print("Starting VU meter...\r")  # Added \r
             start_vu_meter(app)
             
     except Exception as e:
-        print(f"VU meter command error: {e}")
+        print(f"VU meter command error: {e}\r")  # Added \r
 
 def start_vu_meter(app):
     """Start VU meter."""
@@ -461,13 +443,13 @@ def start_vu_meter(app):
             'sound_in_chs': app.channels,
             'monitor_channel': app.monitor_channel,
             'PRIMARY_IN_SAMPLERATE': app.samplerate,
-            'is_wsl': app.is_wsl,
-            'is_macos': app.is_macos,
-            'os_info': app.os_info,
-            'DEBUG_VERBOSE': app.DEBUG_VERBOSE
+            'is_wsl': getattr(app, 'is_wsl', False),
+            'is_macos': getattr(app, 'is_macos', False),
+            'os_info': getattr(app, 'os_info', {}),
+            'DEBUG_VERBOSE': getattr(app, 'DEBUG_VERBOSE', False)
         }
         
-        print(f"Starting VU meter on channel {app.monitor_channel + 1} of {app.channels}")
+        print(f"Starting VU meter on channel {app.monitor_channel + 1} of {app.channels}\r")  # Added \r
         
         # Create and start VU meter process
         process = create_subprocess(
@@ -479,10 +461,10 @@ def start_vu_meter(app):
         )
         
         process.start()
-        print(f"VU meter started (PID: {process.pid})")
+        print(f"VU meter started (PID: {process.pid})\r")  # Added \r
         
     except Exception as e:
-        print(f"Error starting VU meter: {e}")
+        print(f"Error starting VU meter: {e}\r")  # Added \r
         import traceback
         traceback.print_exc()
 
@@ -495,48 +477,41 @@ def handle_intercom_command(app):
     try:
         if 'i' in app.active_processes and app.active_processes['i'] is not None:
             if app.active_processes['i'].is_alive():
-                print("Stopping intercom...")
+                print("Stopping intercom...\r")  # Added \r
                 cleanup_process(app, 'i')
             else:
-                print("Starting intercom...")
+                print("Starting intercom...\r")  # Added \r
                 app.active_processes['i'] = None
                 start_intercom(app)
         else:
-            print("Starting intercom...")
+            print("Starting intercom...\r")  # Added \r
             start_intercom(app)
             
     except Exception as e:
-        print(f"Intercom command error: {e}")
+        print(f"Intercom command error: {e}\r")  # Added \r
 
 def start_intercom(app):
     """Start intercom monitoring."""
     
     from .process_manager import create_subprocess
     from .audio_tools import intercom_m
-    from .bmar_config import SOUND_IN_CHS, MONITOR_CH
     
     try:
         # Ensure app has all required attributes
         ensure_app_attributes(app)
         
-        # Use SOUND_IN_CHS from config instead of app.channels to ensure correct channel count
-        input_channels = SOUND_IN_CHS if SOUND_IN_CHS > 0 else 1
-        
-        # Validate and set monitor channel
-        monitor_channel = MONITOR_CH if MONITOR_CH < input_channels else 0
-        
         # Create intercom configuration
         intercom_config = {
             'input_device': app.device_index,
-            'output_device': app.device_index,  # Use same device for loopback
+            'output_device': app.device_index,
             'samplerate': app.samplerate,
-            'channels': input_channels,  # Use SOUND_IN_CHS from config
+            'channels': app.channels,
             'blocksize': app.blocksize,
             'gain': 1.0,
-            'monitor_channel': monitor_channel
+            'monitor_channel': app.monitor_channel
         }
         
-        print(f"Starting intercom (device {app.device_index}, {app.samplerate}Hz, {input_channels} channels)")
+        print(f"Starting intercom (device {app.device_index}, {app.samplerate}Hz)\r")  # Added \r
         
         # Create and start intercom process
         process = create_subprocess(
@@ -548,10 +523,10 @@ def start_intercom(app):
         )
         
         process.start()
-        print(f"Intercom started (PID: {process.pid})")
+        print(f"Intercom started (PID: {process.pid})\r")  # Added \r
         
     except Exception as e:
-        print(f"Error starting intercom: {e}")
+        print(f"Error starting intercom: {e}\r")  # Added \r
         import traceback
         traceback.print_exc()
 
@@ -561,8 +536,8 @@ def handle_performance_monitor_command(app):
     try:
         from .process_manager import list_active_processes
         
-        print("\nPerformance Monitor:")
-        print("-" * 40)
+        print("\nPerformance Monitor:\r")  # Added \r
+        print("-" * 40 + "\r")  # Added \r
         
         # Show active processes
         list_active_processes(app)
@@ -572,20 +547,20 @@ def handle_performance_monitor_command(app):
         cpu_percent = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory()
         
-        print(f"\nSystem Resources:")
-        print(f"  CPU Usage: {cpu_percent:.1f}%")
-        print(f"  Memory Usage: {memory.percent:.1f}% ({memory.used//1024//1024}MB used)")
-        print(f"  Available Memory: {memory.available//1024//1024}MB")
+        print(f"\nSystem Resources:\r")  # Added \r
+        print(f"  CPU Usage: {cpu_percent:.1f}%\r")  # Added \r
+        print(f"  Memory Usage: {memory.percent:.1f}% ({memory.used//1024//1024}MB used)\r")  # Added \r
+        print(f"  Available Memory: {memory.available//1024//1024}MB\r")  # Added \r
         
         # Show audio buffer status
         if hasattr(app, 'circular_buffer') and app.circular_buffer is not None:
             buffer_usage = (app.buffer_pointer[0] / len(app.circular_buffer)) * 100
-            print(f"  Audio Buffer Usage: {buffer_usage:.1f}%")
+            print(f"  Audio Buffer Usage: {buffer_usage:.1f}%\r")  # Added \r
         
-        print("-" * 40)
+        print("-" * 40 + "\r")  # Added \r
         
     except Exception as e:
-        print(f"Performance monitor error: {e}")
+        print(f"Performance monitor error: {e}\r")  # Added \r
 
 def handle_file_browser_command(app):
     """Handle file browser command."""
@@ -593,39 +568,39 @@ def handle_file_browser_command(app):
     try:
         from .file_utils import list_recent_files
         
-        print(f"\nFile Browser - {app.today_dir}")
-        print("-" * 60)
+        print(f"\nFile Browser - {app.today_dir}\r")  # Added \r
+        print("-" * 60 + "\r")  # Added \r
         
         # List files in today's directory
         if os.path.exists(app.today_dir):
             recent_files = list_recent_files(app.today_dir, limit=10)
             
             if recent_files:
-                print("Recent files:")
+                print("Recent files:\r")  # Added \r
                 for i, (filepath, size, mtime) in enumerate(recent_files, 1):
                     filename = os.path.basename(filepath)
                     size_mb = size / (1024 * 1024)
                     time_str = time.strftime("%H:%M:%S", time.localtime(mtime))
-                    print(f"  {i:2d}. {filename:<30} {size_mb:6.1f}MB {time_str}")
+                    print(f"  {i:2d}. {filename:<30} {size_mb:6.1f}MB {time_str}\r")  # Added \r
             else:
-                print("No files found in today's directory")
+                print("No files found in today's directory\r")  # Added \r
         else:
-            print("Today's directory does not exist yet")
+            print("Today's directory does not exist yet\r")  # Added \r
         
         # Show directory structure
-        print(f"\nDirectory structure:")
-        print(f"  Recording dir: {app.recording_dir}")
-        print(f"  Today's dir:   {app.today_dir}")
+        print(f"\nDirectory structure:\r")  # Added \r
+        print(f"  Recording dir: {app.recording_dir}\r")  # Added \r
+        print(f"  Today's dir:   {app.today_dir}\r")  # Added \r
         
         plots_dir = os.path.join(app.today_dir, 'plots')
         if os.path.exists(plots_dir):
             plot_count = len([f for f in os.listdir(plots_dir) if f.endswith('.png')])
-            print(f"  Plots dir:     {plots_dir} ({plot_count} plots)")
+            print(f"  Plots dir:     {plots_dir} ({plot_count} plots)\r")  # Added \r
         
-        print("-" * 60)
+        print("-" * 60 + "\r")  # Added \r
         
     except Exception as e:
-        print(f"File browser error: {e}")
+        print(f"File browser error: {e}\r")  # Added \r
 
 def handle_configuration_command(app):
     """Handle configuration display command."""
@@ -633,190 +608,33 @@ def handle_configuration_command(app):
     try:
         from .bmar_config import get_platform_config
         
-        print("\nCurrent Configuration:")
-        print("-" * 50)
-        print(f"Audio Device: {app.device_index}")
-        print(f"Sample Rate: {app.samplerate} Hz")
-        print(f"Block Size: {app.blocksize}")
-        print(f"Channels: 1 (mono)")
-        print(f"Max File Size: {app.max_file_size_mb} MB")
-        print(f"Recording Directory: {app.recording_dir}")
-        print(f"Today's Directory: {app.today_dir}")
+        print("\nCurrent Configuration:\r")  # Added \r
+        print("-" * 50 + "\r")  # Added \r
+        print(f"Audio Device: {app.device_index}\r")  # Added \r
+        print(f"Sample Rate: {app.samplerate} Hz\r")  # Added \r
+        print(f"Block Size: {app.blocksize}\r")  # Added \r
+        print(f"Channels: 1 (mono)\r")  # Fixed syntax and added \r
+        print(f"Max File Size: {app.max_file_size_mb} MB\r")  # Added \r
+        print(f"Recording Directory: {app.recording_dir}\r")  # Added \r
+        print(f"Today's Directory: {app.today_dir}\r")  # Added \r
         
         # Platform-specific info
         platform_config = get_platform_config()
-        print(f"\nPlatform: {platform_config['name']}")
+        print(f"\nPlatform: {platform_config['name']}\r")  # Added \r
         if platform_config['is_wsl']:
-            print("WSL Audio Configuration:")
-            print(f"  Pulse Server: {platform_config.get('pulse_server', 'default')}")
+            print("WSL Audio Configuration:\r")  # Added \r
+            print(f"  Pulse Server: {platform_config.get('pulse_server', 'default')}\r")  # Added \r
         
         # Buffer info
         if hasattr(app, 'circular_buffer') and app.circular_buffer is not None:
             buffer_size_mb = len(app.circular_buffer) * 4 / (1024 * 1024)  # 4 bytes per float32
-            print(f"\nBuffer Size: {buffer_size_mb:.1f} MB")
-            print(f"Buffer Duration: {len(app.circular_buffer) / app.samplerate:.1f} seconds")
+            print(f"\nBuffer Size: {buffer_size_mb:.1f} MB\r")  # Added \r
+            print(f"Buffer Duration: {len(app.circular_buffer) / app.samplerate:.1f} seconds\r")  # Added \r
         
-        print("-" * 50)
-        
-    except Exception as e:
-        print(f"Configuration display error: {e}")
-
-def show_help():
-    """Display help information with proper line endings for all platforms."""
-    
-    # Clear any lingering progress indicators or status messages
-    print("\r" + " " * 120 + "\r", end="", flush=True)  # Clear wider area
-    print()  # Add a clean newline to separate from previous output
-    
-    # Print each line individually with explicit line endings for Linux/WSL
-    print("BMAR (Bioacoustic Monitoring and Recording) Help\r")
-    print("============================================================\r")
-    print("\r")
-    print("Commands:\r")
-    print("r - Recording:     Start/stop audio recording\r")
-    print("s - Spectrogram:   One-shot frequency analysis with GUI window\r")
-    print("o - Oscilloscope:  10-second waveform capture with GUI window\r")
-    print("t - Threads:       List all currently running threads\r")
-    print("v - VU Meter:      Audio level monitoring\r")
-    print("i - Intercom:      Audio monitoring of remote microphones\r")
-    print("d - Current Device: Show currently selected audio device\r")
-    print("D - All Devices:    List all available audio devices with details\r")
-    print("p - Performance:   System performance monitor (once)\r")
-    print("P - Performance:   Continuous system performance monitor\r")
-    print("f - FFT:           Show frequency analysis plot\r")
-    print("c - Configuration: Display current settings\r")
-    print("h - Help:          This help message\r")
-    print("q - Quit:          Exit the application\r")
-    print("\r")
-    print("1-9 - Channel:     Switch monitoring channel (while VU/Intercom active)\r")
-    print("\r")
-    print("Tips:\r")
-    print("- Press any command key to toggle that function on/off\r")
-    print("- Multiple functions can run simultaneously\r")
-    print("- Files are automatically organized by date\r")
-    print("- Use 'p' for one-time performance check, 'P' for continuous monitoring\r")
-    print("- Use 'd' for current device info, 'D' for all available devices\r")
-    print("- Press 1-9 to switch audio channel while VU meter or Intercom is running\r")
-    print("============================================================\r")
-    print()  # Add final newline for clean separation
-
-def get_user_input(prompt, default=None, input_type=str, validator=None):
-    """Get validated user input with optional default value."""
-    
-    while True:
-        try:
-            if default is not None:
-                display_prompt = f"{prompt} [{default}]: "
-            else:
-                display_prompt = f"{prompt}: "
-            
-            user_input = input(display_prompt).strip()
-            
-            # Use default if no input provided
-            if not user_input and default is not None:
-                user_input = str(default)
-            
-            # Convert to desired type
-            if input_type == int:
-                value = int(user_input)
-            elif input_type == float:
-                value = float(user_input)
-            else:
-                value = user_input
-            
-            # Apply validator if provided
-            if validator is not None:
-                if not validator(value):
-                    print("Invalid input. Please try again.")
-                    continue
-            
-            return value
-            
-        except ValueError:
-            print(f"Please enter a valid {input_type.__name__}.")
-        except KeyboardInterrupt:
-            print("\nInput cancelled.")
-            return None
-        except Exception as e:
-            print(f"Input error: {e}")
-
-def confirm_action(message, default=True):
-    """Get yes/no confirmation from user."""
-    
-    default_text = "Y/n" if default else "y/N"
-    prompt = f"{message} ({default_text}): "
-    
-    try:
-        response = input(prompt).strip().lower()
-        
-        if not response:
-            return default
-        
-        return response in ['y', 'yes', 'true', '1']
-        
-    except KeyboardInterrupt:
-        print("\nCancelled.")
-        return False
-    except Exception:
-        return default
-
-def display_status_line(app):
-    """Display a status line with current system state."""
-    
-    try:
-        # Count active processes
-        active_count = 0
-        if hasattr(app, 'active_processes') and app.active_processes:
-            for process in app.active_processes.values():
-                if process is not None and process.is_alive():
-                    active_count += 1
-        
-        # Get system time
-        current_time = time.strftime("%H:%M:%S")
-        
-        # Build status line
-        status_parts = [
-            f"Time: {current_time}",
-            f"Active: {active_count}",
-            f"Device: {app.device_index}",
-            f"Rate: {app.samplerate}Hz"
-        ]
-        
-        status_line = " | ".join(status_parts)
-        print(f"\r{status_line}", end="", flush=True)
+        print("-" * 50 + "\r")  # Added \r
         
     except Exception as e:
-        logging.debug(f"Status line display error: {e}")
-
-def cleanup_ui(app):
-    """Clean up user interface resources."""
-    
-    try:
-        # Stop keyboard listener
-        app.keyboard_listener_running = False
-        
-        # Restore terminal settings
-        from .system_utils import restore_terminal_settings
-        if hasattr(app, 'original_terminal_settings') and app.original_terminal_settings:
-            restore_terminal_settings(app, app.original_terminal_settings)
-        
-        print("\nUser interface cleanup completed.")
-        
-    except Exception as e:
-        logging.error(f"UI cleanup error: {e}")
-
-def handle_detailed_device_list_command(app):
-    """Handle detailed device list command (uppercase D)."""
-    
-    try:
-        from .audio_devices import show_detailed_device_list
-        
-        print("\nDetailed Audio Device Information:")
-        print("=" * 60)
-        show_detailed_device_list(app)
-        
-    except Exception as e:
-        logging.error(f"Detailed device list error: {e}")
+        print(f"Configuration display error: {e}\r")  # Added \r
 
 def handle_continuous_performance_monitor_command(app):
     """Handle continuous performance monitor command (uppercase P)."""
@@ -827,7 +645,7 @@ def handle_continuous_performance_monitor_command(app):
     try:
         if 'P' in app.active_processes and app.active_processes['P'] is not None:
             if app.active_processes['P'].is_alive():
-                print("Stopping continuous performance monitor...")
+                print("Stopping continuous performance monitor...\r")  # Added \r
                 
                 # Signal the process to stop using the shared dictionary
                 if hasattr(app, 'performance_monitor_stop_dict'):
@@ -835,15 +653,15 @@ def handle_continuous_performance_monitor_command(app):
                 
                 cleanup_process(app, 'P')
             else:
-                print("Starting continuous performance monitor...")
+                print("Starting continuous performance monitor...\r")  # Added \r
                 app.active_processes['P'] = None  # Clear dead process
                 start_continuous_performance_monitor(app)
         else:
-            print("Starting continuous performance monitor...")
+            print("Starting continuous performance monitor...\r")  # Added \r
             start_continuous_performance_monitor(app)
             
     except Exception as e:
-        print(f"Continuous performance monitor command error: {e}")
+        print(f"Continuous performance monitor command error: {e}\r")  # Added \r
         import traceback
         traceback.print_exc()
 
@@ -873,10 +691,10 @@ def start_continuous_performance_monitor(app):
         )
         
         process.start()
-        print(f"Continuous performance monitor started (PID: {process.pid})")
+        print(f"Continuous performance monitor started (PID: {process.pid})\r")  # Added \r
         
     except Exception as e:
-        print(f"Error starting continuous performance monitor: {e}")
+        print(f"Error starting continuous performance monitor: {e}\r")  # Added \r
         import traceback
         traceback.print_exc()
 
@@ -892,18 +710,18 @@ def handle_channel_switch_command(app, command):
         
         # Validate channel number is within range
         if key_int < 0 or key_int >= app.channels:
-            print(f"\nInvalid channel selection: Device has only {app.channels} channel(s) (1-{app.channels})")
+            print(f"\nInvalid channel selection: Device has only {app.channels} channel(s) (1-{app.channels})\r")  # Added \r
             return
             
         # Update monitor channel
         old_channel = app.monitor_channel
         app.monitor_channel = key_int
-        print(f"\nNow monitoring channel: {app.monitor_channel+1} (of {app.channels})")
+        print(f"\nNow monitoring channel: {app.monitor_channel+1} (of {app.channels})\r")  # Added \r
         
         # Restart VU meter if running
         if hasattr(app, 'active_processes') and 'v' in app.active_processes and app.active_processes['v'] is not None:
             if app.active_processes['v'].is_alive():
-                print(f"Restarting VU meter on channel: {app.monitor_channel+1}")
+                print(f"Restarting VU meter on channel: {app.monitor_channel+1}\r")  # Added \r
                 
                 try:
                     # Stop current VU meter
@@ -915,203 +733,133 @@ def handle_channel_switch_command(app, command):
                     time.sleep(0.1)
                     start_vu_meter(app)
                 except Exception as e:
-                    print(f"Error restarting VU meter: {e}")
+                    print(f"Error restarting VU meter: {e}\r")  # Added \r
         
         # Handle intercom channel change if running
         if hasattr(app, 'active_processes') and 'i' in app.active_processes and app.active_processes['i'] is not None:
             if app.active_processes['i'].is_alive():
-                print(f"Channel change for intercom on channel: {app.monitor_channel+1}")
-                # For intercom, we would need to implement channel change signaling
-                # This would require updating the intercom implementation
+                print(f"Channel change for intercom on channel: {app.monitor_channel+1}\r")  # Added \r
                 
     except ValueError:
-        print(f"Invalid channel number: {command}")
+        print(f"Invalid channel number: {command}\r")  # Added \r
     except Exception as e:
-        print(f"Channel switch error: {e}")
+        print(f"Channel switch error: {e}\r")  # Added \r
         import traceback
         traceback.print_exc()
         logging.error(f"Channel switch error: {e}")
 
-def timed_input(app, prompt, timeout=3, default='n'):
-    """
-    Get user input with a timeout and default value for headless operation.
-    
-    Args:
-        app: Application instance (contains headless flag)
-        prompt: The prompt to display to the user
-        timeout: Timeout in seconds (default: 3)
-        default: Default response if timeout or Enter is pressed (default: 'n')
-    
-    Returns:
-        str: User input or default value
-    """
-    
-    # Check if running in headless mode
-    if hasattr(app, 'headless') and app.headless:
-        print(f"[Headless mode] Using default: '{default}'")
-        return default
-    
-    print(prompt, end='', flush=True)
-    start_time = time.time()
+def cleanup_ui(app):
+    """Clean up user interface resources."""
     
     try:
-        import sys
-        import select
+        # Stop keyboard listener
+        app.keyboard_listener_running = False
         
-        if sys.platform == 'win32':
-            # Windows doesn't have select.select for stdin, use a different approach
-            try:
-                import msvcrt
-                
-                # Check for input character by character with timeout
-                while (time.time() - start_time) < timeout:
-                    if msvcrt.kbhit():
-                        char = msvcrt.getch().decode('utf-8', errors='ignore')
-                        if char == '\r' or char == '\n':
-                            print()  # New line after Enter
-                            return default
-                        elif char.isprintable():
-                            print(char)  # Echo the character
-                            # Read the rest of the line
-                            remaining = input()
-                            return char + remaining
-                    time.sleep(0.1)
-                
-                # Windows fallback - use a different approach since input() blocks
-                # If we can't get character input, just use the timeout
-                remaining_time = timeout - (time.time() - start_time)
-                
-                # For Windows, we'll just do a simple timeout since threading with input() 
-                # doesn't work properly for timeout scenarios
-                remaining_time = timeout - (time.time() - start_time)
-                if remaining_time > 0:
-                    # Just wait for timeout since Windows stdin handling is complex
-                    time.sleep(remaining_time)
-                    
-            except ImportError:
-                # If msvcrt is not available, fall back to basic timeout
-                while (time.time() - start_time) < timeout:
-                    time.sleep(0.1)
-                    
-        else:
-            # Unix/Linux - use select
-            while (time.time() - start_time) < timeout:
-                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
-                if ready:
-                    response = sys.stdin.readline().strip()
-                    return response if response else default
-                    
+        # Restore terminal settings
+        from .system_utils import restore_terminal_settings
+        if hasattr(app, 'original_terminal_settings') and app.original_terminal_settings:
+            restore_terminal_settings(app, app.original_terminal_settings)
+        
+        print("\nUser interface cleanup completed.\r")  # Added \r
+        
     except Exception as e:
-        # If select fails, fall back to basic timeout
-        print(f"\n[Input method failed, using timeout fallback]: {e}")
-        remaining_time = timeout - (time.time() - start_time)
-        if remaining_time > 0:
-            time.sleep(remaining_time)
-    
-    # Timeout occurred
-    print(f"\n[Timeout after {timeout}s] Using default: '{default}'")
-    return default
+        logging.error(f"UI cleanup error: {e}")
 
-def ensure_app_attributes(app):
-    """Ensure the app object has all required attributes for audio processing."""
+def handle_detailed_device_list_command(app):
+    """Handle detailed device list command (uppercase D)."""
     
     try:
-        # Import audio device functions
-        from .audio_devices import sync_app_audio_attributes, get_current_audio_config
+        from .audio_devices import show_detailed_device_list
         
-        # Import config values
-        from .bmar_config import SOUND_IN_CHS, MONITOR_CH
+        print("\nDetailed Audio Device Information:\r")  # Added \r
+        print("=" * 60 + "\r")  # Added \r
+        show_detailed_device_list(app)
         
-        # First try to sync from existing audio configuration
-        if sync_app_audio_attributes(app):
-            logging.info("App attributes synced from audio configuration")
-        else:
-            # Set fallback values if no audio config is available
-            logging.warning("Using fallback audio configuration")
-            
-            # Try to get a working device
-            config = get_current_audio_config(app)
-            if config['device_id'] is not None:
-                app.device_index = config['device_id']
-                app.sound_in_id = config['device_id']
-                app.samplerate = config['sample_rate']
-                app.PRIMARY_IN_SAMPLERATE = config['sample_rate']
-                app.channels = config['channels']
-                app.sound_in_chs = config['channels']
-                app._bit_depth = config['bit_depth']
-            else:
-                # Last resort fallback values
-                app.device_index = None
-                app.sound_in_id = None
-                app.samplerate = 44100
-                app.PRIMARY_IN_SAMPLERATE = 44100
-                app.channels = SOUND_IN_CHS if SOUND_IN_CHS > 0 else 1
-                app.sound_in_chs = app.channels
-                app._bit_depth = 16
-        
-        # Set other required attributes with defaults
-        if not hasattr(app, 'monitor_channel'):
-            app.monitor_channel = MONITOR_CH
-        if not hasattr(app, 'blocksize'):
-            app.blocksize = 1024
-        if not hasattr(app, 'DEBUG_VERBOSE'):
-            app.DEBUG_VERBOSE = False
-        if not hasattr(app, 'testmode'):
-            app.testmode = False
-            
-        # Platform detection
-        if not hasattr(app, 'is_wsl'):
-            from .platform_manager import PlatformManager
-            platform_manager = PlatformManager()
-            app.is_wsl = platform_manager.is_wsl()
-        if not hasattr(app, 'is_macos'):
-            from .platform_manager import PlatformManager
-            platform_manager = PlatformManager()
-            app.is_macos = platform_manager.is_macos()
-        if not hasattr(app, 'os_info'):
-            from .platform_manager import PlatformManager
-            platform_manager = PlatformManager()
-            app.os_info = platform_manager.get_os_info()
-            
-        # Validate monitor channel is within bounds
-        if hasattr(app, 'channels') and app.monitor_channel >= app.channels:
-            print(f"Warning: Monitor channel {app.monitor_channel + 1} exceeds available channels ({app.channels}). Using channel 1.")
-            app.monitor_channel = 0
-            
     except Exception as e:
-        print(f"Warning: Error setting app attributes: {e}")
-        logging.error(f"Error in ensure_app_attributes: {e}")
-        
-        # Emergency fallback values
-        if not hasattr(app, 'device_index'):
-            app.device_index = None
-        if not hasattr(app, 'channels') or app.channels <= 0:
-            app.channels = 1
-        if not hasattr(app, 'samplerate'):
-            app.samplerate = 44100
-        if not hasattr(app, 'blocksize'):
-            app.blocksize = 1024
-        if not hasattr(app, 'monitor_channel'):
-            app.monitor_channel = 0
-
-def list_all_threads():
-    """List all currently running threads."""
-    
-    import threading
-    
-    print("\n=== Currently Running Threads ===")
-    for thread in threading.enumerate():
-        print(f"Thread name: {thread.name}, Thread ID: {thread.ident}, Alive: {thread.is_alive()}")
-    print("=" * 35)
+        logging.error(f"Detailed device list error: {e}")
 
 def handle_thread_list_command(app):
     """Handle thread listing command."""
     
+    from .process_manager import list_active_processes
+    
     try:
-        list_all_threads()
+        print("\nActive Threads:\r")  # Added \r
+        print("=" * 40 + "\r")  # Added \r
+        
+        # List all active threads with details
+        list_active_processes(app)
+        
+        print("-" * 40 + "\r")  # Added \r
+        
     except Exception as e:
-        print(f"Error listing threads: {e}")
+        print(f"Error listing threads: {e}\r")  # Added \r
+        import traceback
+        traceback.print_exc()
         logging.error(f"Error listing threads: {e}")
+
+def show_help():
+    """Display help information with proper line endings for all platforms."""
+    
+    # Clear any lingering progress indicators or status messages
+    print("\r" + " " * 120 + "\r", end="", flush=True)  # Clear wider area
+    print()  # Add a clean newline to separate from previous output
+    
+    # Remove ALL \r characters - use normal print() statements
+    print("BMAR (Bioacoustic Monitoring and Recording) Help")
+    print("============================================================")
+    print()
+    print("Commands:")
+    print("r - Recording:     Start/stop audio recording")
+    print("s - Spectrogram:   One-shot frequency analysis with GUI window")
+    print("o - Oscilloscope:  10-second waveform capture with GUI window")
+    print("t - Threads:       List all currently running threads")
+    print("v - VU Meter:      Audio level monitoring")
+    print("i - Intercom:      Audio monitoring of remote microphones")
+    print("d - Current Device: Show currently selected audio device")
+    print("D - All Devices:    List all available audio devices with details")
+    print("p - Performance:   System performance monitor (once)")
+    print("P - Performance:   Continuous system performance monitor")
+    print("f - FFT:           Show frequency analysis plot")
+    print("c - Configuration: Display current settings")
+    print("h - Help:          This help message")
+    print("q - Quit:          Exit the application")
+    print()
+    print("1-9 - Channel:     Switch monitoring channel (while VU/Intercom active)")
+    print()
+    print("Tips:")
+    print("- Press any command key to toggle that function on/off")
+    print("- Multiple functions can run simultaneously")
+    print("- Files are automatically organized by date")
+    print("- Use 'p' for one-time performance check, 'P' for continuous monitoring")
+    print("- Use 'd' for current device info, 'D' for all available devices")
+    print("- Press 1-9 to switch audio channel while VU meter or Intercom is running")
+    print("============================================================")
+    print()  # Add final newline for clean separation
+
+def handle_quit_command(app):
+    """Handle quit command with proper cleanup."""
+    
+    try:
+        print("Shutting down BMAR...\r")
+        
+        # Stop all active processes
+        from .process_manager import cleanup_all_processes
+        cleanup_all_processes(app)
+        
+        # Set running flag to False
+        app.running = False
+        
+        # Additional cleanup
+        if hasattr(app, 'stop_recording_event'):
+            app.stop_recording_event.set()
+        
+        print("BMAR shutdown complete.\r")
+        
+    except Exception as e:
+        print(f"Error during shutdown: {e}\r")
+        app.running = False
+
 
 def handle_fft_command(app):
     """Handle FFT command."""
@@ -1122,31 +870,28 @@ def handle_fft_command(app):
     try:
         if 'f' in app.active_processes and app.active_processes['f'] is not None:
             if app.active_processes['f'].is_alive():
-                print("Stopping FFT analysis...")
+                print("Stopping FFT analysis...\r")
                 cleanup_process(app, 'f')
             else:
-                print("Starting FFT analysis...")
+                print("Starting FFT analysis...\r")
                 app.active_processes['f'] = None
                 start_fft_analysis(app)
         else:
-            print("Starting FFT analysis...")
+            print("Starting FFT analysis...\r")
             start_fft_analysis(app)
             
     except Exception as e:
-        print(f"FFT command error: {e}")
+        print(f"FFT command error: {e}\r")
         import traceback
         traceback.print_exc()
 
 def start_fft_analysis(app):
     """Start one-shot FFT analysis."""
-    
+
     from .process_manager import create_subprocess
     from .plotting import plot_fft
     
     try:
-        # Ensure app has all required attributes
-        ensure_app_attributes(app)
-        
         # Ensure required directory exists
         plots_dir = os.path.join(app.today_dir, 'plots')
         if not os.path.exists(plots_dir):
@@ -1162,11 +907,10 @@ def start_fft_analysis(app):
             'monitor_channel': getattr(app, 'monitor_channel', 0)
         }
         
-        print(f"Starting FFT analysis (device {app.device_index}, {app.samplerate}Hz)")
-        print(f"  Channel: {app.monitor_channel + 1} of {app.channels}")
+        print(f"Starting FFT analysis (device {app.device_index}, {app.samplerate}Hz)\r")
+        print(f"  Channel: {app.monitor_channel + 1} of {app.channels}\r")
         
         # Create and start FFT process
-        # Note: This will be a short-lived process that captures, analyzes, and exits
         process = create_subprocess(
             target_function=plot_fft,
             args=(fft_config,),
@@ -1176,11 +920,9 @@ def start_fft_analysis(app):
         )
         
         process.start()
-        print(f"FFT analysis started (PID: {process.pid})")
-        
-        # Note: The process will finish automatically after capturing and displaying
+        print(f"FFT analysis started (PID: {process.pid})\r")
         
     except Exception as e:
-        print(f"Error starting FFT analysis: {e}")
+        print(f"Error starting FFT analysis: {e}\r")
         import traceback
         traceback.print_exc()

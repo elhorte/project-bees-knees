@@ -59,6 +59,9 @@ class BmarApp:
         self.active_processes = {}
         self.virtual_device = False
         
+        # Add debug mode flag
+        self.debug_mode = True  # ← Add this line here
+        
         # Audio configuration attributes
         self.device_index = None
         self.sound_in_id = None
@@ -395,28 +398,11 @@ class BmarApp:
 
     def print_line(self, text, prefix_newline=True, suffix_newline=False):
         """Print with proper line endings for cross-platform compatibility."""
-        import os
-        
-        # Build the output string
-        output = ""
-        
-        # Add prefix newline if requested
         if prefix_newline:
-            output += "\n"  # Use simple \n instead of os.linesep for now
-        
-        # Add the main text
-        output += text
-        
-        # Add suffix newline if requested
+            print("")
+        print(text)
         if suffix_newline:
-            output += "\n"
-        
-        # Print with explicit newline and flush
-        print(output)
-        
-        # Ensure output is flushed immediately
-        import sys
-        sys.stdout.flush()
+            print("")
 
 def create_bmar_app():
     """Create and initialize a BMAR application instance."""
