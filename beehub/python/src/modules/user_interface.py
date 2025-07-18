@@ -789,14 +789,29 @@ def handle_thread_list_command(app):
     """Handle thread listing command."""
     
     from .process_manager import list_active_processes
+    from .system_utils import list_all_threads
+    import threading
     
     try:
         print("\nActive Threads:\r")  # Added \r
         print("=" * 40 + "\r")  # Added \r
         
         # List all active threads with details
-        list_active_processes(app)
+        threads = threading.enumerate()
+        if len(threads) > 0:
+            for i, thread in enumerate(threads):
+                status = "Alive" if thread.is_alive() else "Dead"
+                daemon_status = " (Daemon)" if thread.daemon else ""
+                print(f"  [{i+1}] {thread.name} - ID: {thread.ident} - {status}{daemon_status}\r")
+        else:
+            print("  No active threads found\r")
         
+        print("-" * 40 + "\r")
+        
+        # Also show active processes for comparison
+        print("Active Processes:\r")
+        print("-" * 40 + "\r")
+        list_active_processes(app)
         print("-" * 40 + "\r")  # Added \r
         
     except Exception as e:

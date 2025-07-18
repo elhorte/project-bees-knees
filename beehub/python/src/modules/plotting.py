@@ -818,12 +818,26 @@ def plot_fft(config):
         
         print(f"Starting FFT analysis on channel {monitor_channel + 1}...\r")
         
-        # Initialize PyAudio
-        p = pyaudio.PyAudio()
-        
-        try:
-            # Validate device
-            if device_index is not None:
+        # Check for virtual device first
+        if device_index is None:
+            print("Virtual device detected for FFT - generating synthetic audio\r")
+            # Generate synthetic audio data for FFT analysis
+            duration = 2.0  # 2 seconds for FFT
+            audio_data, actual_channels = _generate_synthetic_audio(duration, channels, samplerate, "FFT analysis")
+            
+            # Convert int16 synthetic data to float32 range [-1, 1] like real audio
+            if audio_data.dtype == np.int16:
+                audio_data = audio_data.astype(np.float32) / 32767.0
+            
+            # Process the synthetic data for FFT
+            windowed_data = audio_data * np.hanning(len(audio_data))
+            
+        else:
+            # Initialize PyAudio for real device
+            p = pyaudio.PyAudio()
+            
+            try:
+                # Validate device
                 device_info = p.get_device_info_by_index(device_index)
                 print(f"Using device: {device_info['name']}\r")
                 
@@ -835,110 +849,101 @@ def plot_fft(config):
                 if monitor_channel >= device_info['maxInputChannels']:
                     monitor_channel = 0
                     print(f"Adjusted to channel 1 (device has {device_info['maxInputChannels']} channels)\r")
-                    
-            else:
-                print("Error: No device specified\r")
-                return
-            
-            print("Capturing audio for FFT analysis...\r")
-            
-            # Capture duration for FFT (2 seconds)
-            capture_duration = 2.0
-            total_samples = int(samplerate * capture_duration)
-            audio_data = []
-            
-            # Open audio stream
-            stream = p.open(
-                format=pyaudio.paFloat32,
-                channels=channels,
-                rate=samplerate,
-                input=True,
-                input_device_index=device_index,
-                frames_per_buffer=blocksize
-            )
-            
-            # Capture audio data
-            samples_captured = 0
-            while samples_captured < total_samples:
-                try:
-                    # Read audio chunk
-                    data = stream.read(blocksize, exception_on_overflow=False)
-                    audio_chunk = np.frombuffer(data, dtype=np.float32)
-                    
-                    # Handle multi-channel data
-                    if channels > 1:
-                        audio_chunk = audio_chunk.reshape(-1, channels)
-                        if monitor_channel < audio_chunk.shape[1]:
-                            audio_chunk = audio_chunk[:, monitor_channel]
-                        else:
-                            audio_chunk = audio_chunk[:, 0]  # Fallback to first channel
-                    
-                    audio_data.extend(audio_chunk)
-                    samples_captured += len(audio_chunk)
-                    
-                    # Show progress
-                    progress = (samples_captured / total_samples) * 100
-                    print(f"\rCapturing: {progress:.1f}%", end="", flush=True)
-                    
-                except Exception as e:
-                    print(f"\rError reading audio: {e}\r")
-                    break
-            
-            # Close stream
-            stream.stop_stream()
-            stream.close()
-            
-            print(f"\rProcessing FFT...\r")
-            
-            if len(audio_data) == 0:
-                print("No audio data captured\r")
-                return
-            
-            # Convert to numpy array and apply window
-            audio_data = np.array(audio_data[:total_samples])
-            windowed_data = audio_data * np.hanning(len(audio_data))
-            
-            # Compute FFT
-            fft_size = len(windowed_data)
-            fft = np.fft.fft(windowed_data)
-            freqs = np.fft.fftfreq(fft_size, 1/samplerate)
-            
-            # Take only positive frequencies
-            positive_freqs = freqs[:fft_size//2]
-            magnitude = np.abs(fft[:fft_size//2])
-            
-            # Convert to dB
-            magnitude_db = 20 * np.log10(magnitude + 1e-10)
-            
-            # Create plot
-            plt.figure(figsize=(12, 6))
-            plt.plot(positive_freqs, magnitude_db)
-            plt.xlabel('Frequency (Hz)')
-            plt.ylabel('Magnitude (dB)')
-            plt.title(f'FFT Analysis - Device {device_index}, Channel {monitor_channel + 1} ({samplerate}Hz)')
-            plt.grid(True, alpha=0.3)
-            plt.xlim(0, samplerate // 2)
-            
-            # Save plot
-            if plots_dir:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"fft_{timestamp}_dev{device_index}_ch{monitor_channel + 1}.png"
-                filepath = os.path.join(plots_dir, filename)
-                plt.savefig(filepath, dpi=150, bbox_inches='tight')
-                print(f"FFT plot saved: {filepath}\r")
-            
-            # Show plot
-            plt.show()
-            
-        except Exception as e:
-            print(f"FFT error: {e}\r")
-            import traceback
-            traceback.print_exc()
-            
-        finally:
-            # Cleanup PyAudio
-            p.terminate()
-            
+                
+                print("Capturing audio for FFT analysis...\r")
+                
+                # Capture duration for FFT (2 seconds)
+                capture_duration = 2.0
+                total_samples = int(samplerate * capture_duration)
+                audio_data = []
+                
+                # Open audio stream
+                stream = p.open(
+                    format=pyaudio.paFloat32,
+                    channels=channels,
+                    rate=samplerate,
+                    input=True,
+                    input_device_index=device_index,
+                    frames_per_buffer=blocksize
+                )
+                
+                # Capture audio data
+                samples_captured = 0
+                while samples_captured < total_samples:
+                    try:
+                        # Read audio chunk
+                        data = stream.read(blocksize, exception_on_overflow=False)
+                        audio_chunk = np.frombuffer(data, dtype=np.float32)
+                        
+                        # Handle multi-channel data
+                        if channels > 1:
+                            audio_chunk = audio_chunk.reshape(-1, channels)
+                            if monitor_channel < audio_chunk.shape[1]:
+                                audio_chunk = audio_chunk[:, monitor_channel]
+                            else:
+                                audio_chunk = audio_chunk[:, 0]  # Fallback to first channel
+                        
+                        audio_data.extend(audio_chunk)
+                        samples_captured += len(audio_chunk)
+                        
+                        # Show progress
+                        progress = (samples_captured / total_samples) * 100
+                        print(f"\rCapturing: {progress:.1f}%", end="", flush=True)
+                        
+                    except Exception as e:
+                        print(f"\rError reading audio: {e}\r")
+                        break
+                
+                # Close stream
+                stream.stop_stream()
+                stream.close()
+                
+                print(f"\rProcessing FFT...\r")
+                
+                if len(audio_data) == 0:
+                    print("No audio data captured\r")
+                    return
+                
+                # Convert to numpy array and apply window
+                audio_data = np.array(audio_data[:total_samples])
+                windowed_data = audio_data * np.hanning(len(audio_data))
+                
+            finally:
+                # Cleanup PyAudio
+                p.terminate()
+        
+        # Compute FFT (common path for both virtual and real devices)
+        fft_size = len(windowed_data)
+        fft = np.fft.fft(windowed_data)
+        freqs = np.fft.fftfreq(fft_size, 1/samplerate)
+        
+        # Take only positive frequencies
+        positive_freqs = freqs[:fft_size//2]
+        magnitude = np.abs(fft[:fft_size//2])
+        
+        # Convert to dB
+        magnitude_db = 20 * np.log10(magnitude + 1e-10)
+        
+        # Create plot
+        plt.figure(figsize=(12, 6))
+        plt.plot(positive_freqs, magnitude_db)
+        plt.xlabel('Frequency (Hz)')
+        plt.ylabel('Magnitude (dB)')
+        plt.title(f'FFT Analysis - Device {device_index}, Channel {monitor_channel + 1} ({samplerate}Hz)')
+        plt.grid(True, alpha=0.3)
+        plt.xlim(0, samplerate // 2)
+        
+        # Save plot
+        if plots_dir:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"fft_{timestamp}_dev{device_index}_ch{monitor_channel + 1}.png"
+            filepath = os.path.join(plots_dir, filename)
+            plt.savefig(filepath, dpi=150, bbox_inches='tight')
+            print(f"FFT plot saved: {filepath}\r")
+        
+        # Show plot
+        plt.show()
+        
     except Exception as e:
         print(f"FFT setup error: {e}\r")
         import traceback
@@ -1245,152 +1250,6 @@ def _try_open_plot_file(filepath):
     except Exception as e:
         print(f"Could not open plot file automatically: {e}")
         print(f"Please open manually: {filepath}")
-
-def plot_fft(config):
-    """Generate and display FFT analysis using PyAudio for audio capture."""
-    
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import pyaudio
-    import time
-    from datetime import datetime
-    import os
-    
-    try:
-        device_index = config.get('device_index')
-        samplerate = config.get('samplerate', 44100)
-        channels = config.get('channels', 1)
-        blocksize = config.get('blocksize', 1024)
-        plots_dir = config.get('plots_dir')
-        monitor_channel = config.get('monitor_channel', 0)
-        
-        print(f"Starting FFT analysis on channel {monitor_channel + 1}...\r")
-        
-        # Initialize PyAudio
-        p = pyaudio.PyAudio()
-        
-        try:
-            # Validate device
-            if device_index is not None:
-                device_info = p.get_device_info_by_index(device_index)
-                print(f"Using device: {device_info['name']}\r")
-                
-                if device_info['maxInputChannels'] == 0:
-                    print(f"Error: Device {device_index} has no input channels\r")
-                    return
-                
-                # Validate monitor channel
-                if monitor_channel >= device_info['maxInputChannels']:
-                    monitor_channel = 0
-                    print(f"Adjusted to channel 1 (device has {device_info['maxInputChannels']} channels)\r")
-                    
-            else:
-                print("Error: No device specified\r")
-                return
-            
-            print("Capturing audio for FFT analysis...\r")
-            
-            # Capture duration for FFT (2 seconds)
-            capture_duration = 2.0
-            total_samples = int(samplerate * capture_duration)
-            audio_data = []
-            
-            # Open audio stream
-            stream = p.open(
-                format=pyaudio.paFloat32,
-                channels=channels,
-                rate=samplerate,
-                input=True,
-                input_device_index=device_index,
-                frames_per_buffer=blocksize
-            )
-            
-            # Capture audio data
-            samples_captured = 0
-            while samples_captured < total_samples:
-                try:
-                    # Read audio chunk
-                    data = stream.read(blocksize, exception_on_overflow=False)
-                    audio_chunk = np.frombuffer(data, dtype=np.float32)
-                    
-                    # Handle multi-channel data
-                    if channels > 1:
-                        audio_chunk = audio_chunk.reshape(-1, channels)
-                        if monitor_channel < audio_chunk.shape[1]:
-                            audio_chunk = audio_chunk[:, monitor_channel]
-                        else:
-                            audio_chunk = audio_chunk[:, 0]  # Fallback to first channel
-                    
-                    audio_data.extend(audio_chunk)
-                    samples_captured += len(audio_chunk)
-                    
-                    # Show progress
-                    progress = (samples_captured / total_samples) * 100
-                    print(f"\rCapturing: {progress:.1f}%", end="", flush=True)
-                    
-                except Exception as e:
-                    print(f"\rError reading audio: {e}\r")
-                    break
-            
-            # Close stream
-            stream.stop_stream()
-            stream.close()
-            
-            print(f"\rProcessing FFT...\r")
-            
-            if len(audio_data) == 0:
-                print("No audio data captured\r")
-                return
-            
-            # Convert to numpy array and apply window
-            audio_data = np.array(audio_data[:total_samples])
-            windowed_data = audio_data * np.hanning(len(audio_data))
-            
-            # Compute FFT
-            fft_size = len(windowed_data)
-            fft = np.fft.fft(windowed_data)
-            freqs = np.fft.fftfreq(fft_size, 1/samplerate)
-            
-            # Take only positive frequencies
-            positive_freqs = freqs[:fft_size//2]
-            magnitude = np.abs(fft[:fft_size//2])
-            
-            # Convert to dB
-            magnitude_db = 20 * np.log10(magnitude + 1e-10)
-            
-            # Create plot
-            plt.figure(figsize=(12, 6))
-            plt.plot(positive_freqs, magnitude_db)
-            plt.xlabel('Frequency (Hz)')
-            plt.ylabel('Magnitude (dB)')
-            plt.title(f'FFT Analysis - Device {device_index}, Channel {monitor_channel + 1} ({samplerate}Hz)')
-            plt.grid(True, alpha=0.3)
-            plt.xlim(0, samplerate // 2)
-            
-            # Save plot
-            if plots_dir:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"fft_{timestamp}_dev{device_index}_ch{monitor_channel + 1}.png"
-                filepath = os.path.join(plots_dir, filename)
-                plt.savefig(filepath, dpi=150, bbox_inches='tight')
-                print(f"FFT plot saved: {filepath}\r")
-            
-            # Show plot
-            plt.show()
-            
-        except Exception as e:
-            print(f"FFT error: {e}\r")
-            import traceback
-            traceback.print_exc()
-            
-        finally:
-            # Cleanup PyAudio
-            p.terminate()
-            
-    except Exception as e:
-        print(f"FFT setup error: {e}\r")
-        import traceback
-        traceback.print_exc()
 
 def plot_spectrogram(config):
     """Generate and display a spectrogram using PyAudio for audio capture."""

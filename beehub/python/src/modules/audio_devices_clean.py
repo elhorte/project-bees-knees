@@ -105,7 +105,17 @@ def find_device_by_config(bmar_app) -> bool:
             print("Unknown platform detected")
             return False
         
-        print(f"Looking for device: '{target_device_name}' on {pm.current_platform()}")
+        # Determine platform name for logging
+        if pm.is_windows():
+            platform_name = "Windows"
+        elif pm.is_macos():
+            platform_name = "macOS" 
+        elif pm.is_linux():
+            platform_name = "Linux"
+        else:
+            platform_name = "Unknown"
+            
+        print(f"Looking for device: '{target_device_name}' on {platform_name}")
         
         # Search for matching device
         matching_devices = []

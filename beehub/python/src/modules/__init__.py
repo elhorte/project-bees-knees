@@ -47,6 +47,7 @@ __all__ = [
     'list_audio_devices_detailed',
     'show_current_audio_devices',
     'show_detailed_device_list',
+    'list_all_threads',
     'start_recording_worker',
     'plot_oscope',
     'plot_spectrogram', 
