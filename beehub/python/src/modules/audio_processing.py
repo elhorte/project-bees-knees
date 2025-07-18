@@ -111,7 +111,7 @@ def audio_stream(app):
                     getattr(app.config, 'AUDIO_MONITOR_END', None)
                 )).start()
 
-            if hasattr(app.config, 'MODE_PERIOD') and app.config.MODE_PERIOD and not app.testmode:
+            if hasattr(app.config, 'MODE_PERIOD') and app.config.MODE_PERIOD:
                 logging.info("Starting recording_worker_thread for caching period audio at primary sample rate and all channels...")
                 threading.Thread(target=recording_worker_thread, args=(
                     app,
@@ -124,7 +124,7 @@ def audio_stream(app):
                     getattr(app.config, 'PERIOD_END', None)
                 )).start()
 
-            if hasattr(app.config, 'MODE_EVENT') and app.config.MODE_EVENT and not app.testmode:
+            if hasattr(app.config, 'MODE_EVENT') and app.config.MODE_EVENT:
                 logging.info("Starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...")
                 threading.Thread(target=recording_worker_thread, args=(
                     app,

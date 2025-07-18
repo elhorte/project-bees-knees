@@ -57,7 +57,6 @@ class BmarApp:
         self.today_dir = None
         self.circular_buffer = None
         self.active_processes = {}
-        self.virtual_device = False
         
         # Add debug mode flag
         self.debug_mode = True  # ← Add this line here
@@ -72,10 +71,8 @@ class BmarApp:
         self._bit_depth = 16
         self.blocksize = 1024
         self.monitor_channel = 0
-        self.testmode = True
         
         # Platform attributes
-        self.is_wsl = False
         self.is_macos = False
         self.os_info = ""
         
@@ -111,15 +108,9 @@ class BmarApp:
             self.platform_manager.setup_environment()
             
             # Set platform attributes for VU meter compatibility
-            self.is_wsl = self.platform_manager.is_wsl()
             self.is_macos = self.platform_manager.is_macos()
             os_info = self.platform_manager.get_os_info()
             self.os_info = f"{os_info['platform']}"
-            
-            # Handle WSL-specific setup early
-            if self.is_wsl:
-                print("WSL environment detected - setting up WSL audio...")
-                self.setup_wsl_environment()
             
             # Setup directories (with fallback if module missing)
             try:
@@ -133,7 +124,7 @@ class BmarApp:
             print(f"Recording directory: {self.recording_dir}")
             print(f"Today's directory: {self.today_dir}")
             
-            # Initialize audio with WSL-aware logic
+            # Initialize audio
             audio_success = self.initialize_audio_with_fallback()
             if not audio_success:
                 raise RuntimeError("No suitable audio device found")
@@ -160,20 +151,20 @@ class BmarApp:
             return False
 
     def initialize_audio_with_fallback(self) -> bool:
-        """Initialize audio system with proper WSL fallback handling."""
+        """Initialize audio system using config-specified devices."""
         try:
-            from .audio_devices import configure_audio_device_interactive, get_audio_device_config
+            from .audio_devices import find_device_by_config, get_audio_device_config
             
-            # Try standard audio configuration first (but don't fail hard)
-            if not self.is_wsl:
-                print("Attempting standard audio device configuration...")
-                try:
-                    if configure_audio_device_interactive(self):
-                        print(f"Audio device: {self.device_index} at {self.samplerate}Hz ({self.channels} channels)")
-                        return True
-                except Exception as e:
-                    print(f"Standard audio configuration failed: {e}")
-                    logging.info(f"Standard audio configuration failed, trying fallback: {e}")
+            print("Searching for audio device specified in configuration...")
+            
+            # Try config-based device finding first
+            try:
+                if find_device_by_config(self):
+                    print(f"Audio device configured: {self.device_index} at {self.samplerate}Hz ({self.channels} channels)")
+                    return True
+            except Exception as e:
+                print(f"Config-based device configuration failed: {e}")
+                logging.info(f"Config-based device configuration failed, trying fallback: {e}")
             
             # Try fallback configuration
             print("Attempting fallback audio configuration...")
@@ -189,115 +180,21 @@ class BmarApp:
                 print(f"Fallback audio device: {self.device_index} at {self.samplerate}Hz ({self.channels} channels)")
                 return True
             
-            # WSL-specific fallback
-            if self.is_wsl:
-                print("Attempting WSL audio fallback...")
-                success = self.initialize_wsl_audio_fallback()
-                if success:
-                    print(f"WSL audio device: {self.device_index} at {self.samplerate}Hz ({self.channels} channels)")
-                    return True
-            
-            # Last resort: create a minimal virtual device
-            print("Creating virtual audio device as last resort...")
-            self.create_virtual_audio_device()
-            return True
+            # If we get here, no audio devices were found
+            raise RuntimeError("No suitable audio devices found. Please check your audio hardware and drivers.")
             
         except Exception as e:
             logging.error(f"Audio initialization error: {e}")
+            print(f"FATAL: Audio initialization failed - {e}")
             return False
 
-    def create_virtual_audio_device(self):
-        """Create a virtual audio device for testing when no real devices are available."""
-        try:
-            print("No audio devices found - creating virtual device for testing")
-            print("Warning: No actual audio will be recorded with virtual device")
-            
-            # Set minimal virtual device configuration
-            self.device_index = 0
-            self.samplerate = 44100
-            self.channels = 1
-            self.sound_in_chs = 1
-            self.PRIMARY_IN_SAMPLERATE = 44100
-            self._bit_depth = 16
-            self.blocksize = 1024
-            self.monitor_channel = 0
-            self.virtual_device = True  # Flag to indicate this is virtual
-            self.testmode = False  # Allow operations with virtual device
-            
-            print("Virtual audio device created successfully")
-            print("  Device ID: 0 (virtual)")
-            print("  Sample rate: 44100 Hz")
-            print("  Channels: 1")
-            print("  Note: Interface will work but no audio will be recorded")
-            
-        except Exception as e:
-            logging.error(f"Error creating virtual audio device: {e}")
-            raise
 
-    def setup_wsl_environment(self):
-        """Set up WSL-specific environment."""
-        try:
-            logging.info("Setting up WSL environment...")
-            
-            # Set up matplotlib for WSL (non-interactive backend)
-            import matplotlib
-            matplotlib.use('Agg')  # Use non-interactive backend
-            logging.info("Matplotlib configured for WSL (Agg backend)")
-            
-            # Set up audio environment variables
-            import os
-            os.environ['PULSE_RUNTIME_PATH'] = '/mnt/wslg/runtime-dir/pulse'
-            
-            # Try to start PulseAudio if available
-            try:
-                import subprocess
-                subprocess.run(['pulseaudio', '--check'], capture_output=True, timeout=2)
-                logging.info("PulseAudio is running")
-            except:
-                try:
-                    subprocess.run(['pulseaudio', '--start'], capture_output=True, timeout=5)
-                    logging.info("Started PulseAudio")
-                except:
-                    logging.info("PulseAudio not available or failed to start")
-            
-            logging.info("WSL environment setup completed")
-            
-        except Exception as e:
-            logging.warning(f"WSL environment setup warning: {e}")
-
-    def initialize_wsl_audio_fallback(self) -> bool:
-        """Initialize audio system with WSL fallback."""
-        try:
-            from .audio_devices import setup_wsl_audio_fallback
-            
-            logging.info("Attempting WSL audio fallback...")
-            success = setup_wsl_audio_fallback(self)
-            
-            if success:
-                logging.info("WSL audio fallback successful")
-                return True
-            else:
-                logging.warning("WSL audio fallback failed")
-                return False
-                
-        except ImportError:
-            logging.warning("WSL audio manager not available")
-            return False
-        except Exception as e:
-            logging.error(f"WSL audio fallback error: {e}")
-            return False
 
     def run(self):
         """Main application run loop."""
         try:
             print("\nBMAR Audio Recording System")
             print("="*50)
-            
-            if hasattr(self, 'virtual_device') and self.virtual_device:
-                print("⚠ RUNNING WITH VIRTUAL AUDIO DEVICE")
-                print("  Interface is functional but no audio will be recorded")
-                print("  This is normal in WSL or systems without audio hardware")
-                print()
             
             # Set the keyboard listener to running state
             self.keyboard_listener_running = True

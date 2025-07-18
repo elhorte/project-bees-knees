@@ -447,7 +447,7 @@ def _record_audio_sounddevice(duration, device_index, channels, samplerate, bloc
         return None, 0
 
 def plot_oscope(config):
-    """Generate and display oscilloscope plot using PyAudio for audio capture."""
+    """Generate and display oscilloscope plot with all active audio channels in stacked traces."""
     
     import numpy as np
     import matplotlib.pyplot as plt
@@ -464,7 +464,7 @@ def plot_oscope(config):
         plot_duration = config.get('plot_duration', 10.0)
         plots_dir = config.get('plots_dir')
         
-        print(f"Oscilloscope capturing {plot_duration}s from device {device_index} ({samplerate}Hz)\r")
+        print(f"Oscilloscope capturing {plot_duration}s from device {device_index} ({samplerate}Hz, {channels} channels)\r")
         
         # Initialize PyAudio
         p = pyaudio.PyAudio()
@@ -479,15 +479,21 @@ def plot_oscope(config):
                     print(f"Error: Device {device_index} has no input channels\r")
                     return
                 
+                # Ensure we don't request more channels than available
+                max_channels = device_info['maxInputChannels']
+                if channels > max_channels:
+                    print(f"Warning: Requested {channels} channels, but device only has {max_channels}. Using {max_channels} channels.\r")
+                    channels = max_channels
+                
             else:
                 print("Error: No device specified\r")
                 return
             
-            print("Starting audio capture...\r")
+            print("Starting multi-channel audio capture...\r")
             
             # Calculate total samples needed
             total_samples = int(samplerate * plot_duration)
-            audio_data = []
+            audio_data = {i: [] for i in range(channels)}  # Store data for each channel
             
             # Open audio stream
             stream = p.open(
@@ -510,10 +516,14 @@ def plot_oscope(config):
                     # Handle multi-channel data
                     if channels > 1:
                         audio_chunk = audio_chunk.reshape(-1, channels)
-                        audio_chunk = audio_chunk[:, 0]  # Use first channel
+                        # Store each channel separately
+                        for ch in range(channels):
+                            audio_data[ch].extend(audio_chunk[:, ch])
+                    else:
+                        # Single channel
+                        audio_data[0].extend(audio_chunk)
                     
-                    audio_data.extend(audio_chunk)
-                    samples_captured += len(audio_chunk)
+                    samples_captured += len(audio_chunk) if channels == 1 else len(audio_chunk) // channels
                     
                     # Show progress
                     progress = (samples_captured / total_samples) * 100
@@ -527,39 +537,73 @@ def plot_oscope(config):
             stream.stop_stream()
             stream.close()
             
-            print(f"\rGenerating oscilloscope plot...\r")
+            print(f"\rGenerating multi-channel oscilloscope plot...\r")
             
-            if len(audio_data) == 0:
+            # Check if we have data
+            if not any(len(audio_data[ch]) > 0 for ch in range(channels)):
                 print("No audio data captured\r")
                 return
             
-            # Convert to numpy array
-            audio_data = np.array(audio_data[:total_samples])
-            time_axis = np.arange(len(audio_data)) / samplerate
+            # Convert to numpy arrays and create time axis
+            for ch in range(channels):
+                audio_data[ch] = np.array(audio_data[ch][:total_samples])
+            time_axis = np.arange(total_samples) / samplerate
             
-            # Create plot
-            plt.figure(figsize=(15, 8))
-            plt.plot(time_axis, audio_data, linewidth=0.5)
-            plt.xlabel('Time (seconds)')
-            plt.ylabel('Amplitude')
-            plt.title(f'Oscilloscope - Device {device_index} ({samplerate}Hz)')
-            plt.grid(True, alpha=0.3)
-            plt.xlim(0, plot_duration)
+            # Create stacked subplot layout
+            fig, axes = plt.subplots(channels, 1, figsize=(15, 3 + 2*channels), sharex=True)
             
-            # Add statistics
-            rms = np.sqrt(np.mean(audio_data**2))
-            peak = np.max(np.abs(audio_data))
-            plt.text(0.02, 0.98, f'RMS: {rms:.4f}\nPeak: {peak:.4f}', 
-                    transform=plt.gca().transAxes, verticalalignment='top',
-                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+            # Handle single channel case (axes won't be an array)
+            if channels == 1:
+                axes = [axes]
+            
+            # Plot each channel in its own subplot
+            channel_stats = []
+            for ch in range(channels):
+                ax = axes[ch]
+                
+                # Plot the waveform
+                ax.plot(time_axis, audio_data[ch], linewidth=0.5, color=f'C{ch}')
+                ax.set_ylabel(f'Ch {ch+1}\nAmplitude')
+                ax.grid(True, alpha=0.3)
+                ax.set_xlim(0, plot_duration)
+                
+                # Calculate and display statistics
+                rms = np.sqrt(np.mean(audio_data[ch]**2))
+                peak = np.max(np.abs(audio_data[ch]))
+                channel_stats.append({'rms': rms, 'peak': peak})
+                
+                # Add statistics text box
+                ax.text(0.02, 0.98, f'RMS: {rms:.4f}\nPeak: {peak:.4f}', 
+                       transform=ax.transAxes, verticalalignment='top',
+                       bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+                       fontsize=9)
+                
+                # Set title for first subplot
+                if ch == 0:
+                    ax.set_title(f'Multi-Channel Oscilloscope - Device {device_index} ({samplerate}Hz, {channels} channels)')
+            
+            # Set x-label only on bottom subplot
+            axes[-1].set_xlabel('Time (seconds)')
+            
+            # Adjust layout to prevent overlapping
+            plt.tight_layout()
+            
+            # Add overall statistics as figure text
+            overall_rms = np.sqrt(np.mean([stats['rms']**2 for stats in channel_stats]))
+            overall_peak = np.max([stats['peak'] for stats in channel_stats])
+            
+            fig.text(0.99, 0.02, f'Overall - RMS: {overall_rms:.4f}, Peak: {overall_peak:.4f}', 
+                    horizontalalignment='right', verticalalignment='bottom',
+                    bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8),
+                    fontsize=10)
             
             # Save plot
             if plots_dir:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"oscilloscope_{timestamp}_dev{device_index}.png"
+                filename = f"oscilloscope_multichannel_{timestamp}_dev{device_index}_{channels}ch.png"
                 filepath = os.path.join(plots_dir, filename)
                 plt.savefig(filepath, dpi=150, bbox_inches='tight')
-                print(f"Oscilloscope plot saved: {filepath}\r")
+                print(f"Multi-channel oscilloscope plot saved: {filepath}\r")
             
             # Show plot
             plt.show()

@@ -32,7 +32,6 @@ def start_recording_process(config: Dict, stop_event: multiprocessing.Event):
         bit_depth = config['bit_depth']
         today_dir = config['today_dir']
         recording_dir = config.get('recording_dir', today_dir)
-        testmode = config.get('testmode', False)
         file_format = config.get('file_format', 'WAV').upper()  # Get format from config
         
         print(f"Recording process started with device {device_id}")

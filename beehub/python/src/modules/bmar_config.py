@@ -60,7 +60,6 @@ FULL_SCALE = 2 ** 16                            # just for cli vu meter level re
 BUFFER_SECONDS = 1000                           # time length of circular buffer 
 
 # Global flags
-testmode = False                                # True = run in test mode with lower than needed sample rate
 KB_or_CP = 'KB'                                 # use keyboard or control panel (PyQT5) to control program
 DEBUG_VERBOSE = False                           # Enable verbose debug output (set to True for troubleshooting)
 
@@ -251,23 +250,7 @@ def get_platform_config():
     config = {
         'name': platform.system(),
         'version': platform.version(),
-        'machine': platform.machine(),
-        'is_wsl': False,
-        'pulse_server': None
+        'machine': platform.machine()
     }
-    
-    # Check if running under WSL
-    try:
-        if platform.system() == 'Linux':
-            with open('/proc/version', 'r') as f:
-                version_info = f.read().lower()
-                if 'microsoft' in version_info or 'wsl' in version_info:
-                    config['is_wsl'] = True
-                    # Check for PulseAudio server
-                    pulse_server = os.environ.get('PULSE_SERVER')
-                    if pulse_server:
-                        config['pulse_server'] = pulse_server
-    except:
-        pass
     
     return config

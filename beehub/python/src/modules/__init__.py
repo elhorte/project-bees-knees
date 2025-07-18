@@ -45,6 +45,8 @@ __all__ = [
     'setup_directories',
     'get_audio_device_config',
     'list_audio_devices_detailed',
+    'show_current_audio_devices',
+    'show_detailed_device_list',
     'start_recording_worker',
     'plot_oscope',
     'plot_spectrogram', 

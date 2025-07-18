@@ -10,6 +10,17 @@ import sys
 import os
 import multiprocessing
 
+def ensure_app_attributes(app):
+    """Ensure app has all required attributes."""
+    if not hasattr(app, 'monitor_channel'):
+        app.monitor_channel = 0
+    if not hasattr(app, 'is_macos'):
+        app.is_macos = False
+    if not hasattr(app, 'os_info'):
+        app.os_info = {}
+    if not hasattr(app, 'DEBUG_VERBOSE'):
+        app.DEBUG_VERBOSE = False
+
 def keyboard_listener(app):
     """Keyboard input listener thread function."""
     
@@ -443,7 +454,6 @@ def start_vu_meter(app):
             'sound_in_chs': app.channels,
             'monitor_channel': app.monitor_channel,
             'PRIMARY_IN_SAMPLERATE': app.samplerate,
-            'is_wsl': getattr(app, 'is_wsl', False),
             'is_macos': getattr(app, 'is_macos', False),
             'os_info': getattr(app, 'os_info', {}),
             'DEBUG_VERBOSE': getattr(app, 'DEBUG_VERBOSE', False)
@@ -621,9 +631,6 @@ def handle_configuration_command(app):
         # Platform-specific info
         platform_config = get_platform_config()
         print(f"\nPlatform: {platform_config['name']}\r")  # Added \r
-        if platform_config['is_wsl']:
-            print("WSL Audio Configuration:\r")  # Added \r
-            print(f"  Pulse Server: {platform_config.get('pulse_server', 'default')}\r")  # Added \r
         
         # Buffer info
         if hasattr(app, 'circular_buffer') and app.circular_buffer is not None:
