@@ -126,18 +126,32 @@ def _vu_meter_pyaudio(config):
             stream_callback=audio_callback
         )
         
-        print("VU meter running... Press Ctrl+C to stop")
+        print("VU meter running... Press Enter to stop")
         stream.start_stream()
         
         try:
             while stream.is_active():
+                # Check for user input (Enter key) on Windows
+                if sys.platform == "win32":
+                    import msvcrt
+                    if msvcrt.kbhit():
+                        key = msvcrt.getch()
+                        if key in [b'\r', b'\n']:  # Enter key
+                            break
+                else:
+                    # Unix-like systems
+                    import select
+                    if select.select([sys.stdin], [], [], 0)[0]:
+                        input()  # Read the enter key
+                        break
                 time.sleep(0.1)
-        except KeyboardInterrupt:
-            print("\nVU meter stopped by user")
+        except (OSError, ValueError) as e:
+            print(f"\nVU meter error: {e}")
         
         # Cleanup
         stream.stop_stream()
         stream.close()
+        print("\nVU meter stopped")
         pa.terminate()
         
     except Exception as e:
@@ -194,12 +208,26 @@ def _vu_meter_sounddevice(config):
             blocksize=blocksize,
             callback=audio_callback
         ):
-            print("VU meter running... Press Ctrl+C to stop")
+            print("VU meter running... Press Enter to stop")
             try:
                 while True:
+                    # Check for user input (Enter key) on Windows
+                    if sys.platform == "win32":
+                        import msvcrt
+                        if msvcrt.kbhit():
+                            key = msvcrt.getch()
+                            if key in [b'\r', b'\n']:  # Enter key
+                                break
+                    else:
+                        # Unix-like systems
+                        import select
+                        if select.select([sys.stdin], [], [], 0)[0]:
+                            input()  # Read the enter key
+                            break
                     time.sleep(0.1)
-            except KeyboardInterrupt:
-                print("\nVU meter stopped by user")
+            except (OSError, ValueError) as e:
+                print(f"\nVU meter error: {e}")
+            print("\nVU meter stopped")
         
     except Exception as e:
         print(f"Sounddevice VU meter error: {e}")
@@ -213,18 +241,31 @@ def _vu_meter_virtual(config):
         monitor_channel = config.get('monitor_channel', 0)
         
         print(f"Starting virtual VU meter (synthetic audio, channel {monitor_channel + 1})")
-        print("VU meter running... Press Ctrl+C to stop")
+        print("VU meter running... Press Enter to stop")
         
         import random
         
         try:
             while True:
+                # Check for user input (Enter key) on Windows
+                if sys.platform == "win32":
+                    import msvcrt
+                    if msvcrt.kbhit():
+                        key = msvcrt.getch()
+                        if key in [b'\r', b'\n']:  # Enter key
+                            break
+                else:
+                    # Unix-like systems
+                    import select
+                    if select.select([sys.stdin], [], [], 0)[0]:
+                        input()  # Read the enter key
+                        break
+                        
                 # Generate synthetic audio levels
                 # Simulate varying audio levels
                 base_level = 0.1 + 0.4 * random.random()  # 0.1 to 0.5
                 
                 # Add some periodic variation
-                import time
                 t = time.time()
                 modulation = 0.3 * np.sin(2 * np.pi * 0.5 * t)  # 0.5 Hz modulation
                 rms_level = base_level + modulation
@@ -238,8 +279,10 @@ def _vu_meter_virtual(config):
                 
                 time.sleep(0.05)  # 20 updates per second
                 
-        except KeyboardInterrupt:
-            print("\nVirtual VU meter stopped by user")
+        except (OSError, ValueError) as e:
+            print(f"\nVirtual VU meter error: {e}")
+            
+        print("\nVirtual VU meter stopped")
         
     except Exception as e:
         print(f"Virtual VU meter error: {e}")
@@ -287,17 +330,20 @@ def _display_vu_meter(db_level, rms_level):
         print(f"Display error: {e}")
 
 def intercom_m(config):
-    """Intercom monitoring using PyAudio."""
+    """Microphone monitoring - listen to remote microphone audio input only."""
     peak_level = 0.0
     avg_level = 0.0
     sample_count = 0
     
-    def audio_callback(in_data, out_data, frame_count, time_info, status):
+    def audio_callback(in_data, frame_count, time_info, status):
         nonlocal peak_level, avg_level, sample_count
         
         try:
-            # Convert PyAudio input to numpy
-            indata = np.frombuffer(in_data, dtype=np.float32)
+            # Convert PyAudio input to numpy array
+            if config.get('bit_depth', 16) == 16:
+                indata = np.frombuffer(in_data, dtype=np.int16).astype(np.float32) / 32768.0
+            else:
+                indata = np.frombuffer(in_data, dtype=np.float32)
             
             if config['channels'] > 1:
                 indata = indata.reshape(-1, config['channels'])
@@ -306,7 +352,7 @@ def intercom_m(config):
             else:
                 monitor_data = indata
             
-            # Calculate levels
+            # Calculate audio levels for monitoring
             current_peak = np.max(np.abs(monitor_data))
             current_avg = np.sqrt(np.mean(monitor_data**2))
             
@@ -314,61 +360,88 @@ def intercom_m(config):
             avg_level = (avg_level * sample_count + current_avg) / (sample_count + 1)
             sample_count += 1
             
-            # Apply gain and output
-            gain = config.get('gain', 1.0)
-            output_data = monitor_data * gain
+            # Display real-time VU meter while monitoring
+            if sample_count % 20 == 0:  # Update display every 20 callbacks (~0.5 seconds)
+                db_level = 20 * np.log10(max(current_avg, 0.001))
+                _display_vu_meter(db_level, current_avg)
             
-            # Convert back to bytes for PyAudio
-            if config['channels'] > 1:
-                output_array = np.tile(output_data.reshape(-1, 1), (1, config['channels']))
-                output_bytes = output_array.astype(np.float32).tobytes()
-            else:
-                output_bytes = output_data.astype(np.float32).tobytes()
+            return (in_data, pyaudio.paContinue)
             
-            # Copy to output buffer
-            bytes_to_copy = min(len(output_bytes), len(out_data))
-            out_data[:bytes_to_copy] = output_bytes[:bytes_to_copy]
-            
-            return (None, 0)  # paContinue
-        except Exception as e:
-            print(f"Intercom error: {e}")
-            return (None, 1)  # paAbort
+        except (OSError, ValueError) as e:
+            print(f"Microphone monitoring error: {e}")
+            return (in_data, pyaudio.paAbort)
     
     try:
         input_device = config['input_device']
-        output_device = config.get('output_device', input_device)
         samplerate = config['samplerate']
         channels = config.get('channels', 1)
+        bit_depth = config.get('bit_depth', 16)
         
-        manager = AudioPortManager(target_sample_rate=samplerate, target_bit_depth=16)
+        print("\nMicrophone monitoring active")
+        print(f"Monitoring device {input_device} ({channels} channels at {samplerate}Hz)")
+        print("Press Enter to stop monitoring...")
         
-        print(f"\nIntercom monitoring active")
-        print(f"Input: device {input_device}, Output: device {output_device}")
-        print("Press Ctrl+C to stop")
+        # Create input-only stream for microphone monitoring
+        import pyaudio
+        pa = pyaudio.PyAudio()
         
-        # Create PyAudio duplex stream
-        stream = manager.create_duplex_stream(
-            input_device=input_device,
-            output_device=output_device,
-            sample_rate=samplerate,
-            channels=channels,
-            callback=audio_callback,
-            frames_per_buffer=1024
-        )
-        
-        stream.start_stream()
-        start_time = time.time()
-        
-        while stream.is_active():
-            time.sleep(5.0)
-            elapsed = time.time() - start_time
-            print(f"\nStats: Peak={peak_level:.3f}, Avg={avg_level:.3f}, Time={elapsed:.1f}s")
-            peak_level = 0.0
+        try:
+            audio_format = pyaudio.paInt16 if bit_depth == 16 else pyaudio.paFloat32
+            
+            stream = pa.open(
+                format=audio_format,
+                channels=channels,
+                rate=samplerate,
+                input=True,
+                input_device_index=input_device,
+                frames_per_buffer=1024,
+                stream_callback=audio_callback
+            )
+            
+            if stream is None:
+                print("Failed to create microphone monitoring stream")
+                return
+            
+            stream.start_stream()
+            
+            # Monitor with user input check
+            import select
+            
+            try:
+                while stream.is_active():
+                    # Check for user input (Enter key) on Windows
+                    if sys.platform == "win32":
+                        import msvcrt
+                        if msvcrt.kbhit():
+                            key = msvcrt.getch()
+                            if key in [b'\r', b'\n']:  # Enter key
+                                break
+                    else:
+                        # Unix-like systems
+                        if select.select([sys.stdin], [], [], 0)[0]:
+                            input()  # Read the enter key
+                            break
+                    
+                    time.sleep(1.0)
+                    # No periodic statistics - just continuous VU meter
+            
+            except (OSError, ValueError) as e:
+                print(f"Microphone monitoring error: {e}")
+            
+            # Clean up
+            try:
+                stream.stop_stream()
+                stream.close()
+                print("\nMicrophone monitoring stopped")
+            except (OSError, ValueError):
+                pass
+            
+        finally:
+            pa.terminate()
                 
-    except KeyboardInterrupt:
-        print("\nIntercom stopped by user")
-    except Exception as e:
-        print(f"Intercom error: {e}")
+    except (OSError, ValueError) as e:
+        print(f"Microphone monitoring setup error: {e}")
+        print("Check that the specified input device exists and is available")
 
 def audio_device_test(device_index, samplerate=44100, duration=3.0):
     """Test audio device using PyAudio."""

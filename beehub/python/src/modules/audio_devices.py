@@ -217,7 +217,7 @@ def configure_audio_device_interactive(bmar_app) -> bool:
         
     except Exception as e:
         logging.error(f"Error in configure_audio_device_interactive: {e}")
-        return False
+        return Falses
 
 def list_audio_devices() -> List[Dict]:
     """List all available audio devices."""
@@ -238,71 +238,53 @@ def test_device_configuration(device_index: int, sample_rate: int, bit_depth: in
         return False
 
 def list_audio_devices_detailed(app=None):
-    """List all audio devices with detailed information for menu display."""
-    print("\n" + "="*80)
-    print("DETAILED AUDIO DEVICE INFORMATION")
-    print("="*80)
+    """List all audio devices in compact single-line format matching original BMAR style."""
+    print("\nAudio Device List:")
+    print("-" * 80)
     
     try:
         manager = AudioPortManager()
         devices = manager.list_audio_devices()
         
-        input_devices = [d for d in devices if d['is_input']]
-        output_devices = [d for d in devices if d['is_output']]
+        # Get current device index if available
+        current_input_device = None
+        current_output_device = None
+        if app and hasattr(app, 'device_index'):
+            current_input_device = app.device_index
+        if app and hasattr(app, 'sound_out_id'):
+            current_output_device = app.sound_out_id
         
-        if input_devices:
-            print(f"\n📥 INPUT DEVICES ({len(input_devices)} found):")
-            print("-" * 60)
-            
-            for device in input_devices:
-                print(f"  Device {device['index']}: {device['name']}")
-                print(f"    API: {device['api']}")
-                print(f"    Channels: {device['input_channels']} input")
-                print(f"    Sample Rate: {int(device['default_sample_rate'])} Hz")
-                
-                # Test basic configurations
-                test_results = []
-                test_configs = [(44100, 1), (44100, 2), (48000, 1), (48000, 2)]
-                
-                for sample_rate, channels in test_configs:
-                    if channels <= device['input_channels']:
-                        works = manager.test_device_configuration(
-                            device['index'], sample_rate, 16, channels
-                        )
-                        status = "✓" if works else "✗"
-                        test_results.append(f"{sample_rate}Hz/{channels}ch:{status}")
-                
-                print(f"    Test Results: {' '.join(test_results)}")
-                
-                # Show if this is the currently configured device
-                if app and hasattr(app, 'device_index') and app.device_index == device['index']:
-                    print(f"    >>> CURRENTLY SELECTED <<<")
-                
-                print()
-        else:
-            print("\n📥 INPUT DEVICES: None found")
+        # Sort devices by index for consistent display
+        sorted_devices = sorted(devices, key=lambda d: d['index'])
         
-        if output_devices:
-            print(f"\n📤 OUTPUT DEVICES ({len(output_devices)} found):")
-            print("-" * 60)
+        for device in sorted_devices:
+            index = device['index']
+            name = device['name']
+            api = device['api']
+            input_channels = device['input_channels']
+            output_channels = device['output_channels']
             
-            for device in output_devices[:3]:  # Show first 3 to save space
-                print(f"  Device {device['index']}: {device['name']}")
-                print(f"    API: {device['api']}")
-                print(f"    Channels: {device['output_channels']} output")
-                print()
+            # Truncate long device names to fit in line
+            if len(name) > 40:
+                name = name[:37] + "..."
             
-            if len(output_devices) > 3:
-                print(f"  ... and {len(output_devices) - 3} more output devices")
-        else:
-            print("\n📤 OUTPUT DEVICES: None found")
+            # Create prefix indicator for selected devices
+            prefix = "   "  # Default: 3 spaces
+            if index == current_input_device:
+                prefix = "> "  # Input device indicator
+            elif index == current_output_device:
+                prefix = "< "  # Output device indicator
+            
+            # Format the line with consistent spacing
+            # Format: "  INDEX NAME                               API (X in, Y out)"
+            line = f"{prefix}{index:2d} {name:<40} {api} ({input_channels} in, {output_channels} out)"
+            print(line)
         
-        print("\n" + "="*80)
-        print("Legend: ✓ = Supported, ✗ = Not supported")
-        print("="*80)
+        print("-" * 80)
         
     except Exception as e:
-        logging.error(f"Error listing detailed audio devices: {e}")
+        logging.error("Error listing detailed audio devices: %s", e)
+        print("Error: Could not enumerate audio devices")
         print(f"Error: Could not get detailed device information - {e}")
 
 def show_current_audio_devices(app):
@@ -343,10 +325,10 @@ def show_current_audio_devices(app):
     
     print("="*60)
 
-def show_detailed_device_list():
+def show_detailed_device_list(app=None):
     """Show detailed device list for menu systems (alias for list_audio_devices_detailed)."""
     try:
-        list_audio_devices_detailed()
+        list_audio_devices_detailed(app)
     except Exception as e:
         print(f"Error showing detailed device list: {e}")
-        logging.error(f"Error in show_detailed_device_list: {e}")
+        logging.error("Error in show_detailed_device_list: %s", e)

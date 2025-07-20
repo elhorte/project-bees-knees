@@ -1,0 +1,63 @@
+{
+    "folders": [
+        {
+            "name": "BMAR Project",
+            "path": "."
+        },
+        {
+            "name": "Source Code",
+            "path": ".\\beehub\\python\\src"
+        },
+        {
+            "name": "Modules",
+            "path": ".\\beehub\\python\\src\\modules"
+        }
+    ],
+    "settings": {
+        "python.defaultInterpreterPath": ".\\beehub\\python\\src\\auntbee\\Scripts\\python.exe",
+        "python.terminal.activateEnvironment": true,
+        "terminal.integrated.defaultProfile.windows": "PowerShell",
+        "files.exclude": {
+            "**/__pycache__": true,
+            "**/*.pyc": true,
+            "**/node_modules": true,
+            "**/.git": false
+        },
+        "search.exclude": {
+            "**/auntbee/Lib": true,
+            "**/__pycache__": true
+        },
+        "files.watcherExclude": {
+            "**/auntbee/Lib/**": true
+        }
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-python.python",
+            "ms-python.pylint",
+            "github.copilot",
+            "github.copilot-chat"
+        ]
+    },
+    "launch": {
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "name": "Python: Current File",
+                "type": "debugpy",
+                "request": "launch",
+                "program": "${file}",
+                "console": "integratedTerminal",
+                "cwd": "${workspaceFolder}\\beehub\\python\\src"
+            },
+            {
+                "name": "Python: BMAR Main",
+                "type": "debugpy",
+                "request": "launch",
+                "program": "${workspaceFolder}\\beehub\\python\\src\\main.py",
+                "console": "integratedTerminal",
+                "cwd": "${workspaceFolder}\\beehub\\python\\src"
+            }
+        ]
+    }
+}

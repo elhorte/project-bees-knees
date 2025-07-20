@@ -281,6 +281,168 @@ class AudioPortManager:
         
         return False, None, None, None
 
+    def test_duplex_support(self, device_index: int, sample_rate: int = 44100, channels: int = 1) -> bool:
+        """
+        Test if a device supports duplex mode (simultaneous input/output)
+        
+        Args:
+            device_index: Device index to test
+            sample_rate: Sample rate to test
+            channels: Number of channels to test
+            
+        Returns:
+            True if duplex is supported, False otherwise
+        """
+        pa = pyaudio.PyAudio()
+        try:
+            # Test if device supports duplex mode
+            stream = pa.open(
+                format=pyaudio.paInt16,
+                channels=channels,
+                rate=sample_rate,
+                input=True,
+                output=True,
+                input_device_index=device_index,
+                output_device_index=device_index,
+                frames_per_buffer=1024
+            )
+            stream.close()
+            return True
+        except (OSError, ValueError):
+            return False
+        finally:
+            pa.terminate()
+
+    def create_duplex_stream(self, input_device=None, output_device=None, sample_rate=None, 
+                           channels: int = 2, callback=None, frames_per_buffer: int = 1024) -> Optional[object]:
+        """
+        Create a duplex audio stream for intercom functionality
+        
+        Args:
+            input_device: Input device index or None for auto-select
+            output_device: Output device index or None for auto-select  
+            sample_rate: Sample rate or None for auto-select
+            channels: Number of channels
+            callback: Callback function for audio processing
+            frames_per_buffer: Buffer size in frames
+            
+        Returns:
+            PyAudio stream object or None if failed
+        """
+        pa = pyaudio.PyAudio()
+        
+        try:
+            # If no devices specified, auto-configure
+            if input_device is None:
+                success, input_device_info, auto_sample_rate, _ = self.configure_audio_input(channels)
+                if not success:
+                    print("Could not configure input device for duplex stream")
+                    pa.terminate()
+                    return None
+                input_device_idx = input_device_info['index']
+                if sample_rate is None:
+                    sample_rate = auto_sample_rate or 44100
+            else:
+                input_device_idx = input_device
+                if sample_rate is None:
+                    sample_rate = 44100
+            
+            # Use same device for output if not specified
+            if output_device is None:
+                output_device_idx = input_device_idx
+            else:
+                output_device_idx = output_device
+            
+            # Get device info for validation
+            try:
+                input_info = pa.get_device_info_by_index(input_device_idx)
+                output_info = pa.get_device_info_by_index(output_device_idx)
+                print("Attempting duplex stream:")
+                print(f"  Input: {input_info['name']} (index {input_device_idx})")
+                print(f"  Output: {output_info['name']} (index {output_device_idx})")
+            except (OSError, ValueError) as e:
+                print(f"Warning: Could not get device info: {e}")
+            
+            # Test if duplex is supported on this device
+            print("Testing duplex support...")
+            if not self.test_duplex_support(input_device_idx, min(sample_rate, 44100), 1):
+                print(f"Device {input_device_idx} does not support duplex mode")
+                print("Suggestion: Try using separate input/output streams instead")
+                pa.terminate()
+                return None
+            
+            print("Duplex support confirmed!")
+            
+            # Try different configurations in order of preference
+            configs_to_try = [
+                # Start with safe 16-bit configuration
+                {
+                    'format': pyaudio.paInt16,
+                    'rate': 44100,
+                    'channels': 1,
+                    'frames_per_buffer': max(frames_per_buffer, 2048)
+                },
+                # Try with more channels
+                {
+                    'format': pyaudio.paInt16,
+                    'rate': 44100,
+                    'channels': min(channels, 2),
+                    'frames_per_buffer': max(frames_per_buffer, 2048)
+                },
+                # Try higher sample rate
+                {
+                    'format': pyaudio.paInt16,
+                    'rate': min(sample_rate, 48000),
+                    'channels': 1,
+                    'frames_per_buffer': max(frames_per_buffer, 2048)
+                },
+                # Try float32 format
+                {
+                    'format': pyaudio.paFloat32,
+                    'rate': 44100,
+                    'channels': 1,
+                    'frames_per_buffer': max(frames_per_buffer, 2048)
+                }
+            ]
+            
+            for i, config in enumerate(configs_to_try):
+                try:
+                    print(f"Trying config {i+1}: {config['format']}, {config['rate']}Hz, {config['channels']}ch, {config['frames_per_buffer']} frames")
+                    
+                    stream = pa.open(
+                        format=config['format'],
+                        channels=config['channels'],
+                        rate=config['rate'],
+                        input=True,
+                        output=True,
+                        input_device_index=input_device_idx,
+                        output_device_index=output_device_idx,
+                        frames_per_buffer=config['frames_per_buffer'],
+                        stream_callback=callback
+                    )
+                    
+                    print(f"Success with config {i+1}!")
+                    print(f"  Format: {config['format']}")
+                    print(f"  Sample Rate: {config['rate']}Hz")
+                    print(f"  Channels: {config['channels']}")
+                    print(f"  Buffer Size: {config['frames_per_buffer']}")
+                    
+                    return stream
+                    
+                except (OSError, ValueError) as config_error:
+                    print(f"  Config {i+1} failed: {config_error}")
+                    continue
+            
+            print("All duplex stream configurations failed")
+            return None
+            
+        except (OSError, ValueError) as e:
+            print(f"Error creating duplex stream: {e}")
+            return None
+        finally:
+            # Don't terminate pa here - the stream needs it to stay alive
+            pass
+
 # Additional utility functions for PyAudio-specific features
 
 def list_host_apis():

@@ -921,17 +921,19 @@ def plot_fft(config):
         positive_freqs = freqs[:fft_size//2]
         magnitude = np.abs(fft[:fft_size//2])
         
-        # Convert to dB
-        magnitude_db = 20 * np.log10(magnitude + 1e-10)
+        # Convert to linear amplitude (not dB) to match original format
+        # Normalize the magnitude to match original scale
+        magnitude_normalized = magnitude / np.max(magnitude) * 0.008  # Scale to match your example
         
-        # Create plot
+        # Create plot matching the original format
         plt.figure(figsize=(12, 6))
-        plt.plot(positive_freqs, magnitude_db)
+        plt.plot(positive_freqs, magnitude_normalized, 'b-', linewidth=1)
         plt.xlabel('Frequency (Hz)')
-        plt.ylabel('Magnitude (dB)')
-        plt.title(f'FFT Analysis - Device {device_index}, Channel {monitor_channel + 1} ({samplerate}Hz)')
+        plt.ylabel('Amplitude')
+        plt.title(f'FFT Plot monitoring ch: {monitor_channel + 1} of {channels} channels')
         plt.grid(True, alpha=0.3)
-        plt.xlim(0, samplerate // 2)
+        plt.xlim(0, min(samplerate // 2, 100000))  # Limit to 100kHz max like original
+        plt.ylim(0, 0.009)  # Match the amplitude scale from your example
         
         # Save plot
         if plots_dir:

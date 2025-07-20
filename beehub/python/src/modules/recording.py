@@ -287,7 +287,12 @@ def start_simple_recording(device_id, sample_rate=44100, channels=1, duration=No
         frames_to_record = int(sample_rate * duration) if duration else None
         frames_recorded = 0
         
-        print("Recording... Press Ctrl+C to stop" if duration is None else f"Recording for {duration} seconds...")
+        if duration is None:
+            print("Recording... Press Enter to stop")
+        else:
+            print(f"Recording for {duration} seconds...")
+        
+        import sys
         
         try:
             while True:
@@ -297,9 +302,26 @@ def start_simple_recording(device_id, sample_rate=44100, channels=1, duration=No
                 
                 if frames_to_record and frames_recorded >= frames_to_record:
                     break
+                
+                # Check for user input to stop recording (only for indefinite recording)
+                if duration is None:
+                    if sys.platform == "win32":
+                        import msvcrt
+                        if msvcrt.kbhit():
+                            key = msvcrt.getch()
+                            if key in [b'\r', b'\n']:  # Enter key
+                                break
+                    else:
+                        # Unix-like systems
+                        import select
+                        if select.select([sys.stdin], [], [], 0)[0]:
+                            input()  # Read the enter key
+                            break
                     
-        except KeyboardInterrupt:
-            print("\nRecording stopped")
+        except (OSError, ValueError) as e:
+            print(f"\nRecording error: {e}")
+        
+        print("\nRecording stopped")
         
         # Save file
         with wave.open(filepath, 'wb') as wf:
