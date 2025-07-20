@@ -189,9 +189,22 @@ def get_key():
             import tty
             import termios
             
-            if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
-                return sys.stdin.read(1)
-            return None
+            # Save current terminal settings
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            
+            try:
+                # Set terminal to raw mode for single character input
+                tty.setraw(fd)
+                
+                # Check if input is available (non-blocking)
+                if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
+                    char = sys.stdin.read(1)
+                    return char
+                return None
+            finally:
+                # Always restore terminal settings
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
             
     except Exception as e:
         logging.error(f"Error getting key input: {e}")
@@ -214,32 +227,6 @@ def setup_terminal_for_input(app):
     except Exception as e:
         logging.error(f"Error setting up terminal: {e}")
 
-def restore_terminal_settings(app, settings):
-    """Restore original terminal settings."""
-    
-    try:
-        if platform.system() != "Windows" and settings:
-            import termios
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)
-            
-    except Exception as e:
-        logging.error(f"Error restoring terminal settings: {e}")
-
-def reset_terminal_settings(app):
-    """Reset terminal to normal settings."""
-    
-    try:
-        if platform.system() != "Windows":
-            import termios
-            import tty
-            
-            # Try to reset to sane defaults
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, 
-                            termios.tcgetattr(sys.stdin))
-            
-    except Exception as e:
-        logging.error(f"Error resetting terminal: {e}")
-
 def interruptable_sleep(seconds, stop_sleep_event):
     """Sleep for specified duration but can be interrupted by an event."""
     for i in range(seconds*2):
@@ -255,12 +242,6 @@ def signal_handler(sig, frame):
 
 def setup_signal_handlers(app):
     """Setup signal handlers for graceful shutdown."""
-    
-    def signal_handler(signum, frame):
-        """Handle termination signals."""
-        print(f"\nReceived signal {signum}, shutting down...")
-        app.stop_program[0] = True
-        app.keyboard_listener_running = False
     
     try:
         # Handle common termination signals

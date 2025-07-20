@@ -6,7 +6,6 @@ Handles keyboard input, command processing, and user interaction.
 import threading
 import time
 import logging
-import sys
 import os
 import multiprocessing
 
@@ -419,13 +418,15 @@ def start_trigger_plotting(app):
 def handle_vu_meter_command(app):
     """Handle VU meter command."""
     
-    from .process_manager import cleanup_process, create_subprocess
-    from .audio_tools import vu_meter
+    from .process_manager import cleanup_process
     
     try:
         if 'v' in app.active_processes and app.active_processes['v'] is not None:
-            if app.active_processes['v'].is_alive():
+            if hasattr(app.active_processes['v'], 'is_alive') and app.active_processes['v'].is_alive():
                 print("Stopping VU meter...\r")  # Added \r
+                # Set stop event for the VU meter
+                if hasattr(app, 'vu_stop_event'):
+                    app.vu_stop_event.set()
                 cleanup_process(app, 'v')
             else:
                 print("Starting VU meter...\r")  # Added \r
@@ -439,20 +440,27 @@ def handle_vu_meter_command(app):
         print(f"VU meter command error: {e}\r")  # Added \r
 
 def start_vu_meter(app):
-    """Start VU meter."""
+    """Start VU meter using threading instead of multiprocessing."""
     
-    from .process_manager import create_subprocess
+    import threading
     from .audio_tools import vu_meter
     
     try:
         # Ensure app has all required attributes
         ensure_app_attributes(app)
         
+        # Create a stop event for the VU meter
+        app.vu_stop_event = threading.Event()
+        
         # Create VU meter configuration to match original BMAR_class.py format
         vu_config = {
+            'device_index': app.device_index,
+            'samplerate': app.samplerate,
+            'channels': app.channels,
+            'blocksize': getattr(app, 'blocksize', 1024),
+            'monitor_channel': app.monitor_channel,
             'sound_in_id': app.device_index,
             'sound_in_chs': app.channels,
-            'monitor_channel': app.monitor_channel,
             'PRIMARY_IN_SAMPLERATE': app.samplerate,
             'is_macos': getattr(app, 'is_macos', False),
             'os_info': getattr(app, 'os_info', {}),
@@ -461,17 +469,18 @@ def start_vu_meter(app):
         
         print(f"Starting VU meter on channel {app.monitor_channel + 1} of {app.channels}\r")  # Added \r
         
-        # Create and start VU meter process
-        process = create_subprocess(
-            target_function=vu_meter,
-            args=(vu_config,),
-            process_key='v',
-            app=app,
+        # Create and start VU meter thread
+        vu_thread = threading.Thread(
+            target=vu_meter,
+            args=(vu_config, app.vu_stop_event),
             daemon=True
         )
         
-        process.start()
-        print(f"VU meter started (PID: {process.pid})\r")  # Added \r
+        # Store the thread in active_processes
+        app.active_processes['v'] = vu_thread
+        
+        vu_thread.start()
+        print(f"VU meter started as thread\r")  # Added \r
         
     except Exception as e:
         print(f"Error starting VU meter: {e}\r")  # Added \r

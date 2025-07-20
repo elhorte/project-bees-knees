@@ -13,7 +13,7 @@ import os
 import sys
 from .class_PyAudio import AudioPortManager
 
-def vu_meter(config):
+def vu_meter(config, stop_event=None):
     """Real-time VU meter with virtual device support."""
     
     try:
@@ -29,19 +29,19 @@ def vu_meter(config):
         # Check for virtual device
         if device_index is None:
             print("Virtual device detected - running VU meter with synthetic audio")
-            return _vu_meter_virtual(config)
+            return _vu_meter_virtual(config, stop_event)
         
         # Try PyAudio first
         try:
             import pyaudio
-            return _vu_meter_pyaudio(config)
+            return _vu_meter_pyaudio(config, stop_event)
         except ImportError:
             print("PyAudio not available, trying sounddevice...")
             
         # Fall back to sounddevice
         try:
             import sounddevice as sd
-            return _vu_meter_sounddevice(config)
+            return _vu_meter_sounddevice(config, stop_event)
         except ImportError:
             print("No audio libraries available for VU meter")
             return
@@ -51,7 +51,7 @@ def vu_meter(config):
         import traceback
         traceback.print_exc()
 
-def _vu_meter_pyaudio(config):
+def _vu_meter_pyaudio(config, stop_event=None):
     """VU meter using PyAudio."""
     
     try:
@@ -126,24 +126,14 @@ def _vu_meter_pyaudio(config):
             stream_callback=audio_callback
         )
         
-        print("VU meter running... Press Enter to stop")
+        print("VU meter running... Press 'v' again to stop")
         stream.start_stream()
         
         try:
             while stream.is_active():
-                # Check for user input (Enter key) on Windows
-                if sys.platform == "win32":
-                    import msvcrt
-                    if msvcrt.kbhit():
-                        key = msvcrt.getch()
-                        if key in [b'\r', b'\n']:  # Enter key
-                            break
-                else:
-                    # Unix-like systems
-                    import select
-                    if select.select([sys.stdin], [], [], 0)[0]:
-                        input()  # Read the enter key
-                        break
+                # Check for stop event instead of keyboard input
+                if stop_event and stop_event.is_set():
+                    break
                 time.sleep(0.1)
         except (OSError, ValueError) as e:
             print(f"\nVU meter error: {e}")
@@ -159,7 +149,7 @@ def _vu_meter_pyaudio(config):
         import traceback
         traceback.print_exc()
 
-def _vu_meter_sounddevice(config):
+def _vu_meter_sounddevice(config, stop_event=None):
     """VU meter using sounddevice."""
     
     try:
@@ -208,22 +198,12 @@ def _vu_meter_sounddevice(config):
             blocksize=blocksize,
             callback=audio_callback
         ):
-            print("VU meter running... Press Enter to stop")
+            print("VU meter running... Press 'v' again to stop")
             try:
                 while True:
-                    # Check for user input (Enter key) on Windows
-                    if sys.platform == "win32":
-                        import msvcrt
-                        if msvcrt.kbhit():
-                            key = msvcrt.getch()
-                            if key in [b'\r', b'\n']:  # Enter key
-                                break
-                    else:
-                        # Unix-like systems
-                        import select
-                        if select.select([sys.stdin], [], [], 0)[0]:
-                            input()  # Read the enter key
-                            break
+                    # Check for stop event instead of keyboard input
+                    if stop_event and stop_event.is_set():
+                        break
                     time.sleep(0.1)
             except (OSError, ValueError) as e:
                 print(f"\nVU meter error: {e}")
@@ -234,32 +214,22 @@ def _vu_meter_sounddevice(config):
         import traceback
         traceback.print_exc()
 
-def _vu_meter_virtual(config):
+def _vu_meter_virtual(config, stop_event=None):
     """VU meter with virtual/synthetic audio."""
     
     try:
         monitor_channel = config.get('monitor_channel', 0)
         
         print(f"Starting virtual VU meter (synthetic audio, channel {monitor_channel + 1})")
-        print("VU meter running... Press Enter to stop")
+        print("VU meter running... Press 'v' again to stop")
         
         import random
         
         try:
             while True:
-                # Check for user input (Enter key) on Windows
-                if sys.platform == "win32":
-                    import msvcrt
-                    if msvcrt.kbhit():
-                        key = msvcrt.getch()
-                        if key in [b'\r', b'\n']:  # Enter key
-                            break
-                else:
-                    # Unix-like systems
-                    import select
-                    if select.select([sys.stdin], [], [], 0)[0]:
-                        input()  # Read the enter key
-                        break
+                # Check for stop event instead of keyboard input
+                if stop_event and stop_event.is_set():
+                    break
                         
                 # Generate synthetic audio levels
                 # Simulate varying audio levels

@@ -4,7 +4,6 @@ Provides comprehensive audio management using AudioPortManager exclusively.
 """
 
 import logging
-import sys
 import time
 from typing import List, Dict, Optional, Tuple, Union
 from .class_PyAudio import AudioPortManager

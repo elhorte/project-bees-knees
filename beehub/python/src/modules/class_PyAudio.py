@@ -60,7 +60,6 @@ Implements a hierarchical approach to audio device configuration:
 """
 
 import pyaudio
-import sys
 import time
 from typing import List, Dict, Optional, Tuple
 
