@@ -4,7 +4,6 @@ Handles audio device discovery, configuration, and management using PyAudio.
 """
 
 import logging
-import sys
 from typing import List, Dict, Optional, Tuple
 
 # Use PyAudio exclusively
@@ -217,7 +216,7 @@ def configure_audio_device_interactive(bmar_app) -> bool:
         
     except Exception as e:
         logging.error(f"Error in configure_audio_device_interactive: {e}")
-        return Falses
+        return False
 
 def list_audio_devices() -> List[Dict]:
     """List all available audio devices."""
