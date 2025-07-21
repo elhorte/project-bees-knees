@@ -148,19 +148,30 @@ class BmarApp:
             from . import bmar_config
             self.config = bmar_config
             
+            # Set up platform-specific directory configuration
+            from .bmar_config import get_platform_audio_config
+            platform_config = get_platform_audio_config(self.platform_manager, bmar_config)
+            
+            # Add platform-specific attributes needed by file_utils
+            self.data_drive = platform_config['data_drive']
+            self.data_path = platform_config['data_path']
+            self.folders = platform_config['folders']
+            
             # Set up audio processing attributes from config
             self.PRIMARY_IN_SAMPLERATE = getattr(bmar_config, 'PRIMARY_IN_SAMPLERATE', 48000)
             self.PRIMARY_BITDEPTH = getattr(bmar_config, 'PRIMARY_BITDEPTH', 16)
             self.PRIMARY_SAVE_SAMPLERATE = getattr(bmar_config, 'PRIMARY_SAVE_SAMPLERATE', None)
             self.BUFFER_SECONDS = getattr(bmar_config, 'BUFFER_SECONDS', 300)
             
-            # Set up directory attributes for recording
+            # Set up directory attributes for recording (these will be updated by check_and_create_date_folders)
             self.MONITOR_DIRECTORY = os.path.join(self.today_dir, 'monitor')
             self.PRIMARY_DIRECTORY = os.path.join(self.today_dir, 'primary')
+            self.PLOT_DIRECTORY = os.path.join(self.today_dir, 'plots')
             
             # Ensure recording directories exist
             os.makedirs(self.MONITOR_DIRECTORY, exist_ok=True)
             os.makedirs(self.PRIMARY_DIRECTORY, exist_ok=True)
+            os.makedirs(self.PLOT_DIRECTORY, exist_ok=True)
             
             # Set up data type based on bit depth
             if self.PRIMARY_BITDEPTH == 16:

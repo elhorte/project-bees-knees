@@ -229,10 +229,14 @@ def setup_terminal_for_input(app):
 
 def interruptable_sleep(seconds, stop_sleep_event):
     """Sleep for specified duration but can be interrupted by an event."""
-    for i in range(seconds*2):
+    # Convert to integer iterations, with minimum of 1 to avoid range(0)
+    iterations = max(1, int(seconds * 2))
+    sleep_duration = seconds / iterations
+    
+    for i in range(iterations):
         if stop_sleep_event.is_set():
             return
-        time.sleep(0.5)
+        time.sleep(sleep_duration)
 
 def signal_handler(sig, frame):
     """Handle interrupt signals gracefully."""

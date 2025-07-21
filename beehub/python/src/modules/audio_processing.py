@@ -24,8 +24,28 @@ def callback(app, indata, frames, time_info, status):
         if status != 0:
             print("PyAudio input issue at:", datetime.datetime.now())
 
-    # Convert PyAudio bytes to numpy array
+    # Convert PyAudio bytes to numpy array with the same dtype as the buffer
     audio_data = np.frombuffer(indata, dtype=np.float32)
+    
+    # Handle invalid values (NaN, infinity) in audio data
+    if not np.all(np.isfinite(audio_data)):
+        # Replace NaN and infinity values with zeros
+        audio_data = np.nan_to_num(audio_data, nan=0.0, posinf=0.0, neginf=0.0)
+    
+    # Convert to the buffer's data type to avoid casting warnings
+    if hasattr(app, '_dtype') and app._dtype != np.float32:
+        # Clamp audio data to valid range [-1.0, 1.0] to prevent overflow
+        audio_data = np.clip(audio_data, -1.0, 1.0)
+        
+        # Scale float32 data to the target data type range
+        if app._dtype == np.int16:
+            # Convert float32 [-1.0, 1.0] to int16 [-32768, 32767]
+            audio_data = (audio_data * 32767).astype(np.int16)
+        elif app._dtype == np.int32:
+            # Convert float32 [-1.0, 1.0] to int32 [-2147483648, 2147483647]
+            audio_data = (audio_data * 2147483647).astype(np.int32)
+        # If _dtype is np.float32, no conversion needed
+    # If no _dtype attribute, keep as float32 (fallback)
     
     # Reshape for multi-channel if needed
     if app.sound_in_chs > 1:
