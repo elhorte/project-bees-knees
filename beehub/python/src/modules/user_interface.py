@@ -32,8 +32,8 @@ def keyboard_listener(app):
         print("  's' - Spectrogram (one-shot with GUI)")
         print("  'o' - Oscilloscope (10s capture with GUI)")
         print("  't' - Threads (list all)")
-        print("  'v' - VU meter")
-        print("  'i' - Intercom")
+        print("  'v' - VU meter (independent, start before intercom for combo mode)")
+        print("  'i' - Intercom (audio monitoring)")
         print("  'd' - Current audio device")
         print("  'D' - List detailed audio devices")
         print("  'p' - Performance monitor")
@@ -102,7 +102,15 @@ def process_command(app, command):
             handle_thread_list_command(app)
             
         elif command == 'v' or command == 'V':
-            handle_vu_meter_command(app)
+            # Check if intercom is running - if so, suppress VU meter command
+            if 'i' in app.active_processes and app.active_processes['i'] is not None:
+                if hasattr(app.active_processes['i'], 'is_alive') and app.active_processes['i'].is_alive():
+                    print("VU meter command suppressed while intercom is active.\r")
+                    print("Stop intercom first ('i') or start VU meter before intercom for combo mode.\r")
+                else:
+                    handle_vu_meter_command(app)
+            else:
+                handle_vu_meter_command(app)
             
         elif command == 'i' or command == 'I':
             handle_intercom_command(app)
@@ -429,8 +437,8 @@ def handle_vu_meter_command(app):
                     app.vu_stop_event.set()
                 cleanup_process(app, 'v')
             else:
-                print("Starting VU meter...\r")  # Added \r
                 app.active_processes['v'] = None
+                print("Starting VU meter...\r")  # Added \r
                 start_vu_meter(app)
         else:
             print("Starting VU meter...\r")  # Added \r
@@ -467,8 +475,6 @@ def start_vu_meter(app):
             'DEBUG_VERBOSE': getattr(app, 'DEBUG_VERBOSE', False)
         }
         
-        print(f"Starting VU meter on channel {app.monitor_channel + 1} of {app.channels}\r")  # Added \r
-        
         # Create and start VU meter thread
         vu_thread = threading.Thread(
             target=vu_meter,
@@ -480,7 +486,6 @@ def start_vu_meter(app):
         app.active_processes['v'] = vu_thread
         
         vu_thread.start()
-        print(f"VU meter started as thread\r")  # Added \r
         
     except Exception as e:
         print(f"Error starting VU meter: {e}\r")  # Added \r
@@ -494,20 +499,37 @@ def handle_intercom_command(app):
     from .audio_tools import intercom_m
     
     try:
+        # Check if VU meter is active to decide whether to print status
+        vu_meter_active = ('v' in app.active_processes and 
+                          app.active_processes['v'] is not None and
+                          app.active_processes['v'].is_alive())
+        
         if 'i' in app.active_processes and app.active_processes['i'] is not None:
             if app.active_processes['i'].is_alive():
-                print("Stopping intercom...\r")  # Added \r
+                if not vu_meter_active:
+                    print("Stopping intercom...\r")  # Added \r
                 cleanup_process(app, 'i')
             else:
-                print("Starting intercom...\r")  # Added \r
+                if not vu_meter_active:
+                    print("Starting intercom...\r")  # Added \r
                 app.active_processes['i'] = None
                 start_intercom(app)
         else:
-            print("Starting intercom...\r")  # Added \r
+            if not vu_meter_active:
+                print("Starting intercom...\r")  # Added \r
             start_intercom(app)
             
     except Exception as e:
-        print(f"Intercom command error: {e}\r")  # Added \r
+        # Check VU meter status again for error display
+        try:
+            vu_meter_active = ('v' in app.active_processes and 
+                              app.active_processes['v'] is not None and
+                              app.active_processes['v'].is_alive())
+        except:
+            vu_meter_active = False
+        
+        if not vu_meter_active:
+            print(f"Intercom command error: {e}\r")  # Added \r
 
 def start_intercom(app):
     """Start intercom monitoring."""
@@ -519,6 +541,11 @@ def start_intercom(app):
         # Ensure app has all required attributes
         ensure_app_attributes(app)
         
+        # Check if VU meter is active
+        vu_meter_active = ('v' in app.active_processes and 
+                          app.active_processes['v'] is not None and
+                          app.active_processes['v'].is_alive())
+        
         # Create intercom configuration
         intercom_config = {
             'input_device': app.device_index,
@@ -527,10 +554,13 @@ def start_intercom(app):
             'channels': app.channels,
             'blocksize': app.blocksize,
             'gain': 1.0,
-            'monitor_channel': app.monitor_channel
+            'monitor_channel': app.monitor_channel,
+            'vu_meter_active': vu_meter_active  # Pass simple boolean instead of app object
         }
         
-        print(f"Starting intercom (device {app.device_index}, {app.samplerate}Hz)\r")  # Added \r
+        # Only print status if VU meter is not active to avoid interfering with display
+        if not vu_meter_active:
+            print(f"Starting intercom (device {app.device_index}, {app.samplerate}Hz)\r")  # Added \r
         
         # Create and start intercom process
         process = create_subprocess(
@@ -542,7 +572,10 @@ def start_intercom(app):
         )
         
         process.start()
-        print(f"Intercom started (PID: {process.pid})\r")  # Added \r
+        
+        # Only print status if VU meter is not active to avoid interfering with display
+        if not vu_meter_active:
+            print(f"Intercom started (PID: {process.pid})\r")  # Added \r
         
     except Exception as e:
         print(f"Error starting intercom: {e}\r")  # Added \r

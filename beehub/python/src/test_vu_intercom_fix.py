@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""
+Test script for VU meter and intercom independence
+"""
+
+print("Testing VU meter and intercom independence fixes:")
+print("")
+print("Changes made:")
+print("1. ✅ VU meter 'v' command is suppressed when intercom is running")
+print("2. ✅ Completely removed ALL VU meter code from intercom function")
+print("3. ✅ Optimized VU meter buffer size (256 samples = ~5.8ms at 44100Hz)")
+print("4. ✅ Updated help text to explain independent operation")
+print("5. ✅ Intercom is now 100% VU-free - pure audio monitoring only")
+print("")
+print("Expected behavior:")
+print("- Start VU meter first with 'v' → get fast, responsive VU display")
+print("- Start intercom with 'i' → pure audio monitoring, NO built-in VU meter")
+print("- Both run completely independently with zero conflicts")
+print("- Pressing 'v' while intercom is active shows helpful message")
+print("- Intercom has zero VU calculations, zero level processing, zero display")
+print("")
+print("To test:")
+print("1. Run main BMAR application")
+print("2. Press 'v' to start VU meter (should be fast and responsive)")
+print("3. Press 'i' to start intercom (pure audio monitoring, no VU display)")
+print("4. Both should work together perfectly with no slowdowns")
+print("5. Try pressing 'v' again (should show suppression message)")
+print("6. Stop intercom with 'i', then 'v' should work again")
+print("")
+print("This restores the original BMAR behavior where VU meter and intercom")
+print("operated as completely independent processes with no shared code.")

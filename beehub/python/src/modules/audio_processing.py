@@ -4,7 +4,7 @@ Handles audio streaming, buffer management, and core audio processing operations
 """
 
 import numpy as np
-import sounddevice as sd
+import pyaudio
 import threading
 import datetime
 import time
@@ -16,26 +16,39 @@ from .system_utils import interruptable_sleep
 from .file_utils import check_and_create_date_folders
 from .audio_conversion import downsample_audio, pcm_to_mp3_write
 
-def callback(app, indata, frames, time, status):
-    """Callback function for audio input stream."""
+def callback(app, indata, frames, time_info, status):
+    """Callback function for audio input stream (PyAudio compatible)."""
     if status:
-        print("Callback status:", status)
-        if status.input_overflow:
-            print("Sounddevice input overflow at:", datetime.datetime.now())
+        print("PyAudio callback status:", status)
+        # PyAudio status values are different from sounddevice
+        if status != 0:
+            print("PyAudio input issue at:", datetime.datetime.now())
 
-    data_len = len(indata)
+    # Convert PyAudio bytes to numpy array
+    audio_data = np.frombuffer(indata, dtype=np.float32)
+    
+    # Reshape for multi-channel if needed
+    if app.sound_in_chs > 1:
+        audio_data = audio_data.reshape(-1, app.sound_in_chs)
+    else:
+        audio_data = audio_data.reshape(-1, 1)
 
-    # Managing the circular buffer
+    data_len = len(audio_data)
+
+    # Managing the circular buffer using PyAudio data
     if app.buffer_index + data_len <= app.buffer_size:
-        app.buffer[app.buffer_index:app.buffer_index + data_len] = indata
+        app.buffer[app.buffer_index:app.buffer_index + data_len] = audio_data
         app.buffer_wrap_event.clear()
     else:
         overflow = (app.buffer_index + data_len) - app.buffer_size
-        app.buffer[app.buffer_index:] = indata[:-overflow]
-        app.buffer[:overflow] = indata[-overflow:]
+        app.buffer[app.buffer_index:] = audio_data[:-overflow]
+        app.buffer[:overflow] = audio_data[-overflow:]
         app.buffer_wrap_event.set()
 
     app.buffer_index = (app.buffer_index + data_len) % app.buffer_size
+    
+    # Return PyAudio continue signal
+    return (indata, pyaudio.paContinue)
 
 def setup_audio_circular_buffer(app):
     """Set up the circular buffer for audio recording."""
@@ -66,45 +79,66 @@ def audio_stream(app):
     logging.info(f"Data Type: {app._dtype}")
 
     try:
-        # First verify the device configuration
-        device_info = sd.query_devices(app.sound_in_id)
-        logging.info("Selected device info:")
-        logging.info(f"Name: [{app.sound_in_id}] {device_info['name']}")
-        logging.info(f"Max Input Channels: {device_info['max_input_channels']}")
-        logging.info(f"Device Sample Rate: {int(device_info['default_samplerate'])} Hz")
-
-        if device_info['max_input_channels'] < app.sound_in_chs:
-            raise RuntimeError(f"Device only supports {device_info['max_input_channels']} channels, but {app.sound_in_chs} channels are required")
-
-        # Set the device's sample rate to match our configuration
-        sd.default.samplerate = app.PRIMARY_IN_SAMPLERATE
+        # Initialize PyAudio
+        pa = pyaudio.PyAudio()
         
+        # First verify the device configuration
+        try:
+            device_info = pa.get_device_info_by_index(app.sound_in_id)
+            logging.info("Selected device info:")
+            logging.info(f"Name: [{app.sound_in_id}] {device_info['name']}")
+            logging.info(f"Max Input Channels: {device_info['maxInputChannels']}")
+            logging.info(f"Device Sample Rate: {int(device_info['defaultSampleRate'])} Hz")
+
+            if device_info['maxInputChannels'] < app.sound_in_chs:
+                raise RuntimeError(f"Device only supports {device_info['maxInputChannels']} channels, but {app.sound_in_chs} channels are required")
+        except Exception as e:
+            logging.error(f"Error getting device info: {e}")
+            pa.terminate()
+            return
+
         # Create a partial function to pass app to the callback
-        app_callback = lambda indata, frames, time, status: callback(app, indata, frames, time, status)
+        app_callback = lambda indata, frames, time_info, status: callback(app, indata, frames, time_info, status)
+        
+        # Determine PyAudio format
+        if app._dtype == np.float32:
+            audio_format = pyaudio.paFloat32
+        elif app._dtype == np.int16:
+            audio_format = pyaudio.paInt16
+        elif app._dtype == np.int32:
+            audio_format = pyaudio.paInt32
+        else:
+            audio_format = pyaudio.paFloat32  # Default fallback
         
         # Initialize the stream with the configured sample rate and bit depth
-        stream = sd.InputStream(
-            device=app.sound_in_id,
+        stream = pa.open(
+            format=audio_format,
             channels=app.sound_in_chs,
-            samplerate=app.PRIMARY_IN_SAMPLERATE,
-            dtype=app._dtype,
-            blocksize=app.blocksize,
-            callback=app_callback
+            rate=int(app.PRIMARY_IN_SAMPLERATE),
+            input=True,
+            input_device_index=app.sound_in_id,
+            frames_per_buffer=app.blocksize,
+            stream_callback=app_callback
         )
 
-        logging.info("Audio stream initialized successfully")
-        logging.info(f"Stream sample rate: {stream.samplerate} Hz")
+        logging.info("PyAudio stream initialized successfully")
+        logging.info(f"Stream sample rate: {app.PRIMARY_IN_SAMPLERATE} Hz")
         logging.info(f"Stream bit depth: {app.PRIMARY_BITDEPTH} bits")
 
-        with stream:
-            # Start the recording worker threads
-            if hasattr(app.config, 'MODE_AUDIO_MONITOR') and app.config.MODE_AUDIO_MONITOR:
-                logging.info("Starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
-                threading.Thread(target=recording_worker_thread, args=(
-                    app,
-                    app.config.AUDIO_MONITOR_RECORD,
-                    app.config.AUDIO_MONITOR_INTERVAL,
-                    "Audio_monitor",
+        # Store references for cleanup
+        app.audio_stream = stream
+        app.pa_instance = pa
+        
+        stream.start_stream()
+
+        # Start the recording worker threads
+        if hasattr(app.config, 'MODE_AUDIO_MONITOR') and app.config.MODE_AUDIO_MONITOR:
+            logging.info("Starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
+            threading.Thread(target=recording_worker_thread, args=(
+                app,
+                app.config.AUDIO_MONITOR_RECORD,
+                app.config.AUDIO_MONITOR_INTERVAL,
+                "Audio_monitor",
                     app.config.AUDIO_MONITOR_FORMAT,
                     app.config.AUDIO_MONITOR_SAMPLERATE,
                     getattr(app.config, 'AUDIO_MONITOR_START', None),
@@ -141,13 +175,35 @@ def audio_stream(app):
             while not app.stop_program[0]:
                 time.sleep(0.1)
             
+            # Cleanup PyAudio stream
+            try:
+                if stream.is_active():
+                    stream.stop_stream()
+                stream.close()
+                pa.terminate()
+                logging.info("PyAudio stream cleaned up successfully")
+            except Exception as cleanup_error:
+                logging.error(f"Error during PyAudio cleanup: {cleanup_error}")
+            
             # Normal exit - return True
             logging.info("Audio stream stopped normally")
             return True
 
     except Exception as e:
-        logging.error(f"Error in audio stream: {e}")
+        logging.error(f"Error in PyAudio stream: {e}")
         logging.info("Please check your audio device configuration and ensure it supports the required settings")
+        
+        # Cleanup on error
+        try:
+            if 'stream' in locals() and stream:
+                if stream.is_active():
+                    stream.stop_stream()
+                stream.close()
+            if 'pa' in locals() and pa:
+                pa.terminate()
+        except Exception as cleanup_error:
+            logging.error(f"Error during cleanup after exception: {cleanup_error}")
+        
         sys.stdout.flush()
         return False
 

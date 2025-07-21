@@ -6,33 +6,52 @@ Handles subprocess lifecycle management, cleanup, and process tracking.
 import multiprocessing
 import time
 import logging
-import sounddevice as sd
 import os
 
 def cleanup_process(app, command):
-    """Clean up a specific command's process."""
+    """Clean up a specific command's process or thread."""
+    import threading
+    
     try:
         # Check if the command key exists in active_processes
         if command in app.active_processes:
-            process = app.active_processes[command]
-            if process is not None:
+            process_or_thread = app.active_processes[command]
+            if process_or_thread is not None:
                 try:
-                    if process.is_alive():
-                        logging.info(f"Terminating process for command '{command}'\r")
-                        process.terminate()
-                        process.join(timeout=5)  # Wait up to 5 seconds
-                        
-                        if process.is_alive():
-                            logging.warning(f"Force killing process for command '{command}'\r")
-                            process.kill()
-                            process.join()
+                    if process_or_thread.is_alive():
+                        # Check if it's a thread or process
+                        if isinstance(process_or_thread, threading.Thread):
+                            logging.info(f"Stopping thread for command '{command}'\r")
+                            
+                            # For threads, we need to use stop events
+                            if command == 'v' and hasattr(app, 'vu_stop_event'):
+                                app.vu_stop_event.set()
+                                # Give thread a bit more time to stop gracefully and clean up output
+                                process_or_thread.join(timeout=2)
+                                
+                                if process_or_thread.is_alive():
+                                    logging.warning(f"Thread for command '{command}' did not stop gracefully\r")
+                                else:
+                                    # Small delay to let VU meter clean up its output
+                                    time.sleep(0.1)
+                                    
+                        else:
+                            # It's a process
+                            logging.info(f"Terminating process for command '{command}'\r")
+                            process_or_thread.terminate()
+                            process_or_thread.join(timeout=5)  # Wait up to 5 seconds
+                            
+                            if process_or_thread.is_alive():
+                                logging.warning(f"Force killing process for command '{command}'\r")
+                                process_or_thread.kill()
+                                process_or_thread.join()
                             
                 except Exception as e:
-                    logging.error(f"Error terminating process for command '{command}': {e}\r")
+                    logging.error(f"Error stopping {type(process_or_thread).__name__.lower()} for command '{command}': {e}\r")
                 
-                # Reset the process reference
+                # Reset the process/thread reference
                 app.active_processes[command] = None
-                print(f"Process for command '{command}' has been cleaned up")
+                print(f"{type(process_or_thread).__name__} for command '{command}' has been cleaned up")
         else:
             # The command doesn't exist in our tracking dictionary
             logging.warning(f"Warning: No process tracking for command '{command}'\r")
@@ -117,12 +136,8 @@ def cleanup(app):
         for key in app.active_processes:
             cleanup_process(app, key)
 
-    # Force close any remaining sounddevice streams
-    try:
-        sd.stop()  # Stop all sounddevice streams
-        time.sleep(0.1)
-    except Exception as e:
-        logging.warning(f"Note: Error stopping sounddevice streams: {e}")
+    # PyAudio streams are cleaned up individually by their processes
+    # No global sounddevice cleanup needed since we use PyAudio exclusively
 
     # Restore terminal settings
     from .system_utils import restore_terminal_settings, reset_terminal_settings
