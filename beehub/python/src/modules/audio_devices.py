@@ -8,6 +8,7 @@ from typing import List, Dict, Optional, Tuple
 
 # Use PyAudio exclusively
 from .class_PyAudio import AudioPortManager
+from . import bmar_config as config
 
 def print_all_input_devices():
     """Print a list of all available input devices using PyAudio."""
@@ -116,43 +117,56 @@ def find_device_by_config(bmar_app) -> bool:
             
         print(f"Looking for device: '{target_device_name}' on {platform_name}")
         
-        # Search for matching device
+        # Search for matching device with API priority
         matching_devices = []
+        
+        # First priority: Exact device name + API match
         for device in devices:
             if not device['is_input']:
                 continue
                 
             name_match = target_device_name.lower() in device['name'].lower()
-            api_match = target_api is None or target_api in device['api']
+            api_match = target_api in device['api']
             
             if name_match and api_match:
-                matching_devices.append(device)
+                matching_devices.insert(0, device)  # Priority device goes first
+            elif name_match:
+                matching_devices.append(device)  # Name match goes second
+        
+        # If no name matches, try API matches
+        if not matching_devices:
+            for device in devices:
+                if device['is_input'] and target_api in device['api']:
+                    matching_devices.append(device)
         
         if not matching_devices:
-            print(f"Device '{target_device_name}' not found")
+            print(f"Device '{target_device_name}' with API '{target_api}' not found")
             return False
         
-        # Use the first matching device
-        device = matching_devices[0]
-        print(f"Found device: {device['name']} (API: {device['api']})")
+        # Test devices in priority order
+        for device in matching_devices:
+            print(f"Testing device: {device['name']} (API: {device['api']})")
+            
+            # Test with configured parameters
+            if manager.test_device_configuration(
+                device['index'], config.PRIMARY_IN_SAMPLERATE, config.PRIMARY_BITDEPTH, config.SOUND_IN_CHS
+            ):
+                print(f"Device configured successfully: {device['name']} at {config.PRIMARY_IN_SAMPLERATE}Hz ({config.SOUND_IN_CHS} ch)")
+                
+                # Configure the application with this device
+                bmar_app.device_index = device['index']
+                bmar_app.samplerate = config.PRIMARY_IN_SAMPLERATE
+                bmar_app.channels = config.SOUND_IN_CHS
+                bmar_app.sound_in_id = device['index']
+                bmar_app.sound_in_chs = bmar_app.channels
+                bmar_app.PRIMARY_IN_SAMPLERATE = bmar_app.samplerate
+                
+                return True
+            else:
+                print(f"Device test failed for: {device['name']}")
         
-        # Configure the application with this device
-        bmar_app.device_index = device['index']
-        bmar_app.samplerate = int(device['default_sample_rate'])
-        bmar_app.channels = min(2, device['input_channels'])
-        bmar_app.sound_in_id = device['index']
-        bmar_app.sound_in_chs = bmar_app.channels
-        bmar_app.PRIMARY_IN_SAMPLERATE = bmar_app.samplerate
-        
-        # Test the configuration
-        if not manager.test_device_configuration(
-            bmar_app.device_index, bmar_app.samplerate, 16, bmar_app.channels
-        ):
-            print(f"Warning: Device configuration test failed")
-            return False
-        
-        print(f"Device configured successfully: {device['name']} at {bmar_app.samplerate}Hz ({bmar_app.channels} ch)")
-        return True
+        print("No compatible devices found with required configuration")
+        return False
         
     except Exception as e:
         logging.error(f"Error in find_device_by_config: {e}")
@@ -160,19 +174,114 @@ def find_device_by_config(bmar_app) -> bool:
         return False
 
 def get_audio_device_config() -> Optional[Dict]:
-    """Get audio device configuration with fallback to first available input device."""
+    """Get audio device configuration prioritizing configured device and API."""
     try:
         manager = AudioPortManager()
         devices = manager.list_audio_devices()
         
-        # Find first working input device
+        from .platform_manager import PlatformManager
+        pm = PlatformManager()
+        
+        # Get platform-specific configuration
+        if pm.is_windows():
+            target_device_name = config.WINDOWS_DEVICE_NAME
+            target_api = config.WINDOWS_API_NAME
+            preferred_apis = config.AUDIO_API_PREFERENCE
+        elif pm.is_macos():
+            target_device_name = config.MACOS_DEVICE_NAME
+            target_api = config.MACOS_API_NAME
+            preferred_apis = ["Core Audio"]
+        else:  # Linux
+            target_device_name = config.LINUX_DEVICE_NAME
+            target_api = config.LINUX_API_NAME
+            preferred_apis = ["ALSA"]
+        
+        # First priority: Find exact device name + API match
+        for device in devices:
+            if not device['is_input'] or device['input_channels'] == 0:
+                continue
+                
+            name_match = target_device_name.lower() in device['name'].lower()
+            api_match = target_api in device['api']
+            
+            if name_match and api_match:
+                # Test with configured parameters, not device defaults
+                if manager.test_device_configuration(
+                    device['index'], config.PRIMARY_IN_SAMPLERATE, config.PRIMARY_BITDEPTH, 
+                    config.SOUND_IN_CHS
+                ):
+                    print(f"Found exact match: {device['name']} ({device['api']})")
+                    return {
+                        'default_device': {
+                            'index': device['index'],
+                            'name': device['name'],
+                            'api': device['api'],
+                            'input_channels': device['input_channels'],
+                            'default_sample_rate': device['default_sample_rate']
+                        },
+                        'all_devices': devices
+                    }
+        
+        # Second priority: Find device name match with preferred API
+        for api_name in preferred_apis:
+            for device in devices:
+                if not device['is_input'] or device['input_channels'] == 0:
+                    continue
+                    
+                name_match = target_device_name.lower() in device['name'].lower()
+                api_match = api_name in device['api']
+                
+                if name_match and api_match:
+                    # Test with configured parameters
+                    if manager.test_device_configuration(
+                        device['index'], config.PRIMARY_IN_SAMPLERATE, config.PRIMARY_BITDEPTH, 
+                        config.SOUND_IN_CHS
+                    ):
+                        print(f"Found device with preferred API: {device['name']} ({device['api']})")
+                        return {
+                            'default_device': {
+                                'index': device['index'],
+                                'name': device['name'],
+                                'api': device['api'],
+                                'input_channels': device['input_channels'],
+                                'default_sample_rate': device['default_sample_rate']
+                            },
+                            'all_devices': devices
+                        }
+        
+        # Third priority: Any device with preferred API
+        for api_name in preferred_apis:
+            for device in devices:
+                if not device['is_input'] or device['input_channels'] == 0:
+                    continue
+                    
+                if api_name in device['api']:
+                    # Test with configured parameters
+                    if manager.test_device_configuration(
+                        device['index'], config.PRIMARY_IN_SAMPLERATE, config.PRIMARY_BITDEPTH, 
+                        config.SOUND_IN_CHS
+                    ):
+                        print(f"Found device with preferred API: {device['name']} ({device['api']})")
+                        return {
+                            'default_device': {
+                                'index': device['index'],
+                                'name': device['name'],
+                                'api': device['api'],
+                                'input_channels': device['input_channels'],
+                                'default_sample_rate': device['default_sample_rate']
+                            },
+                            'all_devices': devices
+                        }
+        
+        # Last resort: Find any working input device with configured parameters
         for device in devices:
             if device['is_input'] and device['input_channels'] > 0:
-                # Test if device works with basic configuration
+                # Test with configured parameters, not device defaults
                 if manager.test_device_configuration(
-                    device['index'], int(device['default_sample_rate']), 16, 
-                    min(2, device['input_channels'])
+                    device['index'], config.PRIMARY_IN_SAMPLERATE, config.PRIMARY_BITDEPTH, 
+                    min(config.SOUND_IN_CHS, device['input_channels'])
                 ):
+                    print(f"Fallback device: {device['name']} ({device['api']})")
                     return {
                         'default_device': {
                             'index': device['index'],
@@ -204,8 +313,8 @@ def configure_audio_device_interactive(bmar_app) -> bool:
         if device_config and device_config.get('default_device'):
             device = device_config['default_device']
             bmar_app.device_index = device['index']
-            bmar_app.samplerate = int(device['default_sample_rate'])
-            bmar_app.channels = min(2, device['input_channels'])
+            bmar_app.samplerate = config.PRIMARY_IN_SAMPLERATE  # Use configured sample rate, not device default
+            bmar_app.channels = config.SOUND_IN_CHS  # Use configured channels from config
             bmar_app.sound_in_id = device['index']
             bmar_app.sound_in_chs = bmar_app.channels
             bmar_app.PRIMARY_IN_SAMPLERATE = bmar_app.samplerate

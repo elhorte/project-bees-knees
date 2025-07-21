@@ -72,8 +72,12 @@ def _vu_meter_pyaudio(config, stop_event=None):
                 if stop_event and stop_event.is_set():
                     return (in_data, pyaudio.paAbort)
                     
-                if status:
-                    print(f"Audio status: {status}")
+                # Only print status for critical errors, not normal overflow conditions
+                # Status 2 = paInputOverflow (common, not critical)
+                # Status 1 = paOutputUnderflow  
+                # Status 0 = No error
+                if status and status > 2:
+                    print(f"\nAudio status error: {status}")
                 
                 # Convert audio data
                 audio_data = np.frombuffer(in_data, dtype=np.float32)
@@ -242,6 +246,9 @@ def intercom_m(config):
         samplerate = config['samplerate']
         channels = config.get('channels', 1)
         bit_depth = config.get('bit_depth', 16)
+        
+        # Ensure we use the exact configured parameters, not defaults
+        # Note: samplerate and channels should come from bmar_config.py settings
         
         # Check if VU meter is running - use passed status instead of app object
         vu_meter_active = config.get('vu_meter_active', False)
