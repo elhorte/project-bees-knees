@@ -206,7 +206,7 @@ def start_new_recording(app):
         # Create and start recording process
         process = create_subprocess(
             target_function=recording_worker_thread,
-            args=(app, record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod),
+            args=(app, record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod, app.stop_recording_event),
             process_key='r',
             app=app,
             daemon=True

@@ -142,7 +142,8 @@ def audio_stream(app):
                     app.config.AUDIO_MONITOR_FORMAT,
                     app.config.AUDIO_MONITOR_SAMPLERATE,
                     getattr(app.config, 'AUDIO_MONITOR_START', None),
-                    getattr(app.config, 'AUDIO_MONITOR_END', None)
+                    getattr(app.config, 'AUDIO_MONITOR_END', None),
+                    app.stop_auto_recording_event  # Use separate event for automatic recording
                 )).start()
 
             if hasattr(app.config, 'MODE_PERIOD') and app.config.MODE_PERIOD:
@@ -155,7 +156,8 @@ def audio_stream(app):
                     app.config.PRIMARY_FILE_FORMAT,
                     app.PRIMARY_IN_SAMPLERATE,
                     getattr(app.config, 'PERIOD_START', None),
-                    getattr(app.config, 'PERIOD_END', None)
+                    getattr(app.config, 'PERIOD_END', None),
+                    app.stop_auto_recording_event  # Use separate event for automatic recording
                 )).start()
 
             if hasattr(app.config, 'MODE_EVENT') and app.config.MODE_EVENT:
@@ -168,7 +170,8 @@ def audio_stream(app):
                     app.config.PRIMARY_FILE_FORMAT,
                     app.PRIMARY_IN_SAMPLERATE,
                     getattr(app.config, 'EVENT_START', None),
-                    getattr(app.config, 'EVENT_END', None)
+                    getattr(app.config, 'EVENT_END', None),
+                    app.stop_auto_recording_event  # Use separate event for automatic recording
                 )).start()
 
             # Wait for keyboard input to stop
@@ -209,15 +212,19 @@ def audio_stream(app):
 
     return True  # Normal exit path
 
-def recording_worker_thread(app, record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod):
+def recording_worker_thread(app, record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod, stop_event=None):
     """Worker thread for recording audio to files."""
+    
+    # Use the provided stop event, or fall back to the default one for backward compatibility
+    if stop_event is None:
+        stop_event = app.stop_recording_event
     
     if start_tod is None:
         print(f"{thread_id} is recording continuously\r")
 
     samplerate = app.PRIMARY_IN_SAMPLERATE
 
-    while not app.stop_recording_event.is_set():
+    while not stop_event.is_set():
         try:
             current_time = datetime.datetime.now().time()
             
@@ -226,10 +233,10 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
 
                 app.period_start_index = app.buffer_index 
                 # Wait PERIOD seconds to accumulate audio
-                interruptable_sleep(record_period, app.stop_recording_event)
+                interruptable_sleep(record_period, stop_event)
 
                 # Check if we're shutting down before saving
-                if app.stop_recording_event.is_set():
+                if stop_event.is_set():
                     break
 
                 period_end_index = app.buffer_index 
@@ -253,7 +260,7 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
                     audio_segment = downsample_audio(audio_segment, app.PRIMARY_IN_SAMPLERATE, save_sample_rate)
 
                 # Check if we're shutting down before saving
-                if app.stop_recording_event.is_set():
+                if stop_event.is_set():
                     break
 
                 # Check and create new date folders if needed
@@ -289,16 +296,16 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
                     logging.error(f"Error saving {thread_id} file {filename}: {e}")
 
                 # Wait for the next recording interval
-                if not app.stop_recording_event.is_set():
-                    interruptable_sleep(interval, app.stop_recording_event)
+                if not stop_event.is_set():
+                    interruptable_sleep(interval, stop_event)
             else:
                 # Not in recording time window, wait briefly and check again
-                interruptable_sleep(10, app.stop_recording_event)
+                interruptable_sleep(10, stop_event)
                 
         except Exception as e:
             logging.error(f"Error in {thread_id}: {e}")
-            if not app.stop_recording_event.is_set():
-                interruptable_sleep(30, app.stop_recording_event)  # Wait before retrying
+            if not stop_event.is_set():
+                interruptable_sleep(30, stop_event)  # Wait before retrying
 
 def create_progress_bar(current, total, bar_length=50):
     """Create a progress bar string.

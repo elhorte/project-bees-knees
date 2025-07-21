@@ -86,6 +86,21 @@ class BmarApp:
         self.max_file_size_mb = 100
         self.buffer_pointer = [0]  # For circular buffer tracking
         
+        # Audio streaming and recording attributes
+        self.audio_stream = None
+        self.pa_instance = None
+        self.buffer = None
+        self.buffer_index = 0
+        self.buffer_size = 0
+        self.buffer_wrap = False
+        self.period_start_index = 0
+        
+        # Threading events for recording
+        import threading
+        self.stop_recording_event = threading.Event()  # For manual recording only
+        self.stop_auto_recording_event = threading.Event()  # For automatic recording
+        self.buffer_wrap_event = threading.Event()
+        
         # Initialize platform manager
         from .platform_manager import PlatformManager
         self.platform_manager = PlatformManager()
@@ -128,6 +143,38 @@ class BmarApp:
             audio_success = self.initialize_audio_with_fallback()
             if not audio_success:
                 raise RuntimeError("No suitable audio device found")
+            
+            # Import and setup config for audio processing
+            from . import bmar_config
+            self.config = bmar_config
+            
+            # Set up audio processing attributes from config
+            self.PRIMARY_IN_SAMPLERATE = getattr(bmar_config, 'PRIMARY_IN_SAMPLERATE', 48000)
+            self.PRIMARY_BITDEPTH = getattr(bmar_config, 'PRIMARY_BITDEPTH', 16)
+            self.PRIMARY_SAVE_SAMPLERATE = getattr(bmar_config, 'PRIMARY_SAVE_SAMPLERATE', None)
+            self.BUFFER_SECONDS = getattr(bmar_config, 'BUFFER_SECONDS', 300)
+            
+            # Set up directory attributes for recording
+            self.MONITOR_DIRECTORY = os.path.join(self.today_dir, 'monitor')
+            self.PRIMARY_DIRECTORY = os.path.join(self.today_dir, 'primary')
+            
+            # Ensure recording directories exist
+            os.makedirs(self.MONITOR_DIRECTORY, exist_ok=True)
+            os.makedirs(self.PRIMARY_DIRECTORY, exist_ok=True)
+            
+            # Set up data type based on bit depth
+            if self.PRIMARY_BITDEPTH == 16:
+                self._dtype = np.int16
+            elif self.PRIMARY_BITDEPTH == 24:
+                self._dtype = np.int32
+            elif self.PRIMARY_BITDEPTH == 32:
+                self._dtype = np.float32
+            else:
+                self._dtype = np.float32  # Default fallback
+            
+            # Initialize circular buffer if audio recording will be used
+            if self.should_start_auto_recording():
+                self.setup_audio_circular_buffer()
             
             # Initialize circular buffer
             import multiprocessing
@@ -188,6 +235,46 @@ class BmarApp:
             print(f"FATAL: Audio initialization failed - {e}")
             return False
 
+    def should_start_auto_recording(self):
+        """Check if automatic recording should be started based on config."""
+        try:
+            from . import bmar_config
+            return (getattr(bmar_config, 'MODE_AUDIO_MONITOR', False) or 
+                    getattr(bmar_config, 'MODE_PERIOD', False) or 
+                    getattr(bmar_config, 'MODE_EVENT', False))
+        except ImportError:
+            return False
+
+    def setup_audio_circular_buffer(self):
+        """Set up the circular buffer for audio recording."""
+        # Calculate buffer size and initialize buffer
+        self.buffer_size = int(self.BUFFER_SECONDS * self.PRIMARY_IN_SAMPLERATE)
+        self.buffer = np.zeros((self.buffer_size, self.sound_in_chs), dtype=self._dtype)
+        self.buffer_index = 0
+        self.buffer_wrap = False
+        self.blocksize = 8196
+        self.buffer_wrap_event.clear()
+        
+        print(f"\naudio buffer size: {sys.getsizeof(self.buffer)}\n")
+
+    def start_auto_recording(self):
+        """Start automatic recording if configured."""
+        try:
+            from .audio_processing import audio_stream
+            
+            print("Starting automatic audio recording based on configuration...")
+            
+            # Start audio stream in a separate thread
+            self.audio_thread = threading.Thread(target=audio_stream, args=(self,), daemon=True)
+            self.audio_thread.start()
+            
+            print("Automatic recording started successfully.")
+            return True
+            
+        except Exception as e:
+            logging.error(f"Failed to start automatic recording: {e}")
+            return False
+
 
 
     def run(self):
@@ -198,6 +285,14 @@ class BmarApp:
             
             # Set the keyboard listener to running state
             self.keyboard_listener_running = True
+            
+            # Start automatic recording if configured
+            if self.should_start_auto_recording():
+                self.start_auto_recording()
+                print("Note: Automatic recording is active based on configuration.")
+                print("You can still use manual controls (press 'h' for help).")
+            else:
+                print("No automatic recording configured. Use 'r' to start manual recording.")
             
             # Start the user interface using the CORRECT function name
             from .user_interface import keyboard_listener
@@ -216,6 +311,37 @@ class BmarApp:
         try:
             print("Cleaning up BMAR application...")
             logging.info("Stopping all processes and threads...")
+            
+            # Stop recording if active
+            if hasattr(self, 'stop_recording_event'):
+                self.stop_recording_event.set()
+            
+            # Stop automatic recording if active
+            if hasattr(self, 'stop_auto_recording_event'):
+                self.stop_auto_recording_event.set()
+            
+            # Stop audio stream if active
+            if hasattr(self, 'audio_stream') and self.audio_stream:
+                try:
+                    if self.audio_stream.is_active():
+                        self.audio_stream.stop_stream()
+                    self.audio_stream.close()
+                except Exception as e:
+                    logging.warning(f"Error stopping audio stream: {e}")
+            
+            # Terminate PyAudio if active
+            if hasattr(self, 'pa_instance') and self.pa_instance:
+                try:
+                    self.pa_instance.terminate()
+                except Exception as e:
+                    logging.warning(f"Error terminating PyAudio: {e}")
+            
+            # Wait for audio thread to finish
+            if hasattr(self, 'audio_thread') and self.audio_thread.is_alive():
+                try:
+                    self.audio_thread.join(timeout=5)
+                except Exception as e:
+                    logging.warning(f"Error waiting for audio thread: {e}")
             
             # Stop all active processes
             if hasattr(self, 'active_processes'):
