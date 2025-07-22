@@ -28,7 +28,7 @@ except ImportError:
     logging.warning("file_utils module not available")
 
 try:
-    from .audio_devices import get_audio_device_config, configure_audio_device_interactive
+    from .audio_devices import get_audio_device_config, find_device_by_config
 except ImportError:
     logging.warning("audio_devices module not available")
 
@@ -41,11 +41,6 @@ try:
     from .user_interface import keyboard_listener, cleanup_ui
 except ImportError:
     logging.warning("user_interface module not available")
-
-try:
-    from .class_PyAudio import *
-except ImportError:
-    logging.warning("class_PyAudio module not available")
 
 class BmarApp:
     """Main BMAR Application class."""
@@ -334,18 +329,10 @@ class BmarApp:
             # Stop audio stream if active
             if hasattr(self, 'audio_stream') and self.audio_stream:
                 try:
-                    if self.audio_stream.is_active():
-                        self.audio_stream.stop_stream()
+                    self.audio_stream.stop()
                     self.audio_stream.close()
                 except Exception as e:
                     logging.warning(f"Error stopping audio stream: {e}")
-            
-            # Terminate PyAudio if active
-            if hasattr(self, 'pa_instance') and self.pa_instance:
-                try:
-                    self.pa_instance.terminate()
-                except Exception as e:
-                    logging.warning(f"Error terminating PyAudio: {e}")
             
             # Wait for audio thread to finish
             if hasattr(self, 'audio_thread') and self.audio_thread.is_alive():

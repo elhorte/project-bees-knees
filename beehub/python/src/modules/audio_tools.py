@@ -1,5 +1,5 @@
 """
-BMAR Audio Tools Module - PURE PYAUDIO
+BMAR Audio Tools Module - SOUNDDEVICE VERSION
 Contains VU meter, intercom monitoring, and audio diagnostic utilities.
 """
 
@@ -7,11 +7,11 @@ import numpy as np
 import threading
 import time
 import logging
-import pyaudio
+import sounddevice as sd
 import sys
 
 def vu_meter(config, stop_event=None):
-    """Real-time VU meter using PyAudio exclusively."""
+    """Real-time VU meter using sounddevice exclusively."""
     
     try:
         # Extract configuration
@@ -26,16 +26,16 @@ def vu_meter(config, stop_event=None):
             print("Virtual device detected - running VU meter with synthetic audio")
             return _vu_meter_virtual(config, stop_event)
         
-        # Use PyAudio exclusively
-        return _vu_meter_pyaudio(config, stop_event)
+        # Use sounddevice exclusively
+        return _vu_meter_sounddevice(config, stop_event)
             
     except Exception as e:
         print(f"VU meter error: {e}")
         import traceback
         traceback.print_exc()
 
-def _vu_meter_pyaudio(config, stop_event=None):
-    """VU meter using PyAudio exclusively."""
+def _vu_meter_sounddevice(config, stop_event=None):
+    """VU meter using sounddevice exclusively."""
     
     try:
         device_index = config.get('device_index')
@@ -48,13 +48,10 @@ def _vu_meter_pyaudio(config, stop_event=None):
         if blocksize > 256:
             blocksize = 256  # ~5.8ms at 44100Hz for very responsive updates
         
-        # Initialize PyAudio
-        pa = pyaudio.PyAudio()
-        
         # Validate device and channels
         try:
-            device_info = pa.get_device_info_by_index(device_index)
-            max_input_channels = int(device_info['maxInputChannels'])
+            device_info = sd.query_devices(device_index, 'input')
+            max_input_channels = int(device_info['max_input_channels'])
             actual_channels = min(channels, max_input_channels)
             
             if monitor_channel >= actual_channels:
@@ -65,28 +62,25 @@ def _vu_meter_pyaudio(config, stop_event=None):
             print(f"Error getting device info: {e}")
             actual_channels = channels
         
+        # Global variable to track VU meter data
+        vu_data = {'db_level': -80, 'rms_level': 0.0}
+        
         # Audio callback for VU meter
-        def audio_callback(in_data, frame_count, time_info, status):
+        def audio_callback(indata, frames, time, status):
             try:
                 # Check for stop event first
                 if stop_event and stop_event.is_set():
-                    return (in_data, pyaudio.paAbort)
+                    raise sd.CallbackStop()
                     
-                # Only print status for critical errors, not normal overflow conditions
-                # Status 2 = paInputOverflow (common, not critical)
-                # Status 1 = paOutputUnderflow  
-                # Status 0 = No error
-                if status and status > 2:
-                    print(f"\nAudio status error: {status}")
+                # Check for input overflow
+                if status.input_overflow:
+                    print(f"\nAudio input overflow")
                 
-                # Convert audio data
-                audio_data = np.frombuffer(in_data, dtype=np.float32)
-                
+                # Extract channel data
                 if actual_channels > 1:
-                    audio_data = audio_data.reshape(-1, actual_channels)
-                    channel_data = audio_data[:, monitor_channel]
+                    channel_data = indata[:, monitor_channel]
                 else:
-                    channel_data = audio_data
+                    channel_data = indata.flatten()
                 
                 # Calculate RMS level
                 rms_level = np.sqrt(np.mean(channel_data**2))
@@ -97,48 +91,42 @@ def _vu_meter_pyaudio(config, stop_event=None):
                 else:
                     db_level = -80
                 
-                # Create VU meter display
-                _display_vu_meter(db_level, rms_level)
-                
-                return (in_data, pyaudio.paContinue)
+                # Update global data
+                vu_data['db_level'] = db_level
+                vu_data['rms_level'] = rms_level
                 
             except Exception as e:
                 print(f"VU meter callback error: {e}")
-                return (in_data, pyaudio.paAbort)
+                raise sd.CallbackStop()
         
-        # Open audio stream
-        stream = pa.open(
-            format=pyaudio.paFloat32,
+        # Start stream with sounddevice
+        with sd.InputStream(
+            device=device_index,
             channels=actual_channels,
-            rate=int(samplerate),
-            input=True,
-            input_device_index=device_index,
-            frames_per_buffer=blocksize,
-            stream_callback=audio_callback
-        )
-        
-        stream.start_stream()
-        
-        try:
-            while stream.is_active():
-                # Check for stop event instead of keyboard input
-                if stop_event and stop_event.is_set():
-                    break
-                time.sleep(0.1)
-        except (OSError, ValueError) as e:
-            print(f"\nVU meter error: {e}")
-        
-        # Cleanup
-        stream.stop_stream()
-        stream.close()
-        pa.terminate()
+            samplerate=int(samplerate),
+            blocksize=blocksize,
+            dtype='float32',
+            callback=audio_callback
+        ):
+            try:
+                while True:
+                    # Check for stop event
+                    if stop_event and stop_event.is_set():
+                        break
+                    
+                    # Display VU meter
+                    _display_vu_meter(vu_data['db_level'], vu_data['rms_level'])
+                    time.sleep(0.05)  # Update display at ~20Hz
+                    
+            except KeyboardInterrupt:
+                pass
         
         # Clear the VU meter line and print stop message
         print("\r" + " " * 80 + "\r", end="", flush=True)  # Clear the line
         print("VU meter stopped")
         
     except Exception as e:
-        print(f"PyAudio VU meter error: {e}")
+        print(f"Sounddevice VU meter error: {e}")
         import traceback
         traceback.print_exc()
 
@@ -229,17 +217,17 @@ def _display_vu_meter(db_level, rms_level):
 def intercom_m(config):
     """Microphone monitoring - listen to remote microphone audio input only."""
     
-    def audio_callback(in_data, frame_count, time_info, status):
+    def audio_callback(indata, frames, time, status):
         try:
             # Pure intercom audio processing - no VU meter calculations
             # Audio data flows through for monitoring, no level processing
             # Use separate 'v' command for VU meter display
             
-            return (in_data, pyaudio.paContinue)
+            return True
             
         except (OSError, ValueError) as e:
             # Silent error handling - no terminal output
-            return (in_data, pyaudio.paAbort)
+            return False
     
     try:
         input_device = config['input_device']
@@ -260,181 +248,141 @@ def intercom_m(config):
             print("Press Enter to stop monitoring...")
         
         # Create input-only stream for microphone monitoring
-        pa = pyaudio.PyAudio()
         
         try:
-            audio_format = pyaudio.paInt16 if bit_depth == 16 else pyaudio.paFloat32
-            
-            stream = pa.open(
-                format=audio_format,
+            # Use sounddevice instead of PyAudio for streaming
+            with sd.InputStream(
+                device=input_device,
                 channels=channels,
-                rate=samplerate,
-                input=True,
-                input_device_index=input_device,
-                frames_per_buffer=1024,
-                stream_callback=audio_callback
-            )
-            
-            if stream is None:
-                print("Failed to create microphone monitoring stream")
-                return
-            
-            stream.start_stream()
-            
-            # Monitor with user input check
-            import select
-            
-            try:
-                while stream.is_active():
-                    # Check for user input (Enter key) on Windows
-                    if sys.platform == "win32":
-                        import msvcrt
-                        if msvcrt.kbhit():
-                            key = msvcrt.getch()
-                            if key in [b'\r', b'\n']:  # Enter key
+                samplerate=samplerate,
+                dtype='int16' if bit_depth == 16 else 'float32',
+                blocksize=1024,
+                callback=audio_callback
+            ) as stream:
+                # Monitor with user input check
+                import select
+                
+                try:
+                    while True:
+                        # Check for user input (Enter key) on Windows
+                        if sys.platform == "win32":
+                            import msvcrt
+                            if msvcrt.kbhit():
+                                key = msvcrt.getch()
+                                if key in [b'\r', b'\n']:  # Enter key
+                                    break
+                        else:
+                            # Unix-like systems
+                            if select.select([sys.stdin], [], [], 0)[0]:
+                                input()  # Read the enter key
                                 break
-                    else:
-                        # Unix-like systems
-                        if select.select([sys.stdin], [], [], 0)[0]:
-                            input()  # Read the enter key
-                            break
-                    
-                    time.sleep(1.0)
-                    # Pure microphone monitoring - no output to terminal
-            
-            except (OSError, ValueError) as e:
-                # Silent error handling - no terminal output to avoid interfering with VU meter
-                pass
-            
-            # Clean up
-            try:
-                stream.stop_stream()
-                stream.close()
+                        
+                        time.sleep(1.0)
+                        # Pure microphone monitoring - no output to terminal
+                
+                except (OSError, ValueError):
+                    # Silent error handling - no terminal output to avoid interfering with VU meter
+                    pass
+                
                 # Display stop message only if VU meter is not active
                 if not vu_meter_active:
                     print("\nMicrophone monitoring stopped")
-            except (OSError, ValueError):
-                pass
-            
-        finally:
-            pa.terminate()
                 
-    except (OSError, ValueError) as e:
+        except (OSError, ValueError):
+            # Silent error handling - no terminal output to avoid interfering with VU meter
+            pass
+            
+    except (OSError, ValueError):
         # Silent error handling - no terminal output to avoid interfering with VU meter
         pass
 
 def audio_device_test(device_index, samplerate=44100, duration=3.0):
-    """Test audio device using PyAudio directly."""
+    """Test audio device using sounddevice directly."""
     try:
         # Generate test tone
         t = np.linspace(0, duration, int(duration * samplerate), False)
         tone = 0.3 * np.sin(2 * np.pi * 440 * t)
         
-        # Initialize PyAudio
-        pa = pyaudio.PyAudio()
-        
+        # Test the device using sounddevice
         try:
-            # Create output stream
-            stream = pa.open(
-                format=pyaudio.paFloat32,
-                channels=1,
-                rate=int(samplerate),
-                output=True,
-                output_device_index=device_index,
-                frames_per_buffer=1024
-            )
+            print(f"Testing device {device_index} at {samplerate}Hz for {duration}s")
             
-            stream.start_stream()
-            
-            # Write audio data
-            for i in range(0, len(tone), 1024):
-                chunk = tone[i:i+1024]
-                if len(chunk) < 1024:
-                    chunk = np.pad(chunk, (0, 1024 - len(chunk)))
-                stream.write(chunk.astype(np.float32).tobytes())
-            
-            stream.stop_stream()
-            stream.close()
+            # Play test tone through the device
+            sd.play(tone, samplerate=samplerate, device=device_index)
+            sd.wait()  # Wait until playback is done
             
             print(f"Device {device_index} test completed successfully")
             return True
-        finally:
-            pa.terminate()
+            
+        except Exception as e:
+            print(f"Device {device_index} test failed: {e}")
+            return False
             
     except Exception as e:
-        print(f"Device {device_index} test failed: {e}")
+        print(f"Error in device test: {e}")
         return False
 
 def check_audio_driver_info():
-    """Check audio driver info using PyAudio."""
+    """Check audio driver info using sounddevice."""
     try:
         print("\nAudio Driver Information:")
         print("-" * 40)
         
-        pa = pyaudio.PyAudio()
-        
+        # Get sounddevice version
         try:
-            # Get PortAudio version
-            try:
-                version_info = pa.get_version_text()
-                print(f"PortAudio version: {version_info}")
-            except AttributeError:
-                print("PortAudio version: Unknown")
+            print(f"Sounddevice version: {sd.__version__}")
+        except AttributeError:
+            print("Sounddevice version: Unknown")
         
-            # Get default devices
-            try:
-                default_input = pa.get_default_input_device_info()
-                default_output = pa.get_default_output_device_info()
-                print(f"Default input: {default_input['name']}")
-                print(f"Default output: {default_output['name']}")
-            except (OSError, ValueError):
-                print("Default devices: Not available")
-        finally:
-            pa.terminate()
+        # Get host API information
+        host_apis = sd.query_hostapis()
+        print(f"Available host APIs: {len(host_apis)}")
+        for i, api in enumerate(host_apis):
+            print(f"  API {i}: {api['name']} - {api['device_count']} devices")
+        
+        # Get default devices
+        try:
+            default_input = sd.query_devices(kind='input')
+            default_output = sd.query_devices(kind='output')
+            print(f"Default input: {default_input['name']}")
+            print(f"Default output: {default_output['name']}")
+        except Exception:
+            print("Default devices: Not available")
         
         print("-" * 40)
     except Exception as e:
         print(f"Error: {e}")
 
 def benchmark_audio_performance(device_index, samplerate=44100, duration=10.0):
-    """Benchmark using PyAudio directly."""
+    """Benchmark using sounddevice directly."""
     callback_count = 0
     underrun_count = 0
     total_frames = 0
     
-    def audio_callback(in_data, frame_count, time_info, status):
+    def audio_callback(indata, frames, time, status):
         nonlocal callback_count, underrun_count, total_frames
         
         callback_count += 1
-        total_frames += frame_count
+        total_frames += frames
         
-        if len(in_data) < frame_count * 4:  # Check for underruns
+        if status.input_underflow or status.input_overflow:
             underrun_count += 1
         
         # Simple processing
-        audio_data = np.frombuffer(in_data, dtype=np.float32)
-        _ = np.mean(audio_data**2)
-        
-        return (None, pyaudio.paContinue)
+        _ = np.mean(indata**2)
     
     try:
-        pa = pyaudio.PyAudio()
-        
-        try:
-            stream = pa.open(
-                format=pyaudio.paFloat32,
-                channels=1,
-                rate=int(samplerate),
-                input=True,
-                input_device_index=device_index,
-                frames_per_buffer=1024,
-                stream_callback=audio_callback
-            )
-            
+        # Use sounddevice for benchmarking
+        with sd.InputStream(
+            device=device_index,
+            channels=1,
+            samplerate=samplerate,
+            dtype='float32',
+            blocksize=1024,
+            callback=audio_callback
+        ):
             start_time = time.time()
-            stream.start_stream()
-            time.sleep(duration)
-            stream.stop_stream()
+            sd.sleep(int(duration * 1000))  # Convert to milliseconds
             end_time = time.time()
             
             actual_duration = end_time - start_time
@@ -459,29 +407,27 @@ def benchmark_audio_performance(device_index, samplerate=44100, duration=10.0):
                 'underrun_count': underrun_count,
                 'total_frames': total_frames
             }
-        finally:
-            pa.terminate()
             
     except Exception as e:
         print(f"Benchmark error: {e}")
         return None
 
-# Stub functions for compatibility - not yet fully implemented in PyAudio version
+# Stub functions for compatibility - not yet fully implemented in sounddevice version
 def measure_device_latency(input_device, output_device, samplerate=44100, duration=2.0):
-    """Latency measurement not yet implemented for PyAudio."""
+    """Latency measurement not yet implemented for sounddevice."""
     _ = (input_device, output_device, samplerate, duration)  # Avoid unused warnings
-    print("Latency measurement not yet implemented for PyAudio")
+    print("Latency measurement not yet implemented for sounddevice")
     return None
 
 def audio_spectrum_analyzer(config, duration=10.0):
-    """Spectrum analyzer not yet implemented for PyAudio."""
+    """Spectrum analyzer not yet implemented for sounddevice."""
     _ = (config, duration)  # Avoid unused warnings
-    print("Spectrum analyzer not yet implemented for PyAudio")
+    print("Spectrum analyzer not yet implemented for sounddevice")
 
 def audio_loopback_test(input_device, output_device, samplerate=44100, duration=5.0):
-    """Loopback test not yet implemented for PyAudio."""
+    """Loopback test not yet implemented for sounddevice."""
     _ = (input_device, output_device, samplerate, duration)  # Avoid unused warnings
-    print("Loopback test not yet implemented for PyAudio")
+    print("Loopback test not yet implemented for sounddevice")
     return 0.0
 
 def create_progress_bar(current, total, width=40):

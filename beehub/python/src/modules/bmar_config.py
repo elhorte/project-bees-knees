@@ -64,9 +64,9 @@ KB_or_CP = 'KB'                                 # use keyboard or control panel 
 DEBUG_VERBOSE = False                           # Enable verbose debug output (set to True for troubleshooting)
 
 # Enhanced audio configuration
-ENABLE_ENHANCED_AUDIO = True                    # Enable PyAudio-based enhanced audio device testing
+ENABLE_ENHANCED_AUDIO = True                    # Enable sounddevice-based enhanced audio device testing
 AUDIO_API_PREFERENCE = ["WASAPI", "DirectSound", "MME"]  # Preferred audio APIs in order
-AUDIO_FALLBACK_ENABLED = True                   # Allow fallback to sounddevice if PyAudio fails
+AUDIO_FALLBACK_ENABLED = True                   # Allow fallback to default device if specified device fails
 
 # input device parameters--linux:
 LINUX_MAKE_NAME = ""                             # Leave empty for Linux default

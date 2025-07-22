@@ -10,14 +10,20 @@ import logging
 from pathlib import Path
 
 # Simplified imports to avoid circular dependencies
-from modules.class_PyAudio import AudioPortManager
+import sounddevice as sd
 from modules import bmar_config
 
 def list_audio_devices():
-    """List all available audio devices using PyAudio"""
+    """List all available audio devices using sounddevice"""
     try:
-        manager = AudioPortManager()
-        manager.print_device_list()
+        print("Available audio devices:")
+        devices = sd.query_devices()
+        for i, device in enumerate(devices):
+            if device['max_input_channels'] > 0:
+                print(f"  [{i}] {device['name']} (Input: {device['max_input_channels']} channels)")
+            if device['max_output_channels'] > 0:
+                print(f"  [{i}] {device['name']} (Output: {device['max_output_channels']} channels)")
+        return True
         return True
     except Exception as e:
         logging.error(f"Error listing audio devices: {e}")
@@ -26,30 +32,29 @@ def list_audio_devices():
 def validate_audio_device(device_index: int) -> bool:
     """Validate that the specified audio device exists and is usable"""
     try:
-        manager = AudioPortManager()
-        devices = manager.list_audio_devices()
+        # Check if device exists using sounddevice
+        devices = sd.query_devices()
         
-        # Check if device exists
-        device_found = False
-        for device in devices:
-            if device['index'] == device_index and device['is_input']:
-                device_found = True
-                break
-        
-        if not device_found:
-            logging.error(f"Audio device {device_index} not found or not an input device")
+        if device_index >= len(devices):
+            logging.error("Audio device %d not found", device_index)
+            return False
+            
+        device = devices[device_index]
+        if device['max_input_channels'] == 0:
+            logging.error("Audio device %d is not an input device", device_index)
             return False
         
-        # Test basic configuration
-        if manager.test_device_configuration(device_index, 44100, 16, 2):
-            logging.info(f"Audio device {device_index} validated successfully")
-            return True
-        else:
-            logging.warning(f"Audio device {device_index} may have limited capabilities")
+        # Test basic configuration by creating a simple input stream
+        try:
+            with sd.InputStream(device=device_index, channels=1, samplerate=44100, blocksize=1024):
+                logging.info("Audio device %d validated successfully", device_index)
+                return True
+        except Exception:
+            logging.warning("Audio device %d may have limited capabilities", device_index)
             return True  # Still allow usage, but warn
             
     except Exception as e:
-        logging.error(f"Error validating audio device {device_index}: {e}")
+        logging.error("Error validating audio device %d: %s", device_index, e)
         return False
 
 def show_configuration():

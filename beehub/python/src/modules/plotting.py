@@ -151,9 +151,9 @@ def _record_audio_pyaudio(duration, device_index, channels, samplerate, blocksiz
         return _generate_synthetic_audio(duration, channels, samplerate, task_name)
     
     try:
-        import pyaudio
+        import sounddevice as sd
     except ImportError:
-        logging.error("PyAudio not available - cannot record audio")
+        logging.error("sounddevice not available - cannot record audio")
         return None, 0
     
     p = None

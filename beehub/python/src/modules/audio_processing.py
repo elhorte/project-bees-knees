@@ -4,7 +4,7 @@ Handles audio streaming, buffer management, and core audio processing operations
 """
 
 import numpy as np
-import pyaudio
+import sounddevice as sd
 import threading
 import datetime
 import time
@@ -16,16 +16,20 @@ from .system_utils import interruptable_sleep
 from .file_utils import check_and_create_date_folders
 from .audio_conversion import downsample_audio, pcm_to_mp3_write
 
-def callback(app, indata, frames, time_info, status):
-    """Callback function for audio input stream (PyAudio compatible)."""
+def callback(indata, frames, time, status):
+    """Callback function for audio input stream (sounddevice compatible)."""
     if status:
-        print("PyAudio callback status:", status)
-        # PyAudio status values are different from sounddevice
-        if status != 0:
-            print("PyAudio input issue at:", datetime.datetime.now())
+        print("Sounddevice callback status:", status)
+        if status.input_overflow:
+            print("Sounddevice input overflow at:", datetime.datetime.now())
 
-    # Convert PyAudio bytes to numpy array with the same dtype as the buffer
-    audio_data = np.frombuffer(indata, dtype=np.float32)
+    # Get app reference from the current stream
+    app = getattr(callback, 'app', None)
+    if app is None:
+        return
+    
+    # sounddevice already provides numpy array
+    audio_data = indata.copy()
     
     # Handle invalid values (NaN, infinity) in audio data
     if not np.all(np.isfinite(audio_data)):
@@ -47,15 +51,13 @@ def callback(app, indata, frames, time_info, status):
         # If _dtype is np.float32, no conversion needed
     # If no _dtype attribute, keep as float32 (fallback)
     
-    # Reshape for multi-channel if needed
-    if app.sound_in_chs > 1:
-        audio_data = audio_data.reshape(-1, app.sound_in_chs)
-    else:
+    # Ensure proper shape for multi-channel
+    if audio_data.ndim == 1:
         audio_data = audio_data.reshape(-1, 1)
-
+    
     data_len = len(audio_data)
 
-    # Managing the circular buffer using PyAudio data
+    # Managing the circular buffer using sounddevice data
     if app.buffer_index + data_len <= app.buffer_size:
         app.buffer[app.buffer_index:app.buffer_index + data_len] = audio_data
         app.buffer_wrap_event.clear()
@@ -66,9 +68,6 @@ def callback(app, indata, frames, time_info, status):
         app.buffer_wrap_event.set()
 
     app.buffer_index = (app.buffer_index + data_len) % app.buffer_size
-    
-    # Return PyAudio continue signal
-    return (indata, pyaudio.paContinue)
 
 def setup_audio_circular_buffer(app):
     """Set up the circular buffer for audio recording."""
@@ -99,57 +98,51 @@ def audio_stream(app):
     logging.info(f"Data Type: {app._dtype}")
 
     try:
-        # Initialize PyAudio
-        pa = pyaudio.PyAudio()
-        
         # First verify the device configuration
         try:
-            device_info = pa.get_device_info_by_index(app.sound_in_id)
+            device_info = sd.query_devices(app.sound_in_id, 'input')
             logging.info("Selected device info:")
             logging.info(f"Name: [{app.sound_in_id}] {device_info['name']}")
-            logging.info(f"Max Input Channels: {device_info['maxInputChannels']}")
-            logging.info(f"Device Sample Rate: {int(device_info['defaultSampleRate'])} Hz")
+            logging.info(f"Max Input Channels: {device_info['max_input_channels']}")
+            logging.info(f"Device Sample Rate: {int(device_info['default_samplerate'])} Hz")
 
-            if device_info['maxInputChannels'] < app.sound_in_chs:
-                raise RuntimeError(f"Device only supports {device_info['maxInputChannels']} channels, but {app.sound_in_chs} channels are required")
+            if device_info['max_input_channels'] < app.sound_in_chs:
+                raise RuntimeError(f"Device only supports {device_info['max_input_channels']} channels, but {app.sound_in_chs} channels are required")
         except Exception as e:
             logging.error(f"Error getting device info: {e}")
-            pa.terminate()
             return
 
-        # Create a partial function to pass app to the callback
-        app_callback = lambda indata, frames, time_info, status: callback(app, indata, frames, time_info, status)
+        # Set up callback reference to app
+        callback.app = app
         
-        # Determine PyAudio format
+        # Determine sounddevice dtype
         if app._dtype == np.float32:
-            audio_format = pyaudio.paFloat32
+            dtype = 'float32'
         elif app._dtype == np.int16:
-            audio_format = pyaudio.paInt16
+            dtype = 'int16'
         elif app._dtype == np.int32:
-            audio_format = pyaudio.paInt32
+            dtype = 'int32'
         else:
-            audio_format = pyaudio.paFloat32  # Default fallback
+            dtype = 'float32'  # Default fallback
         
         # Initialize the stream with the configured sample rate and bit depth
-        stream = pa.open(
-            format=audio_format,
+        stream = sd.InputStream(
+            device=app.sound_in_id,
             channels=app.sound_in_chs,
-            rate=int(app.PRIMARY_IN_SAMPLERATE),
-            input=True,
-            input_device_index=app.sound_in_id,
-            frames_per_buffer=app.blocksize,
-            stream_callback=app_callback
+            samplerate=int(app.PRIMARY_IN_SAMPLERATE),
+            blocksize=app.blocksize,
+            dtype=dtype,
+            callback=callback
         )
 
-        logging.info("PyAudio stream initialized successfully")
+        logging.info("Sounddevice stream initialized successfully")
         logging.info(f"Stream sample rate: {app.PRIMARY_IN_SAMPLERATE} Hz")
         logging.info(f"Stream bit depth: {app.PRIMARY_BITDEPTH} bits")
 
         # Store references for cleanup
         app.audio_stream = stream
-        app.pa_instance = pa
         
-        stream.start_stream()
+        stream.start()
 
         # Start the recording worker threads
         if hasattr(app.config, 'MODE_AUDIO_MONITOR') and app.config.MODE_AUDIO_MONITOR:
@@ -198,32 +191,27 @@ def audio_stream(app):
             while not app.stop_program[0]:
                 time.sleep(0.1)
             
-            # Cleanup PyAudio stream
+            # Cleanup sounddevice stream
             try:
-                if stream.is_active():
-                    stream.stop_stream()
+                stream.stop()
                 stream.close()
-                pa.terminate()
-                logging.info("PyAudio stream cleaned up successfully")
+                logging.info("Sounddevice stream cleaned up successfully")
             except Exception as cleanup_error:
-                logging.error(f"Error during PyAudio cleanup: {cleanup_error}")
+                logging.error(f"Error during sounddevice cleanup: {cleanup_error}")
             
             # Normal exit - return True
             logging.info("Audio stream stopped normally")
             return True
 
     except Exception as e:
-        logging.error(f"Error in PyAudio stream: {e}")
+        logging.error(f"Error in sounddevice stream: {e}")
         logging.info("Please check your audio device configuration and ensure it supports the required settings")
         
         # Cleanup on error
         try:
             if 'stream' in locals() and stream:
-                if stream.is_active():
-                    stream.stop_stream()
+                stream.stop()
                 stream.close()
-            if 'pa' in locals() and pa:
-                pa.terminate()
         except Exception as cleanup_error:
             logging.error(f"Error during cleanup after exception: {cleanup_error}")
         
@@ -357,96 +345,54 @@ def create_progress_bar(current, total, bar_length=50):
     
     return f"[{bar}] {percent}%"
 
-def _record_audio_pyaudio(duration, sound_in_id, sound_in_chs, stop_queue, task_name="audio recording"):
+def _record_audio_sounddevice(duration, sound_in_id, sound_in_chs, stop_queue, task_name="audio recording"):
     """
-    Helper function to record a chunk of audio using PyAudio and return it as a numpy array.
-    This function encapsulates the PyAudio stream setup, callback, and teardown.
+    Helper function to record a chunk of audio using sounddevice and return it as a numpy array.
+    This function encapsulates the sounddevice stream setup and recording.
     """
-    import pyaudio
     from . import bmar_config
     
-    p = pyaudio.PyAudio()
-    recording = None
     try:
-        device_info = p.get_device_info_by_index(sound_in_id)
-        max_channels = int(device_info['maxInputChannels'])
+        device_info = sd.query_devices(sound_in_id, 'input')
+        max_channels = int(device_info['max_input_channels'])
         
         actual_channels = min(sound_in_chs, max_channels)
         actual_channels = max(1, actual_channels)
 
         logging.info(f"Starting {task_name} for {duration:.1f}s on {actual_channels} channel(s).")
 
-        # Note: This would need access to config.PRIMARY_IN_SAMPLERATE
-        # For now, we'll use a default or pass it as parameter
+        # Use configured sample rate
         sample_rate = 48000  # Default, should be passed as parameter
-        num_frames = int(sample_rate * duration)
-        chunk_size = 4096
         
-        recording_array = np.zeros((num_frames, actual_channels), dtype=np.float32)
-        frames_recorded = 0
-        recording_complete = False
-
-        def callback(indata, frame_count, time_info, status):
-            nonlocal frames_recorded, recording_complete
-            try:
-                if status:
-                    logging.warning(f"PyAudio callback status: {status}")
-                    
-                if frames_recorded < num_frames and not recording_complete:
-                    frames_to_copy = min(frame_count, num_frames - frames_recorded)
-                    recording_array[frames_recorded:frames_recorded + frames_to_copy] = indata[:frames_to_copy]
-                    frames_recorded += frames_to_copy
-                    
-                    if frames_recorded >= num_frames:
-                        recording_complete = True
-                        
-                return (None, pyaudio.paContinue)
-            except Exception as e:
-                logging.error(f"Error in PyAudio callback: {e}", exc_info=True)
-                recording_complete = True
-                return (None, pyaudio.paAbort)
-
-        stream = p.open(format=pyaudio.paFloat32,
-                        channels=actual_channels,
-                        rate=int(sample_rate),
-                        input=True,
-                        input_device_index=sound_in_id,
-                        frames_per_buffer=chunk_size,
-                        stream_callback=callback)
+        # Record audio using sounddevice
+        recording_array = sd.rec(
+            frames=int(sample_rate * duration),
+            samplerate=sample_rate,
+            channels=actual_channels,
+            device=sound_in_id,
+            dtype='float32'
+        )
         
-        stream.start_stream()
-        
+        # Wait for recording to complete, checking stop queue periodically
         start_time = time.time()
         timeout = duration + 10
         
-        while not recording_complete and stop_queue.empty() and (time.time() - start_time) < timeout:
-            progress_bar = create_progress_bar(frames_recorded, num_frames)
+        while not recording_array.flags.writeable and (time.time() - start_time) < timeout:
+            if not stop_queue.empty():
+                sd.stop()
+                break
+            progress = min(100, int((time.time() - start_time) / duration * 100))
+            progress_bar = create_progress_bar(progress, 100)
             print(f"Recording progress: {progress_bar}", end='\r')
             time.sleep(0.1)
         
-        # Ensure we show 100% completion when done
-        if recording_complete or frames_recorded >= num_frames:
-            progress_bar = create_progress_bar(num_frames, num_frames)  # Force 100%
-            print(f"Recording progress: {progress_bar}", end='\r')
-        
-        stream.stop_stream()
-        stream.close()
+        # Wait for recording completion
+        sd.wait()
         
         print()  # Newline after progress bar
-        if frames_recorded < num_frames * 0.9:
-            logging.warning(f"Recording incomplete: only got {frames_recorded}/{num_frames} frames.\r")
-            return None, 0
-        
         logging.info(f"Finished {task_name}.")
         return recording_array, actual_channels
 
     except Exception as e:
-        logging.error(f"Failed to record audio with PyAudio for {task_name}\r", exc_info=True)
+        logging.error(f"Failed to record audio with sounddevice for {task_name}", exc_info=True)
         return None, 0
-    finally:
-        if p:
-            try:
-                p.terminate()
-                time.sleep(0.1)  # Allow time for resources to be released
-            except Exception as e:
-                logging.error(f"Error terminating PyAudio instance for {task_name}\r", exc_info=True)
