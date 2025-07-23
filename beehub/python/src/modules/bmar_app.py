@@ -301,7 +301,13 @@ class BmarApp:
                 print("No automatic recording configured. Use 'r' to start manual recording.")
             
             # Start the user interface using the CORRECT function name
-            from .user_interface import keyboard_listener
+            from .user_interface import keyboard_listener, background_keyboard_monitor
+            
+            # Start background keyboard monitor in a separate thread (for '^' key)
+            monitor_thread = threading.Thread(target=background_keyboard_monitor, args=(self,), daemon=True)
+            monitor_thread.start()
+            
+            # Start main keyboard listener (this will block until quit)
             keyboard_listener(self)
             
         except KeyboardInterrupt:

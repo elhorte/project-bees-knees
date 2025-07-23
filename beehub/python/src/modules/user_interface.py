@@ -9,6 +9,16 @@ import logging
 import os
 import multiprocessing
 
+try:
+    import keyboard  # For keyboard listener toggle functionality
+    KEYBOARD_AVAILABLE = True
+except ImportError:
+    KEYBOARD_AVAILABLE = False
+    print("Warning: 'keyboard' library not available. Install with 'pip install keyboard' for keyboard toggle functionality.")
+
+# Global variable to track the state of the keyboard listener toggle
+keyboard_listener_enabled = True
+
 def ensure_app_attributes(app):
     """Ensure app has all required attributes."""
     if not hasattr(app, 'monitor_channel'):
@@ -20,11 +30,60 @@ def ensure_app_attributes(app):
     if not hasattr(app, 'DEBUG_VERBOSE'):
         app.DEBUG_VERBOSE = False
 
+def toggle_keyboard_listener():
+    """Toggle the keyboard listener on/off using the '^' key."""
+    global keyboard_listener_enabled
+    
+    keyboard_listener_enabled = not keyboard_listener_enabled
+    state = "enabled" if keyboard_listener_enabled else "disabled"
+    
+    # Provide clear user feedback with different messages for each state
+    if keyboard_listener_enabled:
+        print(f"\nKeyboard listener {state}.")
+        print("BMAR keyboard control activated. Single-key commands are active.")
+    else:
+        print(f"\nKeyboard listener {state}.")
+        print("Terminal control released. You can now type normal commands.")
+        print("Press '^' to return control to BMAR when ready.")
+    
+    return keyboard_listener_enabled
+
+def background_keyboard_monitor(app):
+    """Background thread to monitor for '^' key to toggle keyboard listener."""
+    if not KEYBOARD_AVAILABLE:
+        return
+    
+    print("Background keyboard monitor started. Press '^' to toggle keyboard listener.")
+    
+    # Keep track of previous key state to avoid multiple toggles
+    prev_key_pressed = False
+    
+    while getattr(app, 'keyboard_listener_running', True):
+        try:
+            # Listen for the '^' key to toggle the listener
+            current_key_pressed = keyboard.is_pressed('^')
+            
+            # Only toggle on key press (not release) to avoid double-toggle
+            if current_key_pressed and not prev_key_pressed:
+                toggle_keyboard_listener()
+                # Wait briefly to avoid multiple toggles from a single key press
+                time.sleep(0.3)
+            
+            prev_key_pressed = current_key_pressed
+            
+            # Sleep briefly to avoid high CPU usage
+            time.sleep(0.05)  # Reduced sleep time for better responsiveness
+            
+        except Exception as e:
+            logging.error(f"Error in background keyboard monitor: {e}")
+            time.sleep(1.0)
+
 def keyboard_listener(app):
     """Keyboard input listener thread function."""
     
     # Platform-specific imports
-    from .system_utils import get_key, setup_terminal_for_input
+    from .system_utils import get_key, setup_terminal_for_input, restore_terminal_settings
+    import platform
     
     try:
         print("\nBMAR Controls:")
@@ -42,19 +101,55 @@ def keyboard_listener(app):
         print("  'c' - Configuration")
         print("  'h' - Help")
         print("  'q' - Quit")
+        if KEYBOARD_AVAILABLE:
+            print("  '^' - Toggle keyboard listener on/off (background monitoring)")
         print("\nReady for commands...")
         
-        # Setup terminal for character input
-        setup_terminal_for_input(app)
+        # Track whether terminal is currently in raw mode
+        terminal_in_raw_mode = False
+        previously_disabled = False
         
         while app.keyboard_listener_running:
             try:
-                # Get single character input
-                key = get_key()
+                # Check if keyboard listener is enabled
+                if not keyboard_listener_enabled:
+                    # If we just became disabled, restore terminal to normal mode
+                    if terminal_in_raw_mode or not previously_disabled:
+                        if hasattr(app, 'original_terminal_settings') and app.original_terminal_settings:
+                            restore_terminal_settings(app, app.original_terminal_settings)
+                        terminal_in_raw_mode = False
+                        previously_disabled = True
+                        
+                        # On Windows, we need to make sure the terminal is truly released
+                        if platform.system() == "Windows":
+                            print("\nBMAR keyboard listener disabled.")
+                            print("Terminal is now available for normal use.")
+                            print("Press '^' to re-enable BMAR keyboard control.")
+                        else:
+                            print("\nTerminal control released. Use normal terminal commands.")
+                            print("Press '^' key to return control to BMAR.")
+                    
+                    # When disabled, sleep and do NOT call get_key()
+                    time.sleep(0.2)
+                    continue
+                else:
+                    # If we just became enabled, set up terminal for BMAR control
+                    if not terminal_in_raw_mode or previously_disabled:
+                        setup_terminal_for_input(app)
+                        terminal_in_raw_mode = True
+                        previously_disabled = False
+                        print("\nBMAR keyboard control active. Press 'h' for help.")
                 
-                if key and app.keyboard_listener_running:
-                    # Process the command (preserve case for D vs d)
-                    process_command(app, key)
+                # Only get key input when enabled and in raw mode
+                if terminal_in_raw_mode:
+                    key = get_key()
+                    
+                    if key and app.keyboard_listener_running:
+                        # Process the command (preserve case for D vs d)
+                        process_command(app, key)
+                else:
+                    # Safety sleep if somehow we get here without raw mode
+                    time.sleep(0.1)
                     
             except KeyboardInterrupt:
                 print("\nKeyboard interrupt received")
@@ -66,6 +161,11 @@ def keyboard_listener(app):
     except Exception as e:
         print(f"Keyboard listener error: {e}")
         logging.error(f"Keyboard listener error: {e}")
+    finally:
+        # Always restore terminal settings when exiting
+        if hasattr(app, 'original_terminal_settings') and app.original_terminal_settings:
+            restore_terminal_settings(app, app.original_terminal_settings)
+        print("\nTerminal restored to normal mode.")
     
     print("Keyboard listener stopped")
 
@@ -146,6 +246,13 @@ def process_command(app, command):
             
         elif command == 'l' or command == 'L':
             handle_thread_list_command(app)
+            
+        elif command == '^':
+            # Toggle keyboard listener on/off
+            if KEYBOARD_AVAILABLE:
+                toggle_keyboard_listener()
+            else:
+                print("Keyboard toggle functionality not available. Install 'keyboard' library with 'pip install keyboard'.")
 
         # No imports, no dependencies, just pure print statements
 
@@ -888,6 +995,8 @@ def show_help():
     print("c - Configuration: Display current settings\r")
     print("h - Help:          This help message\r")
     print("q - Quit:          Exit the application\r")
+    if KEYBOARD_AVAILABLE:
+        print("^ - Toggle:        Enable/disable keyboard listener (background monitoring)\r")
     print()
     print("1-9 - Channel:     Switch monitoring channel (while VU/Intercom active)")
     print()
