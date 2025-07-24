@@ -23,17 +23,23 @@ def cleanup_process(app, command):
                         if isinstance(process_or_thread, threading.Thread):
                             logging.info(f"Stopping thread for command '{command}'\r")
                             
-                            # For threads, we need to use stop events
+                            # For VU meter threads, we need special cleanup
                             if command == 'v' and hasattr(app, 'vu_stop_event'):
                                 app.vu_stop_event.set()
-                                # Give thread a bit more time to stop gracefully and clean up output
-                                process_or_thread.join(timeout=2)
+                                # Give VU meter more time to clean up its display
+                                process_or_thread.join(timeout=3)
                                 
                                 if process_or_thread.is_alive():
-                                    logging.warning(f"Thread for command '{command}' did not stop gracefully\r")
+                                    logging.warning(f"VU meter thread did not stop gracefully\r")
                                 else:
-                                    # Small delay to let VU meter clean up its output
-                                    time.sleep(0.1)
+                                    # Clear any remaining VU meter display artifacts
+                                    print("\r" + " " * 80 + "\r", end="", flush=True)
+                                    time.sleep(0.1)  # Brief pause for display cleanup
+                            else:
+                                # Other threads - standard cleanup
+                                process_or_thread.join(timeout=2)
+                                if process_or_thread.is_alive():
+                                    logging.warning(f"Thread for command '{command}' did not stop gracefully\r")
                                     
                         else:
                             # It's a process

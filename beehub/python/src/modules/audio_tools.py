@@ -62,19 +62,27 @@ def _vu_meter_sounddevice(config, stop_event=None):
             print(f"Error getting device info: {e}")
             actual_channels = channels
         
-        # Global variable to track VU meter data
-        vu_data = {'db_level': -80, 'rms_level': 0.0}
+        # Global variable to track VU meter data and state
+        vu_data = {'db_level': -80, 'rms_level': 0.0, 'callback_active': True}
         
         # Audio callback for VU meter
-        def audio_callback(indata, frames, time, status):
+        def audio_callback(indata, frames, time_info, status):
             try:
-                # Check for stop event first
+                # Check for stop event first - exit immediately if stopping
                 if stop_event and stop_event.is_set():
+                    vu_data['callback_active'] = False
+                    raise sd.CallbackStop()
+                
+                # Skip processing if callback is not active
+                if not vu_data['callback_active']:
                     raise sd.CallbackStop()
                     
-                # Check for input overflow
+                # Check for input overflow - but limit spam
                 if status.input_overflow:
-                    print(f"\nAudio input overflow")
+                    # Only print overflow message occasionally to avoid spam
+                    import random
+                    if random.random() < 0.1:  # Only 10% of overflow messages
+                        pass  # Suppress overflow messages during normal operation
                 
                 # Extract channel data
                 if actual_channels > 1:
@@ -95,8 +103,13 @@ def _vu_meter_sounddevice(config, stop_event=None):
                 vu_data['db_level'] = db_level
                 vu_data['rms_level'] = rms_level
                 
+            except sd.CallbackStop:
+                # Normal callback stop - re-raise without error message
+                raise
             except Exception as e:
-                print(f"VU meter callback error: {e}")
+                # Only print error if callback is still active (not during shutdown)
+                if vu_data['callback_active']:
+                    print(f"VU meter callback error: {e}")
                 raise sd.CallbackStop()
         
         # Start stream with sounddevice
@@ -110,8 +123,12 @@ def _vu_meter_sounddevice(config, stop_event=None):
         ):
             try:
                 while True:
-                    # Check for stop event
+                    # Check for stop event or callback inactive
                     if stop_event and stop_event.is_set():
+                        vu_data['callback_active'] = False
+                        break
+                    
+                    if not vu_data['callback_active']:
                         break
                     
                     # Display VU meter
@@ -119,13 +136,19 @@ def _vu_meter_sounddevice(config, stop_event=None):
                     time.sleep(0.05)  # Update display at ~20Hz
                     
             except KeyboardInterrupt:
+                vu_data['callback_active'] = False
                 pass
+            finally:
+                # Always clean up display when exiting loop
+                vu_data['callback_active'] = False
+                print("\r" + " " * 80 + "\r", end="", flush=True)
         
-        # Clear the VU meter line and print stop message
-        print("\r" + " " * 80 + "\r", end="", flush=True)  # Clear the line
+        # Final cleanup message
         print("VU meter stopped")
         
     except Exception as e:
+        # Clean up display on error
+        print("\r" + " " * 80 + "\r", end="", flush=True)
         print(f"Sounddevice VU meter error: {e}")
         import traceback
         traceback.print_exc()
@@ -164,10 +187,13 @@ def _vu_meter_virtual(config, stop_event=None):
                 
                 time.sleep(0.02)  # 50 updates per second for very responsive virtual meter
                 
-        except (OSError, ValueError) as e:
-            print(f"\nVirtual VU meter error: {e}")
+        except (OSError, ValueError):
+            print("\nVirtual VU meter error occurred")
+        finally:
+            # Always clean up display when exiting loop
+            print("\r" + " " * 80 + "\r", end="", flush=True)
             
-        print("\nVirtual VU meter stopped")
+        print("Virtual VU meter stopped")
         
     except Exception as e:
         print(f"Virtual VU meter error: {e}")

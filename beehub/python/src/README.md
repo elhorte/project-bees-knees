@@ -20,6 +20,7 @@ A modular Python app| Key | Function | Description |
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 Make sure you have Python 3.7+ and the required packages installed:
 
 ```bash
@@ -29,23 +30,28 @@ pip install numpy scipy matplotlib sounddevice librosa pydub psutil
 
 ### Running the Application
 
-Navigate to the source directory:
+Navigate to the source directory and launch the venv environment:
+
 ```bash
-cd E:\git\earth_biometrics\project-bees-knees\beehub\python\src
+ cd "E:\git\eb\project-bees-knees\beehub\python\src" && .\auntbee\Scripts\Activate.ps1
 ```
 
 #### Method 1: Simple Quick Start ⭐ (Recommended)
+
 ```bash
 python run_bmar.py
 ```
 
 #### Method 2: Windows Batch File
+
 ```cmd
 run_bmar.bat
 ```
+
 Or double-click `run_bmar.bat` in Windows Explorer.
 
 #### Method 3: Full Command Line Interface
+
 ```bash
 # Basic usage
 python main.py
@@ -67,45 +73,46 @@ python main.py --help
 ```
 
 #### Method 4: Linux/macOS Shell Script
+
 ```bash
 ./run_bmar.sh
 ```
 
 ## 🎛️ Command Line Options
 
-| Option | Description | Example |
-|--------|-------------|---------|
-| `--device` / `-d` | Audio device index | `--device 1` |
-| `--samplerate` / `-r` | Sample rate (8000-96000 Hz) | `--samplerate 48000` |
-| `--blocksize` / `-b` | Audio buffer size | `--blocksize 2048` |
-| `--max-file-size` / `-m` | Max file size in MB | `--max-file-size 200` |
-| `--recording-dir` / `-o` | Output directory | `--recording-dir C:\Recordings` |
-| `--list-devices` / `-l` | List audio devices and exit | `--list-devices` |
-| `--config` / `-c` | Show configuration and exit | `--config` |
-| `--test-audio` / `-t` | Test audio device | `--test-audio` |
-| `--debug` | Enable debug logging | `--debug` |
-| `--help` / `-h` | Show help | `--help` |
+| Option                       | Description                 | Example                           |
+| ---------------------------- | --------------------------- | --------------------------------- |
+| `--device` / `-d`        | Audio device index          | `--device 1`                    |
+| `--samplerate` / `-r`    | Sample rate (8000-96000 Hz) | `--samplerate 48000`            |
+| `--blocksize` / `-b`     | Audio buffer size           | `--blocksize 2048`              |
+| `--max-file-size` / `-m` | Max file size in MB         | `--max-file-size 200`           |
+| `--recording-dir` / `-o` | Output directory            | `--recording-dir C:\Recordings` |
+| `--list-devices` / `-l`  | List audio devices and exit | `--list-devices`                |
+| `--config` / `-c`        | Show configuration and exit | `--config`                      |
+| `--test-audio` / `-t`    | Test audio device           | `--test-audio`                  |
+| `--debug`                  | Enable debug logging        | `--debug`                       |
+| `--help` / `-h`          | Show help                   | `--help`                        |
 
 ## 🎹 Application Controls
 
 Once the application is running, use these keyboard commands:
 
-| Key | Function | Description |
-|-----|----------|-------------|
-| `r` | Recording | Start/stop audio recording |
-| `s` | Spectrogram | Real-time frequency analysis |
-| `o` | Oscilloscope | 10-second waveform capture with GUI window |
-| `t` | Trigger | Triggered waveform capture |
-| `v` | VU Meter | Audio level monitoring |
-| `i` | Intercom | Audio monitoring/loopback |
-| `d` | Current Device | Show currently selected audio device |
-| `D` | All Devices | List all available audio devices with details |
-| `p` | Performance | System performance monitor (one-time) |
-| `P` | Performance | Continuous system performance monitor |
-| `f` | Files | File browser and directory info |
-| `c` | Configuration | Display current settings |
-| `h` | Help | Show help message |
-| `q` | Quit | Exit the application |
+| Key   | Function       | Description                                   |
+| ----- | -------------- | --------------------------------------------- |
+| `r` | Recording      | Start/stop audio recording                    |
+| `s` | Spectrogram    | Real-time frequency analysis                  |
+| `o` | Oscilloscope   | 10-second waveform capture with GUI window    |
+| `t` | Trigger        | Triggered waveform capture                    |
+| `v` | VU Meter       | Audio level monitoring                        |
+| `i` | Intercom       | Audio monitoring/loopback                     |
+| `d` | Current Device | Show currently selected audio device          |
+| `D` | All Devices    | List all available audio devices with details |
+| `p` | Performance    | System performance monitor (one-time)         |
+| `P` | Performance    | Continuous system performance monitor         |
+| `f` | Files          | File browser and directory info               |
+| `c` | Configuration  | Display current settings                      |
+| `h` | Help           | Show help message                             |
+| `q` | Quit           | Exit the application                          |
 
 ## 📁 File Organization
 
@@ -126,6 +133,7 @@ BMAR_Recordings/
 ## 🔧 Configuration Examples
 
 ### Use a specific audio device:
+
 ```bash
 # First, list available devices
 python main.py --list-devices
@@ -135,11 +143,13 @@ python main.py --device 18
 ```
 
 ### High-quality recording setup:
+
 ```bash
 python main.py --device 18 --samplerate 48000 --blocksize 2048 --max-file-size 500
 ```
 
 ### Debug mode with logging:
+
 ```bash
 python main.py --debug --log-file bmar.log
 ```
@@ -147,11 +157,13 @@ python main.py --debug --log-file bmar.log
 ## 🐛 Troubleshooting
 
 ### Audio Device Issues
+
 1. **List devices first**: `python main.py --list-devices`
 2. **Test a device**: `python main.py --test-audio --device X`
 3. **Try different APIs**: Look for WASAPI devices (usually most reliable on Windows)
 
 ### Missing Dependencies
+
 ```bash
 # Install all required packages
 pip install numpy scipy matplotlib sounddevice librosa pydub psutil
@@ -161,7 +173,9 @@ pip install ffmpeg-python
 ```
 
 ### WSL Audio Configuration
+
 If running on Windows Subsystem for Linux, you may need to configure audio routing:
+
 ```bash
 export PULSE_SERVER=tcp:localhost:4713
 ```
@@ -185,6 +199,7 @@ The application is organized into focused modules:
 ## 🚨 Exit and Cleanup
 
 The application handles cleanup automatically when you:
+
 - Press `q` to quit
 - Press `Ctrl+C`
 - Close the terminal window
@@ -202,6 +217,7 @@ All subprocesses are properly terminated and resources are cleaned up.
 ### 🔤 Case-Sensitive Commands
 
 Some commands have different behaviors based on case:
+
 - `d` vs `D`: Current device info vs all available devices
 - `p` vs `P`: One-time performance check vs continuous monitoring
 
@@ -214,6 +230,6 @@ Some commands have different behaviors based on case:
 
 ---
 
-**Version**: 1.0.0  
-**Platform Support**: Windows, Linux, macOS  
+**Version**: 1.0.0
+**Platform Support**: Windows, Linux, macOS
 **Python Requirements**: 3.7+

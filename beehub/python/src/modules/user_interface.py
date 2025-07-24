@@ -8,6 +8,10 @@ import time
 import logging
 import os
 import multiprocessing
+import tempfile
+import json
+from pathlib import Path
+from .system_utils import get_key
 
 try:
     import keyboard  # For keyboard listener toggle functionality
@@ -18,6 +22,40 @@ except ImportError:
 
 # Global variable to track the state of the keyboard listener toggle
 keyboard_listener_enabled = True
+
+# Path for the toggle state file (for inter-process communication)
+TOGGLE_STATE_FILE = Path(tempfile.gettempdir()) / "bmar_keyboard_state.json"
+
+# Initialize the toggle state file with the current state on module import
+def _initialize_toggle_state():
+    """Initialize the toggle state file if it doesn't exist."""
+    if not TOGGLE_STATE_FILE.exists():
+        write_toggle_state_to_file(keyboard_listener_enabled)
+
+def read_toggle_state_from_file():
+    """Read the current toggle state from file for inter-process communication."""
+    try:
+        if TOGGLE_STATE_FILE.exists():
+            with open(TOGGLE_STATE_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get('enabled', True)
+        else:
+            # Default to enabled if file doesn't exist
+            return True
+    except (IOError, json.JSONDecodeError):
+        return True
+
+def write_toggle_state_to_file(enabled):
+    """Write the toggle state to file for inter-process communication."""
+    try:
+        with open(TOGGLE_STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'enabled': enabled}, f)
+        return True
+    except IOError:
+        return False
+
+# Initialize the toggle state file
+_initialize_toggle_state()
 
 def ensure_app_attributes(app):
     """Ensure app has all required attributes."""
@@ -37,137 +75,144 @@ def toggle_keyboard_listener():
     keyboard_listener_enabled = not keyboard_listener_enabled
     state = "enabled" if keyboard_listener_enabled else "disabled"
     
+    # Write state to file for inter-process communication
+    write_toggle_state_to_file(keyboard_listener_enabled)
+    
     # Provide clear user feedback with different messages for each state
     if keyboard_listener_enabled:
         print(f"\nKeyboard listener {state}.")
-        print("BMAR keyboard control activated. Single-key commands are active.")
+        print("BMAR single-key commands are now active. Press 'h' for help.")
     else:
         print(f"\nKeyboard listener {state}.")
-        print("Terminal control released. You can now type normal commands.")
-        print("Press '^' to return control to BMAR when ready.")
+        print("Terminal is now in normal mode - you can type normally.")
+        print("Press '^' again to return to BMAR command mode.")
     
     return keyboard_listener_enabled
 
+def enable_bmar_mode():
+    """Enable BMAR command mode from the command line."""
+    global keyboard_listener_enabled
+    
+    # Write to file first for inter-process communication
+    write_toggle_state_to_file(True)
+    
+    if not keyboard_listener_enabled:
+        keyboard_listener_enabled = True
+        print("BMAR command mode enabled. Single-key commands are now active.")
+        print("Press 'h' for help, '^' to disable again.")
+    else:
+        print("BMAR command mode is already enabled.")
+
+def disable_bmar_mode():
+    """Disable BMAR command mode from the command line."""
+    global keyboard_listener_enabled
+    
+    # Write to file first for inter-process communication
+    write_toggle_state_to_file(False)
+    
+    if keyboard_listener_enabled:
+        keyboard_listener_enabled = False
+        print("BMAR command mode disabled. Terminal is now in normal mode.")
+        print("Press '^' to return to BMAR command mode.")
+    else:
+        print("BMAR command mode is already disabled.")
+
 def background_keyboard_monitor(app):
-    """Background thread to monitor for '^' key to toggle keyboard listener."""
-    if not KEYBOARD_AVAILABLE:
-        return
+    """Background thread to monitor for application state."""
+    print("Background keyboard monitor started.")
     
-    print("Background keyboard monitor started. Press '^' to toggle keyboard listener.")
-    
-    # Keep track of previous key state to avoid multiple toggles
-    prev_key_pressed = False
-    
+    # Simple monitoring - just sleep and stay alive
     while getattr(app, 'keyboard_listener_running', True):
         try:
-            # Listen for the '^' key to toggle the listener
-            current_key_pressed = keyboard.is_pressed('^')
-            
-            # Only toggle on key press (not release) to avoid double-toggle
-            if current_key_pressed and not prev_key_pressed:
-                toggle_keyboard_listener()
-                # Wait briefly to avoid multiple toggles from a single key press
-                time.sleep(0.3)
-            
-            prev_key_pressed = current_key_pressed
-            
-            # Sleep briefly to avoid high CPU usage
-            time.sleep(0.05)  # Reduced sleep time for better responsiveness
-            
+            time.sleep(1.0)
         except Exception as e:
             logging.error(f"Error in background keyboard monitor: {e}")
             time.sleep(1.0)
 
 def keyboard_listener(app):
-    """Keyboard input listener thread function."""
+    """
+    Keyboard input listener thread function.
+    This version uses a blocking mechanism to avoid polling and race conditions.
+    It also checks for external state changes via file system.
+    """
     
-    # Platform-specific imports
-    from .system_utils import get_key, setup_terminal_for_input, restore_terminal_settings
-    import platform
-    
+    import time
+    import logging
+    from .system_utils import get_key # Use the reliable, platform-specific get_key
+
     try:
-        print("\nBMAR Controls:")
-        print("  'r' - Start/stop recording")
-        print("  's' - Spectrogram (one-shot with GUI)")
-        print("  'o' - Oscilloscope (10s capture with GUI)")
-        print("  't' - Threads (list all)")
-        print("  'v' - VU meter (independent, start before intercom for combo mode)")
-        print("  'i' - Intercom (audio monitoring)")
-        print("  'd' - Current audio device")
-        print("  'D' - List detailed audio devices")
-        print("  'p' - Performance monitor")
-        print("  'P' - Continuous performance monitor")
-        print("  'f' - FFT analysis (10s with progress bar)")
-        print("  'c' - Configuration")
-        print("  'h' - Help")
-        print("  'q' - Quit")
-        if KEYBOARD_AVAILABLE:
-            print("  '^' - Toggle keyboard listener on/off (background monitoring)")
-        print("\nReady for commands...")
+        print_controls()
         
-        # Track whether terminal is currently in raw mode
-        terminal_in_raw_mode = False
-        previously_disabled = False
+        global keyboard_listener_enabled
+        last_file_check = time.time()
         
         while app.keyboard_listener_running:
             try:
-                # Check if keyboard listener is enabled
-                if not keyboard_listener_enabled:
-                    # If we just became disabled, restore terminal to normal mode
-                    if terminal_in_raw_mode or not previously_disabled:
-                        if hasattr(app, 'original_terminal_settings') and app.original_terminal_settings:
-                            restore_terminal_settings(app, app.original_terminal_settings)
-                        terminal_in_raw_mode = False
-                        previously_disabled = True
-                        
-                        # On Windows, we need to make sure the terminal is truly released
-                        if platform.system() == "Windows":
-                            print("\nBMAR keyboard listener disabled.")
-                            print("Terminal is now available for normal use.")
-                            print("Press '^' to re-enable BMAR keyboard control.")
-                        else:
-                            print("\nTerminal control released. Use normal terminal commands.")
-                            print("Press '^' key to return control to BMAR.")
-                    
-                    # When disabled, sleep and do NOT call get_key()
-                    time.sleep(0.2)
-                    continue
-                else:
-                    # If we just became enabled, set up terminal for BMAR control
-                    if not terminal_in_raw_mode or previously_disabled:
-                        setup_terminal_for_input(app)
-                        terminal_in_raw_mode = True
-                        previously_disabled = False
-                        print("\nBMAR keyboard control active. Press 'h' for help.")
+                # Check file state every 0.5 seconds for external changes
+                current_time = time.time()
+                if current_time - last_file_check > 0.5:
+                    file_state = read_toggle_state_from_file()
+                    if file_state != keyboard_listener_enabled:
+                        keyboard_listener_enabled = file_state
+                        state = "enabled" if keyboard_listener_enabled else "disabled"
+                        print(f"\nKeyboard listener {state} (external change detected).")
+                    last_file_check = current_time
                 
-                # Only get key input when enabled and in raw mode
-                if terminal_in_raw_mode:
-                    key = get_key()
-                    
-                    if key and app.keyboard_listener_running:
-                        # Process the command (preserve case for D vs d)
-                        process_command(app, key)
+                if keyboard_listener_enabled:
+                    # When enabled, get_key() is used for commands.
+                    command = get_key()
+                    if command:
+                        process_command(app, command)
                 else:
-                    # Safety sleep if somehow we get here without raw mode
-                    time.sleep(0.1)
-                    
+                    # When disabled, wait specifically for the toggle key.
+                    if KEYBOARD_AVAILABLE:
+                        # This blocks until a key is pressed and consumes it.
+                        # Other keys are also consumed but ignored.
+                        event = keyboard.read_event(suppress=True)
+                        if event.event_type == keyboard.KEY_DOWN and event.name == '^':
+                            toggle_keyboard_listener()
+                            time.sleep(0.2) # Debounce
+                    else:
+                        # No way to re-enable, so just sleep.
+                        time.sleep(0.5)
+
             except KeyboardInterrupt:
                 print("\nKeyboard interrupt received")
                 break
             except Exception as e:
-                logging.error(f"Error in keyboard listener: {e}")
+                logging.error(f"Error in keyboard listener loop: {e}")
                 time.sleep(0.1)
-                
+
     except Exception as e:
-        print(f"Keyboard listener error: {e}")
-        logging.error(f"Keyboard listener error: {e}")
+        print(f"Keyboard listener failed to start: {e}")
+        logging.error(f"Keyboard listener failed to start: {e}")
     finally:
-        # Always restore terminal settings when exiting
-        if hasattr(app, 'original_terminal_settings') and app.original_terminal_settings:
-            restore_terminal_settings(app, app.original_terminal_settings)
-        print("\nTerminal restored to normal mode.")
-    
-    print("Keyboard listener stopped")
+        # If the keyboard library was used, ensure all hooks are removed on exit.
+        if KEYBOARD_AVAILABLE:
+            keyboard.unhook_all()
+        print("\nKeyboard listener stopped.")
+        print("Terminal restored to normal mode.")
+
+def print_controls():
+    """Prints the available controls."""
+    print("\nBMAR Controls:")
+    print("  'r' - Start/stop recording")
+    print("  's' - Spectrogram (one-shot with GUI)")
+    print("  'o' - Oscilloscope (10s capture with GUI)")
+    print("  't' - Threads (list all)")
+    print("  'v' - VU meter (independent, start before intercom for combo mode)")
+    print("  'i' - Intercom (audio monitoring)")
+    print("  'd' - Current audio device")
+    print("  'D' - List detailed audio devices")
+    print("  'p' - Performance monitor")
+    print("  'P' - Continuous performance monitor")
+    print("  'f' - FFT analysis (10s with progress bar)")
+    print("  'c' - Configuration")
+    print("  'h' - Help")
+    print("  'q' - Quit")
+    if KEYBOARD_AVAILABLE:
+        print("  '^' - Toggle keyboard listener on/off")
+    print("\nReady for commands...")
 
 def process_command(app, command):
     """Process a user command."""
@@ -536,23 +581,43 @@ def handle_vu_meter_command(app):
     from .process_manager import cleanup_process
     
     try:
+        # Check if VU meter process exists and is running
         if 'v' in app.active_processes and app.active_processes['v'] is not None:
-            if hasattr(app.active_processes['v'], 'is_alive') and app.active_processes['v'].is_alive():
-                print("Stopping VU meter...\r")  # Added \r
+            vu_process = app.active_processes['v']
+            
+            # Check if it's actually alive
+            if hasattr(vu_process, 'is_alive') and vu_process.is_alive():
+                print("Stopping VU meter...\r")
+                
                 # Set stop event for the VU meter
                 if hasattr(app, 'vu_stop_event'):
                     app.vu_stop_event.set()
+                
+                # Give the VU meter thread time to clean up its display
+                time.sleep(0.2)
+                
+                # Clean up the process reference
                 cleanup_process(app, 'v')
+                
+                # Clear any remaining VU meter display artifacts
+                print("\r" + " " * 80 + "\r", end="", flush=True)
+                print("VU meter stopped.")
+                
             else:
+                # Thread is dead, clean up and start new one
                 app.active_processes['v'] = None
-                print("Starting VU meter...\r")  # Added \r
+                print("Starting VU meter...\r")
                 start_vu_meter(app)
         else:
-            print("Starting VU meter...\r")  # Added \r
+            # No existing VU meter, start new one
+            print("Starting VU meter...\r")
             start_vu_meter(app)
             
     except Exception as e:
-        print(f"VU meter command error: {e}\r")  # Added \r
+        print(f"VU meter command error: {e}\r")
+        # Clean up any artifacts and reset
+        print("\r" + " " * 80 + "\r", end="", flush=True)
+        app.active_processes['v'] = None
 
 def start_vu_meter(app):
     """Start VU meter using threading instead of multiprocessing."""
@@ -564,10 +629,15 @@ def start_vu_meter(app):
         # Ensure app has all required attributes
         ensure_app_attributes(app)
         
-        # Create a stop event for the VU meter
+        # Clean up any existing VU meter thread and stop event
+        if hasattr(app, 'vu_stop_event'):
+            app.vu_stop_event.set()  # Stop any existing VU meter
+            time.sleep(0.1)  # Brief pause for cleanup
+        
+        # Create a fresh stop event for the VU meter
         app.vu_stop_event = threading.Event()
         
-        # Create VU meter configuration to match original BMAR_class.py format
+        # Create VU meter configuration
         vu_config = {
             'device_index': app.device_index,
             'samplerate': app.samplerate,
@@ -586,16 +656,29 @@ def start_vu_meter(app):
         vu_thread = threading.Thread(
             target=vu_meter,
             args=(vu_config, app.vu_stop_event),
-            daemon=True
+            daemon=True,
+            name=f"VU-Meter-{app.device_index}"
         )
         
         # Store the thread in active_processes
         app.active_processes['v'] = vu_thread
         
+        # Start the thread
         vu_thread.start()
         
+        # Brief delay to let the thread initialize
+        time.sleep(0.1)
+        
+        # Verify thread started successfully
+        if not vu_thread.is_alive():
+            print("Warning: VU meter thread failed to start")
+            app.active_processes['v'] = None
+        
     except Exception as e:
-        print(f"Error starting VU meter: {e}\r")  # Added \r
+        print(f"Error starting VU meter: {e}\r")
+        # Clean up display and reset state
+        print("\r" + " " * 80 + "\r", end="", flush=True)
+        app.active_processes['v'] = None
         import traceback
         traceback.print_exc()
 

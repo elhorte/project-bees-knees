@@ -13,6 +13,87 @@ import os
 from datetime import datetime
 import platform
 
+# Terminal management functions for keyboard input handling
+def get_key():
+    """
+    Get a single character from the keyboard without pressing Enter.
+    Returns None if no key is pressed (non-blocking).
+    """
+    if sys.platform == 'win32':
+        try:
+            import msvcrt
+            if msvcrt.kbhit():
+                char = msvcrt.getch()
+                if isinstance(char, bytes):
+                    return char.decode('utf-8', errors='ignore')
+                return char
+        except ImportError:
+            pass
+    else:
+        # Unix/Linux/macOS
+        try:
+            import termios
+            import tty
+            import select
+            
+            # Check if input is available
+            if select.select([sys.stdin], [], [], 0)[0]:
+                fd = sys.stdin.fileno()
+                old_settings = termios.tcgetattr(fd)
+                try:
+                    tty.setraw(fd)
+                    char = sys.stdin.read(1)
+                    return char
+                finally:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        except ImportError:
+            pass
+    
+    return None
+
+def setup_terminal_for_input(app):
+    """
+    Set up terminal for single character input (raw mode).
+    """
+    if sys.platform == 'win32':
+        # On Windows, msvcrt handles this automatically
+        pass
+    else:
+        # Unix/Linux/macOS
+        try:
+            import termios
+            import tty
+            
+            fd = sys.stdin.fileno()
+            # Save original settings
+            if not hasattr(app, 'original_terminal_settings'):
+                app.original_terminal_settings = termios.tcgetattr(fd)
+            
+            # Set raw mode
+            tty.setraw(fd)
+        except ImportError:
+            pass
+
+def restore_terminal_settings(app, settings=None):
+    """
+    Restore terminal to normal mode.
+    """
+    if sys.platform == 'win32':
+        # On Windows, no special restoration needed
+        pass
+    else:
+        # Unix/Linux/macOS
+        try:
+            import termios
+            
+            fd = sys.stdin.fileno()
+            if settings:
+                termios.tcsetattr(fd, termios.TCSADRAIN, settings)
+            elif hasattr(app, 'original_terminal_settings') and app.original_terminal_settings:
+                termios.tcsetattr(fd, termios.TCSADRAIN, app.original_terminal_settings)
+        except ImportError:
+            pass
+
 def timed_input(app, prompt, timeout=3, default='n'):
     """
     Get user input with a timeout and default value for headless operation.
