@@ -11,6 +11,7 @@ import time
 import logging
 import sys
 import os
+import soundfile as sf
 
 from .system_utils import interruptable_sleep
 from .file_utils import check_and_create_date_folders
@@ -295,7 +296,6 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
                         pcm_to_mp3_write(audio_segment, full_path, app.config)
                     else:
                         # Save as WAV or other format using soundfile
-                        import soundfile as sf
                         sf.write(full_path, audio_segment, save_sample_rate, subtype='PCM_16')
                     
                     logging.info(f"Saved {thread_id} file: {filename}")

@@ -13,13 +13,18 @@ import logging
 import multiprocessing
 import threading
 import os
+import sys
+import sounddevice as sd
+import time
+from datetime import datetime
+import traceback
+import subprocess
 from scipy import signal
 
 # Try to set matplotlib to use interactive backend for GUI display
 GUI_AVAILABLE = False
 try:
     # On Windows, try TkAgg first as it's most reliable
-    import sys
     if sys.platform == 'win32':
         matplotlib.use('TkAgg')
         print("Using TkAgg backend for GUI display")
@@ -142,8 +147,8 @@ def _generate_synthetic_audio(duration, channels, samplerate, task_name="synthet
         logging.error(f"Error generating synthetic audio for {task_name}: {e}")
         return None, 0
 
-def _record_audio_pyaudio(duration, device_index, channels, samplerate, blocksize, task_name="audio recording"):
-    """Record audio using PyAudio with progress bar and virtual device support."""
+def _record_audio_sounddevice(duration, device_index, channels, samplerate, blocksize, task_name="audio recording"):
+    """Record audio using sounddevice with progress bar and virtual device support."""
     
     # Check for virtual device (device_index=None)
     if device_index is None:
@@ -151,82 +156,76 @@ def _record_audio_pyaudio(duration, device_index, channels, samplerate, blocksiz
         return _generate_synthetic_audio(duration, channels, samplerate, task_name)
     
     try:
-        import sounddevice as sd
-    except ImportError:
-        logging.error("sounddevice not available - cannot record audio")
-        return None, 0
-    
-    p = None
-    recording_complete = False
-    frames_recorded = 0
-    
-    try:
         # Calculate recording parameters
         num_frames = int(samplerate * duration)
-        chunk_size = blocksize
         
         # Validate device channels
-        p = pyaudio.PyAudio()
-        device_info = p.get_device_info_by_index(device_index)
-        max_input_channels = int(device_info['maxInputChannels'])
-        actual_channels = min(channels, max_input_channels)
-        
-        if actual_channels != channels:
-            print(f"Device only supports {max_input_channels} input channels, using {actual_channels}\r")
+        try:
+            device_info = sd.query_devices(device_index, 'input')
+            max_input_channels = device_info['max_input_channels']
+            actual_channels = min(channels, max_input_channels)
+            
+            if actual_channels != channels:
+                print(f"Device only supports {max_input_channels} input channels, using {actual_channels}\r")
+        except Exception as e:
+            print(f"Error querying device {device_index}: {e}\r")
+            return None, 0
         
         # Create recording array
         recording_array = np.zeros((num_frames, actual_channels), dtype=np.float32)
         
         print(f"Recording {duration}s of audio from device {device_index}...\r")
-        print(f"Sample rate: {samplerate}Hz, Channels: {actual_channels}, Block size: {chunk_size}\r")
+        print(f"Sample rate: {samplerate}Hz, Channels: {actual_channels}, Block size: {blocksize}\r")
         
-        def callback(indata, frame_count, time_info, status):
+        frames_recorded = 0
+        recording_complete = False
+        
+        def callback(indata, frames, time, status):
             nonlocal frames_recorded, recording_complete
             try:
                 if status:
-                    print(f"PyAudio stream status: {status}\r")
+                    print(f"Sounddevice stream status: {status}\r")
                 if frames_recorded < num_frames and not recording_complete:
-                    data = np.frombuffer(indata, dtype=np.float32)
-                    if len(data) > 0:
-                        start_idx = frames_recorded
-                        end_idx = min(start_idx + len(data) // actual_channels, num_frames)
-                        data = data.reshape(-1, actual_channels)
-                        recording_array[start_idx:end_idx] = data[:(end_idx - start_idx)]
-                        frames_recorded += len(data) // actual_channels
+                    start_idx = frames_recorded
+                    end_idx = min(start_idx + frames, num_frames)
+                    actual_frames = end_idx - start_idx
+                    
+                    if actual_frames > 0:
+                        recording_array[start_idx:end_idx] = indata[:actual_frames]
+                        frames_recorded += actual_frames
+                        
                         if frames_recorded >= num_frames:
                             recording_complete = True
-                            return (None, pyaudio.paComplete)
-                return (None, pyaudio.paContinue)
+                            raise sd.CallbackStop()
+                            
+            except sd.CallbackStop:
+                raise
             except Exception as e:
-                logging.error(f"Error in PyAudio callback: {e}\r")
+                logging.error(f"Error in sounddevice callback: {e}\r")
                 recording_complete = True
-                return (None, pyaudio.paAbort)
+                raise sd.CallbackStop()
         
-        stream = p.open(format=pyaudio.paFloat32,
-                        channels=actual_channels,
-                        rate=int(samplerate),
-                        input=True,
-                        input_device_index=device_index,
-                        frames_per_buffer=chunk_size,
-                        stream_callback=callback)
-        
-        stream.start_stream()
-        
-        start_time = time.time()
-        timeout = duration + 10
-        
-        while not recording_complete and (time.time() - start_time) < timeout:
-            progress_bar = create_progress_bar(frames_recorded, num_frames)
-            print(f"Recording progress: {progress_bar}", end='\r')
-            time.sleep(0.1)
-        
-        # Ensure we show 100% completion when done
-        if recording_complete or frames_recorded >= num_frames:
-            progress_bar = create_progress_bar(num_frames, num_frames)  # Force 100%
-            print(f"Recording progress: {progress_bar}\r")
-        
-        stream.stop_stream()
-        stream.close()
+        # Start recording with sounddevice
+        with sd.InputStream(
+            device=device_index,
+            channels=actual_channels,
+            samplerate=int(samplerate),
+            blocksize=blocksize,
+            dtype='float32',
+            callback=callback
+        ):
+            start_time = time.time()
+            timeout = duration + 10
+            
+            while not recording_complete and (time.time() - start_time) < timeout:
+                progress_bar = create_progress_bar(frames_recorded, num_frames)
+                print(f"Recording progress: {progress_bar}", end='\r')
+                time.sleep(0.1)
+            
+            # Ensure we show 100% completion when done
+            if recording_complete or frames_recorded >= num_frames:
+                progress_bar = create_progress_bar(num_frames, num_frames)  # Force 100%
+                print(f"Recording progress: {progress_bar}\r")
         
         if frames_recorded < num_frames * 0.9:
             print(f"Warning: Recording incomplete: only got {frames_recorded}/{num_frames} frames.\r")
@@ -236,26 +235,11 @@ def _record_audio_pyaudio(duration, device_index, channels, samplerate, blocksiz
         return recording_array, actual_channels
 
     except Exception as e:
-        logging.error(f"Failed to record audio with PyAudio for {task_name}: {e}\r")
+        logging.error(f"Failed to record audio with sounddevice for {task_name}: {e}\r")
         return None, 0
-    finally:
-        if p:
-            try:
-                p.terminate()
-                time.sleep(0.1)  # Allow time for resources to be released
-            except Exception as e:
-                logging.error(f"Error terminating PyAudio instance for {task_name}: {e}")
 
 def plot_oscope(config):
     """Generate and display oscilloscope plot with all active audio channels in stacked traces."""
-    
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import pyaudio
-    import time
-    from datetime import datetime
-    import os
-    
     try:
         device_index = config.get('device_index')
         samplerate = config.get('samplerate', 44100)
@@ -266,21 +250,18 @@ def plot_oscope(config):
         
         print(f"Oscilloscope capturing {plot_duration}s from device {device_index} ({samplerate}Hz, {channels} channels)\r")
         
-        # Initialize PyAudio
-        p = pyaudio.PyAudio()
-        
         try:
             # Validate device
             if device_index is not None:
-                device_info = p.get_device_info_by_index(device_index)
+                device_info = sd.query_devices(device_index, 'input')
                 print(f"Using device: {device_info['name']}\r")
                 
-                if device_info['maxInputChannels'] == 0:
+                if device_info['max_input_channels'] == 0:
                     print(f"Error: Device {device_index} has no input channels\r")
                     return
                 
                 # Ensure we don't request more channels than available
-                max_channels = device_info['maxInputChannels']
+                max_channels = device_info['max_input_channels']
                 if channels > max_channels:
                     print(f"Warning: Requested {channels} channels, but device only has {max_channels}. Using {max_channels} channels.\r")
                     channels = max_channels
@@ -295,47 +276,53 @@ def plot_oscope(config):
             total_samples = int(samplerate * plot_duration)
             audio_data = {i: [] for i in range(channels)}  # Store data for each channel
             
-            # Open audio stream
-            stream = p.open(
-                format=pyaudio.paFloat32,
-                channels=channels,
-                rate=samplerate,
-                input=True,
-                input_device_index=device_index,
-                frames_per_buffer=blocksize
-            )
-            
-            # Capture audio data
             samples_captured = 0
-            while samples_captured < total_samples:
+            capture_complete = False
+            
+            def callback(indata, frames, time, status):
+                nonlocal samples_captured, capture_complete
                 try:
-                    # Read audio chunk
-                    data = stream.read(blocksize, exception_on_overflow=False)
-                    audio_chunk = np.frombuffer(data, dtype=np.float32)
+                    if status:
+                        print(f"Sounddevice status: {status}\r")
+                        
+                    if samples_captured >= total_samples:
+                        capture_complete = True
+                        raise sd.CallbackStop()
                     
                     # Handle multi-channel data
                     if channels > 1:
-                        audio_chunk = audio_chunk.reshape(-1, channels)
                         # Store each channel separately
                         for ch in range(channels):
-                            audio_data[ch].extend(audio_chunk[:, ch])
+                            audio_data[ch].extend(indata[:, ch])
                     else:
                         # Single channel
-                        audio_data[0].extend(audio_chunk)
+                        audio_data[0].extend(indata.flatten())
                     
-                    samples_captured += len(audio_chunk) if channels == 1 else len(audio_chunk) // channels
+                    samples_captured += frames
                     
                     # Show progress
-                    progress = (samples_captured / total_samples) * 100
+                    progress = min((samples_captured / total_samples) * 100, 100)
                     print(f"\rCapturing: {progress:.1f}%", end="", flush=True)
                     
+                except sd.CallbackStop:
+                    raise
                 except Exception as e:
-                    print(f"\rError reading audio: {e}\r")
-                    break
+                    print(f"\rError in audio callback: {e}\r")
+                    capture_complete = True
+                    raise sd.CallbackStop()
             
-            # Close stream
-            stream.stop_stream()
-            stream.close()
+            # Capture audio data with sounddevice
+            with sd.InputStream(
+                device=device_index,
+                channels=channels,
+                samplerate=samplerate,
+                blocksize=blocksize,
+                dtype='float32',
+                callback=callback
+            ):
+                # Wait for capture to complete
+                while not capture_complete and samples_captured < total_samples:
+                    time.sleep(0.1)
             
             print(f"\rGenerating multi-channel oscilloscope plot...\r")
             
@@ -410,28 +397,15 @@ def plot_oscope(config):
             
         except Exception as e:
             print(f"Oscilloscope error: {e}\r")
-            import traceback
             traceback.print_exc()
-            
-        finally:
-            # Cleanup PyAudio
-            p.terminate()
             
     except Exception as e:
         print(f"Oscilloscope setup error: {e}\r")
-        import traceback
         traceback.print_exc()
 
 def plot_spectrogram(config):
-    """Generate and display a spectrogram using PyAudio for audio capture."""
-    
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import pyaudio
-    import time
-    from datetime import datetime
-    import os
-    
+    """Generate and display a spectrogram using sounddevice for audio capture."""
+
     try:
         device_index = config.get('device_index')
         samplerate = config.get('samplerate', 44100)
@@ -445,21 +419,18 @@ def plot_spectrogram(config):
         
         print(f"Spectrogram capturing {capture_duration}s from device {device_index} ({samplerate}Hz)\r")
         
-        # Initialize PyAudio
-        p = pyaudio.PyAudio()
-        
         try:
             # Validate device
             if device_index is not None:
-                device_info = p.get_device_info_by_index(device_index)
+                device_info = sd.query_devices(device_index, 'input')
                 print(f"Using device: {device_info['name']}\r")
                 
-                if device_info['maxInputChannels'] == 0:
+                if device_info['max_input_channels'] == 0:
                     print(f"Error: Device {device_index} has no input channels\r")
                     return
                     
                 # Adjust channels if device doesn't support requested channels
-                max_channels = device_info['maxInputChannels']
+                max_channels = device_info['max_input_channels']
                 if channels > max_channels:
                     channels = max_channels
                     print(f"Adjusted to {channels} channels (device maximum)\r")
@@ -473,43 +444,51 @@ def plot_spectrogram(config):
             total_samples = int(samplerate * capture_duration)
             audio_data = []
             
-            # Open audio stream
-            stream = p.open(
-                format=pyaudio.paFloat32,
-                channels=channels,
-                rate=samplerate,
-                input=True,
-                input_device_index=device_index,
-                frames_per_buffer=blocksize
-            )
-            
-            # Capture audio data
             samples_captured = 0
-            while samples_captured < total_samples:
+            capture_complete = False
+            
+            def callback(indata, frames, time, status):
+                nonlocal samples_captured, capture_complete
                 try:
-                    # Read audio chunk
-                    data = stream.read(blocksize, exception_on_overflow=False)
-                    audio_chunk = np.frombuffer(data, dtype=np.float32)
+                    if status:
+                        print(f"Sounddevice status: {status}\r")
+                        
+                    if samples_captured >= total_samples:
+                        capture_complete = True
+                        raise sd.CallbackStop()
                     
                     # Handle multi-channel data
                     if channels > 1:
-                        audio_chunk = audio_chunk.reshape(-1, channels)
-                        audio_chunk = audio_chunk[:, 0]  # Use first channel
+                        audio_chunk = indata[:, 0]  # Use first channel
+                    else:
+                        audio_chunk = indata.flatten()
                     
                     audio_data.extend(audio_chunk)
-                    samples_captured += len(audio_chunk)
+                    samples_captured += frames
                     
                     # Show progress
-                    progress = (samples_captured / total_samples) * 100
+                    progress = min((samples_captured / total_samples) * 100, 100)
                     print(f"\rCapturing: {progress:.1f}%", end="", flush=True)
                     
+                except sd.CallbackStop:
+                    raise
                 except Exception as e:
-                    print(f"\rError reading audio: {e}\r")
-                    break
+                    print(f"\rError in audio callback: {e}\r")
+                    capture_complete = True
+                    raise sd.CallbackStop()
             
-            # Close stream
-            stream.stop_stream()
-            stream.close()
+            # Capture audio data with sounddevice
+            with sd.InputStream(
+                device=device_index,
+                channels=channels,
+                samplerate=samplerate,
+                blocksize=blocksize,
+                dtype='float32',
+                callback=callback
+            ):
+                # Wait for capture to complete
+                while not capture_complete and samples_captured < total_samples:
+                    time.sleep(0.1)
             
             print(f"\rCaptured {len(audio_data)} samples\r")
             
@@ -586,27 +565,14 @@ def plot_spectrogram(config):
             
         except Exception as e:
             print(f"Spectrogram error: {e}\r")
-            import traceback
             traceback.print_exc()
-            
-        finally:
-            # Cleanup PyAudio
-            p.terminate()
             
     except Exception as e:
         print(f"Spectrogram setup error: {e}\r")
-        import traceback
         traceback.print_exc()
 
 def plot_fft(config):
-    """Generate and display FFT analysis using PyAudio for audio capture."""
-    
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import pyaudio
-    import time
-    from datetime import datetime
-    import os
+    """Generate and display FFT analysis using sounddevice for audio capture."""
     
     try:
         device_index = config.get('device_index')
@@ -633,22 +599,20 @@ def plot_fft(config):
             windowed_data = audio_data * np.hanning(len(audio_data))
             
         else:
-            # Initialize PyAudio for real device
-            p = pyaudio.PyAudio()
-            
+            # Use sounddevice for real device
             try:
                 # Validate device
-                device_info = p.get_device_info_by_index(device_index)
+                device_info = sd.query_devices(device_index, 'input')
                 print(f"Using device: {device_info['name']}\r")
                 
-                if device_info['maxInputChannels'] == 0:
+                if device_info['max_input_channels'] == 0:
                     print(f"Error: Device {device_index} has no input channels\r")
                     return
                 
                 # Validate monitor channel
-                if monitor_channel >= device_info['maxInputChannels']:
+                if monitor_channel >= device_info['max_input_channels']:
                     monitor_channel = 0
-                    print(f"Adjusted to channel 1 (device has {device_info['maxInputChannels']} channels)\r")
+                    print(f"Adjusted to channel 1 (device has {device_info['max_input_channels']} channels)\r")
                 
                 print("Capturing audio for FFT analysis...\r")
                 
@@ -657,46 +621,54 @@ def plot_fft(config):
                 total_samples = int(samplerate * capture_duration)
                 audio_data = []
                 
-                # Open audio stream
-                stream = p.open(
-                    format=pyaudio.paFloat32,
-                    channels=channels,
-                    rate=samplerate,
-                    input=True,
-                    input_device_index=device_index,
-                    frames_per_buffer=blocksize
-                )
-                
-                # Capture audio data
                 samples_captured = 0
-                while samples_captured < total_samples:
+                capture_complete = False
+                
+                def callback(indata, frames, time, status):
+                    nonlocal samples_captured, capture_complete
                     try:
-                        # Read audio chunk
-                        data = stream.read(blocksize, exception_on_overflow=False)
-                        audio_chunk = np.frombuffer(data, dtype=np.float32)
+                        if status:
+                            print(f"Sounddevice status: {status}\r")
+                            
+                        if samples_captured >= total_samples:
+                            capture_complete = True
+                            raise sd.CallbackStop()
                         
                         # Handle multi-channel data
                         if channels > 1:
-                            audio_chunk = audio_chunk.reshape(-1, channels)
-                            if monitor_channel < audio_chunk.shape[1]:
-                                audio_chunk = audio_chunk[:, monitor_channel]
+                            if monitor_channel < indata.shape[1]:
+                                audio_chunk = indata[:, monitor_channel]
                             else:
-                                audio_chunk = audio_chunk[:, 0]  # Fallback to first channel
+                                audio_chunk = indata[:, 0]  # Fallback to first channel
+                        else:
+                            audio_chunk = indata.flatten()
                         
                         audio_data.extend(audio_chunk)
-                        samples_captured += len(audio_chunk)
+                        samples_captured += frames
                         
                         # Show progress
-                        progress = (samples_captured / total_samples) * 100
+                        progress = min((samples_captured / total_samples) * 100, 100)
                         print(f"\rCapturing: {progress:.1f}%", end="", flush=True)
                         
+                    except sd.CallbackStop:
+                        raise
                     except Exception as e:
-                        print(f"\rError reading audio: {e}\r")
-                        break
+                        print(f"\rError in audio callback: {e}\r")
+                        capture_complete = True
+                        raise sd.CallbackStop()
                 
-                # Close stream
-                stream.stop_stream()
-                stream.close()
+                # Capture audio data with sounddevice
+                with sd.InputStream(
+                    device=device_index,
+                    channels=channels,
+                    samplerate=samplerate,
+                    blocksize=blocksize,
+                    dtype='float32',
+                    callback=callback
+                ):
+                    # Wait for capture to complete
+                    while not capture_complete and samples_captured < total_samples:
+                        time.sleep(0.1)
                 
                 print(f"\rProcessing FFT...\r")
                 
@@ -708,9 +680,9 @@ def plot_fft(config):
                 audio_data = np.array(audio_data[:total_samples])
                 windowed_data = audio_data * np.hanning(len(audio_data))
                 
-            finally:
-                # Cleanup PyAudio
-                p.terminate()
+            except Exception as e:
+                print(f"Error with sounddevice: {e}\r")
+                return
         
         # Compute FFT (common path for both virtual and real devices)
         fft_size = len(windowed_data)
@@ -748,7 +720,6 @@ def plot_fft(config):
         
     except Exception as e:
         print(f"FFT setup error: {e}\r")
-        import traceback
         traceback.print_exc()
 
 def trigger(config):
@@ -835,22 +806,18 @@ def trigger(config):
             ax2.grid(True, alpha=0.3)
             ax2.set_xlim(0, samplerate//2)
         
-        # Audio callback function for PyAudio
-        def audio_callback(indata, frames, time_info, status):
+        # Audio callback function for sounddevice
+        def audio_callback(indata, frames, time, status):
             nonlocal audio_buffer, buffer_index, triggered, trigger_index, last_sample
             
             if status:
                 print(f"Trigger callback status: {status}")
             
-            # Convert PyAudio bytes to numpy array
-            audio_data = np.frombuffer(indata, dtype=np.float32)
-            
             # Handle multi-channel data (use first channel for trigger)
             if channels > 1:
-                audio_data = audio_data.reshape(-1, channels)
-                new_data = audio_data[:, 0]  # Use first channel for trigger detection
+                new_data = indata[:, 0]  # Use first channel for trigger detection
             else:
-                new_data = audio_data
+                new_data = indata.flatten()
             
             for sample in new_data:
                 # Check for trigger
@@ -863,73 +830,61 @@ def trigger(config):
                 audio_buffer[buffer_index] = sample
                 buffer_index = (buffer_index + 1) % buffer_size
                 last_sample = sample
-            
-            return (indata, pyaudio.paContinue)
         
-        # Start PyAudio stream
-        import pyaudio
-        pa = pyaudio.PyAudio()
-        
-        stream = pa.open(
-            format=pyaudio.paFloat32,
+        # Start sounddevice stream
+        with sd.InputStream(
+            device=device_index,
             channels=channels,
-            rate=int(samplerate),
-            input=True,
-            input_device_index=device_index,
-            frames_per_buffer=blocksize,
-            stream_callback=audio_callback
-        )
-        
-        stream.start_stream()
-        
-        try:
-            trigger_count = 0
-            
-            while stream.is_active():
-                if triggered:
-                    # Extract triggered data
-                    start_idx = (trigger_index - pre_trigger_samples) % buffer_size
-                    end_idx = (trigger_index + post_trigger_samples) % buffer_size
-                    
-                    if end_idx > start_idx:
-                        trigger_data = audio_buffer[start_idx:end_idx]
-                    else:
-                        # Handle wraparound
-                        trigger_data = np.concatenate([
-                            audio_buffer[start_idx:],
-                            audio_buffer[:end_idx]
-                        ])
-                    
-                    # Plot and save
-                    try:
-                        plot_triggered_data(trigger_data)
-                        
-                        timestamp = time.strftime("%Y%m%d_%H%M%S")
-                        filename = f"trigger_{timestamp}_{trigger_count:03d}.png"
-                        
-                        # Create plots directory if it doesn't exist
-                        plots_dir = config.get('plots_dir', 'plots')
-                        if not os.path.exists(plots_dir):
-                            os.makedirs(plots_dir)
-                        
-                        filepath = os.path.join(plots_dir, filename)
-                        fig.savefig(filepath, dpi=100, bbox_inches='tight')
-                        
-                        print(f"Saved trigger plot: {filename}")
-                        trigger_count += 1
-                        
-                    except Exception as e:
-                        print(f"Error saving trigger plot: {e}")
-                    
-                    # Reset trigger
-                    triggered = False
+            samplerate=int(samplerate),
+            blocksize=blocksize,
+            dtype='float32',
+            callback=audio_callback
+        ):
+            try:
+                trigger_count = 0
                 
-                time.sleep(0.1)
-        finally:
-            # Clean up PyAudio resources
-            stream.stop_stream()
-            stream.close()
-            pa.terminate()
+                while True:
+                    if triggered:
+                        # Extract triggered data
+                        start_idx = (trigger_index - pre_trigger_samples) % buffer_size
+                        end_idx = (trigger_index + post_trigger_samples) % buffer_size
+                        
+                        if end_idx > start_idx:
+                            trigger_data = audio_buffer[start_idx:end_idx]
+                        else:
+                            # Handle wraparound
+                            trigger_data = np.concatenate([
+                                audio_buffer[start_idx:],
+                                audio_buffer[:end_idx]
+                            ])
+                        
+                        # Plot and save
+                        try:
+                            plot_triggered_data(trigger_data)
+                            
+                            timestamp = time.strftime("%Y%m%d_%H%M%S")
+                            filename = f"trigger_{timestamp}_{trigger_count:03d}.png"
+                            
+                            # Create plots directory if it doesn't exist
+                            plots_dir = config.get('plots_dir', 'plots')
+                            if not os.path.exists(plots_dir):
+                                os.makedirs(plots_dir)
+                            
+                            filepath = os.path.join(plots_dir, filename)
+                            fig.savefig(filepath, dpi=100, bbox_inches='tight')
+                            
+                            print(f"Saved trigger plot: {filename}")
+                            trigger_count += 1
+                            
+                        except Exception as e:
+                            print(f"Error saving trigger plot: {e}")
+                        
+                        # Reset trigger
+                        triggered = False
+                    
+                    time.sleep(0.1)
+            except KeyboardInterrupt:
+                print("\nTrigger plotting stopped by user")
                 
     except KeyboardInterrupt:
         print("\nTrigger plotting stopped by user")
@@ -1050,8 +1005,6 @@ def create_comparison_plot(audio_data_list, labels, samplerate, output_path="com
 def _try_open_plot_file(filepath):
     """Try to open a plot file using the system's default image viewer."""
     try:
-        import subprocess
-        import sys
         
         if sys.platform == 'win32':
             # Windows

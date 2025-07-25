@@ -33,7 +33,7 @@ pip install numpy scipy matplotlib sounddevice librosa pydub psutil
 Navigate to the source directory and launch the venv environment:
 
 ```bash
- cd "E:\git\eb\project-bees-knees\beehub\python\src" && .\auntbee\Scripts\Activate.ps1
+ cd "E:\git\earth_biometrics\project-bees-knees\beehub\python\src" && .\auntbee\Scripts\Activate.ps1
 ```
 
 #### Method 1: Simple Quick Start ⭐ (Recommended)

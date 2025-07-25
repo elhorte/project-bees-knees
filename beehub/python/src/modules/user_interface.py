@@ -6,56 +6,67 @@ Handles keyboard input, command processing, and user interaction.
 import threading
 import time
 import logging
+import sys
 import os
 import multiprocessing
-import tempfile
-import json
-from pathlib import Path
-from .system_utils import get_key
+import platform
+import traceback
 
-try:
-    import keyboard  # For keyboard listener toggle functionality
-    KEYBOARD_AVAILABLE = True
-except ImportError:
-    KEYBOARD_AVAILABLE = False
-    print("Warning: 'keyboard' library not available. Install with 'pip install keyboard' for keyboard toggle functionality.")
+# Platform-specific imports for terminal control
+WINDOWS_AVAILABLE = False
+UNIX_AVAILABLE = False
+orig_settings = None
+msvcrt = None
+termios = None
+tty = None
+select = None
+
+if platform.system() == "Windows":
+    try:
+        import msvcrt
+        WINDOWS_AVAILABLE = True
+    except ImportError:
+        WINDOWS_AVAILABLE = False
+else:
+    try:
+        import termios
+        import tty
+        import select
+        UNIX_AVAILABLE = True
+        # Save original terminal settings
+        if sys.stdin.isatty():
+            orig_settings = termios.tcgetattr(sys.stdin)
+    except ImportError:
+        UNIX_AVAILABLE = False
 
 # Global variable to track the state of the keyboard listener toggle
-keyboard_listener_enabled = True
+interactive_mode = True
+toggle_key = '^'
 
-# Path for the toggle state file (for inter-process communication)
-TOGGLE_STATE_FILE = Path(tempfile.gettempdir()) / "bmar_keyboard_state.json"
+def enable_raw_mode():
+    """Enable raw mode for Unix/Linux systems."""
+    if platform.system() != "Windows" and UNIX_AVAILABLE and orig_settings:
+        tty.setraw(sys.stdin.fileno())
 
-# Initialize the toggle state file with the current state on module import
-def _initialize_toggle_state():
-    """Initialize the toggle state file if it doesn't exist."""
-    if not TOGGLE_STATE_FILE.exists():
-        write_toggle_state_to_file(keyboard_listener_enabled)
+def restore_terminal():
+    """Restore original terminal settings for Unix/Linux systems."""
+    if platform.system() != "Windows" and UNIX_AVAILABLE and orig_settings:
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, orig_settings)
 
-def read_toggle_state_from_file():
-    """Read the current toggle state from file for inter-process communication."""
-    try:
-        if TOGGLE_STATE_FILE.exists():
-            with open(TOGGLE_STATE_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data.get('enabled', True)
-        else:
-            # Default to enabled if file doesn't exist
-            return True
-    except (IOError, json.JSONDecodeError):
-        return True
-
-def write_toggle_state_to_file(enabled):
-    """Write the toggle state to file for inter-process communication."""
-    try:
-        with open(TOGGLE_STATE_FILE, 'w', encoding='utf-8') as f:
-            json.dump({'enabled': enabled}, f)
-        return True
-    except IOError:
-        return False
-
-# Initialize the toggle state file
-_initialize_toggle_state()
+def get_single_key():
+    """Get a single key press in a cross-platform way."""
+    if platform.system() == "Windows" and WINDOWS_AVAILABLE:
+        if msvcrt.kbhit():
+            key = msvcrt.getch()
+            if isinstance(key, bytes):
+                key = key.decode('utf-8', errors='ignore')
+            return key
+        return None
+    else:
+        # Unix/Linux/macOS
+        if UNIX_AVAILABLE and select.select([sys.stdin], [], [], 0.1)[0]:
+            return sys.stdin.read(1)
+        return None
 
 def ensure_app_attributes(app):
     """Ensure app has all required attributes."""
@@ -67,53 +78,6 @@ def ensure_app_attributes(app):
         app.os_info = {}
     if not hasattr(app, 'DEBUG_VERBOSE'):
         app.DEBUG_VERBOSE = False
-
-def toggle_keyboard_listener():
-    """Toggle the keyboard listener on/off using the '^' key."""
-    global keyboard_listener_enabled
-    
-    keyboard_listener_enabled = not keyboard_listener_enabled
-    state = "enabled" if keyboard_listener_enabled else "disabled"
-    
-    # Write state to file for inter-process communication
-    write_toggle_state_to_file(keyboard_listener_enabled)
-    
-    # Provide clear user feedback with different messages for each state
-    if keyboard_listener_enabled:
-        print(f"\nKeyboard listener {state}.")
-        print("BMAR single-key commands are now active. Press 'h' for help.")
-    else:
-        print(f"\nKeyboard listener {state}.")
-        print("Terminal is now in normal mode - you can type normally.")
-        print("Press '^' again to return to BMAR command mode.")
-    
-    return keyboard_listener_enabled
-
-def enable_bmar_mode():
-    """Enable BMAR command mode from the command line."""
-    global keyboard_listener_enabled
-    
-    # Write to file first for inter-process communication
-    write_toggle_state_to_file(True)
-    
-    if not keyboard_listener_enabled:
-        keyboard_listener_enabled = True
-        print("BMAR command mode enabled. Single-key commands are now active.")
-        print("Press 'h' for help, '^' to disable again.")
-    else:
-        print("BMAR command mode is already enabled.")
-
-def disable_bmar_mode():
-    """Disable BMAR command mode from the command line."""
-    global keyboard_listener_enabled
-    
-    # Write to file first for inter-process communication
-    write_toggle_state_to_file(False)
-    
-    if keyboard_listener_enabled:
-        keyboard_listener_enabled = False
-        print("BMAR command mode disabled. Terminal is now in normal mode.")
-        print("Press '^' to return to BMAR command mode.")
     else:
         print("BMAR command mode is already disabled.")
 
@@ -131,50 +95,108 @@ def background_keyboard_monitor(app):
 
 def keyboard_listener(app):
     """
-    Keyboard input listener thread function.
-    This version uses a blocking mechanism to avoid polling and race conditions.
-    It also checks for external state changes via file system.
+    Keyboard input listener thread function with toggle functionality.
+    In interactive mode: Captures single keystrokes for BMAR commands
+    In pass-through mode: Sleeps and doesn't interfere with terminal input
     """
+    global interactive_mode
     
-    import time
-    import logging
-    from .system_utils import get_key # Use the reliable, platform-specific get_key
-
     try:
         print_controls()
-        
-        global keyboard_listener_enabled
-        last_file_check = time.time()
+        print("\nNote: Press '^' to toggle between BMAR keyboard mode and normal terminal.")
+        print("In normal terminal mode, the program continues running in background.")
         
         while app.keyboard_listener_running:
             try:
-                # Check file state every 0.5 seconds for external changes
-                current_time = time.time()
-                if current_time - last_file_check > 0.5:
-                    file_state = read_toggle_state_from_file()
-                    if file_state != keyboard_listener_enabled:
-                        keyboard_listener_enabled = file_state
-                        state = "enabled" if keyboard_listener_enabled else "disabled"
-                        print(f"\nKeyboard listener {state} (external change detected).")
-                    last_file_check = current_time
-                
-                if keyboard_listener_enabled:
-                    # When enabled, get_key() is used for commands.
-                    command = get_key()
-                    if command:
-                        process_command(app, command)
-                else:
-                    # When disabled, wait specifically for the toggle key.
-                    if KEYBOARD_AVAILABLE:
-                        # This blocks until a key is pressed and consumes it.
-                        # Other keys are also consumed but ignored.
-                        event = keyboard.read_event(suppress=True)
-                        if event.event_type == keyboard.KEY_DOWN and event.name == '^':
-                            toggle_keyboard_listener()
-                            time.sleep(0.2) # Debounce
+                if interactive_mode:
+                    # Interactive mode: Set up terminal for raw mode and capture individual keys
+                    if platform.system() != "Windows" and UNIX_AVAILABLE:
+                        enable_raw_mode()
+                    
+                    # Get character input for BMAR commands
+                    if platform.system() == "Windows" and WINDOWS_AVAILABLE:
+                        # Windows implementation
+                        if msvcrt.kbhit():
+                            ch = msvcrt.getch()
+                            if isinstance(ch, bytes):
+                                ch = ch.decode('utf-8', errors='ignore')
+                            
+                            if ch == toggle_key:
+                                interactive_mode = False
+                                # Restore normal terminal behavior immediately
+                                if platform.system() != "Windows" and UNIX_AVAILABLE:
+                                    restore_terminal()
+                                print(f"\n[BMAR keyboard mode OFF - Terminal now operates normally]")
+                                print("All keystrokes are now visible and functional in the terminal.")
+                                print("BMAR processes continue running in background.")
+                                print("Press '^' again to return to BMAR keyboard mode.")
+                                # Flush output to ensure messages are visible
+                                sys.stdout.flush()
+                            else:
+                                # Process BMAR command
+                                process_command(app, ch)
+                        else:
+                            time.sleep(0.05)  # Small delay to prevent CPU hogging
+                    
                     else:
-                        # No way to re-enable, so just sleep.
-                        time.sleep(0.5)
+                        # Unix/Linux/macOS implementation  
+                        if UNIX_AVAILABLE and select.select([sys.stdin], [], [], 0.1)[0]:
+                            ch = sys.stdin.read(1)
+                            
+                            if ch == toggle_key:
+                                interactive_mode = False
+                                print(f"\n[BMAR keyboard mode OFF - Terminal now operates normally]")
+                                print("All keystrokes are now visible and functional in the terminal.")
+                                print("BMAR processes continue running in background.")
+                                print("Press '^' again to return to BMAR keyboard mode.")
+                                # Restore normal terminal behavior
+                                restore_terminal()
+                                # Flush output to ensure messages are visible
+                                sys.stdout.flush()
+                            else:
+                                # Process BMAR command
+                                process_command(app, ch)
+                        else:
+                            # No input available, small delay
+                            time.sleep(0.05)
+                
+                else:
+                    # Pass-through mode: Don't interfere with terminal input at all
+                    # Just sleep and check occasionally if we should return to interactive mode
+                    
+                    # Ensure terminal is in normal mode
+                    if platform.system() != "Windows" and UNIX_AVAILABLE:
+                        restore_terminal()
+                    
+                    # Sleep for a longer period to avoid interfering with terminal
+                    time.sleep(0.5)
+                    
+                    # Check if user wants to return to interactive mode
+                    # We'll look for the toggle key in a non-blocking way
+                    if platform.system() == "Windows" and WINDOWS_AVAILABLE:
+                        if msvcrt.kbhit():
+                            ch = msvcrt.getch()
+                            if isinstance(ch, bytes):
+                                ch = ch.decode('utf-8', errors='ignore')
+                            if ch == toggle_key:
+                                interactive_mode = True
+                                print(f"\n[BMAR keyboard mode ON - Single-key commands active]")
+                                print("BMAR single-key commands are now active. Press 'h' for help.")
+                                sys.stdout.flush()
+                    else:
+                        # For Unix systems, we need to be very careful not to interfere
+                        # We'll use a very short timeout to check for our toggle key
+                        if UNIX_AVAILABLE:
+                            ready, _, _ = select.select([sys.stdin], [], [], 0.01)
+                            if ready:
+                                ch = sys.stdin.read(1)
+                                if ch == toggle_key:
+                                    interactive_mode = True
+                                    print(f"\n[BMAR keyboard mode ON - Single-key commands active]")
+                                    print("BMAR single-key commands are now active. Press 'h' for help.")
+                                    sys.stdout.flush()
+                                # If it's not our toggle key, we unfortunately consumed it
+                                # This is a limitation of this approach
 
             except KeyboardInterrupt:
                 print("\nKeyboard interrupt received")
@@ -187,9 +209,9 @@ def keyboard_listener(app):
         print(f"Keyboard listener failed to start: {e}")
         logging.error(f"Keyboard listener failed to start: {e}")
     finally:
-        # If the keyboard library was used, ensure all hooks are removed on exit.
-        if KEYBOARD_AVAILABLE:
-            keyboard.unhook_all()
+        # Restore terminal to normal mode
+        if platform.system() != "Windows" and UNIX_AVAILABLE:
+            restore_terminal()
         print("\nKeyboard listener stopped.")
         print("Terminal restored to normal mode.")
 
@@ -210,9 +232,9 @@ def print_controls():
     print("  'c' - Configuration")
     print("  'h' - Help")
     print("  'q' - Quit")
-    if KEYBOARD_AVAILABLE:
-        print("  '^' - Toggle keyboard listener on/off")
+    print("  '^' - Toggle between BMAR keyboard mode and normal terminal")
     print("\nReady for commands...")
+    print("Note: Press '^' to toggle between BMAR keyboard mode and normal terminal.")
 
 def process_command(app, command):
     """Process a user command."""
@@ -293,11 +315,8 @@ def process_command(app, command):
             handle_thread_list_command(app)
             
         elif command == '^':
-            # Toggle keyboard listener on/off
-            if KEYBOARD_AVAILABLE:
-                toggle_keyboard_listener()
-            else:
-                print("Keyboard toggle functionality not available. Install 'keyboard' library with 'pip install keyboard'.")
+            # Toggle is handled directly in keyboard_listener function
+            print("Toggle functionality is built into the keyboard listener. This message should not appear.")
 
         # No imports, no dependencies, just pure print statements
 
@@ -306,7 +325,6 @@ def process_command(app, command):
             
     except Exception as e:
         print(f"Error processing command '{command}': {e}\r")  # Added \r
-        import traceback
         print(f"Traceback: \r")  # Added \r
         traceback.print_exc()
         logging.error(f"Error processing command '{command}': {e}")
@@ -391,7 +409,6 @@ def handle_spectrogram_command(app):
             
     except Exception as e:
         print(f"Spectrogram command error: {e}\r")  # Added \r
-        import traceback
         traceback.print_exc()
 
 def start_spectrogram(app):
@@ -438,7 +455,6 @@ def start_spectrogram(app):
         
     except Exception as e:
         print(f"Error starting spectrogram: {e}\r")  # Added \r
-        import traceback
         traceback.print_exc()
 
 def handle_oscilloscope_command(app):
@@ -462,7 +478,6 @@ def handle_oscilloscope_command(app):
             
     except Exception as e:
         print(f"Oscilloscope command error: {e}\r")
-        import traceback
         traceback.print_exc()
 
 def start_oscilloscope(app):
@@ -503,7 +518,6 @@ def start_oscilloscope(app):
         
     except Exception as e:
         print(f"Error starting oscilloscope: {e}\r")
-        import traceback
         traceback.print_exc()
 
 def handle_trigger_command(app):
@@ -572,7 +586,6 @@ def start_trigger_plotting(app):
         
     except Exception as e:
         print(f"Error starting trigger plotting: {e}\r")  # Added \r
-        import traceback
         traceback.print_exc()
 
 def handle_vu_meter_command(app):
@@ -622,7 +635,6 @@ def handle_vu_meter_command(app):
 def start_vu_meter(app):
     """Start VU meter using threading instead of multiprocessing."""
     
-    import threading
     from .audio_tools import vu_meter
     
     try:
@@ -901,7 +913,6 @@ def handle_continuous_performance_monitor_command(app):
             
     except Exception as e:
         print(f"Continuous performance monitor command error: {e}\r")  # Added \r
-        import traceback
         traceback.print_exc()
 
 def start_continuous_performance_monitor(app):
@@ -909,7 +920,7 @@ def start_continuous_performance_monitor(app):
     
     from .process_manager import create_subprocess
     from .system_utils import monitor_system_performance_continuous_standalone
-    import multiprocessing
+
     
     try:
         # Create a shared dictionary to control the stop signal
@@ -934,7 +945,6 @@ def start_continuous_performance_monitor(app):
         
     except Exception as e:
         print(f"Error starting continuous performance monitor: {e}\r")  # Added \r
-        import traceback
         traceback.print_exc()
 
 def handle_channel_switch_command(app, command):
@@ -983,7 +993,6 @@ def handle_channel_switch_command(app, command):
         print(f"Invalid channel number: {command}\r")  # Added \r
     except Exception as e:
         print(f"Channel switch error: {e}\r")  # Added \r
-        import traceback
         traceback.print_exc()
         logging.error(f"Channel switch error: {e}")
 
@@ -1022,7 +1031,6 @@ def handle_thread_list_command(app):
     
     from .process_manager import list_active_processes
     from .system_utils import list_all_threads
-    import threading
     
     try:
         print("\nActive Threads:\r")  # Added \r
@@ -1048,7 +1056,6 @@ def handle_thread_list_command(app):
         
     except Exception as e:
         print(f"Error listing threads: {e}\r")  # Added \r
-        import traceback
         traceback.print_exc()
         logging.error(f"Error listing threads: {e}")
 
@@ -1078,8 +1085,7 @@ def show_help():
     print("c - Configuration: Display current settings\r")
     print("h - Help:          This help message\r")
     print("q - Quit:          Exit the application\r")
-    if KEYBOARD_AVAILABLE:
-        print("^ - Toggle:        Enable/disable keyboard listener (background monitoring)\r")
+    print("^ - Toggle:        Toggle between BMAR keyboard mode and normal terminal\r")
     print()
     print("1-9 - Channel:     Switch monitoring channel (while VU/Intercom active)")
     print()
@@ -1138,7 +1144,6 @@ def handle_fft_command(app):
             
     except Exception as e:
         print(f"FFT command error: {e}\r")
-        import traceback
         traceback.print_exc()
 
 def start_fft_analysis(app):
@@ -1180,5 +1185,4 @@ def start_fft_analysis(app):
         
     except Exception as e:
         print(f"Error starting FFT analysis: {e}\r")
-        import traceback
         traceback.print_exc()
