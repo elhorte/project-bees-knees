@@ -17,7 +17,7 @@ from .system_utils import interruptable_sleep
 from .file_utils import check_and_create_date_folders
 from .audio_conversion import downsample_audio, pcm_to_mp3_write
 
-def callback(indata, frames, time, status):
+def callback(indata, _frames, _time_info, status):
     """Callback function for audio input stream (sounddevice compatible)."""
     if status:
         print("Sounddevice callback status:", status)
@@ -221,7 +221,7 @@ def audio_stream(app):
 
     return True  # Normal exit path
 
-def recording_worker_thread(app, record_period, interval, thread_id, file_format, target_sample_rate, start_tod, end_tod, stop_event=None):
+def recording_worker_thread(app, record_period, interval, thread_id, file_format, _target_sample_rate, start_tod, end_tod, stop_event=None):
     """Worker thread for recording audio to files."""
     
     # Use the provided stop event, or fall back to the default one for backward compatibility
@@ -230,8 +230,6 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
     
     if start_tod is None:
         print(f"{thread_id} is recording continuously\r")
-
-    samplerate = app.PRIMARY_IN_SAMPLERATE
 
     while not stop_event.is_set():
         try:
@@ -350,8 +348,6 @@ def _record_audio_sounddevice(duration, sound_in_id, sound_in_chs, stop_queue, t
     Helper function to record a chunk of audio using sounddevice and return it as a numpy array.
     This function encapsulates the sounddevice stream setup and recording.
     """
-    from . import bmar_config
-    
     try:
         device_info = sd.query_devices(sound_in_id, 'input')
         max_channels = int(device_info['max_input_channels'])
@@ -393,6 +389,6 @@ def _record_audio_sounddevice(duration, sound_in_id, sound_in_chs, stop_queue, t
         logging.info(f"Finished {task_name}.")
         return recording_array, actual_channels
 
-    except Exception as e:
+    except Exception:
         logging.error(f"Failed to record audio with sounddevice for {task_name}", exc_info=True)
         return None, 0

@@ -911,7 +911,69 @@ _**Assistant**_
 ```
 
 ```
-Now let me check if there are any errors and get a final summary: Let me fix one more issue I spotted - there are redundant local traceback imports. Since traceback is already imported at the top of the file, I'll remove the 
+Now let me check if there are any errors and get a final summary: Let me fix one more issue I spotted - there are redundant local traceback imports. Since traceback is already imported at the top of the file, I'll remove the redundant local imports: 
+```
+
+```
+
+```
+
+```
+Now let me create a summary of the cleanup performed:
+
+## Summary of `user_interface.py` Cleanup
+
+I have successfully reviewed and cleaned up the `user_interface.py` module by removing unused code and imports. Here's what was accomplished:
+
+### **Removed Unused Functions:**
+1. **`get_single_key()`** - Function was defined but never called anywhere in the code
+2. **`handle_trigger_command()`** - Function was defined but no 't' command mapping exists for trigger functionality
+3. **`start_trigger_plotting()`** - Supporting function for the unused trigger command
+4. **`handle_file_browser_command()`** - Function was defined but never called from process_command()
+5. **`handle_detailed_device_list_command()`** - Function was defined but never called from process_command()
+6. **`handle_quit_command()`** - Function was defined but quit handling is done directly in process_command()
+
+### **Fixed Logic Errors:**
+1. **`ensure_app_attributes()`** - Removed erroneous `else` clause that printed "BMAR command mode is already disabled" when DEBUG_VERBOSE was already set
+2. **Redundant imports** - Removed duplicate `traceback` imports that were imported locally when already available at module level
+
+### **Removed Redundant Imports:**
+1. **`list_audio_devices_detailed`** - Was imported at the top of `process_command()` but only used locally in the 'D' command handler
+2. **Redundant `traceback` imports** - Removed local imports since it's already imported at the top
+
+### **Removed Unnecessary Comments:**
+1. **"No imports, no dependencies, just pure print statements"** - Comment that was no longer relevant
+
+### **Result:**
+The module is now cleaner with:
+- **6 unused functions removed** (~200+ lines of dead code eliminated)
+- **3 redundant imports removed**
+- **1 logic error fixed** in `ensure_app_attributes()`
+- **2 redundant local imports removed**
+- **1 obsolete comment removed**
+
+### **Functions Preserved:**
+All actively used functions remain intact:
+- `keyboard_listener()` - Core keyboard handling with toggle functionality  
+- `process_command()` - Main command dispatcher
+- All `handle_*_command()` functions that are actually called (recording, spectrogram, oscilloscope, VU meter, intercom, performance monitor, configuration, FFT, channel switching, thread listing)
+- `cleanup_ui()` - Used by `bmar_app.py` for cleanup
+- `background_keyboard_monitor()` - Used by `bmar_app.py` 
+- Terminal control functions (`enable_raw_mode()`, `restore_terminal()`)
+
+The cleanup removes approximately **200+ lines of unused code** while maintaining all existing functionality. The module now has a cleaner structure with no dead code or unused imports.
+
+---
+
+_**User**_
+
+pleaes review the audio_processing.py module and remove unused references and imports.
+
+---
+
+_**Assistant**_
+
+I'll analyze the `audio_processing.py` module to identify and remove unused references and imports. Let me start by examining the import statements and their usage throughout the file. Now let me check which imports are actually used in the code: Let me check if there are any unused local imports in functions: Let me check if the bmar_config import is actually used: 
 
 ---
 
