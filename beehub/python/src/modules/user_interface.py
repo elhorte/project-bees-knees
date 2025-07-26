@@ -53,21 +53,6 @@ def restore_terminal():
     if platform.system() != "Windows" and UNIX_AVAILABLE and orig_settings:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, orig_settings)
 
-def get_single_key():
-    """Get a single key press in a cross-platform way."""
-    if platform.system() == "Windows" and WINDOWS_AVAILABLE:
-        if msvcrt.kbhit():
-            key = msvcrt.getch()
-            if isinstance(key, bytes):
-                key = key.decode('utf-8', errors='ignore')
-            return key
-        return None
-    else:
-        # Unix/Linux/macOS
-        if UNIX_AVAILABLE and select.select([sys.stdin], [], [], 0.1)[0]:
-            return sys.stdin.read(1)
-        return None
-
 def ensure_app_attributes(app):
     """Ensure app has all required attributes."""
     if not hasattr(app, 'monitor_channel'):
@@ -78,8 +63,6 @@ def ensure_app_attributes(app):
         app.os_info = {}
     if not hasattr(app, 'DEBUG_VERBOSE'):
         app.DEBUG_VERBOSE = False
-    else:
-        print("BMAR command mode is already disabled.")
 
 def background_keyboard_monitor(app):
     """Background thread to monitor for application state."""
@@ -240,7 +223,6 @@ def process_command(app, command):
     """Process a user command."""
     
     from .process_manager import cleanup_process, create_subprocess
-    from .audio_devices import list_audio_devices_detailed
     
     try:
         # Ensure app has basic attributes for command processing
@@ -317,8 +299,6 @@ def process_command(app, command):
         elif command == '^':
             # Toggle is handled directly in keyboard_listener function
             print("Toggle functionality is built into the keyboard listener. This message should not appear.")
-
-        # No imports, no dependencies, just pure print statements
 
         else:
             print(f"Unknown command: '{command}'. Press 'h' for help.\r")  # Added \r
@@ -520,74 +500,6 @@ def start_oscilloscope(app):
         print(f"Error starting oscilloscope: {e}\r")
         traceback.print_exc()
 
-def handle_trigger_command(app):
-    """Handle trigger plotting command."""
-    
-    from .process_manager import cleanup_process, create_subprocess
-    from .plotting import trigger
-    
-    try:
-        if 't' in app.active_processes and app.active_processes['t'] is not None:
-            if app.active_processes['t'].is_alive():
-                print("Stopping trigger plotting...\r")  # Added \r
-                cleanup_process(app, 't')
-            else:
-                print("Starting trigger plotting...\r")  # Added \r
-                app.active_processes['t'] = None
-                start_trigger_plotting(app)
-        else:
-            print("Starting trigger plotting...\r")  # Added \r
-            start_trigger_plotting(app)
-            
-    except Exception as e:
-        print(f"Trigger command error: {e}\r")  # Added \r
-
-def start_trigger_plotting(app):
-    """Start trigger plotting."""
-    
-    from .process_manager import create_subprocess
-    from .plotting import trigger
-    
-    try:
-        # Ensure app has all required attributes
-        ensure_app_attributes(app)
-        
-        # Ensure required directory exists
-        plots_dir = os.path.join(app.today_dir, 'plots')
-        if not os.path.exists(plots_dir):
-            os.makedirs(plots_dir, exist_ok=True)
-            
-        # Create trigger configuration
-        trigger_config = {
-            'device_index': app.device_index,
-            'samplerate': app.samplerate,
-            'channels': app.channels,
-            'blocksize': app.blocksize,
-            'trigger_level': 0.1,
-            'trigger_mode': 'rising',
-            'pre_trigger_samples': 1024,
-            'post_trigger_samples': 2048,
-            'plots_dir': plots_dir
-        }
-        
-        print(f"Starting trigger plotting (device {app.device_index}, {app.samplerate}Hz)\r")  # Added \r
-        
-        # Create and start trigger process
-        process = create_subprocess(
-            target_function=trigger,
-            args=(trigger_config,),
-            process_key='t',
-            app=app,
-            daemon=True
-        )
-        
-        process.start()
-        print(f"Trigger plotting started (PID: {process.pid})\r")  # Added \r
-        
-    except Exception as e:
-        print(f"Error starting trigger plotting: {e}\r")  # Added \r
-        traceback.print_exc()
-
 def handle_vu_meter_command(app):
     """Handle VU meter command."""
     
@@ -691,7 +603,6 @@ def start_vu_meter(app):
         # Clean up display and reset state
         print("\r" + " " * 80 + "\r", end="", flush=True)
         app.active_processes['v'] = None
-        import traceback
         traceback.print_exc()
 
 def handle_intercom_command(app):
@@ -781,7 +692,6 @@ def start_intercom(app):
         
     except Exception as e:
         print(f"Error starting intercom: {e}\r")  # Added \r
-        import traceback
         traceback.print_exc()
 
 def handle_performance_monitor_command(app):
@@ -815,46 +725,6 @@ def handle_performance_monitor_command(app):
         
     except Exception as e:
         print(f"Performance monitor error: {e}\r")  # Added \r
-
-def handle_file_browser_command(app):
-    """Handle file browser command."""
-    
-    try:
-        from .file_utils import list_recent_files
-        
-        print(f"\nFile Browser - {app.today_dir}\r")  # Added \r
-        print("-" * 60 + "\r")  # Added \r
-        
-        # List files in today's directory
-        if os.path.exists(app.today_dir):
-            recent_files = list_recent_files(app.today_dir, limit=10)
-            
-            if recent_files:
-                print("Recent files:\r")  # Added \r
-                for i, (filepath, size, mtime) in enumerate(recent_files, 1):
-                    filename = os.path.basename(filepath)
-                    size_mb = size / (1024 * 1024)
-                    time_str = time.strftime("%H:%M:%S", time.localtime(mtime))
-                    print(f"  {i:2d}. {filename:<30} {size_mb:6.1f}MB {time_str}\r")  # Added \r
-            else:
-                print("No files found in today's directory\r")  # Added \r
-        else:
-            print("Today's directory does not exist yet\r")  # Added \r
-        
-        # Show directory structure
-        print(f"\nDirectory structure:\r")  # Added \r
-        print(f"  Recording dir: {app.recording_dir}\r")  # Added \r
-        print(f"  Today's dir:   {app.today_dir}\r")  # Added \r
-        
-        plots_dir = os.path.join(app.today_dir, 'plots')
-        if os.path.exists(plots_dir):
-            plot_count = len([f for f in os.listdir(plots_dir) if f.endswith('.png')])
-            print(f"  Plots dir:     {plots_dir} ({plot_count} plots)\r")  # Added \r
-        
-        print("-" * 60 + "\r")  # Added \r
-        
-    except Exception as e:
-        print(f"File browser error: {e}\r")  # Added \r
 
 def handle_configuration_command(app):
     """Handle configuration display command."""
@@ -1013,19 +883,6 @@ def cleanup_ui(app):
     except Exception as e:
         logging.error(f"UI cleanup error: {e}")
 
-def handle_detailed_device_list_command(app):
-    """Handle detailed device list command (uppercase D)."""
-    
-    try:
-        from .audio_devices import show_detailed_device_list
-        
-        print("\nDetailed Audio Device Information:\r")  # Added \r
-        print("=" * 60 + "\r")  # Added \r
-        show_detailed_device_list(app)
-        
-    except Exception as e:
-        logging.error(f"Detailed device list error: {e}")
-
 def handle_thread_list_command(app):
     """Handle thread listing command."""
     
@@ -1098,30 +955,6 @@ def show_help():
     print("- Press 1-9 to switch audio channel while VU meter or Intercom is running")
     print("============================================================")
     print()  # Add final newline for clean separation
-
-def handle_quit_command(app):
-    """Handle quit command with proper cleanup."""
-    
-    try:
-        print("Shutting down BMAR...\r")
-        
-        # Stop all active processes
-        from .process_manager import cleanup_all_processes
-        cleanup_all_processes(app)
-        
-        # Set running flag to False
-        app.running = False
-        
-        # Additional cleanup
-        if hasattr(app, 'stop_recording_event'):
-            app.stop_recording_event.set()
-        
-        print("BMAR shutdown complete.\r")
-        
-    except Exception as e:
-        print(f"Error during shutdown: {e}\r")
-        app.running = False
-
 
 def handle_fft_command(app):
     """Handle FFT command."""
