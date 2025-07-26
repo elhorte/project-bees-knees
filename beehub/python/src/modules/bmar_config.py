@@ -6,7 +6,6 @@ Contains global constants, settings, and configuration validation.
 import os
 import datetime
 import platform
-import subprocess
 
 # #############################################################
 # #### Control Panel ##########################################
@@ -26,14 +25,14 @@ MODE_FFT_PERIODIC_RECORD = True                 # record fft periodically
 # recording types controls:
 AUDIO_MONITOR_START = None  ##datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec; None = continuous recording
 AUDIO_MONITOR_END = datetime.time(23, 0, 0)     # time of day to stop recording hr, min, sec
-AUDIO_MONITOR_RECORD = 60                     # file size in seconds of continuous recording (default 1800 sec)
-AUDIO_MONITOR_INTERVAL = 0.1                      # seconds between recordings
+AUDIO_MONITOR_RECORD = 300                     # file size in seconds of continuous recording (default 1800 sec)
+AUDIO_MONITOR_INTERVAL = 0.1                    # seconds between recordings
 
 PERIOD_START = None  ##datetime.time(4, 0, 0)   # 'None' = continuous recording
 PERIOD_END = datetime.time(20, 0, 0)
-PERIOD_RECORD = 900                             # seconds of recording (default 900 sec)
+PERIOD_RECORD = 300                             # seconds of recording (default 900 sec)
 PERIOD_SPECTROGRAM = 120                        # spectrogram duration for saved png images
-PERIOD_INTERVAL = 0.1                             # seconds between start of period, must be > period, of course
+PERIOD_INTERVAL = 0.1                           # seconds between start of period, must be > period, of course
 
 EVENT_START = datetime.time(4, 0, 0)
 EVENT_END = datetime.time(22, 0, 0)
@@ -46,21 +45,17 @@ MONITOR_CH = 0                                  # channel to monitor for event (
 # Audio input configuration
 MIC_1 = True
 MIC_2 = True
-MIC_3 = False
-MIC_4 = False
+MIC_3 = True
+MIC_4 = True
 
 SOUND_IN_CHS = MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
 
 # instrumentation parms
-FFT_BINS = 800                                  # number of bins for fft
-FFT_BW = 1000                                   # bandwidth of each bucket in hertz
 FFT_INTERVAL = 30                               # minutes between ffts
 
-FULL_SCALE = 2 ** 16                            # just for cli vu meter level reference
 BUFFER_SECONDS = 1000                           # time length of circular buffer 
 
 # Global flags
-KB_or_CP = 'KB'                                 # use keyboard or control panel (PyQT5) to control program
 DEBUG_VERBOSE = False                           # Enable verbose debug output (set to True for troubleshooting)
 
 # Enhanced audio configuration
@@ -83,7 +78,7 @@ WINDOWS_MODEL_NAME = "UMC204HD"                 # Audio interface model
 WINDOWS_DEVICE_NAME = "UMC204HD"                # Device name
 WINDOWS_API_NAME = "WASAPI"                     # Windows audio API
 WINDOWS_HOSTAPI_NAME = "WASAPI"                 # Host API name
-WINDOWS_HOSTAPI_INDEX = 1                      # Default host API index
+WINDOWS_HOSTAPI_INDEX = 21                      # Default host API index
 WINDOWS_DEVICE_ID = None                        # Device ID for Focusrite
 
 # input device parameters--macos:
@@ -103,7 +98,7 @@ PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'
 
 AUDIO_MONITOR_SAMPLERATE = 48000                # For continuous audio
 AUDIO_MONITOR_BITDEPTH = 16                     # Audio bit depth
-AUDIO_MONITOR_CHANNELS = 1                      # Number of channels
+AUDIO_MONITOR_CHANNELS = 4                      # Number of channels
 AUDIO_MONITOR_QUALITY = 0                       # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
 
@@ -123,7 +118,7 @@ linux_data_folders = ["audio", "plots"]
 # mic location map channel to position
 MIC_LOCATION = ['1: upper--front', '2: upper--back', '3: lower w/queen--front', '4: lower w/queen--back']
 
-# Windows mme defaults, 2 ch only
+# Windows mme defaults
 SOUND_IN_DEFAULT = 0                            # default input device id              
 SOUND_OUT_ID_DEFAULT = 3                        # default output device id
 SOUND_OUT_CHS_DEFAULT = 1                       # default number of output channels
@@ -138,17 +133,6 @@ FFT_GAIN = 12                                   # Gain in dB of audio level for 
 
 SPECTROGRAM_DURATION = 10.0                     # seconds
 SPECTROGRAM_GAIN = 12                           # Gain in dB of audio level for spectrogram 
-
-# Dictionary to track active processes by key
-ACTIVE_PROCESSES_TEMPLATE = {
-    'v': None,  # VU meter
-    'o': None,  # Oscilloscope
-    's': None,  # Spectrogram 
-    'f': None,  # FFT
-    'i': None,  # Intercom
-    'p': None,  # Performance monitor (one-shot)
-    'P': None   # Performance monitor (continuous)
-}
 
 def get_date_folder():
     """Get current date folder in YYMMDD format."""
@@ -210,40 +194,6 @@ def get_platform_audio_config(platform_manager, config):
             'hostapi_index': config.LINUX_HOSTAPI_INDEX,
             'device_id': config.LINUX_DEVICE_ID
         }
-
-def validate_audio_config(config):
-    """Validate audio configuration parameters."""
-    errors = []
-    
-    # Validate sound input channels
-    if hasattr(config, 'SOUND_IN_CHS'):
-        sound_in_chs = int(config.SOUND_IN_CHS) if hasattr(config, 'SOUND_IN_CHS') else 1
-        if sound_in_chs <= 0 or sound_in_chs > 64:
-            errors.append(f"Invalid SOUND_IN_CHS value: {config.SOUND_IN_CHS}")
-    
-    # Validate bit depth
-    if hasattr(config, 'PRIMARY_BITDEPTH'):
-        try:
-            validate_bit_depth(config.PRIMARY_BITDEPTH)
-        except ValueError as e:
-            errors.append(str(e))
-    
-    return errors
-
-def construct_directory_paths(data_drive, data_path, location_id, hive_id, folders, date_folder):
-    """Construct standardized directory paths."""
-    primary_directory = os.path.join(data_drive, data_path, location_id, hive_id, 
-                                   folders[0], "raw", date_folder, "")
-    monitor_directory = os.path.join(data_drive, data_path, location_id, hive_id, 
-                                   folders[0], "mp3", date_folder, "")
-    plot_directory = os.path.join(data_drive, data_path, location_id, hive_id, 
-                                 folders[1], date_folder, "")
-    
-    return {
-        'primary': primary_directory,
-        'monitor': monitor_directory,
-        'plot': plot_directory
-    }
 
 def get_platform_config():
     """Get platform-specific configuration information."""

@@ -5,23 +5,17 @@ Main application class that coordinates all modules and manages the application 
 
 import multiprocessing
 import threading
-import signal
 import sys
 import logging
-import time
 import os
 import numpy as np
+import datetime
 
 # Import core modules that should always be present
 from .bmar_config import *
 from .platform_manager import PlatformManager
 
 # Try to import other modules with fallbacks
-try:
-    from .system_utils import setup_logging, setup_signal_handlers
-except ImportError:
-    logging.warning("system_utils module not available")
-
 try:
     from .file_utils import setup_directories, get_today_dir
 except ImportError:
@@ -33,12 +27,7 @@ except ImportError:
     logging.warning("audio_devices module not available")
 
 try:
-    from .process_manager import stop_all, cleanup
-except ImportError:
-    logging.warning("process_manager module not available")
-
-try:
-    from .user_interface import keyboard_listener, cleanup_ui
+    from .user_interface import keyboard_listener, cleanup_ui, background_keyboard_monitor
 except ImportError:
     logging.warning("user_interface module not available")
 
@@ -91,13 +80,11 @@ class BmarApp:
         self.period_start_index = 0
         
         # Threading events for recording
-        import threading
         self.stop_recording_event = threading.Event()  # For manual recording only
         self.stop_auto_recording_event = threading.Event()  # For automatic recording
         self.buffer_wrap_event = threading.Event()
         
         # Initialize platform manager
-        from .platform_manager import PlatformManager
         self.platform_manager = PlatformManager()
 
     def initialize(self):
@@ -183,7 +170,6 @@ class BmarApp:
                 self.setup_audio_circular_buffer()
             
             # Initialize circular buffer
-            import multiprocessing
             buffer_duration = 300  # 5 minutes default
             buffer_size = int(self.samplerate * buffer_duration)
             self.circular_buffer = multiprocessing.Array('f', buffer_size)
@@ -301,7 +287,6 @@ class BmarApp:
                 print("No automatic recording configured. Use 'r' to start manual recording.")
             
             # Start the user interface using the CORRECT function name
-            from .user_interface import keyboard_listener, background_keyboard_monitor
             
             # Start background keyboard monitor in a separate thread (for '^' key)
             monitor_thread = threading.Thread(target=background_keyboard_monitor, args=(self,), daemon=True)
@@ -364,7 +349,6 @@ class BmarApp:
             
             # Clean up user interface using the CORRECT function name
             try:
-                from .user_interface import cleanup_ui
                 cleanup_ui(self)
                 print("User interface cleanup completed.")
             except Exception as e:
@@ -402,9 +386,6 @@ class BmarApp:
     def setup_basic_directories(self):
         """Set up basic directories when directory_utils module is not available."""
         try:
-            import os
-            from datetime import datetime
-            
             # Create basic recording directory
             home_dir = os.path.expanduser("~")
             self.recording_dir = os.path.join(home_dir, "BMAR_Recordings")
@@ -449,8 +430,6 @@ def create_bmar_app():
 
 def run_bmar_application():
     """Main entry point for running the BMAR application."""
-    import sys
-    
     try:
         # Create and run the application
         app = create_bmar_app()
@@ -473,5 +452,4 @@ def run_bmar_application():
 
 if __name__ == "__main__":
     """Allow the module to be run directly for testing."""
-    import sys
     sys.exit(run_bmar_application())
