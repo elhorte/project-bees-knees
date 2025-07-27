@@ -10,8 +10,6 @@ import logging
 import signal
 import subprocess
 import os
-from datetime import datetime
-import platform
 
 # Terminal management functions for keyboard input handling
 def get_key():
@@ -150,7 +148,6 @@ def timed_input(app, prompt, timeout=3, default='n'):
         # Check if we can use select on this platform
         try:
             import select
-            fd = sys.stdin.fileno()
             
             while True:
                 ready, _, _ = select.select([sys.stdin], [], [], 0.1)
@@ -163,7 +160,6 @@ def timed_input(app, prompt, timeout=3, default='n'):
         except Exception as e:
             print(f"\nError with Unix input method: {e}")
             # Final fallback - just return default
-            pass
     
     # Timeout occurred
     print(f"\n[Timeout after {timeout}s] Using default: '{default}'")
@@ -181,6 +177,7 @@ def clear_input_buffer(app):
         # For macOS and Linux/WSL
         if app.platform_manager.termios is not None and app.platform_manager.tty is not None:
             fd = sys.stdin.fileno()
+            old_settings = None
             try:
                 old_settings = app.platform_manager.termios.tcgetattr(fd)
                 app.platform_manager.tty.setraw(sys.stdin.fileno())
@@ -188,7 +185,8 @@ def clear_input_buffer(app):
                 while app.platform_manager.select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
                     sys.stdin.read(1)
             finally:
-                app.platform_manager.termios.tcsetattr(fd, app.platform_manager.termios.TCSADRAIN, old_settings)
+                if old_settings is not None:
+                    app.platform_manager.termios.tcsetattr(fd, app.platform_manager.termios.TCSADRAIN, old_settings)
         else:
             # Silent fail or fallback - do NOT use stty on Windows
             if not sys.platform == 'win32':
@@ -200,7 +198,7 @@ def safe_stty(command):
         subprocess.run(f"stty {command}", shell=True, check=False, 
                       capture_output=True, text=True, timeout=2)
     except Exception as e:
-        logging.warning(f"stty command failed: {e}")
+        logging.warning("stty command failed: %s", e)
 
 def reset_terminal_settings(app):
     """Reset terminal settings to default state without clearing the screen."""
@@ -210,103 +208,7 @@ def reset_terminal_settings(app):
             old_settings = app.platform_manager.termios.tcgetattr(fd)
             app.platform_manager.termios.tcsetattr(fd, app.platform_manager.termios.TCSANOW, old_settings)
     except Exception as e:
-        logging.warning(f"Could not reset terminal settings: {e}")
-
-def restore_terminal_settings(app, settings):
-    """Restore terminal settings from saved state."""
-    try:
-        if app.platform_manager.termios is not None and settings is not None:
-            fd = sys.stdin.fileno()
-            app.platform_manager.termios.tcsetattr(fd, app.platform_manager.termios.TCSANOW, settings)
-    except Exception as e:
-        logging.warning(f"Could not restore terminal settings: {e}")
-
-def getch(app):
-    """Simple getch implementation for Linux."""
-    try:
-        if app.platform_manager.termios is not None and app.platform_manager.tty is not None:
-            fd = sys.stdin.fileno()
-            old_settings = app.platform_manager.termios.tcgetattr(fd)
-            try:
-                app.platform_manager.tty.setraw(sys.stdin.fileno())
-                char = sys.stdin.read(1)
-            finally:
-                app.platform_manager.termios.tcsetattr(fd, app.platform_manager.termios.TCSADRAIN, old_settings)
-            return char
-        else:
-            return input()[:1]  # Fallback for systems without termios
-    except:
-        return None
-
-def get_key(app):
-    """Get a single keypress from the user."""
-    if app.platform_manager.msvcrt is not None:
-        # Windows implementation
-        try:
-            if app.platform_manager.msvcrt.kbhit():
-                key = app.platform_manager.msvcrt.getch()
-                if isinstance(key, bytes):
-                    key = key.decode('utf-8', errors='ignore')
-                return key
-        except Exception:
-            pass
-        return None
-    else:
-        # Unix/Linux/macOS implementation
-        return getch(app)
-
-def get_key():
-    """Get a single keypress from the user in a cross-platform way."""
-    
-    try:
-        if platform.system() == "Windows":
-            import msvcrt
-            if msvcrt.kbhit():
-                return msvcrt.getch().decode('utf-8')
-            return None
-        else:
-            # Unix/Linux/macOS
-            import select
-            import tty
-            import termios
-            
-            # Save current terminal settings
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
-            
-            try:
-                # Set terminal to raw mode for single character input
-                tty.setraw(fd)
-                
-                # Check if input is available (non-blocking)
-                if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
-                    char = sys.stdin.read(1)
-                    return char
-                return None
-            finally:
-                # Always restore terminal settings
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-            
-    except Exception as e:
-        logging.error(f"Error getting key input: {e}")
-        return None
-
-def setup_terminal_for_input(app):
-    """Setup terminal for character-by-character input."""
-    
-    try:
-        if platform.system() != "Windows":
-            import tty
-            import termios
-            
-            # Save original terminal settings
-            app.original_terminal_settings = termios.tcgetattr(sys.stdin)
-            
-            # Set terminal to raw mode for character input
-            tty.setraw(sys.stdin.fileno())
-            
-    except Exception as e:
-        logging.error(f"Error setting up terminal: {e}")
+        logging.warning("Could not reset terminal settings: %s", e)
 
 def interruptable_sleep(seconds, stop_sleep_event):
     """Sleep for specified duration but can be interrupted by an event."""
@@ -314,18 +216,18 @@ def interruptable_sleep(seconds, stop_sleep_event):
     iterations = max(1, int(seconds * 2))
     sleep_duration = seconds / iterations
     
-    for i in range(iterations):
+    for _ in range(iterations):
         if stop_sleep_event.is_set():
             return
         time.sleep(sleep_duration)
 
-def signal_handler(sig, frame):
+def signal_handler(_sig, _frame):
     """Handle interrupt signals gracefully."""
     print('\nStopping all threads...\r')
     # This will be connected to the main app's stop function
     sys.exit(0)
 
-def setup_signal_handlers(app):
+def setup_signal_handlers(_app):
     """Setup signal handlers for graceful shutdown."""
     
     try:
@@ -340,7 +242,7 @@ def setup_signal_handlers(app):
         logging.info("Signal handlers installed")
         
     except Exception as e:
-        logging.error(f"Error setting up signal handlers: {e}")
+        logging.error("Error setting up signal handlers: %s", e)
 
 def list_all_threads():
     """Debug function to list all active threads."""
@@ -430,11 +332,6 @@ def monitor_system_performance_continuous(app):
 
 def monitor_system_performance_continuous_standalone(stop_event_dict):
     """Standalone continuous performance monitor for multiprocessing."""
-    import threading
-    import time
-    
-    # Create a local event from the shared dictionary
-    stop_event = threading.Event()
     
     try:
         print("Continuous performance monitor started...")

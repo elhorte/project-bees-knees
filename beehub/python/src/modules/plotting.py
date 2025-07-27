@@ -6,16 +6,11 @@ Contains oscilloscope, spectrogram, and other plotting functionality.
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from matplotlib.backends.backend_agg import FigureCanvasAgg
 import time
 import logging
-import multiprocessing
-import threading
 import os
 import sys
 import sounddevice as sd
-import time
 from datetime import datetime
 import traceback
 import subprocess
@@ -94,16 +89,16 @@ def _generate_synthetic_audio(duration, channels, samplerate, task_name="synthet
         freq3 = 1320  # E6 note
         
         # Generate signal with multiple components
-        signal = (0.6 * np.sin(2 * np.pi * freq1 * t) +      # Primary tone
-                 0.3 * np.sin(2 * np.pi * freq2 * t) +      # Harmonic
-                 0.2 * np.sin(2 * np.pi * freq3 * t) +      # Higher harmonic
-                 0.1 * np.sin(2 * np.pi * 100 * t) +        # Low frequency
-                 0.05 * np.random.randn(len(t)))            # Noise
+        audio_signal = (0.6 * np.sin(2 * np.pi * freq1 * t) +      # Primary tone
+                       0.3 * np.sin(2 * np.pi * freq2 * t) +      # Harmonic
+                       0.2 * np.sin(2 * np.pi * freq3 * t) +      # Higher harmonic
+                       0.1 * np.sin(2 * np.pi * 100 * t) +        # Low frequency
+                       0.05 * np.random.randn(len(t)))            # Noise
         
         # Add some time-varying effects
         # Amplitude modulation
         am_freq = 2.0  # 2 Hz modulation
-        am_signal = signal * (0.7 + 0.3 * np.sin(2 * np.pi * am_freq * t))
+        am_signal = audio_signal * (0.7 + 0.3 * np.sin(2 * np.pi * am_freq * t))
         
         # Add frequency sweep
         sweep_start = 200
@@ -180,7 +175,7 @@ def _record_audio_sounddevice(duration, device_index, channels, samplerate, bloc
         frames_recorded = 0
         recording_complete = False
         
-        def callback(indata, frames, time, status):
+        def callback(indata, frames, _time, status):
             nonlocal frames_recorded, recording_complete
             try:
                 if status:
@@ -279,7 +274,7 @@ def plot_oscope(config):
             samples_captured = 0
             capture_complete = False
             
-            def callback(indata, frames, time, status):
+            def callback(indata, frames, _time, status):
                 nonlocal samples_captured, capture_complete
                 try:
                     if status:
@@ -324,7 +319,7 @@ def plot_oscope(config):
                 while not capture_complete and samples_captured < total_samples:
                     time.sleep(0.1)
             
-            print(f"\rGenerating multi-channel oscilloscope plot...\r")
+            print("\rGenerating multi-channel oscilloscope plot...\r")
             
             # Check if we have data
             if not any(len(audio_data[ch]) > 0 for ch in range(channels)):
@@ -447,7 +442,7 @@ def plot_spectrogram(config):
             samples_captured = 0
             capture_complete = False
             
-            def callback(indata, frames, time, status):
+            def callback(indata, frames, _time, status):
                 nonlocal samples_captured, capture_complete
                 try:
                     if status:
@@ -463,7 +458,7 @@ def plot_spectrogram(config):
                     else:
                         audio_chunk = indata.flatten()
                     
-                    audio_data.extend(audio_chunk)
+                    audio_data.extend(audio_chunk.tolist())
                     samples_captured += frames
                     
                     # Show progress
@@ -589,7 +584,7 @@ def plot_fft(config):
             print("Virtual device detected for FFT - generating synthetic audio\r")
             # Generate synthetic audio data for FFT analysis
             duration = 2.0  # 2 seconds for FFT
-            audio_data, actual_channels = _generate_synthetic_audio(duration, channels, samplerate, "FFT analysis")
+            audio_data, _ = _generate_synthetic_audio(duration, channels, samplerate, "FFT analysis")
             
             # Convert int16 synthetic data to float32 range [-1, 1] like real audio
             if audio_data.dtype == np.int16:
@@ -624,7 +619,7 @@ def plot_fft(config):
                 samples_captured = 0
                 capture_complete = False
                 
-                def callback(indata, frames, time, status):
+                def callback(indata, frames, _time, status):
                     nonlocal samples_captured, capture_complete
                     try:
                         if status:
@@ -643,7 +638,7 @@ def plot_fft(config):
                         else:
                             audio_chunk = indata.flatten()
                         
-                        audio_data.extend(audio_chunk)
+                        audio_data.extend(audio_chunk.tolist())
                         samples_captured += frames
                         
                         # Show progress
@@ -670,7 +665,7 @@ def plot_fft(config):
                     while not capture_complete and samples_captured < total_samples:
                         time.sleep(0.1)
                 
-                print(f"\rProcessing FFT...\r")
+                print("\rProcessing FFT...\r")
                 
                 if len(audio_data) == 0:
                     print("No audio data captured\r")
@@ -807,7 +802,7 @@ def trigger(config):
             ax2.set_xlim(0, samplerate//2)
         
         # Audio callback function for sounddevice
-        def audio_callback(indata, frames, time, status):
+        def audio_callback(indata, _frames, _time, status):
             nonlocal audio_buffer, buffer_index, triggered, trigger_index, last_sample
             
             if status:
