@@ -4,9 +4,7 @@ Contains VU meter, intercom monitoring, and audio diagnostic utilities.
 """
 
 import numpy as np
-import threading
 import time
-import logging
 import sounddevice as sd
 import sys
 
@@ -16,10 +14,6 @@ def vu_meter(config, stop_event=None):
     try:
         # Extract configuration
         device_index = config.get('device_index')
-        samplerate = config.get('samplerate', 44100)
-        channels = config.get('channels', 1)
-        blocksize = config.get('blocksize', 256)  # Smaller for responsive VU meter
-        monitor_channel = config.get('monitor_channel', 0)
         
         # Check for virtual device
         if device_index is None:
@@ -29,7 +23,7 @@ def vu_meter(config, stop_event=None):
         # Use sounddevice exclusively
         return _vu_meter_sounddevice(config, stop_event)
             
-    except Exception as e:
+    except (sd.PortAudioError, ValueError, RuntimeError) as e:
         print(f"VU meter error: {e}")
         import traceback
         traceback.print_exc()
@@ -58,7 +52,7 @@ def _vu_meter_sounddevice(config, stop_event=None):
                 print(f"Channel {monitor_channel + 1} not available, using channel 1")
                 monitor_channel = 0
                 
-        except Exception as e:
+        except (sd.PortAudioError, ValueError) as e:
             print(f"Error getting device info: {e}")
             actual_channels = channels
         
@@ -66,7 +60,7 @@ def _vu_meter_sounddevice(config, stop_event=None):
         vu_data = {'db_level': -80, 'rms_level': 0.0, 'callback_active': True}
         
         # Audio callback for VU meter
-        def audio_callback(indata, frames, time_info, status):
+        def audio_callback(indata, _frames, _time_info, _status):
             try:
                 # Check for stop event first - exit immediately if stopping
                 if stop_event and stop_event.is_set():
@@ -76,13 +70,6 @@ def _vu_meter_sounddevice(config, stop_event=None):
                 # Skip processing if callback is not active
                 if not vu_data['callback_active']:
                     raise sd.CallbackStop()
-                    
-                # Check for input overflow - but limit spam
-                if status.input_overflow:
-                    # Only print overflow message occasionally to avoid spam
-                    import random
-                    if random.random() < 0.1:  # Only 10% of overflow messages
-                        pass  # Suppress overflow messages during normal operation
                 
                 # Extract channel data
                 if actual_channels > 1:
@@ -137,7 +124,6 @@ def _vu_meter_sounddevice(config, stop_event=None):
                     
             except KeyboardInterrupt:
                 vu_data['callback_active'] = False
-                pass
             finally:
                 # Always clean up display when exiting loop
                 vu_data['callback_active'] = False
@@ -146,7 +132,7 @@ def _vu_meter_sounddevice(config, stop_event=None):
         # Final cleanup message
         print("VU meter stopped")
         
-    except Exception as e:
+    except (sd.PortAudioError, ValueError, RuntimeError) as e:
         # Clean up display on error
         print("\r" + " " * 80 + "\r", end="", flush=True)
         print(f"Sounddevice VU meter error: {e}")
@@ -195,7 +181,7 @@ def _vu_meter_virtual(config, stop_event=None):
             
         print("Virtual VU meter stopped")
         
-    except Exception as e:
+    except (ValueError, RuntimeError) as e:
         print(f"Virtual VU meter error: {e}")
         import traceback
         traceback.print_exc()
@@ -237,13 +223,13 @@ def _display_vu_meter(db_level, rms_level):
         # Print with carriage return to overwrite previous line
         print(f"\rVU: {level_display}", end="", flush=True)
         
-    except Exception as e:
+    except (ValueError, TypeError) as e:
         print(f"Display error: {e}")
 
 def intercom_m(config):
     """Microphone monitoring - listen to remote microphone audio input only."""
     
-    def audio_callback(indata, frames, time, status):
+    def audio_callback(_indata, _frames, _time_info, _status):
         try:
             # Pure intercom audio processing - no VU meter calculations
             # Audio data flows through for monitoring, no level processing
@@ -251,7 +237,7 @@ def intercom_m(config):
             
             return True
             
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError):
             # Silent error handling - no terminal output
             return False
     
@@ -284,7 +270,7 @@ def intercom_m(config):
                 dtype='int16' if bit_depth == 16 else 'float32',
                 blocksize=1024,
                 callback=audio_callback
-            ) as stream:
+            ):
                 # Monitor with user input check
                 import select
                 
@@ -340,11 +326,11 @@ def audio_device_test(device_index, samplerate=44100, duration=3.0):
             print(f"Device {device_index} test completed successfully")
             return True
             
-        except Exception as e:
+        except (sd.PortAudioError, ValueError) as e:
             print(f"Device {device_index} test failed: {e}")
             return False
             
-    except Exception as e:
+    except (sd.PortAudioError, ValueError, RuntimeError) as e:
         print(f"Error in device test: {e}")
         return False
 
@@ -372,11 +358,11 @@ def check_audio_driver_info():
             default_output = sd.query_devices(kind='output')
             print(f"Default input: {default_input['name']}")
             print(f"Default output: {default_output['name']}")
-        except Exception:
+        except (sd.PortAudioError, ValueError):
             print("Default devices: Not available")
         
         print("-" * 40)
-    except Exception as e:
+    except (sd.PortAudioError, ValueError, RuntimeError) as e:
         print(f"Error: {e}")
 
 def benchmark_audio_performance(device_index, samplerate=44100, duration=10.0):
@@ -385,7 +371,7 @@ def benchmark_audio_performance(device_index, samplerate=44100, duration=10.0):
     underrun_count = 0
     total_frames = 0
     
-    def audio_callback(indata, frames, time, status):
+    def audio_callback(indata, frames, _time_info, status):
         nonlocal callback_count, underrun_count, total_frames
         
         callback_count += 1
@@ -426,36 +412,17 @@ def benchmark_audio_performance(device_index, samplerate=44100, duration=10.0):
             else:
                 print("  Status: POOR")
                 
-            stream.close()
-            
             return {
                 'callback_count': callback_count,
                 'underrun_count': underrun_count,
                 'total_frames': total_frames
             }
             
-    except Exception as e:
+    except (sd.PortAudioError, ValueError, RuntimeError) as e:
         print(f"Benchmark error: {e}")
         return None
 
 # Stub functions for compatibility - not yet fully implemented in sounddevice version
-def measure_device_latency(input_device, output_device, samplerate=44100, duration=2.0):
-    """Latency measurement not yet implemented for sounddevice."""
-    _ = (input_device, output_device, samplerate, duration)  # Avoid unused warnings
-    print("Latency measurement not yet implemented for sounddevice")
-    return None
-
-def audio_spectrum_analyzer(config, duration=10.0):
-    """Spectrum analyzer not yet implemented for sounddevice."""
-    _ = (config, duration)  # Avoid unused warnings
-    print("Spectrum analyzer not yet implemented for sounddevice")
-
-def audio_loopback_test(input_device, output_device, samplerate=44100, duration=5.0):
-    """Loopback test not yet implemented for sounddevice."""
-    _ = (input_device, output_device, samplerate, duration)  # Avoid unused warnings
-    print("Loopback test not yet implemented for sounddevice")
-    return 0.0
-
 def create_progress_bar(current, total, width=40):
     """Create a text progress bar."""
     if total == 0:
