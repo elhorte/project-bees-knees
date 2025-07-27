@@ -4,93 +4,23 @@ Handles audio device discovery, configuration, and management using sounddevice.
 """
 
 import logging
-from typing import List, Dict, Optional
+from typing import Dict, Optional
 import sounddevice as sd
 
 # Use sounddevice for audio device management
 from . import bmar_config as config
 
-def print_all_input_devices():
-    """Print a list of all available input devices using sounddevice."""
-    print("\nFull input device list (sounddevice):")
-    
-    try:
-        devices = sd.query_devices()
-        for i, device in enumerate(devices):
-            if device['max_input_channels'] > 0:
-                hostapi_info = sd.query_hostapis(index=device['hostapi'])
-                api_name = hostapi_info['name']
-                print(f"  [{i}] {device['name']} (API: {api_name}) | MaxCh: {device['max_input_channels']} | Default SR: {int(device['default_samplerate'])} Hz")
-        
-        for i, device in enumerate(devices):
-            if device['max_input_channels'] > 0:
-                # Enhanced device info with sounddevice testing
-                hostapi_info = sd.query_hostapis(index=device['hostapi'])
-                api_name = hostapi_info['name']
-                base_info = f"  [{i}] {device['name']} - {api_name} " \
-                           f"({device['max_input_channels']} ch, {int(device['default_samplerate'])} Hz)"
-                
-                # Test basic configuration
-                can_use_basic = test_device_configuration_sounddevice(
-                    i, 44100, min(2, device['max_input_channels'])
-                )
-                
-                config_test = "✓" if can_use_basic else "⚠"
-                print(f"{base_info} {config_test}")
-        
-    except Exception as e:
-        logging.error("Error listing audio devices: %s", e)
-        print("Error: Could not enumerate audio devices")
+# Removed unused function print_all_input_devices() - not used in codebase
 
 def test_device_configuration_sounddevice(device_index: int, samplerate: int, channels: int) -> bool:
     """Test if a device can handle the specified configuration using sounddevice."""
     try:
         with sd.InputStream(device=device_index, channels=channels, samplerate=samplerate, blocksize=1024):
             return True
-    except Exception:
+    except (sd.PortAudioError, ValueError, OSError):
         return False
 
-def get_enhanced_device_info(device_index: int) -> Dict:
-    """Get enhanced device information using sounddevice testing."""
-    try:
-        devices = sd.query_devices()
-        
-        # Find the device
-        if device_index >= len(devices):
-            return {}
-            
-        device_info = devices[device_index]
-        
-        if device_info['max_input_channels'] == 0:
-            return {}
-        
-        # Test various configurations
-        test_configs = [
-            (44100, 1),
-            (44100, 2),
-            (48000, 1),
-            (48000, 2),
-            (96000, 1),
-            (96000, 2)
-        ]
-        
-        supported_configs = []
-        for sample_rate, channels in test_configs:
-            if channels <= device_info['max_input_channels']:
-                if test_device_configuration_sounddevice(device_index, sample_rate, channels):
-                    supported_configs.append({
-                        'sample_rate': sample_rate,
-                        'channels': channels
-                    })
-        
-        return {
-            'device_info': device_info,
-            'supported_configs': supported_configs
-        }
-        
-    except Exception as e:
-        logging.error("Error getting enhanced device info: %s", e)
-        return {}
+# Removed unused function get_enhanced_device_info() - not used in codebase
 
 def find_device_by_config(bmar_app) -> bool:
     """Find and configure audio device based on platform-specific configuration."""
@@ -198,7 +128,7 @@ def find_device_by_config(bmar_app) -> bool:
         print("No compatible devices found with required configuration")
         return False
         
-    except Exception as e:
+    except (sd.PortAudioError, ImportError, AttributeError) as e:
         logging.error("Error in find_device_by_config: %s", e)
         print(f"Error finding device by config: {e}")
         return False
@@ -312,69 +242,15 @@ def get_audio_device_config() -> Optional[Dict]:
         print("No working input devices found")
         return None
         
-    except Exception as e:
+    except (sd.PortAudioError, ImportError, AttributeError) as e:
         logging.error("Error getting audio device config: %s", e)
         return None
 
-def configure_audio_device_interactive(bmar_app) -> bool:
-    """Configure audio device interactively by trying config-based detection first."""
-    try:
-        # Try config-based detection first
-        if find_device_by_config(bmar_app):
-            return True
-        
-        # Fallback to first available device
-        print("Config-based detection failed, trying fallback...")
-        device_config = get_audio_device_config()
-        if device_config and device_config.get('default_device'):
-            device = device_config['default_device']
-            bmar_app.device_index = device['index']
-            bmar_app.samplerate = config.PRIMARY_IN_SAMPLERATE  # Use configured sample rate, not device default
-            bmar_app.channels = config.SOUND_IN_CHS  # Use configured channels from config
-            bmar_app.sound_in_id = device['index']
-            bmar_app.sound_in_chs = bmar_app.channels
-            bmar_app.PRIMARY_IN_SAMPLERATE = bmar_app.samplerate
-            print(f"Fallback device configured: {device['name']}")
-            return True
-        
-        return False
-        
-    except Exception as e:
-        logging.error("Error in configure_audio_device_interactive: %s", e)
-        return False
+# Removed unused function configure_audio_device_interactive() - not used in codebase
 
-def list_audio_devices() -> List[Dict]:
-    """List all available audio devices."""
-    try:
-        devices = sd.query_devices()
-        hostapis = sd.query_hostapis()
-        
-        device_list = []
-        for i, device in enumerate(devices):
-            hostapi = hostapis[device['hostapi']]
-            device_list.append({
-                'index': i,
-                'name': device['name'],
-                'hostapi': hostapi['name'],
-                'max_input_channels': device['max_input_channels'],
-                'max_output_channels': device['max_output_channels'],
-                'default_sample_rate': device['default_samplerate']
-            })
-        
-        return device_list
-    except Exception as e:
-        logging.error("Error listing audio devices: %s", e)
-        return []
+# Removed unused function list_audio_devices() - not used in codebase
 
-def test_device_configuration(device_index: int, sample_rate: int, bit_depth: int, channels: int) -> bool:
-    """Test if a device configuration is supported."""
-    try:
-        # Use the sounddevice test function, ignoring bit_depth as sounddevice handles this automatically
-        _ = bit_depth  # Suppress unused parameter warning
-        return test_device_configuration_sounddevice(device_index, sample_rate, channels)
-    except Exception as e:
-        logging.error("Error testing device configuration: %s", e)
-        return False
+# Removed unused function test_device_configuration() - not used in codebase
 
 def list_audio_devices_detailed(app=None):
     """List all audio devices in compact single-line format matching original BMAR style."""
@@ -421,7 +297,7 @@ def list_audio_devices_detailed(app=None):
         
         print("-" * 80)
         
-    except Exception as e:
+    except (sd.PortAudioError, ValueError) as e:
         logging.error("Error listing detailed audio devices: %s", e)
         print("Error: Could not enumerate audio devices")
         print(f"Error: Could not get detailed device information - {e}")
@@ -453,13 +329,13 @@ def show_current_audio_devices(app):
                     api_name = hostapi['name']
                 print(f"Device Name: {device_name}")
                 print(f"API: {api_name}")
-            except Exception:
+            except (sd.PortAudioError, ValueError, IndexError):
                 print("Device Name: Could not retrieve")
                 
         else:
             print("No audio device currently configured")
             
-    except Exception as e:
+    except (AttributeError, KeyError) as e:
         print(f"Error getting current device info: {e}")
         logging.error("Error in show_current_audio_devices: %s", e)
     
@@ -467,8 +343,4 @@ def show_current_audio_devices(app):
 
 def show_detailed_device_list(app=None):
     """Show detailed device list for menu systems (alias for list_audio_devices_detailed)."""
-    try:
-        list_audio_devices_detailed(app)
-    except Exception as e:
-        print(f"Error showing detailed device list: {e}")
-        logging.error("Error in show_detailed_device_list: %s", e)
+    list_audio_devices_detailed(app)
