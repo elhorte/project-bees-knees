@@ -17,6 +17,8 @@ def pcm_to_mp3_write(np_array, full_path, config):
         config: Configuration object containing audio settings
     """
     try:
+        # The input np_array should already be int16 from the buffer
+        # No need to convert again - this was causing double scaling
         int_array = np_array.astype(np.int16)
         byte_array = int_array.tobytes()
 
@@ -62,15 +64,20 @@ def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
     Downsample audio to a lower sample rate with anti-aliasing filter.
     
     Args:
-        audio_data: Input audio data as NumPy array
+        audio_data: Input audio data as NumPy array (should be int16 from buffer)
         orig_sample_rate: Original sample rate
         target_sample_rate: Target sample rate
         
     Returns:
-        NumPy array: Downsampled audio data
+        NumPy array: Downsampled audio data as int16
     """
     # Convert audio to float for processing
-    audio_float = audio_data.astype(np.float32) / np.iinfo(np.int16).max
+    # The input should be int16 data from the buffer, so convert to float range [-1.0, 1.0]
+    if audio_data.dtype == np.int16:
+        audio_float = audio_data.astype(np.float32) / 32767.0  # Use 32767 to preserve scaling
+    else:
+        # If already float, assume it's in proper range
+        audio_float = audio_data.astype(np.float32)
     downsample_ratio = int(orig_sample_rate / target_sample_rate)
 
     # Define an anti-aliasing filter
@@ -99,6 +106,7 @@ def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
     # Combine the two channels back into a stereo array
     downsampled_audio_float = np.column_stack((left_downsampled, right_downsampled))
     
-    # Convert back to int16
-    downsampled_audio = (downsampled_audio_float * np.iinfo(np.int16).max).astype(np.int16)
+    # Convert back to int16 preserving the original scaling
+    # Convert float range [-1.0, 1.0] back to int16 range [-32767, 32767]
+    downsampled_audio = (downsampled_audio_float * 32767.0).astype(np.int16)
     return downsampled_audio

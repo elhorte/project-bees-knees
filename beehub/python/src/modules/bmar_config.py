@@ -45,8 +45,8 @@ MONITOR_CH = 0                                  # channel to monitor for event (
 # Audio input configuration
 MIC_1 = True
 MIC_2 = True
-MIC_3 = True
-MIC_4 = True
+MIC_3 = False
+MIC_4 = False
 
 SOUND_IN_CHS = MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
 
@@ -126,13 +126,13 @@ SOUND_OUT_SR_DEFAULT = 48000                    # default sample rate
 
 # audio display parameters:
 TRACE_DURATION = 5.0                            # seconds
-OSCOPE_GAIN_DB = 20                             # Gain in dB of audio level for oscope 
+OSCOPE_GAIN_DB = 0                             # Gain in dB of audio level for oscope 
 
 FFT_DURATION = 10.0                             # seconds
-FFT_GAIN = 12                                   # Gain in dB of audio level for fft
+FFT_GAIN = 0                                   # Gain in dB of audio level for fft
 
 SPECTROGRAM_DURATION = 10.0                     # seconds
-SPECTROGRAM_GAIN = 12                           # Gain in dB of audio level for spectrogram 
+SPECTROGRAM_GAIN = 0                           # Gain in dB of audio level for spectrogram
 
 def get_date_folder():
     """Get current date folder in YYMMDD format."""

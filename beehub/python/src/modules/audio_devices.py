@@ -247,9 +247,7 @@ def get_audio_device_config() -> Optional[Dict]:
         return None
 
 # Removed unused function configure_audio_device_interactive() - not used in codebase
-
 # Removed unused function list_audio_devices() - not used in codebase
-
 # Removed unused function test_device_configuration() - not used in codebase
 
 def list_audio_devices_detailed(app=None):

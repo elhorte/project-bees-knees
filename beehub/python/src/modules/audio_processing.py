@@ -44,11 +44,17 @@ def callback(indata, _frames, _time_info, status):
         
         # Scale float32 data to the target data type range
         if app._dtype == np.int16:
-            # Convert float32 [-1.0, 1.0] to int16 [-32768, 32767]
-            audio_data = (audio_data * 32767).astype(np.int16)
+            # Convert float32 [-1.0, 1.0] to int16 with headroom to prevent clipping
+            # Use 95% of max range to leave headroom for gain processing
+            scale_factor = 31128  # 32767 * 0.95 for 5% headroom
+            audio_data = np.clip(audio_data, -0.95, 0.95)  # Clip to leave headroom
+            audio_data = (audio_data * scale_factor).astype(np.int16)
         elif app._dtype == np.int32:
-            # Convert float32 [-1.0, 1.0] to int32 [-2147483648, 2147483647]
-            audio_data = (audio_data * 2147483647).astype(np.int32)
+            # Convert float32 [-1.0, 1.0] to int32 with headroom to prevent clipping
+            # Use 95% of max range to leave headroom for gain processing
+            scale_factor = 2040109465  # 2147483647 * 0.95 for 5% headroom
+            audio_data = np.clip(audio_data, -0.95, 0.95)  # Clip to leave headroom
+            audio_data = (audio_data * scale_factor).astype(np.int32)
         # If _dtype is np.float32, no conversion needed
     # If no _dtype attribute, keep as float32 (fallback)
     
@@ -293,8 +299,16 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
                     if file_format.lower() == 'mp3':
                         pcm_to_mp3_write(audio_segment, full_path, app.config)
                     else:
-                        # Save as WAV or other format using soundfile
-                        sf.write(full_path, audio_segment, save_sample_rate, subtype='PCM_16')
+                        # Save as WAV/FLAC using soundfile
+                        # Ensure audio_segment is int16 and properly scaled
+                        # Convert to float32 in range [-1.0, 1.0] to prevent soundfile normalization
+                        if audio_segment.dtype == np.int16:
+                            # Our int16 data uses 95% range (max ~31128), convert to proper float range
+                            audio_float = audio_segment.astype(np.float32) / 32767.0
+                            sf.write(full_path, audio_float, save_sample_rate, subtype='PCM_16')
+                        else:
+                            # If already float, save directly
+                            sf.write(full_path, audio_segment, save_sample_rate, subtype='PCM_16')
                     
                     logging.info(f"Saved {thread_id} file: {filename}")
                     
