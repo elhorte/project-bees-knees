@@ -116,19 +116,44 @@ Once the application is running, use these keyboard commands:
 
 ## 📁 File Organization
 
-The application automatically organizes files by date:
+The application automatically organizes files by type by subtype by date:
 
-```
-BMAR_Recordings/
-├── 2025-07-14/
-│   ├── recording_001.wav
-│   ├── recording_002.wav
-│   └── plots/
-│       ├── spectrogram_20250714_143022_001.png
-│       └── oscope_20250714_143055_001.png
-└── 2025-07-15/
-    └── ...
-```
+`<BMAR data paths>`
+
+G:\My Drive
+|   └── eb_beehive_data
+|       └──Zeev-Berkeley
+|           └──Z1_Cluster
+|               ├──audio
+|                   ├──mp3
+|                       └──2025-08-09
+|                           └──20250809-001850_320bps_safety_recording_Zeev-Berkeley_Z1_4mic.mp3
+|                   ├──raw
+|                       └──2025-08-09
+|                           └──20250809-001850_96000_16_period_recording_Zeev-Berkeley_Z1_4mic.flac
+|                   ├──plots
+|                       └──2025-08-09
+|                           └──fft_20250718_105705_spectrogram_ch1.png
+|               ├──camera
+|                   ├──images-visible
+|                       └──2025-08-09
+|                           └──20250809-001850_GPS-<...>_Zeev-Berkeley_Z1_visible.jpeg
+|                   ├──images-IR
+|                       └──2025-08-09
+|                           └──20250809-001850_GPS-<...>_Zeev-Berkeley_Z1_IR.jpeg
+|                   ├──images-UV
+|                       └──2025-08-09
+|                           └──20250809-001850_GPS-<...>_Zeev-Berkeley_Z1_UV.jpeg
+|                   └──video-visible
+|                      └──2025-08-09
+|                           └──20250809-001850_GPS-<...>_Zeev-Berkeley_Z1_visible.mp4
+|               └──sensors
+|                   ├──atmo
+|                       └──2025-08-09
+|                           └──20250809-001850_GPS-<...>_Zeev-Berkeley_Z1_gas_cluster_001.json
+|                   └──ground
+|                       └──2025-08-09
+|                            └──20250809-001850_GPS-<...>_Zeev-Berkeley_Z1_gnd_cluster_001.json
 
 ## 🔧 Configuration Examples
 

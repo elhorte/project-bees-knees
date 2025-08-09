@@ -25,12 +25,12 @@ MODE_FFT_PERIODIC_RECORD = True                 # record fft periodically
 # recording types controls:
 AUDIO_MONITOR_START = None  ##datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec; None = continuous recording
 AUDIO_MONITOR_END = datetime.time(23, 0, 0)     # time of day to stop recording hr, min, sec
-AUDIO_MONITOR_RECORD = 300                     # file size in seconds of continuous recording (default 1800 sec)
+AUDIO_MONITOR_RECORD = 60                     # file size in seconds of continuous recording (default 1800 sec)
 AUDIO_MONITOR_INTERVAL = 0.1                    # seconds between recordings
 
 PERIOD_START = None  ##datetime.time(4, 0, 0)   # 'None' = continuous recording
 PERIOD_END = datetime.time(20, 0, 0)
-PERIOD_RECORD = 300                             # seconds of recording (default 900 sec)
+PERIOD_RECORD = 60                             # seconds of recording (default 900 sec)
 PERIOD_SPECTROGRAM = 120                        # spectrogram duration for saved png images
 PERIOD_INTERVAL = 0.1                           # seconds between start of period, must be > period, of course
 
@@ -54,6 +54,7 @@ SOUND_IN_CHS = MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
 FFT_INTERVAL = 30                               # minutes between ffts
 
 BUFFER_SECONDS = 1000                           # time length of circular buffer 
+LOG_AUDIO_CALLBACK = False  # set True to see per-callback audio stats
 
 # Global flags
 DEBUG_VERBOSE = False                           # Enable verbose debug output (set to True for troubleshooting)
@@ -93,7 +94,7 @@ MACOS_DEVICE_ID = 0                             # Default device ID
 # audio parameters:
 PRIMARY_IN_SAMPLERATE = 192000                  # Audio sample rate
 PRIMARY_BITDEPTH = 16                           # Audio bit depth
-PRIMARY_SAVE_SAMPLERATE = 96000                 # if None then save at Input Samplerate
+PRIMARY_SAVE_SAMPLERATE = None                 # if None then save at Input Samplerate
 PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'
 
 AUDIO_MONITOR_SAMPLERATE = 48000                # For continuous audio

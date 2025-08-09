@@ -3,19 +3,14 @@ BMAR Audio Processing Module
 Handles audio streaming, buffer management, and core audio processing operations.
 """
 
+import logging
+import sys, time, threading, os, datetime, platform
 import numpy as np
 import sounddevice as sd
-import threading
-import datetime
-import time
-import logging
-import sys
-import os
 import soundfile as sf
-
+from .audio_conversion import ensure_pcm16, pcm_to_mp3_write, downsample_audio
+from .file_utils import check_and_create_date_folders, log_saved_file
 from .system_utils import interruptable_sleep
-from .file_utils import check_and_create_date_folders
-from .audio_conversion import downsample_audio, pcm_to_mp3_write
 
 def callback(indata, _frames, _time_info, status):
     """Callback function for audio input stream (sounddevice compatible)."""
@@ -31,32 +26,16 @@ def callback(indata, _frames, _time_info, status):
     
     # sounddevice already provides numpy array
     audio_data = indata.copy()
-    
-    # Handle invalid values (NaN, infinity) in audio data
-    if not np.all(np.isfinite(audio_data)):
-        # Replace NaN and infinity values with zeros
-        audio_data = np.nan_to_num(audio_data, nan=0.0, posinf=0.0, neginf=0.0)
-    
-    # Convert to the buffer's data type to avoid casting warnings
-    if hasattr(app, '_dtype') and app._dtype != np.float32:
-        # Clamp audio data to valid range [-1.0, 1.0] to prevent overflow
-        audio_data = np.clip(audio_data, -1.0, 1.0)
-        
-        # Scale float32 data to the target data type range
-        if app._dtype == np.int16:
-            # Convert float32 [-1.0, 1.0] to int16 with headroom to prevent clipping
-            # Use 95% of max range to leave headroom for gain processing
-            scale_factor = 31128  # 32767 * 0.95 for 5% headroom
-            audio_data = np.clip(audio_data, -0.95, 0.95)  # Clip to leave headroom
-            audio_data = (audio_data * scale_factor).astype(np.int16)
-        elif app._dtype == np.int32:
-            # Convert float32 [-1.0, 1.0] to int32 with headroom to prevent clipping
-            # Use 95% of max range to leave headroom for gain processing
-            scale_factor = 2040109465  # 2147483647 * 0.95 for 5% headroom
-            audio_data = np.clip(audio_data, -0.95, 0.95)  # Clip to leave headroom
-            audio_data = (audio_data * scale_factor).astype(np.int32)
-        # If _dtype is np.float32, no conversion needed
-    # If no _dtype attribute, keep as float32 (fallback)
+
+    # Always keep callback data as float32 in [-1, 1]
+    audio_data = audio_data.astype(np.float32, copy=False)
+    audio_data = np.nan_to_num(audio_data, nan=0.0, posinf=0.0, neginf=0.0)
+    audio_data = np.clip(audio_data, -1.0, 1.0)
+
+    # If your circular buffer expects a specific dtype, store float32 consistently:
+    if getattr(app, "_dtype", np.float32) != np.float32:
+        app._dtype = np.float32
+    # write audio_data (float32) into the circular buffer here
     
     # Ensure proper shape for multi-channel
     if audio_data.ndim == 1:
@@ -78,14 +57,14 @@ def callback(indata, _frames, _time_info, status):
 
 def setup_audio_circular_buffer(app):
     """Set up the circular buffer for audio recording."""
-    # Calculate buffer size and initialize buffer
+    # Force float32 pipeline for capture; convert only at write time
+    app._dtype = np.float32
     app.buffer_size = int(app.BUFFER_SECONDS * app.PRIMARY_IN_SAMPLERATE)
     app.buffer = np.zeros((app.buffer_size, app.sound_in_chs), dtype=app._dtype)
     app.buffer_index = 0
     app.buffer_wrap = False
     app.blocksize = 8196
     app.buffer_wrap_event.clear()
-    
     print(f"\naudio buffer size: {sys.getsizeof(app.buffer)}\n")
     sys.stdout.flush()
 
@@ -122,24 +101,19 @@ def audio_stream(app):
         # Set up callback reference to app
         callback.app = app
         
-        # Determine sounddevice dtype
-        if app._dtype == np.float32:
-            dtype = 'float32'
-        elif app._dtype == np.int16:
-            dtype = 'int16'
-        elif app._dtype == np.int32:
-            dtype = 'int32'
-        else:
-            dtype = 'float32'  # Default fallback
+        # Determine sounddevice dtype (float32 for consistency)
+        dtype = 'float32'
+        app._dtype = np.float32
         
-        # Initialize the stream with the configured sample rate and bit depth
+        # Build the capture callback and initialize the stream
+        cb = _make_stream_callback(app)
         stream = sd.InputStream(
             device=app.sound_in_id,
             channels=app.sound_in_chs,
             samplerate=int(app.PRIMARY_IN_SAMPLERATE),
             blocksize=app.blocksize,
             dtype=dtype,
-            callback=callback
+            callback=cb
         )
 
         logging.info("Sounddevice stream initialized successfully")
@@ -148,67 +122,73 @@ def audio_stream(app):
 
         # Store references for cleanup
         app.audio_stream = stream
-        
         stream.start()
 
-        # Start the recording worker threads
-        if hasattr(app.config, 'MODE_AUDIO_MONITOR') and app.config.MODE_AUDIO_MONITOR:
-            logging.info("Starting recording_worker_thread for down sampling audio to 48k and saving mp3...")
+        # Start recording threads based on flags (independently)
+        threads_started = 0
+
+        if getattr(app.config, 'MODE_AUDIO_MONITOR', False):
+            logging.info("Starting recording_worker_thread: Audio_monitor (MP3)")
             threading.Thread(target=recording_worker_thread, args=(
                 app,
                 app.config.AUDIO_MONITOR_RECORD,
                 app.config.AUDIO_MONITOR_INTERVAL,
                 "Audio_monitor",
-                    app.config.AUDIO_MONITOR_FORMAT,
-                    app.config.AUDIO_MONITOR_SAMPLERATE,
-                    getattr(app.config, 'AUDIO_MONITOR_START', None),
-                    getattr(app.config, 'AUDIO_MONITOR_END', None),
-                    app.stop_auto_recording_event  # Use separate event for automatic recording
-                )).start()
+                app.config.AUDIO_MONITOR_FORMAT,
+                app.config.AUDIO_MONITOR_SAMPLERATE,
+                getattr(app.config, 'AUDIO_MONITOR_START', None),
+                getattr(app.config, 'AUDIO_MONITOR_END', None),
+                app.stop_auto_recording_event
+            ), daemon=True).start()
+            threads_started += 1
 
-            if hasattr(app.config, 'MODE_PERIOD') and app.config.MODE_PERIOD:
-                logging.info("Starting recording_worker_thread for caching period audio at primary sample rate and all channels...")
-                threading.Thread(target=recording_worker_thread, args=(
-                    app,
-                    app.config.PERIOD_RECORD,
-                    app.config.PERIOD_INTERVAL,
-                    "Period_recording",
-                    app.config.PRIMARY_FILE_FORMAT,
-                    app.PRIMARY_IN_SAMPLERATE,
-                    getattr(app.config, 'PERIOD_START', None),
-                    getattr(app.config, 'PERIOD_END', None),
-                    app.stop_auto_recording_event  # Use separate event for automatic recording
-                )).start()
+        if getattr(app.config, 'MODE_PERIOD', False):
+            logging.info("Starting recording_worker_thread: Period_recording (primary)")
+            threading.Thread(target=recording_worker_thread, args=(
+                app,
+                app.config.PERIOD_RECORD,
+                app.config.PERIOD_INTERVAL,
+                "Period_recording",
+                app.config.PRIMARY_FILE_FORMAT,
+                app.PRIMARY_IN_SAMPLERATE,
+                getattr(app.config, 'PERIOD_START', None),
+                getattr(app.config, 'PERIOD_END', None),
+                app.stop_auto_recording_event
+            ), daemon=True).start()
+            threads_started += 1
 
-            if hasattr(app.config, 'MODE_EVENT') and app.config.MODE_EVENT:
-                logging.info("Starting recording_worker_thread for saving event audio at primary sample rate and trigger by event...")
-                threading.Thread(target=recording_worker_thread, args=(
-                    app,
-                    app.config.SAVE_BEFORE_EVENT,
-                    app.config.SAVE_AFTER_EVENT,
-                    "Event_recording",
-                    app.config.PRIMARY_FILE_FORMAT,
-                    app.PRIMARY_IN_SAMPLERATE,
-                    getattr(app.config, 'EVENT_START', None),
-                    getattr(app.config, 'EVENT_END', None),
-                    app.stop_auto_recording_event  # Use separate event for automatic recording
-                )).start()
+        if getattr(app.config, 'MODE_EVENT', False):
+            logging.info("Starting recording_worker_thread: Event_recording (primary)")
+            threading.Thread(target=recording_worker_thread, args=(
+                app,
+                app.config.SAVE_BEFORE_EVENT,
+                app.config.SAVE_AFTER_EVENT,
+                "Event_recording",
+                app.config.PRIMARY_FILE_FORMAT,
+                app.PRIMARY_IN_SAMPLERATE,
+                getattr(app.config, 'EVENT_START', None),
+                getattr(app.config, 'EVENT_END', None),
+                app.stop_auto_recording_event
+            ), daemon=True).start()
+            threads_started += 1
 
-            # Wait for keyboard input to stop
-            while not app.stop_program[0]:
-                time.sleep(0.1)
-            
-            # Cleanup sounddevice stream
-            try:
-                stream.stop()
-                stream.close()
-                logging.info("Sounddevice stream cleaned up successfully")
-            except Exception as cleanup_error:
-                logging.error(f"Error during sounddevice cleanup: {cleanup_error}")
-            
-            # Normal exit - return True
-            logging.info("Audio stream stopped normally")
-            return True
+        if threads_started == 0:
+            logging.warning("No recording modes enabled (MODE_AUDIO_MONITOR / MODE_PERIOD / MODE_EVENT).")
+
+        # Keep running until stop is requested (regardless of which modes are active)
+        while not app.stop_program[0]:
+            time.sleep(0.1)
+
+        # Cleanup sounddevice stream
+        try:
+            stream.stop()
+            stream.close()
+            logging.info("Sounddevice stream cleaned up successfully")
+        except Exception as cleanup_error:
+            logging.error(f"Error during sounddevice cleanup: {cleanup_error}")
+
+        logging.info("Audio stream stopped normally")
+        return True
 
     except Exception as e:
         logging.error(f"Error in sounddevice stream: {e}")
@@ -245,73 +225,42 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
                 print(f"{thread_id} started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec\n\r")
 
                 app.period_start_index = app.buffer_index 
-                # Wait PERIOD seconds to accumulate audio
+                # Wait record_period seconds to accumulate audio
                 interruptable_sleep(record_period, stop_event)
-
-                # Check if we're shutting down before saving
                 if stop_event.is_set():
                     break
 
-                period_end_index = app.buffer_index 
-                save_start_index = app.period_start_index % app.buffer_size
-                save_end_index = period_end_index % app.buffer_size
+                # Ensure the buffer has enough data (first iteration safety)
+                need_frames = int(record_period * app.PRIMARY_IN_SAMPLERATE)
+                while _buffer_available_frames(app) < min(need_frames, app.buffer_size) and not app.stop_program[0]:
+                    time.sleep(0.05)
 
-                # Saving from a circular buffer so segments aren't necessarily contiguous
-                if save_end_index > save_start_index:
-                    audio_segment = app.buffer[save_start_index:save_end_index].copy()
-                else:
-                    # Buffer wrapped around
-                    part1 = app.buffer[save_start_index:].copy()
-                    part2 = app.buffer[:save_end_index].copy()
-                    audio_segment = np.concatenate([part1, part2], axis=0)
+                # Snapshot the most recent record_period seconds
+                segment = _snapshot_from_buffer(app, record_period, app.PRIMARY_IN_SAMPLERATE)
+                _log_array_stats(f"{thread_id}/segment before save", segment)
 
-                # Determine the sample rate to use for saving
-                save_sample_rate = app.PRIMARY_SAVE_SAMPLERATE if app.PRIMARY_SAVE_SAMPLERATE is not None else app.PRIMARY_IN_SAMPLERATE
-                
-                # Resample if needed
-                if save_sample_rate < app.PRIMARY_IN_SAMPLERATE:
-                    audio_segment = downsample_audio(audio_segment, app.PRIMARY_IN_SAMPLERATE, save_sample_rate)
+                # Optional resample (only if target is lower than capture)
+                save_sr = _target_sample_rate or app.PRIMARY_IN_SAMPLERATE
+                if save_sr < app.PRIMARY_IN_SAMPLERATE:
+                    segment = downsample_audio(segment, app.PRIMARY_IN_SAMPLERATE, save_sr)
 
-                # Check if we're shutting down before saving
-                if stop_event.is_set():
-                    break
+                # Build output folder and filename
+                ts = datetime.datetime.now()
+                out_dir = _resolve_audio_output_dir(app, thread_id)
 
-                # Check and create new date folders if needed
-                if not check_and_create_date_folders(app):
-                    logging.error(f"Failed to create date folders for {thread_id}")
-                    continue
+                ext = (file_format or "flac").lower()
+                if ext not in ("mp3", "wav", "flac"):
+                    ext = "flac"
+                filename = f"{thread_id}_{ts:%Y%m%d_%H%M%S}_dev{app.sound_in_id}_{app.sound_in_chs}ch_sr{save_sr}.{ext}"
+                full_path = os.path.join(out_dir, filename)
 
-                # Calculate the saving sample rate for the filename
-                filename_sample_rate = int(save_sample_rate)
-                
-                # Generate timestamp and filename
-                timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-                filename = f"{timestamp}_{filename_sample_rate}_{app.PRIMARY_BITDEPTH}_{thread_id}_{app.config.LOCATION_ID}_{app.config.HIVE_ID}.{file_format.lower()}"
-                
-                # Choose directory based on thread type
-                if "Audio_monitor" in thread_id:
-                    full_path = os.path.join(app.MONITOR_DIRECTORY, filename)
-                else:
-                    full_path = os.path.join(app.PRIMARY_DIRECTORY, filename)
-
+                # Write and verify
                 try:
-                    # Save the file
-                    if file_format.lower() == 'mp3':
-                        pcm_to_mp3_write(audio_segment, full_path, app.config)
+                    if ext == "mp3":
+                        write_mp3_with_logging(segment, full_path, app.config)
                     else:
-                        # Save as WAV/FLAC using soundfile
-                        # Ensure audio_segment is int16 and properly scaled
-                        # Convert to float32 in range [-1.0, 1.0] to prevent soundfile normalization
-                        if audio_segment.dtype == np.int16:
-                            # Our int16 data uses 95% range (max ~31128), convert to proper float range
-                            audio_float = audio_segment.astype(np.float32) / 32767.0
-                            sf.write(full_path, audio_float, save_sample_rate, subtype='PCM_16')
-                        else:
-                            # If already float, save directly
-                            sf.write(full_path, audio_segment, save_sample_rate, subtype='PCM_16')
-                    
-                    logging.info(f"Saved {thread_id} file: {filename}")
-                    
+                        write_pcm_with_logging(segment, full_path, save_sr, subtype="PCM_16")
+                    log_saved_file(full_path, f"{thread_id}")
                 except Exception as e:
                     logging.error(f"Error saving {thread_id} file {filename}: {e}")
 
@@ -406,3 +355,120 @@ def _record_audio_sounddevice(duration, sound_in_id, sound_in_chs, stop_queue, t
     except Exception:
         logging.error(f"Failed to record audio with sounddevice for {task_name}", exc_info=True)
         return None, 0
+
+def _make_stream_callback(app):
+    """
+    Capture callback: writes float32 into circular buffer and logs periodic stats.
+    """
+    app._last_cb_log = 0.0
+
+    def _cb(indata, frames, _time_info, status):
+        if status:
+            logging.warning("audio callback status: %s", status)
+
+        x = np.asarray(indata, dtype=np.float32)
+        if x.ndim == 1:
+            x = x[:, None]
+
+        ch = min(x.shape[1], app.sound_in_chs)
+        n = x.shape[0]
+        idx = app.buffer_index
+        end = idx + n
+        if end <= app.buffer_size:
+            app.buffer[idx:end, :ch] = x[:, :ch]
+        else:
+            first = app.buffer_size - idx
+            app.buffer[idx:, :ch] = x[:first, :ch]
+            app.buffer[:n-first, :ch] = x[first:, :ch]
+            app.buffer_wrap = True
+        app.buffer_index = (idx + n) % app.buffer_size
+
+        # Optional periodic stats (now computed correctly)
+        now = time.time()
+        if now - app._last_cb_log > 2.0:
+            if getattr(app.config, "LOG_AUDIO_CALLBACK", False):
+                wb = x[:, :ch]
+                absmax = float(np.abs(wb).max()) if wb.size else 0.0
+                rms = float(np.sqrt(np.mean(np.square(wb.astype(np.float64))))) if wb.size else 0.0
+                logging.info(
+                    "callback: frames=%d ch=%d absmax=%.6f rms=%.6f idx=%d wrap=%s",
+                    n, ch, absmax, rms, app.buffer_index, app.buffer_wrap
+                )
+            app._last_cb_log = now
+    return _cb
+
+def _log_array_stats(tag: str, arr) -> None:
+    try:
+        a = np.asarray(arr)
+        if a.size == 0:
+            logging.info("%s: empty array", tag)
+            return
+        rms = float(np.sqrt(np.mean(np.square(a.astype(np.float64)))))
+        logging.info(
+            "%s: dtype=%s shape=%s min=%.6f max=%.6f mean=%.6f rms=%.6f absmax=%.6f",
+            tag, a.dtype, a.shape,
+            float(a.min()), float(a.max()),
+            float(a.mean()), rms, float(np.max(np.abs(a))),
+        )
+    except Exception as e:
+        logging.warning("array-stats failed for %s: %s", tag, e)
+
+def _buffer_available_frames(app) -> int:
+    """How many valid frames are currently in the circular buffer."""
+    return app.buffer_size if getattr(app, "buffer_wrap", False) else int(getattr(app, "buffer_index", 0))
+
+def _snapshot_from_buffer(app, seconds: float, sr: int) -> np.ndarray:
+    """Return most recent 'seconds' from the circular buffer (float32, shape [N, C])."""
+    n = max(0, min(int(seconds * sr), app.buffer_size))
+    if n == 0:
+        return np.empty((0, app.sound_in_chs), dtype=np.float32)
+    end = app.buffer_index
+    start = (end - n) % app.buffer_size
+    if start < end:
+        out = app.buffer[start:end]
+    else:
+        out = np.vstack((app.buffer[start:], app.buffer[:end]))
+    return out.astype(np.float32, copy=True)
+
+def write_pcm_with_logging(frames, path, sr, subtype="PCM_16"):
+    _log_array_stats("PCM/write input", frames)
+    if frames is None or np.asarray(frames).size == 0:
+        logging.error("PCM/write aborted: empty frames for %s", path)
+        return
+    pcm16 = np.ascontiguousarray(ensure_pcm16(frames))
+    _log_array_stats("PCM/write pcm16", pcm16)
+    sf.write(path, pcm16, int(sr), subtype=subtype)
+    log_saved_file(path, "Audio")
+    try:
+        y, r = sf.read(path, dtype='int16', always_2d=False)
+        _log_array_stats("PCM/roundtrip read", y)
+        logging.info("PCM/roundtrip sr=%s ch=%s", r, (y.shape[1] if y.ndim == 2 else 1))
+    except Exception as e:
+        logging.warning("PCM/roundtrip failed for %s: %s", path, e)
+
+def write_mp3_with_logging(frames, path, config):
+    _log_array_stats("MP3/write input", frames)
+    if frames is None or np.asarray(frames).size == 0:
+        logging.error("MP3/write aborted: empty frames for %s", path)
+        return
+    pcm16 = np.ascontiguousarray(ensure_pcm16(frames))
+    _log_array_stats("MP3/write pcm16", pcm16)
+    pcm_to_mp3_write(pcm16, path, config)
+    log_saved_file(path, "Audio")
+
+def _first_defined_path(*candidates):
+    for p in candidates:
+        if isinstance(p, str) and p.strip():
+            return os.path.abspath(os.path.expanduser(p))
+    return None
+
+def _resolve_audio_output_dir(app, thread_id: str) -> str:
+    """
+    Resolve output dir strictly from BMAR_config via check_and_create_date_folders.
+    """
+    cfg = app.config
+    res = check_and_create_date_folders(cfg)  # will raise/log if config invalid
+    out_dir = res.get("audio_dir") or res.get("audio") or res.get("AUDIO_DIR")
+    out_dir = os.path.normpath(os.path.expanduser(out_dir))
+    os.makedirs(out_dir, exist_ok=True)
+    return out_dir

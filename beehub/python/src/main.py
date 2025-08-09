@@ -12,6 +12,7 @@ from pathlib import Path
 # Simplified imports to avoid circular dependencies
 import sounddevice as sd
 from modules import bmar_config
+from modules.file_utils import check_and_create_date_folders
 
 def list_audio_devices():
     """List all available audio devices using sounddevice"""
@@ -197,6 +198,12 @@ def main():
         from modules.bmar_app import create_bmar_app
         
         app = create_bmar_app()
+        
+        cfg = app.config  # or however your config object is referenced
+        dirs = check_and_create_date_folders(cfg)
+        logging.info("Recording directory setup (config): %s", dirs["base_dir"])
+        logging.info("Today's audio directory (config): %s", dirs["audio_dir"])
+        
         app.run()
         
     except ImportError as e:

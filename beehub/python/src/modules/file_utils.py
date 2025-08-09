@@ -4,9 +4,21 @@ Handles file operations, directory management, and file discovery.
 """
 
 import os
-import datetime
 import logging
+import datetime
+import platform
 import time
+
+def _platform_base_root(cfg) -> str:
+    """Build base root strictly from BMAR_config platform fields; no fallbacks."""
+    sysname = platform.system()
+    if sysname == "Windows":
+        base = os.path.join(cfg.win_data_drive, cfg.win_data_path)
+    elif sysname == "Darwin":
+        base = os.path.join(os.path.expanduser(cfg.mac_data_drive), cfg.mac_data_path)
+    else:
+        base = os.path.join(os.path.expanduser(cfg.linux_data_drive), cfg.linux_data_path)
+    return os.path.normpath(base)
 
 def ensure_directories_exist(directories):
     """
@@ -56,38 +68,60 @@ def ensure_directories_exist(directories):
                     logging.error(f"  Could not check parent directory permissions: {e2}")
     return success
 
-def check_and_create_date_folders(app):
+def check_and_create_date_folders(cfg):
     """
-    Check if today's date folders exist and create them if necessary.
-    This function should be called at startup and periodically during operation.
-    
-    Args:
-        app: BmarApp instance containing configuration and directory paths.
+    Create and return dict of config-based recording folders.
+    Uses only BMAR_config fields: win/mac/linux *_data_drive, *_data_path and *_data_folders.
+    Returns:
+      {
+        'base_dir': <root>,
+        'audio_base': <root>/audio,
+        'plots_base': <root>/plots,
+        'today': YYYY-MM-DD,
+        'audio_dir': <root>/audio/YYYY-MM-DD,
+        'plots_dir': <root>/plots/YYYY-MM-DD,
+      }
     """
-    # Get current date components
-    current_date = datetime.datetime.now()
-    yy = current_date.strftime('%y')
-    mm = current_date.strftime('%m')
-    dd = current_date.strftime('%d')
-    date_folder = f"{yy}{mm}{dd}"
-    
-    print(f"\nChecking/creating date folders for {date_folder}...")
-    
-    # Update directory paths with current date using app properties
-    app.PRIMARY_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID, 
-                                    app.folders[0], "raw", date_folder, "")
-    app.MONITOR_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID, 
-                                    app.folders[0], "mp3", date_folder, "")
-    app.PLOT_DIRECTORY = os.path.join(app.data_drive, app.data_path, app.config.LOCATION_ID, app.config.HIVE_ID, 
-                                    app.folders[1], date_folder, "")
-    
-    print(f"Primary directory: {app.PRIMARY_DIRECTORY}")
-    print(f"Monitor directory: {app.MONITOR_DIRECTORY}")
-    print(f"Plot directory: {app.PLOT_DIRECTORY}")
-    
-    # Create directories if they don't exist
-    required_directories = [app.PRIMARY_DIRECTORY, app.MONITOR_DIRECTORY, app.PLOT_DIRECTORY]
-    return ensure_directories_exist(required_directories)
+    root = _platform_base_root(cfg)
+
+    # Determine folder names list from platform
+    sysname = platform.system()
+    if sysname == "Windows":
+        folders = getattr(cfg, "win_data_folders", ["audio", "plots"])
+    elif sysname == "Darwin":
+        folders = getattr(cfg, "mac_data_folders", ["audio", "plots"])
+    else:
+        folders = getattr(cfg, "linux_data_folders", ["audio", "plots"])
+
+    # Ensure bases exist
+    os.makedirs(root, exist_ok=True)
+    subdirs = {name: os.path.join(root, name) for name in folders}
+    for p in subdirs.values():
+        os.makedirs(p, exist_ok=True)
+
+    # Per-day subfolders
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    dated = {name: os.path.join(path, today) for name, path in subdirs.items()}
+    for p in dated.values():
+        os.makedirs(p, exist_ok=True)
+
+    audio_base = subdirs.get("audio") or subdirs.get("AUDIO") or list(subdirs.values())[0]
+    plots_base = subdirs.get("plots") or subdirs.get("PLOTS") or list(subdirs.values())[1 if len(subdirs) > 1 else 0]
+    audio_dir = dated.get("audio") or dated.get("AUDIO") or audio_base
+    plots_dir = dated.get("plots") or dated.get("PLOTS") or plots_base
+
+    info = {
+        "base_dir": root,
+        "audio_base": audio_base,
+        "plots_base": plots_base,
+        "today": today,
+        "audio_dir": os.path.normpath(audio_dir),
+        "plots_dir": os.path.normpath(plots_dir),
+    }
+    logging.info("Recording root (config): %s", info["base_dir"])
+    logging.info("Audio dir (config): %s", info["audio_dir"])
+    logging.info("Plots dir (config): %s", info["plots_dir"])
+    return info
 
 def find_file_of_type_with_offset(app, offset):
     """
@@ -302,3 +336,17 @@ def list_recent_files(directory, limit=10, extensions=None):
     except Exception as e:
         logging.error(f"Error listing recent files in {directory}: {e}")
         return []
+
+def log_saved_file(path: str, prefix: str = "") -> None:
+    """
+    Log the absolute path of a saved file.
+    Use prefix like 'Audio' or 'Image' if desired.
+    """
+    try:
+        abspath = os.path.abspath(os.path.expanduser(path))
+        if prefix:
+            logging.info("%s saved: %s", prefix, abspath)
+        else:
+            logging.info("Saved file: %s", abspath)
+    except Exception as e:
+        logging.warning("Could not log saved file path for %s: %s", path, e)
