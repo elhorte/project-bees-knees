@@ -3,14 +3,13 @@ BMAR Audio Conversion Module
 Handles audio format conversion, downsampling, and encoding operations.
 """
 
-import logging
 import numpy as np
 from pydub import AudioSegment
 from math import gcd
 try:
     # High-quality path if SciPy is present; otherwise we’ll fall back to linear interp
     from scipy.signal import resample_poly
-except Exception:
+except ImportError:
     resample_poly = None
 
 __all__ = ["ensure_pcm16", "downsample_audio", "pcm_to_mp3_write"]
@@ -93,18 +92,37 @@ def downsample_audio(x, in_sr: int, out_sr: int):
 
     return y
 
-def pcm_to_mp3_write(np_array, full_path, config):
+def pcm_to_mp3_write(np_array, full_path, config, sample_rate=None, bitrate_kbps=None, vbr_quality=None):
     """
     Export as MP3 using pydub/ffmpeg. Converts to PCM16 bytes first.
     """
     pcm16 = ensure_pcm16(np_array)
     channels = 1 if pcm16.ndim == 1 else pcm16.shape[1]
-    sr = getattr(config, "SAVE_SAMPLE_RATE", None) or \
-         getattr(config, "PRIMARY_IN_SAMPLERATE", None) or 44100
+    # Use provided sample_rate if given; otherwise fall back to config
+    sr = int(sample_rate) if sample_rate else (
+        getattr(config, "SAVE_SAMPLE_RATE", None) or getattr(config, "PRIMARY_IN_SAMPLERATE", None) or 44100
+    )
 
-    q = int(getattr(config, "AUDIO_MONITOR_QUALITY", 128))
-    q = min(320, max(10, q))
-    bitrate = f"{q}k"
+    export_kwargs = {"format": "mp3"}
+    # Prefer explicit CBR if provided
+    if bitrate_kbps is not None:
+        export_kwargs["bitrate"] = f"{int(bitrate_kbps)}k"
+    elif vbr_quality is not None:
+        # Use ffmpeg VBR quality parameter
+        export_kwargs["parameters"] = ["-q:a", str(int(vbr_quality))]
+    else:
+        # Fallback to config: treat 64-320 as kbps, 0-9 as VBR
+        q = getattr(config, "AUDIO_MONITOR_QUALITY", 128)
+        try:
+            q = int(q)
+        except (ValueError, TypeError):
+            q = 128
+        if 64 <= q <= 320:
+            export_kwargs["bitrate"] = f"{q}k"
+        elif 0 <= q <= 9:
+            export_kwargs["parameters"] = ["-q:a", str(q)]
+        else:
+            export_kwargs["bitrate"] = "128k"
 
     seg = AudioSegment(
         data=pcm16.tobytes(),
@@ -112,4 +130,4 @@ def pcm_to_mp3_write(np_array, full_path, config):
         frame_rate=int(sr),
         channels=int(channels),
     )
-    seg.export(full_path, format="mp3", bitrate=bitrate)
+    seg.export(full_path, **export_kwargs)

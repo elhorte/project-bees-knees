@@ -40,7 +40,8 @@ else:
         UNIX_AVAILABLE = False
 
 # Global variable to track the state of the keyboard listener toggle
-interactive_mode = True
+# Store interactive mode on the app instance instead of using a module-level global
+# interactive_mode = True  # removed in favor of app.interactive_mode
 toggle_key = '^'
 
 def enable_raw_mode():
@@ -63,6 +64,9 @@ def ensure_app_attributes(app):
         app.os_info = {}
     if not hasattr(app, 'DEBUG_VERBOSE'):
         app.DEBUG_VERBOSE = False
+    # Store interactive keyboard mode on the app to avoid module-level global
+    if not hasattr(app, 'interactive_mode'):
+        app.interactive_mode = True
 
 def background_keyboard_monitor(app):
     """Background thread to monitor for application state."""
@@ -70,11 +74,7 @@ def background_keyboard_monitor(app):
     
     # Simple monitoring - just sleep and stay alive
     while getattr(app, 'keyboard_listener_running', True):
-        try:
-            time.sleep(1.0)
-        except Exception as e:
-            logging.error(f"Error in background keyboard monitor: {e}")
-            time.sleep(1.0)
+        time.sleep(1.0)
 
 def keyboard_listener(app):
     """
@@ -82,7 +82,10 @@ def keyboard_listener(app):
     In interactive mode: Captures single keystrokes for BMAR commands
     In pass-through mode: Sleeps and doesn't interfere with terminal input
     """
-    global interactive_mode
+    # Use app.interactive_mode instead of module-level global
+    
+    # Ensure required attributes exist to avoid AttributeError on first access
+    ensure_app_attributes(app)
     
     try:
         print_controls()
@@ -91,7 +94,7 @@ def keyboard_listener(app):
         
         while app.keyboard_listener_running:
             try:
-                if interactive_mode:
+                if app.interactive_mode:
                     # Interactive mode: Set up terminal for raw mode and capture individual keys
                     if platform.system() != "Windows" and UNIX_AVAILABLE:
                         enable_raw_mode()
@@ -105,11 +108,11 @@ def keyboard_listener(app):
                                 ch = ch.decode('utf-8', errors='ignore')
                             
                             if ch == toggle_key:
-                                interactive_mode = False
+                                app.interactive_mode = False
                                 # Restore normal terminal behavior immediately
                                 if platform.system() != "Windows" and UNIX_AVAILABLE:
                                     restore_terminal()
-                                print(f"\n[BMAR keyboard mode OFF - Terminal now operates normally]")
+                                print("\n[BMAR keyboard mode OFF - Terminal now operates normally]")
                                 print("All keystrokes are now visible and functional in the terminal.")
                                 print("BMAR processes continue running in background.")
                                 print("Press '^' again to return to BMAR keyboard mode.")
@@ -127,8 +130,8 @@ def keyboard_listener(app):
                             ch = sys.stdin.read(1)
                             
                             if ch == toggle_key:
-                                interactive_mode = False
-                                print(f"\n[BMAR keyboard mode OFF - Terminal now operates normally]")
+                                app.interactive_mode = False
+                                print("\n[BMAR keyboard mode OFF - Terminal now operates normally]")
                                 print("All keystrokes are now visible and functional in the terminal.")
                                 print("BMAR processes continue running in background.")
                                 print("Press '^' again to return to BMAR keyboard mode.")
@@ -162,8 +165,8 @@ def keyboard_listener(app):
                             if isinstance(ch, bytes):
                                 ch = ch.decode('utf-8', errors='ignore')
                             if ch == toggle_key:
-                                interactive_mode = True
-                                print(f"\n[BMAR keyboard mode ON - Single-key commands active]")
+                                app.interactive_mode = True
+                                print("\n[BMAR keyboard mode ON - Single-key commands active]")
                                 print("BMAR single-key commands are now active. Press 'h' for help.")
                                 sys.stdout.flush()
                     else:
@@ -174,8 +177,8 @@ def keyboard_listener(app):
                             if ready:
                                 ch = sys.stdin.read(1)
                                 if ch == toggle_key:
-                                    interactive_mode = True
-                                    print(f"\n[BMAR keyboard mode ON - Single-key commands active]")
+                                    app.interactive_mode = True
+                                    print("\n[BMAR keyboard mode ON - Single-key commands active]")
                                     print("BMAR single-key commands are now active. Press 'h' for help.")
                                     sys.stdout.flush()
                                 # If it's not our toggle key, we unfortunately consumed it
@@ -184,13 +187,13 @@ def keyboard_listener(app):
             except KeyboardInterrupt:
                 print("\nKeyboard interrupt received")
                 break
-            except Exception as e:
-                logging.error(f"Error in keyboard listener loop: {e}")
+            except (OSError, ValueError, RuntimeError, AttributeError) as e:
+                logging.error("Error in keyboard listener loop: %s", e)
                 time.sleep(0.1)
 
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, AttributeError) as e:
         print(f"Keyboard listener failed to start: {e}")
-        logging.error(f"Keyboard listener failed to start: {e}")
+        logging.error("Keyboard listener failed to start: %s", e)
     finally:
         # Restore terminal to normal mode
         if platform.system() != "Windows" and UNIX_AVAILABLE:
@@ -222,7 +225,7 @@ def print_controls():
 def process_command(app, command):
     """Process a user command."""
     
-    from .process_manager import cleanup_process, create_subprocess
+    # removed unused imports
     
     try:
         # Ensure app has basic attributes for command processing
@@ -293,9 +296,6 @@ def process_command(app, command):
             # Handle channel switching (1-9)
             handle_channel_switch_command(app, command)
             
-        elif command == 'l' or command == 'L':
-            handle_thread_list_command(app)
-            
         elif command == '^':
             # Toggle is handled directly in keyboard_listener function
             print("Toggle functionality is built into the keyboard listener. This message should not appear.")
@@ -303,17 +303,16 @@ def process_command(app, command):
         else:
             print(f"Unknown command: '{command}'. Press 'h' for help.\r")  # Added \r
             
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:
         print(f"Error processing command '{command}': {e}\r")  # Added \r
-        print(f"Traceback: \r")  # Added \r
+        print("Traceback: \r")  # Added \r
         traceback.print_exc()
-        logging.error(f"Error processing command '{command}': {e}")
+        logging.error("Error processing command '%s': %s", command, e)
 
 def handle_recording_command(app):
     """Handle recording start/stop command."""
     
-    from .process_manager import cleanup_process, create_subprocess
-    from .audio_processing import recording_worker_thread
+    from .process_manager import cleanup_process
     
     try:
         if 'r' in app.active_processes and app.active_processes['r'] is not None:
@@ -330,7 +329,7 @@ def handle_recording_command(app):
             print("Starting recording...\r")  # Added \r
             start_new_recording(app)
             
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
         print(f"Recording command error: {e}\r")  # Added \r
 
 def start_new_recording(app):
@@ -365,14 +364,13 @@ def start_new_recording(app):
         process.start()
         print(f"Recording started (PID: {process.pid})\r")  # Added \r
         
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:
         print(f"Error starting recording: {e}\r")  # Added \r
 
 def handle_spectrogram_command(app):
     """Handle spectrogram command."""
     
-    from .process_manager import cleanup_process, create_subprocess
-    from .plotting import plot_spectrogram
+    from .process_manager import cleanup_process
     
     try:
         if 's' in app.active_processes and app.active_processes['s'] is not None:
@@ -387,7 +385,7 @@ def handle_spectrogram_command(app):
             print("Starting spectrogram...\r")  # Added \r
             start_spectrogram(app)
             
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:
         print(f"Spectrogram command error: {e}\r")  # Added \r
         traceback.print_exc()
 
@@ -411,10 +409,14 @@ def start_spectrogram(app):
             'blocksize': app.blocksize,
             'fft_size': 2048,
             'overlap': 0.75,
-            'capture_duration': 5.0,
+            # Allow optional override; otherwise plotting will use SPECTROGRAM_DURATION
+            'capture_duration': getattr(app, 'override_spectrogram_duration', None),
             'freq_range': [0, app.samplerate // 2],
             'plots_dir': plots_dir
         }
+        
+        # Remove None entries so plotting uses config default
+        spectrogram_config = {k: v for k, v in spectrogram_config.items() if v is not None}
         
         print(f"Starting spectrogram (device {app.device_index}, {app.samplerate}Hz)\r")  # Added \r
         
@@ -433,15 +435,14 @@ def start_spectrogram(app):
         
         # Note: The process will finish automatically after capturing and displaying
         
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:
         print(f"Error starting spectrogram: {e}\r")  # Added \r
         traceback.print_exc()
 
 def handle_oscilloscope_command(app):
     """Handle oscilloscope command."""
     
-    from .process_manager import cleanup_process, create_subprocess
-    from .plotting import plot_oscope
+    from .process_manager import cleanup_process
     
     try:
         if 'o' in app.active_processes and app.active_processes['o'] is not None:
@@ -456,7 +457,7 @@ def handle_oscilloscope_command(app):
             print("Starting oscilloscope...\r")
             start_oscilloscope(app)
             
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:
         print(f"Oscilloscope command error: {e}\r")
         traceback.print_exc()
 
@@ -478,9 +479,14 @@ def start_oscilloscope(app):
             'samplerate': app.samplerate,
             'channels': app.channels,
             'blocksize': getattr(app, 'blocksize', 1024),
-            'plot_duration': 10.0,  # Capture 10 seconds of audio
-            'plots_dir': plots_dir
+            # Use TRACE_DURATION from config as default; allow app.override_trace_duration
+            'plot_duration': getattr(app, 'override_trace_duration', None),
+            'plots_dir': plots_dir,
+            'monitor_channel': getattr(app, 'monitor_channel', 0)
         }
+        
+        # Remove None values to allow plotting to fall back to TRACE_DURATION
+        oscope_config = {k: v for k, v in oscope_config.items() if v is not None}
         
         print(f"Starting oscilloscope (device {app.device_index}, {app.samplerate}Hz)\r")
         
@@ -496,7 +502,7 @@ def start_oscilloscope(app):
         process.start()
         print(f"Oscilloscope started (PID: {process.pid})\r")
         
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:
         print(f"Error starting oscilloscope: {e}\r")
         traceback.print_exc()
 
@@ -538,7 +544,7 @@ def handle_vu_meter_command(app):
             print("Starting VU meter...\r")
             start_vu_meter(app)
             
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:
         print(f"VU meter command error: {e}\r")
         # Clean up any artifacts and reset
         print("\r" + " " * 80 + "\r", end="", flush=True)
@@ -576,6 +582,9 @@ def start_vu_meter(app):
             'DEBUG_VERBOSE': getattr(app, 'DEBUG_VERBOSE', False)
         }
         
+        # Inform which channel will be monitored
+        print(f"Now monitoring channel: {app.monitor_channel+1} (of {app.channels})\r")
+        
         # Create and start VU meter thread
         vu_thread = threading.Thread(
             target=vu_meter,
@@ -598,7 +607,7 @@ def start_vu_meter(app):
             print("Warning: VU meter thread failed to start")
             app.active_processes['v'] = None
         
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:
         print(f"Error starting VU meter: {e}\r")
         # Clean up display and reset state
         print("\r" + " " * 80 + "\r", end="", flush=True)
@@ -608,14 +617,14 @@ def start_vu_meter(app):
 def handle_intercom_command(app):
     """Handle intercom command."""
     
-    from .process_manager import cleanup_process, create_subprocess
-    from .audio_tools import intercom_m
+    from .process_manager import cleanup_process
     
     try:
         # Check if VU meter is active to decide whether to print status
-        vu_meter_active = ('v' in app.active_processes and 
-                          app.active_processes['v'] is not None and
-                          app.active_processes['v'].is_alive())
+        vu_thread = None
+        if hasattr(app, 'active_processes'):
+            vu_thread = app.active_processes.get('v')
+        vu_meter_active = bool(vu_thread and getattr(vu_thread, 'is_alive', lambda: False)())
         
         if 'i' in app.active_processes and app.active_processes['i'] is not None:
             if app.active_processes['i'].is_alive():
@@ -632,14 +641,12 @@ def handle_intercom_command(app):
                 print("Starting intercom...\r")  # Added \r
             start_intercom(app)
             
-    except Exception as e:
-        # Check VU meter status again for error display
-        try:
-            vu_meter_active = ('v' in app.active_processes and 
-                              app.active_processes['v'] is not None and
-                              app.active_processes['v'].is_alive())
-        except:
-            vu_meter_active = False
+    except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
+        # Compute VU status safely without broad excepts
+        vu_thread = None
+        if hasattr(app, 'active_processes'):
+            vu_thread = app.active_processes.get('v')
+        vu_meter_active = bool(vu_thread and getattr(vu_thread, 'is_alive', lambda: False)())
         
         if not vu_meter_active:
             print(f"Intercom command error: {e}\r")  # Added \r
@@ -655,43 +662,67 @@ def start_intercom(app):
         ensure_app_attributes(app)
         
         # Check if VU meter is active
-        vu_meter_active = ('v' in app.active_processes and 
-                          app.active_processes['v'] is not None and
-                          app.active_processes['v'].is_alive())
+        vu_thread = None
+        if hasattr(app, 'active_processes'):
+            vu_thread = app.active_processes.get('v')
+        vu_meter_active = bool(vu_thread and getattr(vu_thread, 'is_alive', lambda: False)())
         
         # Create intercom configuration
+        # Prefer explicit INTERCOM_SAMPLERATE, then SOUND_OUT_SR_DEFAULT, else fallback 48000
+        intercom_sr = getattr(app.config, 'INTERCOM_SAMPLERATE', None)
+        if not intercom_sr:
+            intercom_sr = getattr(app.config, 'SOUND_OUT_SR_DEFAULT', 48000)
+        
+        # Resolve output device: prefer app.output_device_index, else config default
+        out_dev_idx = getattr(app, 'output_device_index', None)
+        if out_dev_idx is None:
+            out_dev_idx = getattr(app.config, 'SOUND_OUT_ID_DEFAULT', None)
+        
+        # Decide if buffer path is available (same process memory)
+        buffer_available = getattr(app, 'buffer', None) is not None
+        
         intercom_config = {
-            'input_device': app.device_index,
-            'output_device': app.device_index,
-            'samplerate': app.samplerate,
+            'output_device': out_dev_idx,
+            'samplerate': int(intercom_sr),
             'channels': app.channels,
             'blocksize': app.blocksize,
             'gain': 1.0,
             'monitor_channel': app.monitor_channel,
-            'vu_meter_active': vu_meter_active  # Pass simple boolean instead of app object
+            'bit_depth': getattr(app, 'bit_depth', 16),
+            'vu_meter_active': vu_meter_active
         }
         
-        # Only print status if VU meter is not active to avoid interfering with display
-        if not vu_meter_active:
-            print(f"Starting intercom (device {app.device_index}, {app.samplerate}Hz)\r")  # Added \r
-        
-        # Create and start intercom process
-        process = create_subprocess(
-            target_function=intercom_m,
-            args=(intercom_config,),
-            process_key='i',
-            app=app,
-            daemon=True
-        )
-        
-        process.start()
+        # For subprocess path (no buffer), include input device; for thread path, include app
+        if not buffer_available:
+            intercom_config['input_device'] = app.device_index
+        else:
+            intercom_config['app'] = app  # safe only in-thread
         
         # Only print status if VU meter is not active to avoid interfering with display
         if not vu_meter_active:
-            print(f"Intercom started (PID: {process.pid})\r")  # Added \r
+            print(f"Starting intercom (device {intercom_config['output_device']}, {intercom_config['samplerate']}Hz)\r")
         
-    except Exception as e:
-        print(f"Error starting intercom: {e}\r")  # Added \r
+        # Start as thread if using buffer (needs in-process memory); else use subprocess
+        if buffer_available:
+            th = threading.Thread(target=intercom_m, args=(intercom_config,), daemon=True)
+            th.start()
+            app.active_processes['i'] = th
+            if not vu_meter_active:
+                print("Intercom started (thread)\r")
+        else:
+            process = create_subprocess(
+                target_function=intercom_m,
+                args=(intercom_config,),
+                process_key='i',
+                app=app,
+                daemon=True
+            )
+            process.start()
+            if not vu_meter_active:
+                print(f"Intercom started (PID: {process.pid})\r")
+        
+    except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
+        print(f"Error starting intercom: {e}\r")
         traceback.print_exc()
 
 def handle_performance_monitor_command(app):
@@ -711,7 +742,7 @@ def handle_performance_monitor_command(app):
         cpu_percent = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory()
         
-        print(f"\nSystem Resources:\r")  # Added \r
+        print("\nSystem Resources:\r")  # Added \r
         print(f"  CPU Usage: {cpu_percent:.1f}%\r")  # Added \r
         print(f"  Memory Usage: {memory.percent:.1f}% ({memory.used//1024//1024}MB used)\r")  # Added \r
         print(f"  Available Memory: {memory.available//1024//1024}MB\r")  # Added \r
@@ -723,7 +754,7 @@ def handle_performance_monitor_command(app):
         
         print("-" * 40 + "\r")  # Added \r
         
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
         print(f"Performance monitor error: {e}\r")  # Added \r
 
 def handle_configuration_command(app):
@@ -737,7 +768,7 @@ def handle_configuration_command(app):
         print(f"Audio Device: {app.device_index}\r")  # Added \r
         print(f"Sample Rate: {app.samplerate} Hz\r")  # Added \r
         print(f"Block Size: {app.blocksize}\r")  # Added \r
-        print(f"Channels: 1 (mono)\r")  # Fixed syntax and added \r
+        print("Channels: 1 (mono)\r")  # Fixed syntax and added \r
         print(f"Max File Size: {app.max_file_size_mb} MB\r")  # Added \r
         print(f"Recording Directory: {app.recording_dir}\r")  # Added \r
         print(f"Today's Directory: {app.today_dir}\r")  # Added \r
@@ -754,14 +785,13 @@ def handle_configuration_command(app):
         
         print("-" * 50 + "\r")  # Added \r
         
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
         print(f"Configuration display error: {e}\r")  # Added \r
 
 def handle_continuous_performance_monitor_command(app):
     """Handle continuous performance monitor command (uppercase P)."""
     
-    from .process_manager import cleanup_process, create_subprocess
-    from .system_utils import monitor_system_performance_continuous_standalone
+    from .process_manager import cleanup_process
     
     try:
         if 'P' in app.active_processes and app.active_processes['P'] is not None:
@@ -781,7 +811,7 @@ def handle_continuous_performance_monitor_command(app):
             print("Starting continuous performance monitor...\r")  # Added \r
             start_continuous_performance_monitor(app)
             
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
         print(f"Continuous performance monitor command error: {e}\r")  # Added \r
         traceback.print_exc()
 
@@ -813,7 +843,7 @@ def start_continuous_performance_monitor(app):
         process.start()
         print(f"Continuous performance monitor started (PID: {process.pid})\r")  # Added \r
         
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
         print(f"Error starting continuous performance monitor: {e}\r")  # Added \r
         traceback.print_exc()
 
@@ -833,7 +863,6 @@ def handle_channel_switch_command(app, command):
             return
             
         # Update monitor channel
-        old_channel = app.monitor_channel
         app.monitor_channel = key_int
         print(f"\nNow monitoring channel: {app.monitor_channel+1} (of {app.channels})\r")  # Added \r
         
@@ -843,15 +872,14 @@ def handle_channel_switch_command(app, command):
                 print(f"Restarting VU meter on channel: {app.monitor_channel+1}\r")  # Added \r
                 
                 try:
-                    # Stop current VU meter
-                    app.active_processes['v'].terminate()
-                    app.active_processes['v'].join(timeout=1)
-                    app.active_processes['v'] = None
+                    # Stop current VU meter thread cleanly
+                    from .process_manager import cleanup_process
+                    cleanup_process(app, 'v')
                     
                     # Start VU meter with new channel
                     time.sleep(0.1)
                     start_vu_meter(app)
-                except Exception as e:
+                except (RuntimeError, OSError, ValueError) as e:
                     print(f"Error restarting VU meter: {e}\r")  # Added \r
         
         # Handle intercom channel change if running
@@ -861,10 +889,10 @@ def handle_channel_switch_command(app, command):
                 
     except ValueError:
         print(f"Invalid channel number: {command}\r")  # Added \r
-    except Exception as e:
+    except (RuntimeError, OSError) as e:
         print(f"Channel switch error: {e}\r")  # Added \r
         traceback.print_exc()
-        logging.error(f"Channel switch error: {e}")
+        logging.error("Channel switch error: %s", e)
 
 def cleanup_ui(app):
     """Clean up user interface resources."""
@@ -880,14 +908,13 @@ def cleanup_ui(app):
         
         print("\nUser interface cleanup completed.\r")  # Added \r
         
-    except Exception as e:
-        logging.error(f"UI cleanup error: {e}")
+    except (RuntimeError, OSError) as e:
+        logging.error("UI cleanup error: %s", e)
 
 def handle_thread_list_command(app):
     """Handle thread listing command."""
     
     from .process_manager import list_active_processes
-    from .system_utils import list_all_threads
     
     try:
         print("\nActive Threads:\r")  # Added \r
@@ -911,10 +938,10 @@ def handle_thread_list_command(app):
         list_active_processes(app)
         print("-" * 40 + "\r")  # Added \r
         
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
         print(f"Error listing threads: {e}\r")  # Added \r
         traceback.print_exc()
-        logging.error(f"Error listing threads: {e}")
+        logging.error("Error listing threads: %s", e)
 
 def show_help():
     """Display help information with proper line endings for all platforms."""
@@ -956,29 +983,6 @@ def show_help():
     print("============================================================")
     print()  # Add final newline for clean separation
 
-def handle_fft_command(app):
-    """Handle FFT command."""
-    
-    from .process_manager import cleanup_process, create_subprocess
-    from .plotting import plot_fft
-    
-    try:
-        if 'f' in app.active_processes and app.active_processes['f'] is not None:
-            if app.active_processes['f'].is_alive():
-                print("Stopping FFT analysis...\r")
-                cleanup_process(app, 'f')
-            else:
-                print("Starting FFT analysis...\r")
-                app.active_processes['f'] = None
-                start_fft_analysis(app)
-        else:
-            print("Starting FFT analysis...\r")
-            start_fft_analysis(app)
-            
-    except Exception as e:
-        print(f"FFT command error: {e}\r")
-        traceback.print_exc()
-
 def start_fft_analysis(app):
     """Start one-shot FFT analysis."""
 
@@ -998,8 +1002,13 @@ def start_fft_analysis(app):
             'channels': app.channels,
             'blocksize': app.blocksize,
             'plots_dir': plots_dir,
-            'monitor_channel': getattr(app, 'monitor_channel', 0)
+            'monitor_channel': getattr(app, 'monitor_channel', 0),
+            # Optional per-run override
+            'capture_duration': getattr(app, 'override_fft_duration', None)
         }
+        
+        # Remove None so plotting uses config default
+        fft_config = {k: v for k, v in fft_config.items() if v is not None}
         
         print(f"Starting FFT analysis (device {app.device_index}, {app.samplerate}Hz)\r")
         print(f"  Channel: {app.monitor_channel + 1} of {app.channels}\r")
@@ -1016,6 +1025,28 @@ def start_fft_analysis(app):
         process.start()
         print(f"FFT analysis started (PID: {process.pid})\r")
         
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
         print(f"Error starting FFT analysis: {e}\r")
+        traceback.print_exc()
+
+def handle_fft_command(app):
+    """Handle FFT command."""
+    
+    from .process_manager import cleanup_process
+    
+    try:
+        if 'f' in app.active_processes and app.active_processes['f'] is not None:
+            if app.active_processes['f'].is_alive():
+                print("Stopping FFT analysis...\r")
+                cleanup_process(app, 'f')
+            else:
+                print("Starting FFT analysis...\r")
+                app.active_processes['f'] = None
+                start_fft_analysis(app)
+        else:
+            print("Starting FFT analysis...\r")
+            start_fft_analysis(app)
+            
+    except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
+        print(f"FFT command error: {e}\r")
         traceback.print_exc()

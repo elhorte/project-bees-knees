@@ -24,19 +24,10 @@ def callback(indata, _frames, _time_info, status):
     if app is None:
         return
     
-    # sounddevice already provides numpy array
-    audio_data = indata.copy()
+    # sounddevice already provides numpy array. Convert robustly to int16 without changing gain
+    audio_data = ensure_pcm16(indata)
+    audio_data = np.nan_to_num(audio_data, nan=0, posinf=0, neginf=0)
 
-    # Always keep callback data as float32 in [-1, 1]
-    audio_data = audio_data.astype(np.float32, copy=False)
-    audio_data = np.nan_to_num(audio_data, nan=0.0, posinf=0.0, neginf=0.0)
-    audio_data = np.clip(audio_data, -1.0, 1.0)
-
-    # If your circular buffer expects a specific dtype, store float32 consistently:
-    if getattr(app, "_dtype", np.float32) != np.float32:
-        app._dtype = np.float32
-    # write audio_data (float32) into the circular buffer here
-    
     # Ensure proper shape for multi-channel
     if audio_data.ndim == 1:
         audio_data = audio_data.reshape(-1, 1)
@@ -58,7 +49,7 @@ def callback(indata, _frames, _time_info, status):
 def setup_audio_circular_buffer(app):
     """Set up the circular buffer for audio recording."""
     # Force float32 pipeline for capture; convert only at write time
-    app._dtype = np.float32
+    app._dtype = np.int16
     app.buffer_size = int(app.BUFFER_SECONDS * app.PRIMARY_IN_SAMPLERATE)
     app.buffer = np.zeros((app.buffer_size, app.sound_in_chs), dtype=app._dtype)
     app.buffer_index = 0
@@ -101,10 +92,10 @@ def audio_stream(app):
         # Set up callback reference to app
         callback.app = app
         
-        # Determine sounddevice dtype (float32 for consistency)
-        dtype = 'float32'
-        app._dtype = np.float32
-        
+        # Determine sounddevice dtype (int16 for consistency)
+        dtype = 'int16'
+        app._dtype = np.int16
+
         # Build the capture callback and initialize the stream
         cb = _make_stream_callback(app)
         stream = sd.InputStream(
@@ -244,6 +235,22 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
                 if save_sr < app.PRIMARY_IN_SAMPLERATE:
                     segment = downsample_audio(segment, app.PRIMARY_IN_SAMPLERATE, save_sr)
 
+                # Optional headroom (attenuate before write to avoid inter-sample/encoder clipping) 
+                headroom_db = float(getattr(app.config, 'SAVE_HEADROOM_DB', 0) or 0)
+                if headroom_db > 0.0:
+                    scale = float(10.0 ** (-headroom_db / 20.0))
+                    arr = np.asarray(segment)
+                    if np.issubdtype(arr.dtype, np.integer):
+                        y = np.round(arr.astype(np.float32) * scale)
+                        if arr.dtype == np.int16:
+                            y = np.clip(y, -32768, 32767).astype(np.int16)
+                        else:
+                            info = np.iinfo(arr.dtype)
+                            y = np.clip(y, info.min, info.max).astype(arr.dtype)
+                        segment = y
+                    else:
+                        segment = (arr.astype(np.float32) * scale)
+
                 # Build output folder and filename
                 ts = datetime.datetime.now()
                 out_dir = _resolve_audio_output_dir(app, thread_id)
@@ -251,13 +258,39 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
                 ext = (file_format or "flac").lower()
                 if ext not in ("mp3", "wav", "flac"):
                     ext = "flac"
-                filename = f"{thread_id}_{ts:%Y%m%d_%H%M%S}_dev{app.sound_in_id}_{app.sound_in_chs}ch_sr{save_sr}.{ext}"
+                # Determine display bitrate tag for MP3
+                if ext == "mp3":
+                    q_val = getattr(app.config, 'AUDIO_MONITOR_QUALITY', 128)
+                    try:
+                        q_int = int(q_val)
+                    except Exception:
+                        q_int = 128
+                    if 64 <= q_int <= 320:
+                        rate_tag = f"{q_int}bps"  # per user request wording
+                    elif 0 <= q_int <= 9:
+                        rate_tag = f"VBRq{q_int}"
+                    else:
+                        rate_tag = "128bps"
+                    filename = f"{thread_id}_{ts:%Y%m%d_%H%M%S}_dev{app.sound_in_id}_{app.sound_in_chs}ch_sr{save_sr}_mon{int(getattr(app, 'monitor_channel', 0)) + 1}_{rate_tag}.mp3"
+                else:
+                    filename = f"{thread_id}_{ts:%Y%m%d_%H%M%S}_dev{app.sound_in_id}_{app.sound_in_chs}ch_sr{save_sr}_mon{int(getattr(app, 'monitor_channel', 0)) + 1}.{ext}"
                 full_path = os.path.join(out_dir, filename)
 
                 # Write and verify
                 try:
                     if ext == "mp3":
-                        write_mp3_with_logging(segment, full_path, app.config)
+                        # Ensure the written MP3 uses save_sr and desired bitrate or VBR quality
+                        q_val = getattr(app.config, 'AUDIO_MONITOR_QUALITY', 128)
+                        try:
+                            q_int = int(q_val)
+                        except Exception:
+                            q_int = 128
+                        if 64 <= q_int <= 320:
+                            write_mp3_with_logging(segment, full_path, app.config, sample_rate=save_sr, bitrate_kbps=q_int)
+                        elif 0 <= q_int <= 9:
+                            write_mp3_with_logging(segment, full_path, app.config, sample_rate=save_sr, bitrate_kbps=None, vbr_quality=q_int)
+                        else:
+                            write_mp3_with_logging(segment, full_path, app.config, sample_rate=save_sr)
                     else:
                         write_pcm_with_logging(segment, full_path, save_sr, subtype="PCM_16")
                     log_saved_file(full_path, f"{thread_id}")
@@ -366,7 +399,8 @@ def _make_stream_callback(app):
         if status:
             logging.warning("audio callback status: %s", status)
 
-        x = np.asarray(indata, dtype=np.float32)
+        # Convert any incoming dtype to int16 consistently (no normalization/AGC)
+        x = ensure_pcm16(indata)
         if x.ndim == 1:
             x = x[:, None]
 
@@ -421,14 +455,14 @@ def _snapshot_from_buffer(app, seconds: float, sr: int) -> np.ndarray:
     """Return most recent 'seconds' from the circular buffer (float32, shape [N, C])."""
     n = max(0, min(int(seconds * sr), app.buffer_size))
     if n == 0:
-        return np.empty((0, app.sound_in_chs), dtype=np.float32)
+        return np.empty((0, app.sound_in_chs), dtype=np.int16)
     end = app.buffer_index
     start = (end - n) % app.buffer_size
     if start < end:
         out = app.buffer[start:end]
     else:
         out = np.vstack((app.buffer[start:], app.buffer[:end]))
-    return out.astype(np.float32, copy=True)
+    return out.astype(np.int16, copy=True)
 
 def write_pcm_with_logging(frames, path, sr, subtype="PCM_16"):
     _log_array_stats("PCM/write input", frames)
@@ -446,14 +480,14 @@ def write_pcm_with_logging(frames, path, sr, subtype="PCM_16"):
     except Exception as e:
         logging.warning("PCM/roundtrip failed for %s: %s", path, e)
 
-def write_mp3_with_logging(frames, path, config):
+def write_mp3_with_logging(frames, path, config, sample_rate=None, bitrate_kbps=None, vbr_quality=None):
     _log_array_stats("MP3/write input", frames)
     if frames is None or np.asarray(frames).size == 0:
         logging.error("MP3/write aborted: empty frames for %s", path)
         return
     pcm16 = np.ascontiguousarray(ensure_pcm16(frames))
     _log_array_stats("MP3/write pcm16", pcm16)
-    pcm_to_mp3_write(pcm16, path, config)
+    pcm_to_mp3_write(pcm16, path, config, sample_rate=sample_rate, bitrate_kbps=bitrate_kbps, vbr_quality=vbr_quality)
     log_saved_file(path, "Audio")
 
 def _first_defined_path(*candidates):

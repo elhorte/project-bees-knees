@@ -49,12 +49,14 @@ class BmarApp:
         self.device_index = None
         self.sound_in_id = None
         self.sound_in_chs = 1
-        self.samplerate = 44100
-        self.PRIMARY_IN_SAMPLERATE = 44100
+        self.samplerate = 48000
+        self.PRIMARY_IN_SAMPLERATE = 48000
         self.channels = 1
         self._bit_depth = 16
         self.blocksize = 1024
         self.monitor_channel = 0
+        # Default output device index for playback (intercom)
+        self.output_device_index = None
         
         # Platform attributes
         self.is_macos = False
@@ -129,6 +131,16 @@ class BmarApp:
             # Import and setup config for audio processing
             from . import bmar_config
             self.config = bmar_config
+            
+            # Initialize channel to monitor and default output device from config
+            try:
+                self.monitor_channel = int(getattr(self.config, 'MONITOR_CH', 0))
+            except Exception:
+                self.monitor_channel = 0
+            try:
+                self.output_device_index = getattr(self.config, 'SOUND_OUT_ID_DEFAULT', None)
+            except Exception:
+                self.output_device_index = None
             
             # Set up platform-specific directory configuration
             from .bmar_config import get_platform_audio_config

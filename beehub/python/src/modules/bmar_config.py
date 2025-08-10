@@ -25,12 +25,12 @@ MODE_FFT_PERIODIC_RECORD = True                 # record fft periodically
 # recording types controls:
 AUDIO_MONITOR_START = None  ##datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec; None = continuous recording
 AUDIO_MONITOR_END = datetime.time(23, 0, 0)     # time of day to stop recording hr, min, sec
-AUDIO_MONITOR_RECORD = 60                     # file size in seconds of continuous recording (default 1800 sec)
+AUDIO_MONITOR_RECORD = 1800                     # file size in seconds of continuous recording (default 1800 sec)
 AUDIO_MONITOR_INTERVAL = 0.1                    # seconds between recordings
 
 PERIOD_START = None  ##datetime.time(4, 0, 0)   # 'None' = continuous recording
 PERIOD_END = datetime.time(20, 0, 0)
-PERIOD_RECORD = 60                             # seconds of recording (default 900 sec)
+PERIOD_RECORD = 900                             # seconds of recording (default 900 sec)
 PERIOD_SPECTROGRAM = 120                        # spectrogram duration for saved png images
 PERIOD_INTERVAL = 0.1                           # seconds between start of period, must be > period, of course
 
@@ -97,10 +97,14 @@ PRIMARY_BITDEPTH = 16                           # Audio bit depth
 PRIMARY_SAVE_SAMPLERATE = None                 # if None then save at Input Samplerate
 PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'
 
+# Apply pre-write attenuation to avoid clipping in saved files (dB)
+# 0 = no attenuation; try 3 for a little headroom
+SAVE_HEADROOM_DB = 0.0
+
 AUDIO_MONITOR_SAMPLERATE = 48000                # For continuous audio
 AUDIO_MONITOR_BITDEPTH = 16                     # Audio bit depth
 AUDIO_MONITOR_CHANNELS = 4                      # Number of channels
-AUDIO_MONITOR_QUALITY = 0                       # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
+AUDIO_MONITOR_QUALITY = 256                       # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
 
 # Windows
@@ -125,15 +129,25 @@ SOUND_OUT_ID_DEFAULT = 3                        # default output device id
 SOUND_OUT_CHS_DEFAULT = 1                       # default number of output channels
 SOUND_OUT_SR_DEFAULT = 48000                    # default sample rate
 
+# Intercom (local monitor) parameters
+INTERCOM_SAMPLERATE = 48000                     # Sample rate for local monitoring playback
+
 # audio display parameters:
-TRACE_DURATION = 5.0                            # seconds
-OSCOPE_GAIN_DB = 0                             # Gain in dB of audio level for oscope 
+TRACE_DURATION = 10.0                            # seconds
+OSCOPE_GAIN_DB = 0                             # Gain in dB of audio level for oscilloscope
 
 FFT_DURATION = 10.0                             # seconds
-FFT_GAIN = 0                                   # Gain in dB of audio level for fft
+FFT_GAIN = 12                                   # Gain in dB of audio level for fft
+# FFT frequency axis limits (Hz). Set max to None to use Nyquist (samplerate/2)
+FFT_FREQ_MIN_HZ = 0.0
+FFT_FREQ_MAX_HZ = 10000.0  # 10 kHz max for audio
 
 SPECTROGRAM_DURATION = 10.0                     # seconds
 SPECTROGRAM_GAIN = 0                           # Gain in dB of audio level for spectrogram
+
+# Spectrogram display scaling (dBFS)
+SPECTROGRAM_DB_MIN = -70.0
+SPECTROGRAM_DB_MAX = 0.0
 
 def get_date_folder():
     """Get current date folder in YYMMDD format."""

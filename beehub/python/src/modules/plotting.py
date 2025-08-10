@@ -240,8 +240,23 @@ def plot_oscope(config):
         samplerate = config.get('samplerate', 44100)
         channels = config.get('channels', 1)
         blocksize = config.get('blocksize', 1024)
-        plot_duration = config.get('plot_duration', 10.0)
+        # Use TRACE_DURATION from config module as default
+        try:
+            from . import bmar_config as _cfg
+            _default_trace = float(getattr(_cfg, 'TRACE_DURATION', 5.0))
+        except Exception:
+            _default_trace = 5.0
+        plot_duration = float(config.get('plot_duration', _default_trace))
         plots_dir = config.get('plots_dir')
+        monitor_channel = int(config.get('monitor_channel', 0))
+        
+        # Optional plotting gain (in dB) from config module; default 0 dB (no scaling)
+        try:
+            from . import bmar_config as _cfg
+            oscope_gain_db = getattr(_cfg, 'OSCOPE_GAIN_DB', 0)
+        except Exception:
+            oscope_gain_db = 0
+        oscope_gain = float(10 ** (oscope_gain_db / 20.0))
         
         print(f"Oscilloscope capturing {plot_duration}s from device {device_index} ({samplerate}Hz, {channels} channels)\r")
         
@@ -284,13 +299,11 @@ def plot_oscope(config):
                         capture_complete = True
                         raise sd.CallbackStop()
                     
-                    # Handle multi-channel data
+                    # Handle multi-channel data (float32 in [-1, 1] from sounddevice)
                     if channels > 1:
-                        # Store each channel separately
                         for ch in range(channels):
                             audio_data[ch].extend(indata[:, ch])
                     else:
-                        # Single channel
                         audio_data[0].extend(indata.flatten())
                     
                     samples_captured += frames
@@ -306,7 +319,7 @@ def plot_oscope(config):
                     capture_complete = True
                     raise sd.CallbackStop()
             
-            # Capture audio data with sounddevice
+            # Capture audio data with sounddevice (no scaling, no AGC applied by code)
             with sd.InputStream(
                 device=device_index,
                 channels=channels,
@@ -328,66 +341,74 @@ def plot_oscope(config):
             
             # Convert to numpy arrays and create time axis
             for ch in range(channels):
-                audio_data[ch] = np.array(audio_data[ch][:total_samples])
+                audio_data[ch] = np.array(audio_data[ch][:total_samples], dtype=np.float32)
             time_axis = np.arange(total_samples) / samplerate
+            
+            # Apply optional gain just for plotting (no normalization)
+            plot_data = {}
+            for ch in range(channels):
+                plot_data[ch] = audio_data[ch] * oscope_gain
             
             # Create stacked subplot layout
             fig, axes = plt.subplots(channels, 1, figsize=(15, 3 + 2*channels), sharex=True)
-            
-            # Handle single channel case (axes won't be an array)
             if channels == 1:
                 axes = [axes]
-            
-            # Plot each channel in its own subplot
+            # Clamp monitor channel to range
+            mon = min(max(0, monitor_channel), channels - 1)
             channel_stats = []
+            clipped_any = False
             for ch in range(channels):
                 ax = axes[ch]
+                y = plot_data[ch]
                 
-                # Plot the waveform
-                ax.plot(time_axis, audio_data[ch], linewidth=0.5, color=f'C{ch}')
+                # Compute statistics and clipping
+                rms = float(np.sqrt(np.mean(y**2))) if y.size else 0.0
+                peak = float(np.max(np.abs(y))) if y.size else 0.0
+                clipped = bool(np.any(np.abs(y) >= 0.999))
+                clipped_any = clipped_any or clipped
+                channel_stats.append({'rms': rms, 'peak': peak, 'clipped': clipped})
+                
+                # Plot waveform
+                color = 'tab:red' if ch == mon else f'C{ch}'
+                lw = 0.9 if ch == mon else 0.5
+                ax.plot(time_axis, y, linewidth=lw, color=color)
                 ax.set_ylabel(f'Ch {ch+1}\nAmplitude')
                 ax.grid(True, alpha=0.3)
                 ax.set_xlim(0, plot_duration)
+                ax.set_ylim(-1.05, 1.05)  # Fixed scale to reveal true clipping
+                ax.axhline(1.0, color='r', linestyle='--', linewidth=0.8, alpha=0.7)
+                ax.axhline(-1.0, color='r', linestyle='--', linewidth=0.8, alpha=0.7)
                 
-                # Calculate and display statistics
-                rms = np.sqrt(np.mean(audio_data[ch]**2))
-                peak = np.max(np.abs(audio_data[ch]))
-                channel_stats.append({'rms': rms, 'peak': peak})
+                # Stats box with clipping indicator
+                clip_text = "\nCLIP" if clipped else ""
+                ax.text(0.02, 0.98, f'RMS: {rms:.4f}\nPeak: {peak:.4f}{clip_text}', 
+                        transform=ax.transAxes, va='top',
+                        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+                        fontsize=9)
                 
-                # Add statistics text box
-                ax.text(0.02, 0.98, f'RMS: {rms:.4f}\nPeak: {peak:.4f}', 
-                       transform=ax.transAxes, verticalalignment='top',
-                       bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
-                       fontsize=9)
-                
-                # Set title for first subplot
                 if ch == 0:
-                    ax.set_title(f'Multi-Channel Oscilloscope - Device {device_index} ({samplerate}Hz, {channels} channels)')
+                    title_extra = " - CLIPPING DETECTED" if clipped_any else ""
+                    ax.set_title(f'Multi-Channel Oscilloscope - Device {device_index} ({samplerate}Hz, {channels} ch){title_extra} [Gain: {oscope_gain_db} dB]  Mon CH: {mon+1}')
             
-            # Set x-label only on bottom subplot
             axes[-1].set_xlabel('Time (seconds)')
-            
-            # Adjust layout to prevent overlapping
             plt.tight_layout()
             
-            # Add overall statistics as figure text
-            overall_rms = np.sqrt(np.mean([stats['rms']**2 for stats in channel_stats]))
-            overall_peak = np.max([stats['peak'] for stats in channel_stats])
-            
+            # Overall stats
+            overall_rms = float(np.sqrt(np.mean([s['rms']**2 for s in channel_stats]))) if channel_stats else 0.0
+            overall_peak = float(np.max([s['peak'] for s in channel_stats])) if channel_stats else 0.0
             fig.text(0.99, 0.02, f'Overall - RMS: {overall_rms:.4f}, Peak: {overall_peak:.4f}', 
-                    horizontalalignment='right', verticalalignment='bottom',
-                    bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8),
-                    fontsize=10)
+                     ha='right', va='bottom',
+                     bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8),
+                     fontsize=10)
             
             # Save plot
             if plots_dir:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"oscilloscope_multichannel_{timestamp}_dev{device_index}_{channels}ch.png"
+                filename = f"oscilloscope_multichannel_{timestamp}_dev{device_index}_{channels}ch_mon{mon+1}.png"
                 filepath = os.path.join(plots_dir, filename)
                 plt.savefig(filepath, dpi=150, bbox_inches='tight')
                 print(f"Multi-channel oscilloscope plot saved: {filepath}\r")
             
-            # Show plot
             plt.show()
             
         except Exception as e:
@@ -408,7 +429,13 @@ def plot_spectrogram(config):
         blocksize = config.get('blocksize', 1024)
         fft_size = config.get('fft_size', 2048)
         overlap = config.get('overlap', 0.75)
-        capture_duration = config.get('capture_duration', 5.0)
+        # Default capture duration from config module
+        try:
+            from . import bmar_config as _cfg
+            _default_spec = float(getattr(_cfg, 'SPECTROGRAM_DURATION', 5.0))
+        except Exception:
+            _default_spec = 5.0
+        capture_duration = float(config.get('capture_duration', _default_spec))
         freq_range = config.get('freq_range', [0, samplerate // 2])
         plots_dir = config.get('plots_dir')
         
@@ -530,6 +557,17 @@ def plot_spectrogram(config):
             freq_mask = (freqs >= freq_range[0]) & (freqs <= freq_range[1])
             filtered_freqs = freqs[freq_mask]
             filtered_spectrogram = spectrogram[freq_mask, :]
+
+            # Read color scale (dBFS) from config with sensible defaults
+            try:
+                from . import bmar_config as _cfg
+                vmin = float(getattr(_cfg, 'SPECTROGRAM_DB_MIN', -90.0))
+                vmax = float(getattr(_cfg, 'SPECTROGRAM_DB_MAX', 0.0))
+            except Exception:
+                vmin, vmax = -90.0, 0.0
+            if vmin >= vmax:
+                # Ensure valid range
+                vmin, vmax = -90.0, 0.0
             
             # Plot spectrogram
             plt.imshow(
@@ -538,10 +576,12 @@ def plot_spectrogram(config):
                 origin='lower',
                 extent=[times[0], times[-1], filtered_freqs[0], filtered_freqs[-1]],
                 cmap='viridis',
-                interpolation='nearest'
+                interpolation='nearest',
+                vmin=vmin,
+                vmax=vmax
             )
             
-            plt.colorbar(label='Magnitude (dB)')
+            plt.colorbar(label='Magnitude (dBFS)')
             plt.xlabel('Time (seconds)')
             plt.ylabel('Frequency (Hz)')
             plt.title(f'Spectrogram - Device {device_index} ({samplerate}Hz)')
@@ -576,27 +616,31 @@ def plot_fft(config):
         blocksize = config.get('blocksize', 1024)
         plots_dir = config.get('plots_dir')
         monitor_channel = config.get('monitor_channel', 0)
+        mon = int(monitor_channel)
         
-        print(f"Starting FFT analysis on channel {monitor_channel + 1}...\r")
+        # Optional FFT display gain (currently applied to magnitude scaling) in dB
+        try:
+            from . import bmar_config as _cfg
+            fft_gain_db = getattr(_cfg, 'FFT_GAIN', 0)
+        except Exception:
+            fft_gain_db = 0
+        fft_gain = float(10 ** (fft_gain_db / 20.0))
+        
+        print(f"Starting FFT analysis on channel {mon + 1}...\r")
         
         # Check for virtual device first
         if device_index is None:
             print("Virtual device detected for FFT - generating synthetic audio\r")
-            # Generate synthetic audio data for FFT analysis
-            duration = 2.0  # 2 seconds for FFT
+            duration = 2.0
             audio_data, _ = _generate_synthetic_audio(duration, channels, samplerate, "FFT analysis")
-            
-            # Convert int16 synthetic data to float32 range [-1, 1] like real audio
-            if audio_data.dtype == np.int16:
+            if audio_data is None or len(audio_data) == 0:
+                print("No synthetic audio generated\r")
+                return
+            if isinstance(audio_data, np.ndarray) and audio_data.dtype == np.int16:
                 audio_data = audio_data.astype(np.float32) / 32767.0
-            
-            # Process the synthetic data for FFT
             windowed_data = audio_data * np.hanning(len(audio_data))
-            
         else:
-            # Use sounddevice for real device
             try:
-                # Validate device
                 device_info = sd.query_devices(device_index, 'input')
                 print(f"Using device: {device_info['name']}\r")
                 
@@ -604,18 +648,20 @@ def plot_fft(config):
                     print(f"Error: Device {device_index} has no input channels\r")
                     return
                 
-                # Validate monitor channel
-                if monitor_channel >= device_info['max_input_channels']:
-                    monitor_channel = 0
-                    print(f"Adjusted to channel 1 (device has {device_info['max_input_channels']} channels)\r")
+                # Ensure requested monitor channel is capturable; open enough channels
+                max_in = int(device_info['max_input_channels'])
+                channels_to_open = max(1, min(max_in, int(monitor_channel) + 1))
                 
                 print("Capturing audio for FFT analysis...\r")
-                
-                # Capture duration for FFT (2 seconds)
-                capture_duration = 2.0
+                # Use default duration from config
+                try:
+                    from . import bmar_config as _cfg
+                    _default_fft = float(getattr(_cfg, 'FFT_DURATION', 2.0))
+                except Exception:
+                    _default_fft = 2.0
+                capture_duration = float(config.get('capture_duration', _default_fft))
                 total_samples = int(samplerate * capture_duration)
                 audio_data = []
-                
                 samples_captured = 0
                 capture_complete = False
                 
@@ -624,27 +670,22 @@ def plot_fft(config):
                     try:
                         if status:
                             print(f"Sounddevice status: {status}\r")
-                            
                         if samples_captured >= total_samples:
                             capture_complete = True
                             raise sd.CallbackStop()
                         
-                        # Handle multi-channel data
-                        if channels > 1:
-                            if monitor_channel < indata.shape[1]:
-                                audio_chunk = indata[:, monitor_channel]
-                            else:
-                                audio_chunk = indata[:, 0]  # Fallback to first channel
+                        # Select channel safely
+                        if indata.ndim == 2 and indata.shape[1] > 1:
+                            ch_idx = monitor_channel if monitor_channel < indata.shape[1] else 0
+                            audio_chunk = indata[:, ch_idx]
                         else:
                             audio_chunk = indata.flatten()
                         
                         audio_data.extend(audio_chunk.tolist())
                         samples_captured += frames
                         
-                        # Show progress
                         progress = min((samples_captured / total_samples) * 100, 100)
                         print(f"\rCapturing: {progress:.1f}%", end="", flush=True)
-                        
                     except sd.CallbackStop:
                         raise
                     except Exception as e:
@@ -652,65 +693,82 @@ def plot_fft(config):
                         capture_complete = True
                         raise sd.CallbackStop()
                 
-                # Capture audio data with sounddevice
                 with sd.InputStream(
                     device=device_index,
-                    channels=channels,
+                    channels=channels_to_open,
                     samplerate=samplerate,
                     blocksize=blocksize,
                     dtype='float32',
                     callback=callback
                 ):
-                    # Wait for capture to complete
                     while not capture_complete and samples_captured < total_samples:
                         time.sleep(0.1)
                 
                 print("\rProcessing FFT...\r")
-                
                 if len(audio_data) == 0:
                     print("No audio data captured\r")
                     return
                 
-                # Convert to numpy array and apply window
-                audio_data = np.array(audio_data[:total_samples])
+                audio_data = np.array(audio_data[:total_samples], dtype=np.float32)
                 windowed_data = audio_data * np.hanning(len(audio_data))
-                
             except Exception as e:
                 print(f"Error with sounddevice: {e}\r")
+                traceback.print_exc()
                 return
         
-        # Compute FFT (common path for both virtual and real devices)
+        # Compute FFT
+        if windowed_data is None or len(windowed_data) == 0:
+            print("No data for FFT\r")
+            return
+        
         fft_size = len(windowed_data)
-        fft = np.fft.fft(windowed_data)
+        fft_vals = np.fft.fft(windowed_data)
         freqs = np.fft.fftfreq(fft_size, 1/samplerate)
-        
-        # Take only positive frequencies
+        pos_mask = np.arange(fft_size//2)
         positive_freqs = freqs[:fft_size//2]
-        magnitude = np.abs(fft[:fft_size//2])
+        magnitude = np.abs(fft_vals[:fft_size//2])
         
-        # Convert to linear amplitude (not dB) to match original format
-        # Normalize the magnitude to match original scale
-        magnitude_normalized = magnitude / np.max(magnitude) * 0.008  # Scale to match your example
+        max_mag = np.max(magnitude) if magnitude.size else 0.0
+        if max_mag <= 0.0 or not np.isfinite(max_mag):
+            print("Silence or invalid data captured for FFT\r")
+            magnitude_normalized = np.zeros_like(magnitude)
+        else:
+            magnitude_normalized = (magnitude / max_mag) * (0.008 * fft_gain)
         
-        # Create plot matching the original format
+        # Read FFT frequency axis limits from config
+        try:
+            from . import bmar_config as _cfg
+            fmin = float(getattr(_cfg, 'FFT_FREQ_MIN_HZ', 0.0))
+            fmax_cfg = getattr(_cfg, 'FFT_FREQ_MAX_HZ', None)
+            fmax = float(fmax_cfg) if fmax_cfg is not None else float(int(samplerate) // 2)
+        except Exception:
+            fmin, fmax = 0.0, float(int(samplerate) // 2)
+        # Sanitize
+        nyq = float(int(samplerate) // 2)
+        if not np.isfinite(fmin) or fmin < 0:
+            fmin = 0.0
+        if not np.isfinite(fmax) or fmax <= 0:
+            fmax = nyq
+        fmax = min(fmax, nyq)
+        if fmin >= fmax:
+            fmin = 0.0
+        
         plt.figure(figsize=(12, 6))
         plt.plot(positive_freqs, magnitude_normalized, 'b-', linewidth=1)
         plt.xlabel('Frequency (Hz)')
         plt.ylabel('Amplitude')
-        plt.title(f'FFT Plot monitoring ch: {monitor_channel + 1} of {channels} channels')
+        plt.title(f'FFT Plot monitoring ch: {int(mon) + 1} of {int(channels)} channels [Gain: {fft_gain_db} dB]')
         plt.grid(True, alpha=0.3)
-        plt.xlim(0, min(samplerate // 2, 100000))  # Limit to 100kHz max like original
-        plt.ylim(0, 0.009)  # Match the amplitude scale from your example
+        plt.xlim(fmin, fmax)
+        plt.ylim(0, 0.009 * max(1.0, fft_gain))
         
-        # Save plot
         if plots_dir:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"fft_{timestamp}_dev{device_index}_ch{monitor_channel + 1}.png"
+            filename = f"fft_{timestamp}_dev{device_index}_ch{int(mon) + 1}.png"
             filepath = os.path.join(plots_dir, filename)
             plt.savefig(filepath, dpi=150, bbox_inches='tight')
             print(f"FFT plot saved: {filepath}\r")
         
-        # Show plot
         plt.show()
         
     except Exception as e:
