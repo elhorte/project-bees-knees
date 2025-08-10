@@ -8,6 +8,12 @@ import time
 import sounddevice as sd
 import sys
 from .audio_conversion import downsample_audio
+import traceback
+from collections import deque
+import random
+import select
+if sys.platform == "win32": import msvcrt
+
 
 # Notes for VU meter tuning (config keys):
 # - vu_dynamic_range_db (default 40.0)
@@ -44,7 +50,7 @@ def vu_meter(config, stop_event=None):
 
     except (sd.PortAudioError, ValueError, RuntimeError) as e:
         print(f"VU meter error: {e}")
-        import traceback
+
         traceback.print_exc()
 
 
@@ -66,7 +72,7 @@ def _vu_meter_from_buffer(app, config, stop_event=None):
         floor_percentile = float(config.get('vu_floor_percentile', 0.2))  # 20th percentile
         floor_margin_db = float(config.get('vu_floor_margin_db', 0.0))    # shift above floor if desired
         hist_seconds = float(config.get('vu_hist_seconds', 10.0))         # history duration for floor
-        from collections import deque
+
         max_hist_len = max(1, int(hist_seconds / max(1e-3, update_interval)))
         rms_db_hist = deque(maxlen=max_hist_len)
 
@@ -262,7 +268,6 @@ def _vu_meter_sounddevice(config, stop_event=None):
         # Clean up display on error
         print("\r" + " " * 80 + "\r", end="", flush=True)
         print(f"Sounddevice VU meter error: {e}")
-        import traceback
         traceback.print_exc()
 
 
@@ -272,7 +277,7 @@ def _vu_meter_virtual(config, stop_event=None):
     try:
         # Access config for completeness and future use
         _ = config.get('monitor_channel', 0)
-        import random
+
         
         try:
             while True:
@@ -308,7 +313,6 @@ def _vu_meter_virtual(config, stop_event=None):
         
     except (ValueError, RuntimeError) as e:
         print(f"Virtual VU meter error: {e}")
-        import traceback
         traceback.print_exc()
 
 
@@ -507,11 +511,10 @@ def intercom_m(config):
         ):
             try:
                 # Keep process alive; allow user input to stop when attached to a console
-                import select
+
                 while True:
                     if sys.platform == "win32":
                         try:
-                            import msvcrt
                             if msvcrt.kbhit():
                                 key = msvcrt.getch()
                                 if key in [b'\r', b'\n']:
@@ -537,7 +540,6 @@ def intercom_m(config):
     except (sd.PortAudioError, ValueError, RuntimeError, OSError) as e:
         if not vu_meter_active:
             print(f"Intercom error: {e}")
-        import traceback
         traceback.print_exc()
 
 
@@ -700,11 +702,9 @@ def _intercom_from_buffer(app, config):
             callback=callback,
         ):
             try:
-                import select
                 while True:
                     if sys.platform == "win32":
                         try:
-                            import msvcrt
                             if msvcrt.kbhit():
                                 key = msvcrt.getch()
                                 if key in [b'\r', b'\n']:
@@ -729,7 +729,6 @@ def _intercom_from_buffer(app, config):
     except (sd.PortAudioError, ValueError, RuntimeError, OSError) as e:
         if not vu_meter_active:
             print(f"Intercom error: {e}")
-        import traceback
         traceback.print_exc()
 
 

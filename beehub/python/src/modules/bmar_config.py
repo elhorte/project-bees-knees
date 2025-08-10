@@ -28,12 +28,12 @@ BUFFER_SECONDS = 900                            # time length of circular buffer
 # recording types controls:
 AUDIO_MONITOR_START = None  ##datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec; None = continuous recording
 AUDIO_MONITOR_END = datetime.time(23, 0, 0)     # time of day to stop recording hr, min, sec
-AUDIO_MONITOR_RECORD = BUFFER_SECONDS            # file size in seconds of continuous recording (default BUFFER_SECONDS sec)
+AUDIO_MONITOR_RECORD = BUFFER_SECONDS           # duration of continuous recording in seconds, must be <= BUFFER_SECONDS (default BUFFER_SECONDS)
 AUDIO_MONITOR_INTERVAL = 0.1                    # seconds between recordings
 
 PERIOD_START = None  ##datetime.time(4, 0, 0)   # 'None' = continuous recording
 PERIOD_END = datetime.time(20, 0, 0)
-PERIOD_RECORD = BUFFER_SECONDS                  # seconds of recording (default BUFFER_SECONDS sec)
+PERIOD_RECORD = BUFFER_SECONDS                  # duration of period recording in seconds, must be <= BUFFER_SECONDS (default BUFFER_SECONDS)
 PERIOD_SPECTROGRAM = 120                        # spectrogram duration for saved png images
 PERIOD_INTERVAL = 0.1                           # seconds between start of period, must be > period, of course
 
@@ -64,7 +64,7 @@ DEBUG_VERBOSE = False                           # Enable verbose debug output (s
 # Enhanced audio configuration
 ENABLE_ENHANCED_AUDIO = True                    # Enable sounddevice-based enhanced audio device testing
 AUDIO_API_PREFERENCE = ["WASAPI", "DirectSound", "MME"]  # Preferred audio APIs in order
-AUDIO_FALLBACK_ENABLED = True                   # Allow fallback to default device if specified device fails
+AUDIO_FALLBACK_ENABLED = False                   # Allow fallback to default device if specified device fails
 
 # input device parameters--linux:
 LINUX_MAKE_NAME = ""                             # Leave empty for Linux default
@@ -96,7 +96,7 @@ MACOS_DEVICE_ID = 0                             # Default device ID
 # audio parameters:
 PRIMARY_IN_SAMPLERATE = 192000                  # Audio sample rate
 PRIMARY_BITDEPTH = 16                           # Audio bit depth
-PRIMARY_SAVE_SAMPLERATE = None                 # if None then save at Input Samplerate
+PRIMARY_SAVE_SAMPLERATE = 96000                 # if None then save at Input Samplerate
 PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'
 
 # Apply pre-write attenuation to avoid clipping in saved files (dB)
@@ -105,7 +105,7 @@ SAVE_HEADROOM_DB = 0.0
 
 AUDIO_MONITOR_SAMPLERATE = 48000                # For continuous audio
 AUDIO_MONITOR_BITDEPTH = 16                     # Audio bit depth
-AUDIO_MONITOR_CHANNELS = 4                      # Number of channels
+AUDIO_MONITOR_CHANNELS = 2                      # Number of channels
 AUDIO_MONITOR_QUALITY = 256                       # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
 AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
 
@@ -136,7 +136,7 @@ INTERCOM_SAMPLERATE = 48000                     # Sample rate for local monitori
 
 # audio display parameters:
 TRACE_DURATION = 10.0                            # seconds
-OSCOPE_GAIN_DB = 0                             # Gain in dB of audio level for oscilloscope
+OSCOPE_GAIN_DB = 12                             # Gain in dB of audio level for oscilloscope
 
 FFT_DURATION = 10.0                             # seconds
 FFT_GAIN = 12                                   # Gain in dB of audio level for fft
@@ -145,13 +145,14 @@ FFT_FREQ_MIN_HZ = 0.0
 FFT_FREQ_MAX_HZ = 10000.0  # 10 kHz max for audio
 
 SPECTROGRAM_DURATION = 10.0                     # seconds
-SPECTROGRAM_GAIN = 0                           # Gain in dB of audio level for spectrogram
+SPECTROGRAM_GAIN = 12                           # Gain in dB of audio level for spectrogram
 
 # Spectrogram display scaling (dBFS)
 SPECTROGRAM_DB_MIN = -70.0
 SPECTROGRAM_DB_MAX = 0.0
 
-def get_date_folder():
+'''
+def get_dated_folder():
     """Get current date folder in YYMMDD format."""
     current_date = datetime.datetime.now()
     yy = current_date.strftime('%y')  # 2-digit year (e.g., '23' for 2023)
@@ -169,6 +170,7 @@ def validate_bit_depth(bit_depth):
         return 'float32'
     else:
         raise ValueError(f"Unsupported bit depth: {bit_depth}")
+'''
 
 def get_platform_audio_config(platform_manager, config):
     """Get platform-specific audio configuration."""
