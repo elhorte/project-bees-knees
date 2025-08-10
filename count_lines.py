@@ -12,7 +12,7 @@ def count_lines_in_file(filepath):
         return 0
 
 def main():
-    modules_dir = r'e:\git\eb\project-bees-knees\beehub\python\src\modules'
+    modules_dir = r'e:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules'
     pattern = os.path.join(modules_dir, '*.py')
     files = glob.glob(pattern)
     
