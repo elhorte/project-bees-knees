@@ -17,20 +17,23 @@ HIVE_ID = "Z1_4mic"
 HIVE_CONFIG = "dual-mic, sensor"
 
 # mode controls
-MODE_AUDIO_MONITOR = True                      # recording continuously to mp3 files
+MODE_AUDIO_MONITOR = True                       # recording continuously to mp3 files
 MODE_PERIOD = True                              # period recording
 MODE_EVENT = False                              # event recording
 MODE_FFT_PERIODIC_RECORD = True                 # record fft periodically
 
+# circular buffer size
+BUFFER_SECONDS = 900                            # time length of circular buffer 
+
 # recording types controls:
 AUDIO_MONITOR_START = None  ##datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec; None = continuous recording
 AUDIO_MONITOR_END = datetime.time(23, 0, 0)     # time of day to stop recording hr, min, sec
-AUDIO_MONITOR_RECORD = 1800                     # file size in seconds of continuous recording (default 1800 sec)
+AUDIO_MONITOR_RECORD = BUFFER_SECONDS            # file size in seconds of continuous recording (default BUFFER_SECONDS sec)
 AUDIO_MONITOR_INTERVAL = 0.1                    # seconds between recordings
 
 PERIOD_START = None  ##datetime.time(4, 0, 0)   # 'None' = continuous recording
 PERIOD_END = datetime.time(20, 0, 0)
-PERIOD_RECORD = 900                             # seconds of recording (default 900 sec)
+PERIOD_RECORD = BUFFER_SECONDS                  # seconds of recording (default BUFFER_SECONDS sec)
 PERIOD_SPECTROGRAM = 120                        # spectrogram duration for saved png images
 PERIOD_INTERVAL = 0.1                           # seconds between start of period, must be > period, of course
 
@@ -53,7 +56,6 @@ SOUND_IN_CHS = MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
 # instrumentation parms
 FFT_INTERVAL = 30                               # minutes between ffts
 
-BUFFER_SECONDS = 1000                           # time length of circular buffer 
 LOG_AUDIO_CALLBACK = False  # set True to see per-callback audio stats
 
 # Global flags

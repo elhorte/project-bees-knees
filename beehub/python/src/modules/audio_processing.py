@@ -12,6 +12,26 @@ from .audio_conversion import ensure_pcm16, pcm_to_mp3_write, downsample_audio
 from .file_utils import check_and_create_date_folders, log_saved_file
 from .system_utils import interruptable_sleep
 
+# Track threads we've warned about duration clamping to avoid log spam
+_DURATION_CLAMP_WARNED = set()
+
+def _clamp_record_seconds(app, requested_seconds: float) -> float:
+    """Clamp requested record duration to the circular buffer length (in seconds).
+    Returns the effective duration that can be safely read back from the buffer.
+    """
+    try:
+        buf_sec = float(getattr(app, 'BUFFER_SECONDS', 0))
+        req = float(requested_seconds)
+        if buf_sec <= 0:
+            return max(0.0, req)
+        return max(0.0, min(req, buf_sec))
+    except Exception:
+        # On any parsing error, fall back to the original value
+        try:
+            return float(requested_seconds)
+        except Exception:
+            return 0.0
+
 def callback(indata, _frames, _time_info, status):
     """Callback function for audio input stream (sounddevice compatible)."""
     if status:
@@ -204,6 +224,17 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
     # Use the provided stop event, or fall back to the default one for backward compatibility
     if stop_event is None:
         stop_event = app.stop_recording_event
+
+    # Enforce that the requested record duration cannot exceed the circular buffer length
+    effective_record_period = _clamp_record_seconds(app, record_period)
+    if effective_record_period < float(record_period):
+        key = (thread_id, float(record_period), float(getattr(app, 'BUFFER_SECONDS', 0)))
+        if key not in _DURATION_CLAMP_WARNED:
+            logging.warning(
+                "%s: Clamping record duration from %.3fs to %.3fs to not exceed circular buffer (BUFFER_SECONDS=%.3fs)",
+                thread_id, float(record_period), effective_record_period, float(getattr(app, 'BUFFER_SECONDS', 0))
+            )
+            _DURATION_CLAMP_WARNED.add(key)
     
     if start_tod is None:
         print(f"{thread_id} is recording continuously\r")
@@ -213,21 +244,21 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
             current_time = datetime.datetime.now().time()
             
             if start_tod is None or (start_tod <= current_time <= end_tod):        
-                print(f"{thread_id} started at: {datetime.datetime.now()} for {record_period} sec, interval {interval} sec\n\r")
+                print(f"{thread_id} started at: {datetime.datetime.now()} for {effective_record_period} sec, interval {interval} sec\n\r")
 
                 app.period_start_index = app.buffer_index 
-                # Wait record_period seconds to accumulate audio
-                interruptable_sleep(record_period, stop_event)
+                # Wait effective_record_period seconds to accumulate audio
+                interruptable_sleep(effective_record_period, stop_event)
                 if stop_event.is_set():
                     break
 
                 # Ensure the buffer has enough data (first iteration safety)
-                need_frames = int(record_period * app.PRIMARY_IN_SAMPLERATE)
+                need_frames = int(effective_record_period * app.PRIMARY_IN_SAMPLERATE)
                 while _buffer_available_frames(app) < min(need_frames, app.buffer_size) and not app.stop_program[0]:
                     time.sleep(0.05)
 
-                # Snapshot the most recent record_period seconds
-                segment = _snapshot_from_buffer(app, record_period, app.PRIMARY_IN_SAMPLERATE)
+                # Snapshot the most recent effective_record_period seconds
+                segment = _snapshot_from_buffer(app, effective_record_period, app.PRIMARY_IN_SAMPLERATE)
                 _log_array_stats(f"{thread_id}/segment before save", segment)
 
                 # Optional resample (only if target is lower than capture)
