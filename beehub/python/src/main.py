@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import sys
+from pathlib import Path as _Path
+
+# Ensure src and src/modules are importable for all legacy/new modules
+_SRC_DIR = _Path(__file__).resolve().parent
+_MOD_DIR = _SRC_DIR / "modules"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+if str(_MOD_DIR) not in sys.path:
+    sys.path.insert(0, str(_MOD_DIR))
 
 """
 BMAR Main Entry Point
@@ -12,16 +22,15 @@ Quiet console, but keep file logs: python main.py --quiet --log-file "C:\Temp\bm
 For time-based rotation, swap RotatingFileHandler for TimedRotatingFileHandler(when="midnight", interval=1, backupCount=7).
 """
 
-import sys
-import argparse
-import logging
+import sys, os, argparse, logging, platform
+from modules.bmar_config import default_config, set_runtime_overrides
 from pathlib import Path
-from logging.handlers import RotatingFileHandler  
+from logging.handlers import RotatingFileHandler
+from modules.file_utils import check_and_create_date_folders
+from dataclasses import replace, asdict, is_dataclass  # FIX: dataclass utilities
 
 # Simplified imports to avoid circular dependencies
 import sounddevice as sd
-from modules import bmar_config
-from modules.file_utils import check_and_create_date_folders
 
 def list_audio_devices():
     """List all available audio devices using sounddevice"""
@@ -67,61 +76,26 @@ def validate_audio_device(device_index: int) -> bool:
         logging.error("Error validating audio device %d: %s", device_index, e)
         return False
 
-def show_configuration():
+def show_configuration(cfg):
     """Display current BMAR configuration"""
+    print("Current BMAR Configuration:")
+    print("-" * 40)
     try:
-        print("Current BMAR Configuration:")
-        print("-" * 40)
-        
-        # Try different ways to access configuration
-        config_found = False
-        
-        # Method 1: Try direct attribute access
-        try:
-            if hasattr(bmar_config, 'PRIMARY_IN_SAMPLERATE'):
-                print(f"Sample Rate: {bmar_config.PRIMARY_IN_SAMPLERATE} Hz")
-                config_found = True
-            if hasattr(bmar_config, 'BIT_DEPTH'):
-                print(f"Bit Depth: {bmar_config.BIT_DEPTH} bits")
-            if hasattr(bmar_config, 'CHANNELS'):
-                print(f"Channels: {bmar_config.CHANNELS}")
-            if hasattr(bmar_config, 'PRIMARY_DIRECTORY'):
-                print(f"Recording Directory: {bmar_config.PRIMARY_DIRECTORY}")
-        except:
-            pass
-        
-        # Method 2: Try get_config function with different names
-        if not config_found:
-            for func_name in ['get_config', 'load_config', 'get_configuration', 'config']:
-                if hasattr(bmar_config, func_name):
-                    try:
-                        config = getattr(bmar_config, func_name)()
-                        print(f"Sample Rate: {getattr(config, 'PRIMARY_IN_SAMPLERATE', 'Unknown')} Hz")
-                        print(f"Bit Depth: {getattr(config, 'BIT_DEPTH', 'Unknown')} bits")
-                        print(f"Channels: {getattr(config, 'CHANNELS', 'Unknown')}")
-                        print(f"Recording Directory: {getattr(config, 'PRIMARY_DIRECTORY', 'Unknown')}")
-                        config_found = True
-                        break
-                    except:
-                        continue
-        
-        # Method 3: Show available attributes if nothing else works
-        if not config_found:
-            print("Available configuration attributes:")
-            config_attrs = [attr for attr in dir(bmar_config) if not attr.startswith('_')]
-            for attr in sorted(config_attrs):
+        if is_dataclass(cfg):
+            data = asdict(cfg)
+            for k in sorted(data.keys()):
+                print(f"{k}: {data[k]}")
+        else:
+            for attr in sorted(a for a in dir(cfg) if not a.startswith("_")):
                 try:
-                    value = getattr(bmar_config, attr)
-                    if not callable(value):
-                        print(f"  {attr}: {value}")
-                except:
-                    print(f"  {attr}: <cannot access>")
-        
-        print("-" * 40)
-        
+                    val = getattr(cfg, attr)
+                    if not callable(val):
+                        print(f"{attr}: {val}")
+                except Exception:
+                    print(f"{attr}: <unavailable>")
     except Exception as e:
-        print(f"Error loading configuration: {e}")
-        print("This may indicate the configuration module needs to be updated for PyAudio migration.")
+        print(f"Error displaying configuration: {e}")
+    print("-" * 40)
 
 def setup_argument_parser():
     parser = argparse.ArgumentParser(
@@ -138,12 +112,16 @@ Examples:
   python main.py --log-level INFO         # Explicitly set log level (overrides --debug/--verbose/--quiet)
         """
     )
-    
     # Information commands
     parser.add_argument(
         "--list-devices", "-l",
         action="store_true",
         help="List available audio devices and exit"
+    )
+    parser.add_argument(
+        "--show-devices",
+        action="store_true",
+        help="Alias for --list-devices (show all audio devices and exit)"
     )
     
     parser.add_argument(
@@ -184,31 +162,54 @@ Examples:
         type=Path,
         help="Also write logs to this file (rotates at ~10MB, keeps 5 backups)"
     )
+    parser.add_argument("--data-root", type=Path, help="Override platform data root for this OS")
+    parser.add_argument("--win-data-drive", help="Windows data drive, e.g., G:")
+    parser.add_argument("--win-data-path", help=r"Windows data path, e.g., 'My Drive\eb_beehive_data'")
+    parser.add_argument("--mac-data-root", help="macOS absolute root, e.g., '/Volumes/.../eb_beehive_data'")
+    parser.add_argument("--linux-data-root", help="Linux absolute root, e.g., '/data/eb_beehive_data'")
+    parser.add_argument(
+        "--device-name",
+        help="Input audio device name (substring match)."
+    )
+    parser.add_argument(
+        "--api",
+        dest="api_name",
+        help="Preferred host API name (e.g., WASAPI)."
+    )
+    parser.add_argument(
+        "--hostapi-index",
+        type=int,
+        help="Preferred host API index."
+    )
     return parser
 
 def main():
     """Main application entry point"""
-    # Parse command line arguments
     parser = setup_argument_parser()
     args = parser.parse_args()
-    
-    # Set up logging (info off by default; enable with --verbose)
-    if args.log_level:
-        log_level = getattr(logging, args.log_level)
-    elif args.debug:
-        log_level = logging.DEBUG
-    elif args.verbose:
-        log_level = logging.INFO
-    elif args.quiet:
-        log_level = logging.ERROR
-    else:
-        log_level = logging.WARNING
+    cfg = default_config()
 
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        force=True
+    # Apply runtime-only overrides (no env)
+    set_runtime_overrides(
+        device_name=args.device_name,
+        api_name=args.api_name,
+        hostapi_index=args.hostapi_index,
     )
+
+    # Logging setup
+    log_level = logging.DEBUG if getattr(args, "verbose", False) else logging.INFO
+    logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", force=True)
+    logger = logging.getLogger(__name__)
+
+    # If user requested to show devices, do it and exit
+    if getattr(args, "list_devices", False) or getattr(args, "show_devices", False):
+        try:
+            from modules.audio_devices import list_audio_devices_detailed
+            list_audio_devices_detailed()
+        except Exception as e:
+            logger.error("Failed to list audio devices: %s", e, exc_info=True)
+            sys.exit(2)
+        sys.exit(0)
 
     # Optional rotating file output if requested
     if args.log_file:
@@ -223,9 +224,32 @@ def main():
         file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
         logging.getLogger().addHandler(file_handler)
 
-    logger = logging.getLogger(__name__)
-    logger.info("BMAR application starting with sounddevices support")
-    
+    # cfg already created above
+
+    # Apply CLI overrides (env already applied in default_config)
+    sysname = platform.system()
+    if sysname == "Windows":
+        if args.win_data_drive: cfg = replace(cfg, win_data_drive=args.win_data_drive)
+        if args.win_data_path:  cfg = replace(cfg, win_data_path=args.win_data_path.lstrip("\\/"))
+        if args.data_root:
+            drive, tail = os.path.splitdrive(str(args.data_root))
+            tail = tail.lstrip("\\/")
+            if drive:
+                cfg = replace(cfg, win_data_drive=drive, win_data_path=tail or cfg.win_data_path)
+    elif sysname == "Darwin":
+        root = args.mac_data_root or (str(args.data_root) if args.data_root else None)
+        if root: cfg = replace(cfg, mac_data_root=root)
+    else:
+        root = args.linux_data_root or (str(args.data_root) if args.data_root else None)
+        if root: cfg = replace(cfg, linux_data_root=root)
+
+    dir_info = check_and_create_date_folders(cfg)
+    cfg = replace(cfg,
+                 PRIMARY_DIRECTORY=Path(dir_info["audio_raw_dir"]),
+                 MONITOR_DIRECTORY=Path(dir_info["audio_monitor_dir"]),
+                 PLOTS_DIRECTORY=Path(dir_info["plots_dir"]),
+    )
+
     # Handle information commands
     if args.list_devices:
         logger.info("Listing available audio devices")
@@ -245,16 +269,18 @@ def main():
     
     if args.config:
         logger.info("Showing current configuration")
-        show_configuration()
+        show_configuration(cfg)  # FIX: pass the dataclass-based config
         sys.exit(0)
     
     # If no specific command, try to import and run the main app
     try:
         logger.info("Attempting to load main BMAR application...")
         from modules.bmar_app import create_bmar_app
-        
         app = create_bmar_app()
-        
+        if app is None:
+            logger.error("BMAR application failed to initialize (create_bmar_app returned None). See previous errors.")
+            sys.exit(1)
+
         cfg = app.config  # or however your config object is referenced
         dirs = check_and_create_date_folders(cfg)
         logging.info("Recording directory setup (config): %s", dirs["base_dir"])
@@ -263,12 +289,11 @@ def main():
         logging.info("Today's PLOTS directory (config): %s", dirs["plots_dir"])
 
         # Back-fill config so legacy code uses the correct folders
-        cfg.PRIMARY_DIRECTORY = dirs["audio_raw_dir"]       # RAW saves
-        cfg.MONITOR_DIRECTORY = dirs["audio_monitor_dir"]   # MONITOR (safety) saves
+        cfg.PRIMARY_DIRECTORY = dirs["audio_raw_dir"]
+        cfg.MONITOR_DIRECTORY = dirs["audio_monitor_dir"]
         cfg.PLOTS_DIRECTORY = dirs["plots_dir"]
 
         app.run()
-        
     except ImportError as e:
         logger.error(f"Could not import BMAR application: {e}")
         logger.info("Try using --list-devices or --test-device commands instead.")

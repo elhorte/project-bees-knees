@@ -9,7 +9,6 @@ import numpy as np
 import sounddevice as sd
 import soundfile as sf
 from .audio_conversion import ensure_pcm16, pcm_to_mp3_write, downsample_audio
-from .file_utils import check_and_create_date_folders, log_saved_file
 from .system_utils import interruptable_sleep
 from .directory_utils import (
     get_today_monitor_dir_from_cfg,
@@ -17,6 +16,12 @@ from .directory_utils import (
     build_monitor_output_path,
     build_raw_output_path,
 )
+
+# Try to import other modules with fallbacks
+try:
+    from .file_utils import check_and_create_date_folders, log_saved_file
+except ImportError:
+    logging.warning("file_utils module not available to audio_processing")
 
 # Track threads we've warned about duration clamping to avoid log spam
 _DURATION_CLAMP_WARNED = set()

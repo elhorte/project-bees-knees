@@ -2,61 +2,51 @@
 BMAR Modules Package
 Modular components for the Bioacoustic Monitoring and Recording system.
 """
-
-# Import main application class
-from .bmar_app import BmarApp, create_bmar_app, run_bmar_application
-
-# Import configuration
-from .bmar_config import *
-
-# Import core modules
-from .platform_manager import PlatformManager
-from .system_utils import *
-from .file_utils import *
-from .audio_devices import *
-from .audio_conversion import *
-from .audio_processing import *
-from .audio_tools import *
-from .plotting import *
-from .user_interface import *
-from .process_manager import *
+import importlib
+import types
 
 __version__ = "1.0.0"
 __author__ = "BMAR Development Team"
-__description__ = "Modular Bioacoustic Monitoring and Recording System"
+__description__ = "Modular Biometric Monitoring and Recording System"
 
-# Export main components
-__all__ = [
-    # Main application
-    'BmarApp',
-    'create_bmar_app', 
-    'run_bmar_application',
-    
-    # Core modules
-    'PlatformManager',
-    
-    # Configuration constants
-    'DEFAULT_SAMPLERATE',
-    'DEFAULT_BLOCKSIZE', 
-    'DEFAULT_MAX_FILE_SIZE_MB',
-    'CIRCULAR_BUFFER_DURATION_SECONDS',
-    
-    # Key functions from each module
-    'setup_directories',
-    'get_audio_device_config',
-    'list_audio_devices_detailed',
-    'show_current_audio_devices',
-    'show_detailed_device_list',
-    'list_all_threads',
-    'start_recording_worker',
-    'plot_oscope',
-    'plot_spectrogram', 
-    'trigger',
-    'vu_meter',
-    'intercom_m',
-    'keyboard_listener',
-    'process_command',
-    'cleanup_process',
-    'stop_all',
-    'cleanup'
-]
+# Lazy attribute resolution to avoid circular imports at package import time
+_SUBMODULES = (
+    "modules.bmar_app",
+    "modules.bmar_config",
+    "modules.platform_manager",
+    "modules.file_utils",
+    "modules.audio_devices",
+    "modules.audio_conversion",
+    "modules.audio_processing",
+    "modules.audio_tools",
+    "modules.plotting",
+    "modules.user_interface",
+    "modules.process_manager",
+    "modules.system_utils",
+)
+
+def __getattr__(name: str):
+    for modname in _SUBMODULES:
+        try:
+            mod = importlib.import_module(modname)
+        except Exception:
+            continue
+        if hasattr(mod, name):
+            return getattr(mod, name)
+    raise AttributeError(f"module 'modules' has no attribute '{name}'")
+
+def __dir__():
+    names = set(globals().keys())
+    for modname in _SUBMODULES:
+        try:
+            mod = importlib.import_module(modname)
+        except Exception:
+            continue
+        names.update(getattr(mod, "__all__", []) or dir(mod))
+    return sorted(names)
+
+'''
+__init__.py no longer triggers bmar_app at package import time, so importing modules.file_utils doesn’t re-enter bmar_app.
+bmar_app imports file_utils in a package-qualified way and doesn’t suppress real import-time errors.
+file_utils.py is now complete and importable.
+'''

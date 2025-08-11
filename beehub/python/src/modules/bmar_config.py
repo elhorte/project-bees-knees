@@ -1,225 +1,243 @@
-"""
-BMAR Configuration Module
-Contains global constants, settings, and configuration validation.
-"""
-
-import os
+from dataclasses import dataclass, replace
 import datetime
+import os
 import platform
+from typing import Optional, List
+from pathlib import Path  # FIX: used in type hints and defaults
 
-# #############################################################
-# #### Control Panel ##########################################
-# #############################################################
+@dataclass(frozen=True)
+class BMARConfig:
+    # IDs
+    LOCATION_ID: str = "Zeev-Berkeley"
+    HIVE_ID: str = "Z1_4mic"
+    HIVE_CONFIG: str = "dual-mic, sensor"
 
-# location and hive ID
-LOCATION_ID = "Zeev-Berkeley"
-HIVE_ID = "Z1_4mic"
-HIVE_CONFIG = "dual-mic, sensor"
+    # Modes
+    MODE_AUDIO_MONITOR: bool = True
+    MODE_PERIOD: bool = True
+    MODE_EVENT: bool = False
+    MODE_FFT_PERIODIC_RECORD: bool = True
 
-# mode controls
-MODE_AUDIO_MONITOR = True                       # recording continuously to mp3 files
-MODE_PERIOD = True                              # period recording
-MODE_EVENT = False                              # event recording
-MODE_FFT_PERIODIC_RECORD = True                 # record fft periodically
+    # Audio/capture basics
+    BUFFER_SECONDS: int = 900
+    SOUND_IN_CHS: int = 1
+    SOUND_OUT_SR_DEFAULT: int = 48000
+    SOUND_OUT_ID_DEFAULT: Optional[int] = None
 
-# circular buffer size
-BUFFER_SECONDS = 900                            # time length of circular buffer 
+    # Monitor/MP3 settings
+    AUDIO_MONITOR_START: Optional[datetime.time] = None
+    AUDIO_MONITOR_END: Optional[datetime.time] = datetime.time(23, 0, 0)
+    AUDIO_MONITOR_RECORD: int = 900
+    AUDIO_MONITOR_INTERVAL: float = 0.1
+    AUDIO_MONITOR_QUALITY: int = 128
 
-# recording types controls:
-AUDIO_MONITOR_START = None  ##datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec; None = continuous recording
-AUDIO_MONITOR_END = datetime.time(23, 0, 0)     # time of day to stop recording hr, min, sec
-AUDIO_MONITOR_RECORD = BUFFER_SECONDS           # duration of continuous recording in seconds, must be <= BUFFER_SECONDS (default BUFFER_SECONDS)
-AUDIO_MONITOR_INTERVAL = 0.1                    # seconds between recordings
+    # Platform data roots (used by file_utils._platform_base_root)
+    win_data_drive: Optional[str] = None     # e.g., "G:"
+    win_data_path: Optional[str] = None      # e.g., r"My Drive\eb_beehive_data" (NO leading slash)
+    mac_data_root: Optional[str] = None      # e.g., "/Volumes/GoogleDrive/My Drive/eb_beehive_data"
+    linux_data_root: Optional[str] = None    # e.g., "/data/eb_beehive_data"
 
-PERIOD_START = None  ##datetime.time(4, 0, 0)   # 'None' = continuous recording
-PERIOD_END = datetime.time(20, 0, 0)
-PERIOD_RECORD = BUFFER_SECONDS                  # duration of period recording in seconds, must be <= BUFFER_SECONDS (default BUFFER_SECONDS)
-PERIOD_SPECTROGRAM = 120                        # spectrogram duration for saved png images
-PERIOD_INTERVAL = 0.1                           # seconds between start of period, must be > period, of course
+    # Derived/output paths (set at runtime)
+    PRIMARY_DIRECTORY: Optional[Path] = None       # audio/raw/YYYY-MM-DD
+    MONITOR_DIRECTORY: Optional[Path] = None       # audio/monitor/YYYY-MM-DD
+    PLOTS_DIRECTORY: Optional[Path] = None         # audio/plots/YYYY-MM-DD
 
-EVENT_START = datetime.time(4, 0, 0)
-EVENT_END = datetime.time(22, 0, 0)
-SAVE_BEFORE_EVENT = 30                          # seconds to save before the event
-SAVE_AFTER_EVENT = 30                           # seconds to save after the event
-EVENT_THRESHOLD = 20000                         # audio level threshold to be considered an event
+    # Audio device selection (per-OS). Use empty strings/lists for "not set".
+    # Linux
+    linux_make_name: str = ""
+    linux_model_name: List[str] = None  # tokens to match (substring, case-insensitive)
+    linux_device_name: str = ""
+    linux_api_name: str = "ALSA"
+    linux_hostapi_name: str = "ALSA"
+    linux_hostapi_index: Optional[int] = None
+    linux_device_id: Optional[int] = None
 
-MONITOR_CH = 0                                  # channel to monitor for event (if > number of chs, all channels are monitored)
+    # Windows
+    windows_make_name: str = "Behringer"
+    windows_model_name: str = "UMC204HD"
+    windows_device_name: str = "UMC204HD"
+    windows_api_name: str = "WASAPI"
+    windows_hostapi_name: str = "WASAPI"
+    windows_hostapi_index: Optional[int] = None
+    windows_device_id: Optional[int] = None
 
-# Audio input configuration
-MIC_1 = True
-MIC_2 = True
-MIC_3 = False
-MIC_4 = False
+    # macOS (Darwin)
+    mac_make_name: str = ""
+    mac_model_name: List[str] = None
+    mac_device_name: str = "Built-in"
+    mac_api_name: str = "Core Audio"
+    mac_hostapi_name: str = "Core Audio"
+    mac_hostapi_index: Optional[int] = None
+    mac_device_id: Optional[int] = None
 
-SOUND_IN_CHS = MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
+# Ensure list defaults are lists
+def _fix_list_defaults(cfg: BMARConfig) -> BMARConfig:
+    return replace(
+        cfg,
+        linux_model_name=cfg.linux_model_name or [],
+        mac_model_name=cfg.mac_model_name or [],
+    )
 
-# instrumentation parms
-FFT_INTERVAL = 30                               # minutes between ffts
+def default_config() -> BMARConfig:
+    """OS-sensed defaults with env overrides."""
+    cfg = BMARConfig()
+    return _fix_list_defaults(cfg)
 
-LOG_AUDIO_CALLBACK = False  # set True to see per-callback audio stats
+# Runtime overrides (optional; CLI can set them during this run only)
+_runtime = {"Windows": {}, "Darwin": {}, "Linux": {}}
 
-# Global flags
-DEBUG_VERBOSE = False                           # Enable verbose debug output (set to True for troubleshooting)
+def set_runtime_overrides(device_name: Optional[str] = None,
+                          api_name: Optional[str] = None,
+                          hostapi_name: Optional[str] = None,
+                          hostapi_index: Optional[int] = None):
+    sysname = platform.system()
+    if device_name not in (None, ""):
+        _runtime[sysname]["device_name"] = device_name
+    if api_name not in (None, ""):
+        _runtime[sysname]["api_name"] = api_name
+    if hostapi_name not in (None, ""):
+        _runtime[sysname]["hostapi_name"] = hostapi_name
+    if hostapi_index is not None:
+        _runtime[sysname]["hostapi_index"] = hostapi_index
 
-# Enhanced audio configuration
-ENABLE_ENHANCED_AUDIO = True                    # Enable sounddevice-based enhanced audio device testing
-AUDIO_API_PREFERENCE = ["WASAPI", "DirectSound", "MME"]  # Preferred audio APIs in order
-AUDIO_FALLBACK_ENABLED = False                   # Allow fallback to default device if specified device fails
+def _tokens(x) -> List[str]:
+    if x is None:
+        return []
+    if isinstance(x, str):
+        return [x] if x else []
+    return [t for t in x if t]
 
-# input device parameters--linux:
-LINUX_MAKE_NAME = ""                             # Leave empty for Linux default
-LINUX_MODEL_NAME = ["pipewire"]                  # Use pipewire as the audio system
-LINUX_DEVICE_NAME = "pipewire"                   # Use pipewire device
-LINUX_API_NAME = "ALSA"                          # Use ALSA API for Linux
-LINUX_HOSTAPI_NAME = "ALSA"                      # Use ALSA host API
-LINUX_HOSTAPI_INDEX = 0                          # ALSA is typically index 0
-LINUX_DEVICE_ID = None                           # Use pipewire device ID
-
-# input device parameters--windows:
-WINDOWS_MAKE_NAME = "Behringer"                 # Audio interface make
-WINDOWS_MODEL_NAME = "UMC204HD"                 # Audio interface model
-WINDOWS_DEVICE_NAME = "UMC204HD"                # Device name
-WINDOWS_API_NAME = "WASAPI"                     # Windows audio API
-WINDOWS_HOSTAPI_NAME = "WASAPI"                 # Host API name
-WINDOWS_HOSTAPI_INDEX = 21                      # Default host API index
-WINDOWS_DEVICE_ID = None                        # Device ID for Focusrite
-
-# input device parameters--macos:
-MACOS_MAKE_NAME = ""                            # Leave empty for macOS default
-MACOS_MODEL_NAME = ["Built-in"]                 # Built-in audio
-MACOS_DEVICE_NAME = "Built-in"                  # Built-in device
-MACOS_API_NAME = "CoreAudio"                    # macOS audio API
-MACOS_HOSTAPI_NAME = "CoreAudio"                # Host API name
-MACOS_HOSTAPI_INDEX = 0                         # Default host API index
-MACOS_DEVICE_ID = 0                             # Default device ID
-
-# audio parameters:
-PRIMARY_IN_SAMPLERATE = 192000                  # Audio sample rate
-PRIMARY_BITDEPTH = 16                           # Audio bit depth
-PRIMARY_SAVE_SAMPLERATE = 96000                 # if None then save at Input Samplerate
-PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'
-
-# Apply pre-write attenuation to avoid clipping in saved files (dB)
-# 0 = no attenuation; try 3 for a little headroom
-SAVE_HEADROOM_DB = 0.0
-
-AUDIO_MONITOR_SAMPLERATE = 48000                # For continuous audio
-AUDIO_MONITOR_BITDEPTH = 16                     # Audio bit depth
-AUDIO_MONITOR_CHANNELS = 2                      # Number of channels
-AUDIO_MONITOR_QUALITY = 256                       # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
-AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
-
-# Windows
-win_data_drive = "G:\\"   # D is internal and limited; G is Google Drive, just FYI
-win_data_path = "My Drive\\eb_beehive_data"
-win_data_folders = ["audio\\raw", "audio\\monitor", "plots"]
-# macOS
-mac_data_drive = "~"
-mac_data_path = "data/eb_beehive_data"
-mac_data_folders = ["audio/raw", "plots/monitor", "plots"]
-# Linux
-linux_data_drive = "~"                          # Use home directory
-linux_data_path = "beedata/eb_beehive_data"     # Store in ~/beedata
-linux_data_folders = ["audio/raw", "audio/monitor", "plots"]
-
-# mic location map channel to position
-MIC_LOCATION = ['1: upper--front', '2: upper--back', '3: lower w/queen--front', '4: lower w/queen--back']
-
-# Windows mme defaults
-SOUND_IN_DEFAULT = 0                            # default input device id              
-SOUND_OUT_ID_DEFAULT = 3                        # default output device id
-SOUND_OUT_CHS_DEFAULT = 1                       # default number of output channels
-SOUND_OUT_SR_DEFAULT = 48000                    # default sample rate
-
-# Intercom (local monitor) parameters
-INTERCOM_SAMPLERATE = 48000                     # Sample rate for local monitoring playback
-
-# audio display parameters:
-TRACE_DURATION = 10.0                            # seconds
-OSCOPE_GAIN_DB = 12                             # Gain in dB of audio level for oscilloscope
-
-FFT_DURATION = 10.0                             # seconds
-FFT_GAIN = 12                                   # Gain in dB of audio level for fft
-# FFT frequency axis limits (Hz). Set max to None to use Nyquist (samplerate/2)
-FFT_FREQ_MIN_HZ = 0.0
-FFT_FREQ_MAX_HZ = 10000.0  # 10 kHz max for audio
-
-SPECTROGRAM_DURATION = 10.0                     # seconds
-SPECTROGRAM_GAIN = 12                           # Gain in dB of audio level for spectrogram
-
-# Spectrogram display scaling (dBFS)
-SPECTROGRAM_DB_MIN = -70.0
-SPECTROGRAM_DB_MAX = 0.0
-
-'''
-def get_dated_folder():
-    """Get current date folder in YYMMDD format."""
-    current_date = datetime.datetime.now()
-    yy = current_date.strftime('%y')  # 2-digit year (e.g., '23' for 2023)
-    mm = current_date.strftime('%m')  # Month (01-12)
-    dd = current_date.strftime('%d')  # Day (01-31)
-    return f"{yy}{mm}{dd}"             # Format YYMMDD (e.g., '230516')
-
-def validate_bit_depth(bit_depth):
-    """Validate and return appropriate data type for bit depth."""
-    if bit_depth == 16:
-        return 'int16'
-    elif bit_depth == 24:
-        return 'int32'  # 24-bit audio is typically stored in 32-bit containers
-    elif bit_depth == 32:
-        return 'float32'
-    else:
-        raise ValueError(f"Unsupported bit depth: {bit_depth}")
-'''
-
-def get_platform_audio_config(platform_manager, config):
-    """Get platform-specific audio configuration."""
-    if platform_manager.is_macos():
-        return {
-            'data_drive': os.path.expanduser(config.mac_data_drive),
-            'data_path': config.mac_data_path,
-            'folders': config.mac_data_folders,
-            'make_name': config.MACOS_MAKE_NAME,
-            'model_name': config.MACOS_MODEL_NAME,
-            'device_name': config.MACOS_DEVICE_NAME,
-            'api_name': config.MACOS_API_NAME,
-            'hostapi_name': config.MACOS_HOSTAPI_NAME,
-            'hostapi_index': config.MACOS_HOSTAPI_INDEX,
-            'device_id': config.MACOS_DEVICE_ID
-        }
-    elif platform_manager.is_windows():
-        return {
-            'data_drive': config.win_data_drive,
-            'data_path': config.win_data_path,
-            'folders': config.win_data_folders,
-            'make_name': config.WINDOWS_MAKE_NAME,
-            'model_name': config.WINDOWS_MODEL_NAME,
-            'device_name': config.WINDOWS_DEVICE_NAME,
-            'api_name': config.WINDOWS_API_NAME,
-            'hostapi_name': config.WINDOWS_HOSTAPI_NAME,
-            'hostapi_index': config.WINDOWS_HOSTAPI_INDEX,
-            'device_id': config.WINDOWS_DEVICE_ID
-        }
-    else:  # Linux or other Unix-like
-        return {
-            'data_drive': os.path.expanduser(config.linux_data_drive),
-            'data_path': config.linux_data_path,
-            'folders': config.linux_data_folders,
-            'make_name': config.LINUX_MAKE_NAME,
-            'model_name': config.LINUX_MODEL_NAME,
-            'device_name': config.LINUX_DEVICE_NAME,
-            'api_name': config.LINUX_API_NAME,
-            'hostapi_name': config.LINUX_HOSTAPI_NAME,
-            'hostapi_index': config.LINUX_HOSTAPI_INDEX,
-            'device_id': config.LINUX_DEVICE_ID
-        }
-
-def get_platform_config():
-    """Get platform-specific configuration information."""
-    config = {
-        'name': platform.system(),
-        'version': platform.version(),
-        'machine': platform.machine()
+def device_search_criteria(cfg: Optional[BMARConfig] = None) -> dict:
+    """
+    Returns normalized search spec for current platform:
+    {
+      'name_tokens': [...],
+      'model_tokens': [...],
+      'make_tokens': [...],
+      'api_name': str|None,
+      'hostapi_name': str|None,
+      'hostapi_index': int|None,
+      'device_id': int|None,
+      'strict': bool   # True if any selector provided
     }
-    
-    return config
+    """
+    cfg = _fix_list_defaults(cfg or default_config())
+    sysname = platform.system()
+    if sysname == "Windows":
+        name = cfg.windows_device_name
+        model = _tokens(cfg.windows_model_name)
+        make = _tokens(cfg.windows_make_name)
+        api = cfg.windows_api_name
+        hostapi = cfg.windows_hostapi_name
+        hostapi_idx = cfg.windows_hostapi_index
+        dev_id = cfg.windows_device_id
+    elif sysname == "Darwin":
+        name = cfg.mac_device_name
+        model = _tokens(cfg.mac_model_name)
+        make = _tokens(cfg.mac_make_name)
+        api = cfg.mac_api_name
+        hostapi = cfg.mac_hostapi_name
+        hostapi_idx = cfg.mac_hostapi_index
+        dev_id = cfg.mac_device_id
+    else:
+        name = cfg.linux_device_name
+        model = _tokens(cfg.linux_model_name)
+        make = _tokens(cfg.linux_make_name)
+        api = cfg.linux_api_name
+        hostapi = cfg.linux_hostapi_name
+        hostapi_idx = cfg.linux_hostapi_index
+        dev_id = cfg.linux_device_id
+
+    # Apply runtime overrides
+    ov = _runtime.get(sysname, {})
+    name = ov.get("device_name", name)
+    api = ov.get("api_name", api)
+    hostapi = ov.get("hostapi_name", hostapi)
+    hostapi_idx = ov.get("hostapi_index", hostapi_idx)
+
+    strict = any([name, model, make, hostapi, hostapi_idx is not None, dev_id is not None])
+    return {
+        "name_tokens": _tokens(name),
+        "model_tokens": model,
+        "make_tokens": make,
+        "api_name": api or None,
+        "hostapi_name": hostapi or None,
+        "hostapi_index": hostapi_idx,
+        "device_id": dev_id,
+        "strict": strict,
+    }
+
+# Back-compat: legacy constants (export derived from dataclass)
+def _derive_constants(cfg: Optional[BMARConfig] = None):
+    cfg = _fix_list_defaults(cfg or default_config())
+    return {
+        # Linux
+        "LINUX_MAKE_NAME": cfg.linux_make_name,
+        "LINUX_MODEL_NAME": cfg.linux_model_name,
+        "LINUX_DEVICE_NAME": cfg.linux_device_name,
+        "LINUX_API_NAME": cfg.linux_api_name,
+        "LINUX_HOSTAPI_NAME": cfg.linux_hostapi_name,
+        "LINUX_HOSTAPI_INDEX": cfg.linux_hostapi_index,
+        "LINUX_DEVICE_ID": cfg.linux_device_id,
+        # Windows
+        "WINDOWS_MAKE_NAME": cfg.windows_make_name,
+        "WINDOWS_MODEL_NAME": cfg.windows_model_name,
+        "WINDOWS_DEVICE_NAME": cfg.windows_device_name,
+        "WINDOWS_API_NAME": cfg.windows_api_name,
+        "WINDOWS_HOSTAPI_NAME": cfg.windows_hostapi_name,
+        "WINDOWS_HOSTAPI_INDEX": cfg.windows_hostapi_index,
+        "WINDOWS_DEVICE_ID": cfg.windows_device_id,
+        # macOS
+        "MACOS_MAKE_NAME": cfg.mac_make_name,
+        "MACOS_MODEL_NAME": cfg.mac_model_name,
+        "MACOS_DEVICE_NAME": cfg.mac_device_name,
+        "MACOS_API_NAME": cfg.mac_api_name,
+        "MACOS_HOSTAPI_NAME": cfg.mac_hostapi_name,
+        "MACOS_HOSTAPI_INDEX": cfg.mac_hostapi_index,
+        "MACOS_DEVICE_ID": cfg.mac_device_id,
+    }
+
+_consts = _derive_constants()
+globals().update(_consts)
+
+AUDIO_API_PREFERENCE = {
+    "Windows": ["WASAPI", "WDM-KS", "MME", "DirectSound", "ASIO"],
+    "Darwin":  ["Core Audio"],
+    "Linux":   ["ALSA", "JACK", "PulseAudio", "OSS"],
+}
+def API_PREFERENCE_FOR_PLATFORM():
+    return AUDIO_API_PREFERENCE.get(platform.system(), [])
+
+__all__ = [
+    "BMARConfig", "default_config", "set_runtime_overrides",
+    "device_search_criteria", "AUDIO_API_PREFERENCE", "API_PREFERENCE_FOR_PLATFORM",
+    # legacy constant names:
+    "LINUX_MAKE_NAME","LINUX_MODEL_NAME","LINUX_DEVICE_NAME","LINUX_API_NAME","LINUX_HOSTAPI_NAME","LINUX_HOSTAPI_INDEX","LINUX_DEVICE_ID",
+    "WINDOWS_MAKE_NAME","WINDOWS_MODEL_NAME","WINDOWS_DEVICE_NAME","WINDOWS_API_NAME","WINDOWS_HOSTAPI_NAME","WINDOWS_HOSTAPI_INDEX","WINDOWS_DEVICE_ID",
+    "MACOS_MAKE_NAME","MACOS_MODEL_NAME","MACOS_DEVICE_NAME","MACOS_API_NAME","MACOS_HOSTAPI_NAME","MACOS_HOSTAPI_INDEX","MACOS_DEVICE_ID",
+]
+# --- end back-compat ---
+def get_platform_audio_config(platform_manager, _cfg_module=None):
+    """
+    Back-compat helper used by bmar_app. Uses BMARConfig values only (no env).
+    Returns dict with keys: data_drive, data_path, folders.
+    """
+    cfg = default_config()
+    sysname = platform.system()
+    if sysname == "Windows":
+        drive = (cfg.win_data_drive or "").strip()
+        if drive and len(drive) == 1 and drive.isalpha():
+            drive = f"{drive.upper()}:"
+        elif drive and len(drive) >= 2 and drive[1] != ":" and drive[0].isalpha():
+            drive = f"{drive[0].upper()}:"
+        data_drive = drive  # e.g., "G:"
+        data_path = (cfg.win_data_path or "eb_beehive_data").lstrip("\\/")
+    elif sysname == "Darwin":
+        data_drive = ""
+        data_path = cfg.mac_data_root or os.path.join(os.path.expanduser("~"), "eb_beehive_data")
+    else:
+        data_drive = ""
+        data_path = cfg.linux_data_root or os.path.join(os.path.expanduser("~"), "eb_beehive_data")
+
+    folders = {"primary": "primary", "monitor": "monitor", "plots": "plots"}
+    return {"data_drive": data_drive, "data_path": data_path, "folders": folders}

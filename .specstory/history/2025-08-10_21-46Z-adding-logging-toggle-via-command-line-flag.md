@@ -1926,3 +1926,541 @@ This keeps configuration explicit, testable, and safe, while runtime state remai
 
 ---
 
+_**User**_
+
+I have created a new branch for this change to dataclasses. Please migrate the entire project to dataclasses for globals.
+
+---
+
+_**Assistant**_
+
+Great idea. Here’s a minimal, safe migration that replaces “globals-as-module” with dataclasses, while keeping the rest of your code working.
+
+What you’ll get
+- BMARConfig dataclass for configuration (immutable; easy to clone with updated paths).
+- Keep using app.config everywhere, but now it’s an instance, not a module.
+- check_and_create_date_folders still returns a dict; we wire its results back into BMARConfig via with_paths().
+- directory_utils helpers keep working with the new config object.
+
+1) Replace `bmar_config.py` with a dataclass-based config
+
+````python
+from dataclasses import dataclass, replace
+from pathlib import Path
+import datetime
+from typing import Optional
+
+"""
+BMAR Configuration Module (dataclass-based)
+- Immutable config for clarity and safety
+- Use cfg = replace(cfg, FIELD=value) or cfg.with_paths(...) to update derived fields
+"""
+
+@dataclass(frozen=True)
+class BMARConfig:
+    # IDs
+    LOCATION_ID: str = "Zeev-Berkeley"
+    HIVE_ID: str = "Z1_4mic"
+    HIVE_CONFIG: str = "dual-mic, sensor"
+
+    # Modes
+    MODE_AUDIO_MONITOR: bool = True
+    MODE_PERIOD: bool = True
+    MODE_EVENT: bool = False
+    MODE_FFT_PERIODIC_RECORD: bool = True
+
+    # Audio/capture basics
+    BUFFER_SECONDS: int = 900
+    SOUND_IN_CHS: int = 1                   # used by UI
+    SOUND_OUT_SR_DEFAULT: int = 48000
+    SOUND_OUT_ID_DEFAULT: Optional[int] = None
+
+    # Monitor/MP3 settings
+    AUDIO_MONITOR_START: Optional[datetime.time] = None
+    AUDIO_MONITOR_END: Optional[datetime.time] = datetime.time(23, 0, 0)
+    AUDIO_MONITOR_RECORD: int = 900
+    AUDIO_MONITOR_INTERVAL: float = 0.1
+    AUDIO_MONITOR_QUALITY: int = 128        # kbps or VBR q (0-9) if you switch to VBR
+
+    # Derived/output paths (set at runtime)
+    PRIMARY_DIRECTORY: Optional[Path] = None       # audio/raw/YYYY-MM-DD
+    MONITOR_DIRECTORY: Optional[Path] = None       # audio/monitor/YYYY-MM-DD
+    PLOTS_DIRECTORY: Optional[Path] = None         # audio/plots/YYYY-MM-DD
+
+    def with_paths(self, raw: Path, mon: Path, plots: Path) -> "BMARConfig":
+        return replace(self,
+                       PRIMARY_DIRECTORY=raw,
+                       MONITOR_DIRECTORY=mon,
+                       PLOTS_DIRECTORY=plots)
+
+def default_config() -> BMARConfig:
+    """Factory for default config (replace with env/CLI sources as needed)."""
+    return BMARConfig()
+````
+
+2) Initialize the dataclass in `main.py` and wire paths after folder creation
+
+````python
+# ...existing code...
+from pathlib import Path
+from logging.handlers import RotatingFileHandler
+from modules.bmar_config import default_config  # NEW
+from modules.file_utils import check_and_create_date_folders
+# ...existing code...
+
+def main():
+    """Main application entry point"""
+    # Parse command line arguments
+    parser = setup_argument_parser()
+    args = parser.parse_args()
+
+    # ...existing logging setup...
+
+    # NEW: build config instance (dataclass) instead of module-level globals
+    cfg = default_config()
+
+    # NEW: create folder hierarchy and wire paths back into the config
+    dir_info = check_and_create_date_folders(cfg)
+    # dir_info must contain 'audio_raw_dir', 'audio_monitor_dir', 'plots_dir'
+    cfg = cfg.with_paths(
+        raw=Path(dir_info["audio_raw_dir"]),
+        mon=Path(dir_info["audio_monitor_dir"]),
+        plots=Path(dir_info["plots_dir"]),
+    )
+
+    # If you keep an application object, attach cfg to it:
+    # app.config = cfg
+    # Otherwise, pass cfg explicitly to functions that need it.
+
+    logger = logging.getLogger(__name__)
+    logger.info("BMAR application starting with sounddevices support")
+    logger.info("Config wired: raw=%s monitor=%s plots=%s", cfg.PRIMARY_DIRECTORY, cfg.MONITOR_DIRECTORY, cfg.PLOTS_DIRECTORY)
+
+    # ...existing code...
+# ...existing code...
+````
+
+3) Complete directory_utils with dataclass-aware helpers
+
+````python
+import os
+import re
+import logging
+from datetime import datetime
+from typing import Optional
+
+"""
+Directory Utilities Module
+Handles creation and management of recording directories.
+"""
+
+def _is_date_dir(path: str) -> bool:
+    """Return True if the last component looks like YYYY-MM-DD."""
+    try:
+        base = os.path.basename(os.path.normpath(path or ""))
+        return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", base))
+    except Exception:
+        return False
+
+def setup_directories():
+    """Legacy helper – prefer file_utils.check_and_create_date_folders(cfg)."""
+    try:
+        home_dir = os.path.expanduser("~")
+        recording_dir = os.path.join(home_dir, "BMAR_Recordings")
+        os.makedirs(recording_dir, exist_ok=True)
+        logging.info(f"Recording directory setup: {recording_dir}")
+        return recording_dir
+    except Exception as e:
+        logging.error(f"Error setting up recording directory: {e}")
+        return os.getcwd()
+
+def get_today_dir(recording_dir: str):
+    """Return a dated subfolder under recording_dir.
+       If recording_dir itself is already a date folder (YYYY-MM-DD), return it unchanged.
+    """
+    try:
+        if not recording_dir:
+            return recording_dir
+        if _is_date_dir(recording_dir):
+            os.makedirs(recording_dir, exist_ok=True)
+            logging.debug(f"Today's directory already set: {recording_dir}")
+            return recording_dir
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_dir = os.path.join(recording_dir, today)
+        os.makedirs(today_dir, exist_ok=True)
+        logging.info(f"Today's directory: {today_dir}")
+        return today_dir
+    except Exception as e:
+        logging.error(f"Error setting up today's directory: {e}")
+        return recording_dir
+
+def ensure_directory_exists(directory_path: Optional[str]):
+    """Ensure a directory exists, creating it if necessary."""
+    try:
+        if directory_path:
+            os.makedirs(directory_path, exist_ok=True)
+        return True
+    except Exception as e:
+        logging.error(f"Error creating directory {directory_path}: {e}")
+        return False
+
+# Explicit helpers – use these so RAW and MONITOR never get mixed up
+def get_today_raw_dir_from_cfg(cfg) -> str:
+    """Return today's RAW directory from cfg.PRIMARY_DIRECTORY (already dated)."""
+    base = getattr(cfg, "PRIMARY_DIRECTORY", None)
+    if not base:
+        raise ValueError("cfg.PRIMARY_DIRECTORY is not set")
+    return get_today_dir(str(base))
+
+def get_today_monitor_dir_from_cfg(cfg) -> str:
+    """Return today's MONITOR directory from cfg.MONITOR_DIRECTORY (already dated)."""
+    base = getattr(cfg, "MONITOR_DIRECTORY", None)
+    if not base:
+        raise ValueError("cfg.MONITOR_DIRECTORY is not set")
+    return get_today_dir(str(base))
+
+def get_today_plots_dir_from_cfg(cfg) -> str:
+    """Return today's PLOTS directory from cfg.PLOTS_DIRECTORY (already dated)."""
+    base = getattr(cfg, "PLOTS_DIRECTORY", None)
+    if not base:
+        raise ValueError("cfg.PLOTS_DIRECTORY is not set")
+    return get_today_dir(str(base))
+
+def build_raw_output_path(cfg, filename: str) -> str:
+    base = get_today_raw_dir_from_cfg(cfg)
+    return os.path.join(base, filename)
+
+def build_monitor_output_path(cfg, filename: str) -> str:
+    base = get_today_monitor_dir_from_cfg(cfg)
+    return os.path.join(base, filename)
+
+def build_plots_output_path(cfg, filename: str) -> str:
+    base = get_today_plots_dir_from_cfg(cfg)
+    return os.path.join(base, filename)
+````
+
+What to update in your code
+- Ensure app.config is an instance of BMARConfig (from default_config()).
+- Call check_and_create_date_folders(app.config), then set app.config = app.config.with_paths(...).
+- Continue using cfg.PRIMARY_DIRECTORY / cfg.MONITOR_DIRECTORY where you already do; they’re now fields on the dataclass.
+
+Tip for the branch
+- After these changes compile and run. If any code still imports modules.bmar_config expecting module variables, replace those usages with app.config.FIELD.
+- Future: you can split derived paths into a separate dataclass (BMARPaths) if you want stricter immutability for config constants.
+
+---
+
+_**User**_
+
+These errors occured on first run:
+(auntbee) PS E:\git\earth_biometrics\project-bees-knees\beehub\python\src> python main.py --verbose
+Using TkAgg backend for GUI display
+Traceback (most recent call last):
+  File "E:\git\earth_biometrics\project-bees-knees\beehub\python\src\main.py", line 301, in <module>
+    main()
+  File "E:\git\earth_biometrics\project-bees-knees\beehub\python\src\main.py", line 230, in main
+    dir_info = check_and_create_date_folders(cfg)
+  File "E:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules\file_utils.py", line 100, in check_and_create_date_folders
+    root = _platform_base_root(cfg)
+  File "E:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules\file_utils.py", line 16, in _platform_base_root
+    base = os.path.join(cfg.win_data_drive, cfg.win_data_path)
+AttributeError: 'BMARConfig' object has no attribute 'win_data_drive'
+
+---
+
+_**Assistant**_
+
+You’re hitting an AttributeError because file_utils._platform_base_root expects platform path fields (e.g., win_data_drive, win_data_path) that aren’t in the BMARConfig dataclass yet. Let’s add those fields and make _platform_base_root robust with sensible fallbacks.
+
+1) Extend BMARConfig with platform path fields
+
+````python
+# ...existing code...
+from dataclasses import dataclass, replace
+from pathlib import Path
+import datetime
+from typing import Optional
+
+@dataclass(frozen=True)
+class BMARConfig:
+    # IDs
+    LOCATION_ID: str = "Zeev-Berkeley"
+    HIVE_ID: str = "Z1_4mic"
+    HIVE_CONFIG: str = "dual-mic, sensor"
+
+    # Modes
+    MODE_AUDIO_MONITOR: bool = True
+    MODE_PERIOD: bool = True
+    MODE_EVENT: bool = False
+    MODE_FFT_PERIODIC_RECORD: bool = True
+
+    # Audio/capture basics
+    BUFFER_SECONDS: int = 900
+    SOUND_IN_CHS: int = 1
+    SOUND_OUT_SR_DEFAULT: int = 48000
+    SOUND_OUT_ID_DEFAULT: Optional[int] = None
+
+    # Monitor/MP3 settings
+    AUDIO_MONITOR_START: Optional[datetime.time] = None
+    AUDIO_MONITOR_END: Optional[datetime.time] = datetime.time(23, 0, 0)
+    AUDIO_MONITOR_RECORD: int = 900
+    AUDIO_MONITOR_INTERVAL: float = 0.1
+    AUDIO_MONITOR_QUALITY: int = 128
+
+    # Platform data roots (used by file_utils._platform_base_root)
+    # Windows: join(win_data_drive, win_data_path) => e.g., "G:", r"\My Drive\eb_beehive_data"
+    win_data_drive: Optional[str] = None
+    win_data_path: Optional[str] = None
+    # macOS/Linux: absolute root folder (e.g., "/Volumes/Data/eb_beehive_data" or "/data/eb_beehive_data")
+    mac_data_root: Optional[str] = None
+    linux_data_root: Optional[str] = None
+
+    # Derived/output paths (set at runtime)
+    PRIMARY_DIRECTORY: Optional[Path] = None       # audio/raw/YYYY-MM-DD
+    MONITOR_DIRECTORY: Optional[Path] = None       # audio/monitor/YYYY-MM-DD
+    PLOTS_DIRECTORY: Optional[Path] = None         # audio/plots/YYYY-MM-DD
+
+    def with_paths(self, raw: Path, mon: Path, plots: Path) -> "BMARConfig":
+        return replace(self,
+                       PRIMARY_DIRECTORY=raw,
+                       MONITOR_DIRECTORY=mon,
+                       PLOTS_DIRECTORY=plots)
+
+def default_config() -> BMARConfig:
+    return BMARConfig()
+# ...existing code...
+````
+
+2) Make _platform_base_root resilient and build the enforced hierarchy
+
+````python
+# ...existing code...
+import os
+import platform
+import datetime
+import logging
+
+def _platform_base_root(cfg) -> str:
+    """Resolve the platform-specific data root from config with safe fallbacks."""
+    sysname = platform.system()
+    if sysname == "Windows":
+        drive = getattr(cfg, "win_data_drive", None)
+        path = getattr(cfg, "win_data_path", None)
+        if drive and path:
+            base = os.path.join(str(drive), str(path))
+        else:
+            # Fallback to user home
+            base = os.path.join(os.path.expanduser("~"), "eb_beehive_data")
+    elif sysname == "Darwin":
+        root = getattr(cfg, "mac_data_root", None)
+        base = str(root) if root else os.path.join(os.path.expanduser("~"), "eb_beehive_data")
+    else:
+        root = getattr(cfg, "linux_data_root", None)
+        base = str(root) if root else os.path.join(os.path.expanduser("~"), "eb_beehive_data")
+    return os.path.normpath(base)
+
+def ensure_directories_exist(directories):
+    for d in directories:
+        os.makedirs(d, exist_ok=True)
+
+def check_and_create_date_folders(cfg):
+    """
+    Enforce hierarchy:
+    <platform-root>/<LOCATION_ID>/<HIVE_ID>/audio/{monitor,raw,plots}/YYYY-MM-DD
+    """
+    root = _platform_base_root(cfg)
+    location = str(getattr(cfg, "LOCATION_ID", "UNKNOWN"))
+    hive = str(getattr(cfg, "HIVE_ID", "UNKNOWN"))
+
+    base_dir = os.path.join(root, location, hive)
+    audio_base = os.path.join(base_dir, "audio")
+    monitor_base = os.path.join(audio_base, "monitor")
+    raw_base = os.path.join(audio_base, "raw")
+    plots_base = os.path.join(audio_base, "plots")
+
+    ensure_directories_exist((base_dir, audio_base, monitor_base, raw_base, plots_base))
+
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    monitor_dir = os.path.join(monitor_base, today)
+    raw_dir = os.path.join(raw_base, today)
+    plots_dir = os.path.join(plots_base, today)
+    ensure_directories_exist((monitor_dir, raw_dir, plots_dir))
+
+    info = {
+        "base_dir": os.path.normpath(base_dir),
+        "audio_base": os.path.normpath(audio_base),
+        "plots_base": os.path.normpath(plots_base),
+        "today": today,
+        "audio_monitor_dir": os.path.normpath(monitor_dir),
+        "audio_raw_dir": os.path.normpath(raw_dir),
+        "plots_dir": os.path.normpath(plots_dir),
+        # Back-compat:
+        "audio_dir": os.path.normpath(raw_dir),
+    }
+    logging.info("Audio raw dir (config): %s", info["audio_raw_dir"])
+    logging.info("Audio monitor dir (config): %s", info["audio_monitor_dir"])
+    logging.info("Plots dir (config): %s", info["plots_dir"])
+    return info
+
+def log_saved_file(path: str, prefix: str = "") -> None:
+    try:
+        logging.info("%sAudio saved: %s", f"{prefix}: " if prefix else "", os.path.normpath(path))
+    except Exception:
+        pass
+# ...existing code...
+````
+
+How to set your Windows root
+- If you want to keep using G:\My Drive\eb_beehive_data, set these once (CLI/env or code):
+  - cfg = replace(cfg, win_data_drive="G:", win_data_path=r"\My Drive\eb_beehive_data")
+- Or later, add CLI flags to populate those fields at startup.
+
+Run again:
+- python `main.py` --verbose
+It should no longer raise AttributeError, and it will build the required audio/monitor and audio/raw directories under your platform root.
+
+---
+
+_**User**_
+
+I am not clear on your recommendation:
+
+How to set your Windows root
+
+If you want to keep using G:\My Drive\eb_beehive_data, set these once (CLI/env or code):
+cfg = replace(cfg, win_data_drive="G:", win_data_path=r"\My Drive\eb_beehive_data")
+Or later, add CLI flags to populate those fields at startup.
+
+I do want to set root for Windows, Mac, and Linux via OS sensing. I do want to keep using "G:\My Drive\eb_beehive_data," and the equivalent for the other OS's. 
+
+What specifically do you suggest in this context?
+
+---
+
+_**Assistant**_
+
+GitHub Copilot
+
+Here’s a concrete, OS‑sensed setup with safe defaults plus optional CLI/env overrides.
+
+1) Make Windows join robust and keep your default roots
+
+````python
+# ...existing code...
+def _platform_base_root(cfg) -> str:
+    """Resolve the platform-specific data root from config with safe fallbacks."""
+    sysname = platform.system()
+    if sysname == "Windows":
+        drive = getattr(cfg, "win_data_drive", None)
+        path = getattr(cfg, "win_data_path", None)
+        if drive and path:
+            # Ensure we don't lose the drive if path starts with a slash
+            path_str = str(path).lstrip("\\/")
+            drive_str = str(drive).rstrip("\\/")
+            base = f"{drive_str}\\{path_str}"
+        else:
+            base = os.path.join(os.path.expanduser("~"), "eb_beehive_data")
+    elif sysname == "Darwin":
+        root = getattr(cfg, "mac_data_root", None)
+        base = str(root) if root else os.path.join(os.path.expanduser("~"), "eb_beehive_data")
+    else:
+        root = getattr(cfg, "linux_data_root", None)
+        base = str(root) if root else os.path.join(os.path.expanduser("~"), "eb_beehive_data")
+    return os.path.normpath(base)
+# ...existing code...
+````
+
+2) Set per‑OS defaults in your dataclass (env can override)
+
+````python
+# ...existing code...
+from dataclasses import dataclass, replace
+from pathlib import Path
+import datetime, os, platform
+from typing import Optional
+
+@dataclass(frozen=True)
+class BMARConfig:
+    # IDs and modes ...
+    # ...existing code...
+    # Platform data roots (used by file_utils._platform_base_root)
+    win_data_drive: Optional[str] = None     # e.g., "G:"
+    win_data_path: Optional[str] = None      # e.g., r"My Drive\eb_beehive_data" (NO leading slash)
+    mac_data_root: Optional[str] = None      # e.g., "/Volumes/GoogleDrive/My Drive/eb_beehive_data"
+    linux_data_root: Optional[str] = None    # e.g., "/data/eb_beehive_data"
+    # Derived/output paths ...
+    # ...existing code...
+
+def default_config() -> BMARConfig:
+    """OS-sensed defaults with env overrides."""
+    cfg = BMARConfig()
+
+    sysname = platform.system()
+    if sysname == "Windows":
+        win_drive = os.environ.get("BMAR_WIN_DRIVE", "G:")
+        # Important: no leading slash so we don't drop the drive during join
+        win_path = os.environ.get("BMAR_WIN_PATH", r"My Drive\eb_beehive_data")
+        cfg = replace(cfg, win_data_drive=win_drive, win_data_path=win_path)
+    elif sysname == "Darwin":
+        mac_root = os.environ.get("BMAR_MAC_ROOT", os.path.expanduser("~/eb_beehive_data"))
+        cfg = replace(cfg, mac_data_root=mac_root)
+    else:
+        linux_root = os.environ.get("BMAR_LINUX_ROOT", os.path.expanduser("~/eb_beehive_data"))
+        cfg = replace(cfg, linux_data_root=linux_root)
+
+    return cfg
+# ...existing code...
+````
+
+3) Optional CLI overrides (useful when testing on different volumes)
+
+````python
+# ...existing code...
+import os, platform
+# ...existing code...
+
+def setup_argument_parser():
+    parser = argparse.ArgumentParser( # ...existing args... )
+    # ...existing code...
+    parser.add_argument("--data-root", type=Path, help="Override platform data root for this OS")
+    parser.add_argument("--win-data-drive", help="Windows data drive, e.g., G:")
+    parser.add_argument("--win-data-path", help=r"Windows data path, e.g., 'My Drive\eb_beehive_data'")
+    parser.add_argument("--mac-data-root", help="macOS absolute root, e.g., '/Volumes/.../eb_beehive_data'")
+    parser.add_argument("--linux-data-root", help="Linux absolute root, e.g., '/data/eb_beehive_data'")
+    return parser
+# ...existing code...
+
+def main():
+    # ...existing code...
+    cfg = default_config()
+
+    # Apply CLI overrides (env already applied in default_config)
+    sysname = platform.system()
+    if sysname == "Windows":
+        if args.win_data_drive: cfg = replace(cfg, win_data_drive=args.win_data_drive)
+        if args.win_data_path:  cfg = replace(cfg, win_data_path=args.win_data_path.lstrip("\\/"))
+        if args.data_root:
+            drive, tail = os.path.splitdrive(str(args.data_root))
+            tail = tail.lstrip("\\/")
+            if drive:
+                cfg = replace(cfg, win_data_drive=drive, win_data_path=tail or cfg.win_data_path)
+    elif sysname == "Darwin":
+        root = args.mac_data_root or (str(args.data_root) if args.data_root else None)
+        if root: cfg = replace(cfg, mac_data_root=root)
+    else:
+        root = args.linux_data_root or (str(args.data_root) if args.data_root else None)
+        if root: cfg = replace(cfg, linux_data_root=root)
+
+    dir_info = check_and_create_date_folders(cfg)
+    cfg = replace(cfg,
+                 PRIMARY_DIRECTORY=Path(dir_info["audio_raw_dir"]),
+                 MONITOR_DIRECTORY=Path(dir_info["audio_monitor_dir"]),
+                 PLOTS_DIRECTORY=Path(dir_info["plots_dir"]))
+    # ...existing code...
+```
+
+Usage examples (Windows PowerShell):
+- Keep your
+
+---
+

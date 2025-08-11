@@ -19,7 +19,7 @@ from .platform_manager import PlatformManager
 try:
     from .file_utils import setup_directories, get_today_dir
 except ImportError:
-    logging.warning("file_utils module not available")
+    logging.warning("file_utils module not available to BMAR_app")
 
 try:
     from .audio_devices import get_audio_device_config, find_device_by_config
@@ -30,6 +30,58 @@ try:
     from .user_interface import keyboard_listener, cleanup_ui, background_keyboard_monitor
 except ImportError:
     logging.warning("user_interface module not available")
+
+# Prefer package-qualified (relative) import; warn only if truly missing
+try:
+    from .file_utils import check_and_create_date_folders
+except ImportError:
+    logging.warning("file_utils module not available to BMAR_app")
+    check_and_create_date_folders = None
+except Exception as e:
+    logging.exception("BMAR_app failed importing file_utils due to an internal error")
+    raise
+
+# Import bmar_config here for use in BmarApp
+from . import bmar_config as _cfg_mod
+
+try:
+    from .file_utils import setup_directories, get_today_dir, check_and_create_date_folders
+except ImportError:
+    logging.warning("file_utils module not available to BMAR_app")
+    setup_directories = get_today_dir = check_and_create_date_folders = None
+
+# Import core modules that should always be present
+from .bmar_config import *
+from .platform_manager import PlatformManager
+
+# Try to import other modules with fallbacks
+try:
+    from .file_utils import setup_directories, get_today_dir
+except ImportError:
+    logging.warning("file_utils module not available to BMAR_app")
+
+try:
+    from .audio_devices import get_audio_device_config, find_device_by_config
+except ImportError:
+    logging.warning("audio_devices module not available")
+
+try:
+    from .user_interface import keyboard_listener, cleanup_ui, background_keyboard_monitor
+except ImportError:
+    logging.warning("user_interface module not available")
+
+# Prefer package-qualified (relative) import; warn only if truly missing
+try:
+    from .file_utils import check_and_create_date_folders
+except ImportError:
+    logging.warning("file_utils module not available to BMAR_app")
+    check_and_create_date_folders = None
+except Exception as e:
+    logging.exception("BMAR_app failed importing file_utils due to an internal error")
+    raise
+
+# Import bmar_config here for use in BmarApp
+from . import bmar_config as _cfg_mod
 
 class BmarApp:
     """Main BMAR Application class."""
@@ -202,42 +254,46 @@ class BmarApp:
             return False
 
     def initialize_audio_with_fallback(self) -> bool:
-        """Initialize audio system using config-specified devices."""
+        """
+        Initialize audio input. If a device name is configured, require it and abort on failure.
+        Only attempt a generic selection when no device name is configured.
+        """
+        configured_name = None
         try:
-            from .audio_devices import find_device_by_config, get_audio_device_config
-            
-            print("Searching for audio device specified in configuration...")
-            
-            # Try config-based device finding first
-            try:
-                if find_device_by_config(self):
-                    print(f"Audio device configured: {self.device_index} at {self.samplerate}Hz ({self.channels} channels)")
-                    return True
-            except Exception as e:
-                print(f"Config-based device configuration failed: {e}")
-                logging.info(f"Config-based device configuration failed, trying fallback: {e}")
-            
-            # Try fallback configuration
-            print("Attempting fallback audio configuration...")
-            device_config = get_audio_device_config()
-            if device_config and device_config.get('default_device'):
-                device = device_config['default_device']
-                self.device_index = device['index']
-                self.samplerate = int(device['default_sample_rate'])
-                self.channels = min(2, device['input_channels'])
-                self.sound_in_id = device['index']
-                self.sound_in_chs = self.channels
-                self.PRIMARY_IN_SAMPLERATE = self.samplerate
-                print(f"Fallback audio device: {self.device_index} at {self.samplerate}Hz ({self.channels} channels)")
-                return True
-            
-            # If we get here, no audio devices were found
-            raise RuntimeError("No suitable audio devices found. Please check your audio hardware and drivers.")
-            
+            configured_name = _cfg_mod.DEVICE_NAME_FOR_PLATFORM()
+        except Exception:
+            configured_name = None
+
+        try:
+            info = find_device_by_config(getattr(self, "config", None), strict=bool(configured_name))
         except Exception as e:
-            logging.error(f"Audio initialization error: {e}")
-            print(f"FATAL: Audio initialization failed - {e}")
+            if configured_name:
+                logging.error("Config-based device configuration failed (strict): %s", e)
+                return False
+            logging.info("Config-based device configuration failed, trying fallback: %s", e)
+            info = None
+
+        if not info and not configured_name:
+            # try non-strict only when nothing is configured
+            try:
+                info = get_audio_device_config(getattr(self, "config", None), strict=False)
+            except Exception as e:
+                logging.error("Fallback audio configuration failed: %s", e)
+                info = None
+
+        if not info:
+            logging.error("Audio initialization error: No suitable audio devices found. Please check your audio hardware and drivers.")
             return False
+
+        # Apply the found device info to the audio stream
+        self.device_index = info["index"]
+        self.samplerate = int(info["default_sample_rate"])
+        self.channels = min(2, info["input_channels"])
+        self.sound_in_id = info["index"]
+        self.sound_in_chs = self.channels
+        self.PRIMARY_IN_SAMPLERATE = self.samplerate
+        print(f"Audio device: {self.device_index} at {self.samplerate}Hz ({self.channels} channels)")
+        return True
 
     def should_start_auto_recording(self):
         """Check if automatic recording should be started based on config."""
@@ -465,3 +521,9 @@ def run_bmar_application():
 if __name__ == "__main__":
     """Allow the module to be run directly for testing."""
     sys.exit(run_bmar_application())
+
+'''
+__init__.py no longer triggers bmar_app at package import time, so importing modules.file_utils doesn’t re-enter bmar_app.
+bmar_app imports file_utils in a package-qualified way and doesn’t suppress real import-time errors.
+file_utils.py is now complete and importable.
+'''
