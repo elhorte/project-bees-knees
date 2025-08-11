@@ -142,7 +142,7 @@ class BMARConfig:
     SPECTROGRAM_DB_MAX: float = 0.0
 
     # VU meter presentation controls
-    VU_METER_LATENCY_MS: int = 50
+    VU_METER_LATENCY_MS: int = 30       # msec
     VU_METER_DAMPING: float = 0.50
 
     # Directories (wired by main/file_utils at runtime)
