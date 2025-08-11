@@ -1861,7 +1861,68 @@ I don't think that is necessary for now. thanks.
 
 _**Assistant**_
 
+Understood. If anything regresses with intercom/VU stopping or paths, ping me and I’ll adjust quickly.
 
+---
+
+_**User**_
+
+is there any advantage to using the dataclasses library for managing global variables instead of using BMAR_app's class struction (again, just for global variables)?
+
+---
+
+_**Assistant**_
+
+Short answer: yes—dataclasses are better than a “globals-on-a-class” pattern for config/state.
+
+Advantages over a class of globals:
+- Types and IDE help: fields are explicit and type-checked; auto __init__/repr/eq.
+- Safer state: you pass instances instead of mutating module/class globals.
+- Easy copies: dataclasses.replace lets you tweak a field without side effects.
+- Immutability: frozen=True for constants; prevents accidental writes.
+- Serialization: asdict() for logging, JSON, or persistence.
+- Testing: create isolated configs/states per test without leaking global state.
+
+Trade-offs:
+- You still need to pass the instance around (no implicit global).
+- Validation is manual in __post_init__ (or use pydantic if you need rich validation).
+- Some migration work from existing globals.
+
+Minimal example splitting config vs runtime state:
+````python
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Dict, Optional, Any
+
+@dataclass(frozen=True)
+class BMARConfig:
+    LOCATION_ID: str
+    HIVE_ID: str
+    BUFFER_SECONDS: int = 900
+    MODE_AUDIO_MONITOR: bool = True
+    SOUND_OUT_SR_DEFAULT: int = 48000
+    # Derived paths set at startup (filled after check_and_create_date_folders)
+    AUDIO_RAW_DIR: Optional[Path] = None
+    AUDIO_MONITOR_DIR: Optional[Path] = None
+    PLOTS_DIR: Optional[Path] = None
+
+    def with_paths(self, raw: Path, mon: Path, plots: Path) -> "BMARConfig":
+        return replace(self, AUDIO_RAW_DIR=raw, AUDIO_MONITOR_DIR=mon, PLOTS_DIR=plots)
+
+@dataclass
+class AppState:
+    monitor_channel: int = 0
+    active_processes: Dict[str, Any] = field(default_factory=dict)
+    vu_stop_event: Any = None
+    intercom_stop_event: Any = None
+````
+
+Usage pattern:
+- Construct BMARConfig from defaults/env/CLI.
+- After check_and_create_date_folders, call cfg = cfg.with_paths(raw, mon, plots).
+- Pass cfg and a mutable AppState into the parts of the app that need them.
+
+This keeps configuration explicit, testable, and safe, while runtime state remains mutable and contained.
 
 ---
 
