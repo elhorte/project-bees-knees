@@ -6,10 +6,10 @@ Handles keyboard input, command processing, and user interaction.
 import threading
 import time
 import logging
+import platform
 import sys
 import os
 import multiprocessing
-import platform
 import traceback
 
 # Platform-specific imports for terminal control
@@ -58,10 +58,14 @@ def ensure_app_attributes(app):
     """Ensure app has all required attributes."""
     if not hasattr(app, 'monitor_channel'):
         app.monitor_channel = 0
+    if not hasattr(app, 'sound_in_chs'):
+        app.sound_in_chs = getattr(getattr(app, 'config', object()), 'SOUND_IN_CHS', 1) or 1
+    if not hasattr(app, 'sound_in_id'):
+        app.sound_in_id = None
     if not hasattr(app, 'is_macos'):
-        app.is_macos = False
+        app.is_macos = (platform.system() == "Darwin")
     if not hasattr(app, 'os_info'):
-        app.os_info = {}
+        app.os_info = platform.platform()
     if not hasattr(app, 'DEBUG_VERBOSE'):
         app.DEBUG_VERBOSE = False
     # Store interactive keyboard mode on the app to avoid module-level global
@@ -88,10 +92,9 @@ def keyboard_listener(app):
     ensure_app_attributes(app)
     
     try:
-        print_controls()
-        print("\nNote: Press '^' to toggle between BMAR keyboard mode and normal terminal.")
-        print("In normal terminal mode, the program continues running in background.")
-        
+        ##print_controls()
+        print("\nPress 'h' or '?' for list of available commands.\n\n")
+
         while app.keyboard_listener_running:
             try:
                 if app.interactive_mode:
@@ -220,13 +223,11 @@ def print_controls():
     print("  'q' - Quit")
     print("  '^' - Toggle between BMAR keyboard mode and normal terminal")
     print("\nReady for commands...")
-    print("Note: Press '^' to toggle between BMAR keyboard mode and normal terminal.")
+    ##print("Note: Press '^' to toggle between BMAR keyboard mode and normal terminal.")
 
 def process_command(app, command):
     """Process a user command."""
-    
-    # removed unused imports
-    
+
     try:
         # Ensure app has basic attributes for command processing
         if not hasattr(app, 'active_processes'):
@@ -266,6 +267,9 @@ def process_command(app, command):
             
         elif command == 'i' or command == 'I':
             handle_intercom_command(app)
+
+        elif command == '0':
+            handle_stop_monitoring_command(app)
             
         elif command == 'd':
             print("\nShowing current audio device...\r")
@@ -299,7 +303,6 @@ def process_command(app, command):
         elif command == '^':
             # Toggle is handled directly in keyboard_listener function
             print("Toggle functionality is built into the keyboard listener. This message should not appear.")
-
         else:
             print(f"Unknown command: '{command}'. Press 'h' for help.\r")  # Added \r
             
@@ -616,71 +619,71 @@ def start_vu_meter(app):
 
 def handle_intercom_command(app):
     """Handle intercom command."""
-    
     from .process_manager import cleanup_process
-    
     try:
         # Check if VU meter is active to decide whether to print status
         vu_thread = None
         if hasattr(app, 'active_processes'):
             vu_thread = app.active_processes.get('v')
         vu_meter_active = bool(vu_thread and getattr(vu_thread, 'is_alive', lambda: False)())
-        
+
         if 'i' in app.active_processes and app.active_processes['i'] is not None:
-            if app.active_processes['i'].is_alive():
+            ic_proc = app.active_processes['i']
+            if hasattr(ic_proc, 'is_alive') and ic_proc.is_alive():
                 if not vu_meter_active:
-                    print("Stopping intercom...\r")  # Added \r
+                    print("Stopping intercom...\r")
+                # NEW: signal intercom to stop and try to join cleanly
+                if hasattr(app, 'intercom_stop_event') and app.intercom_stop_event is not None:
+                    try:
+                        app.intercom_stop_event.set()
+                    except Exception:
+                        pass
+                try:
+                    # Try to join threads/processes quickly before fallback cleanup
+                    if hasattr(ic_proc, 'join'):
+                        ic_proc.join(timeout=2.0)
+                except Exception:
+                    pass
                 cleanup_process(app, 'i')
             else:
                 if not vu_meter_active:
-                    print("Starting intercom...\r")  # Added \r
+                    print("Starting intercom...\r")
                 app.active_processes['i'] = None
                 start_intercom(app)
         else:
             if not vu_meter_active:
-                print("Starting intercom...\r")  # Added \r
+                print("Starting intercom...\r")
             start_intercom(app)
-            
     except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
-        # Compute VU status safely without broad excepts
         vu_thread = None
         if hasattr(app, 'active_processes'):
             vu_thread = app.active_processes.get('v')
         vu_meter_active = bool(vu_thread and getattr(vu_thread, 'is_alive', lambda: False)())
-        
         if not vu_meter_active:
-            print(f"Intercom command error: {e}\r")  # Added \r
+            print(f"Intercom command error: {e}\r")
 
 def start_intercom(app):
     """Start intercom monitoring."""
-    
     from .process_manager import create_subprocess
     from .audio_tools import intercom_m
-    
     try:
-        # Ensure app has all required attributes
         ensure_app_attributes(app)
-        
+
         # Check if VU meter is active
         vu_thread = None
         if hasattr(app, 'active_processes'):
             vu_thread = app.active_processes.get('v')
         vu_meter_active = bool(vu_thread and getattr(vu_thread, 'is_alive', lambda: False)())
-        
-        # Create intercom configuration
-        # Prefer explicit INTERCOM_SAMPLERATE, then SOUND_OUT_SR_DEFAULT, else fallback 48000
-        intercom_sr = getattr(app.config, 'INTERCOM_SAMPLERATE', None)
-        if not intercom_sr:
-            intercom_sr = getattr(app.config, 'SOUND_OUT_SR_DEFAULT', 48000)
-        
-        # Resolve output device: prefer app.output_device_index, else config default
+
+        # Prefer explicit INTERCOM_SAMPLERATE, then SOUND_OUT_SR_DEFAULT, else 48000
+        intercom_sr = getattr(app.config, 'INTERCOM_SAMPLERATE', None) or getattr(app.config, 'SOUND_OUT_SR_DEFAULT', 48000)
+
         out_dev_idx = getattr(app, 'output_device_index', None)
         if out_dev_idx is None:
             out_dev_idx = getattr(app.config, 'SOUND_OUT_ID_DEFAULT', None)
-        
-        # Decide if buffer path is available (same process memory)
+
         buffer_available = getattr(app, 'buffer', None) is not None
-        
+
         intercom_config = {
             'output_device': out_dev_idx,
             'samplerate': int(intercom_sr),
@@ -691,28 +694,28 @@ def start_intercom(app):
             'bit_depth': getattr(app, 'bit_depth', 16),
             'vu_meter_active': vu_meter_active
         }
-        
-        # For subprocess path (no buffer), include input device; for thread path, include app
-        if not buffer_available:
-            intercom_config['input_device'] = app.device_index
-        else:
-            intercom_config['app'] = app  # safe only in-thread
-        
-        # Only print status if VU meter is not active to avoid interfering with display
+
         if not vu_meter_active:
             print(f"Starting intercom (device {intercom_config['output_device']}, {intercom_config['samplerate']}Hz)\r")
-        
-        # Start as thread if using buffer (needs in-process memory); else use subprocess
+            print(f"Now monitoring channel: {app.monitor_channel+1} (of {app.channels})\r")
+
+        # NEW: create a stop event per run
+        app.intercom_stop_event = None
+
         if buffer_available:
-            th = threading.Thread(target=intercom_m, args=(intercom_config,), daemon=True)
+            import threading as _th
+            app.intercom_stop_event = _th.Event()
+            th = _th.Thread(target=intercom_m, args=(intercom_config, app.intercom_stop_event), daemon=True)
             th.start()
             app.active_processes['i'] = th
             if not vu_meter_active:
                 print("Intercom started (thread)\r")
         else:
+            import multiprocessing as _mp
+            app.intercom_stop_event = _mp.Event()
             process = create_subprocess(
                 target_function=intercom_m,
-                args=(intercom_config,),
+                args=(intercom_config, app.intercom_stop_event),
                 process_key='i',
                 app=app,
                 daemon=True
@@ -720,7 +723,6 @@ def start_intercom(app):
             process.start()
             if not vu_meter_active:
                 print(f"Intercom started (PID: {process.pid})\r")
-        
     except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
         print(f"Error starting intercom: {e}\r")
         traceback.print_exc()
@@ -951,7 +953,7 @@ def show_help():
     print()  # Add a clean newline to separate from previous output
     
     # Remove ALL \r characters - use normal print() statements
-    print("BMAR (Bioacoustic Monitoring and Recording) Help")
+    print("BMAR (Biometric Monitoring and Recording) Help")
     print("============================================================")
     print()
     print("Commands:\r")
@@ -969,18 +971,9 @@ def show_help():
     print("c - Configuration: Display current settings\r")
     print("h - Help:          This help message\r")
     print("q - Quit:          Exit the application\r")
-    print("^ - Toggle:        Toggle between BMAR keyboard mode and normal terminal\r")
     print()
-    print("1-9 - Channel:     Switch monitoring channel (while VU/Intercom active)")
-    print()
-    print("Tips:")
-    print("- Press any command key to toggle that function on/off")
-    print("- Multiple functions can run simultaneously")
-    print("- Files are automatically organized by date")
-    print("- Use 'p' for one-time performance check, 'P' for continuous monitoring")
-    print("- Use 'd' for current device info, 'D' for all available devices")
-    print("- Press 1-9 to switch audio channel while VU meter or Intercom is running")
-    print("============================================================")
+    print("1-9 - Channel:     Switch monitoring channel (while VU/Intercom active)\r")
+    print("0 - Stop:         Stop all monitoring\r")
     print()  # Add final newline for clean separation
 
 def start_fft_analysis(app):
@@ -1050,3 +1043,54 @@ def handle_fft_command(app):
     except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
         print(f"FFT command error: {e}\r")
         traceback.print_exc()
+
+def handle_stop_monitoring_command(app):
+    """Stop VU meter and/or intercom if running (keyboard '0')."""
+    try:
+        from .process_manager import cleanup_process
+        stopped_any = False
+
+        # Stop VU meter if active
+        if hasattr(app, 'active_processes') and 'v' in app.active_processes and app.active_processes['v'] is not None:
+            vu_proc = app.active_processes['v']
+            if hasattr(vu_proc, 'is_alive') and vu_proc.is_alive():
+                print("Stopping VU meter...\r")
+                if hasattr(app, 'vu_stop_event'):
+                    app.vu_stop_event.set()
+                time.sleep(0.2)
+                try:
+                    if hasattr(vu_proc, 'join'):
+                        vu_proc.join(timeout=1.0)
+                except Exception:
+                    pass
+                cleanup_process(app, 'v')
+                print("\r" + " " * 80 + "\r", end="", flush=True)
+                print("VU meter stopped.\r")
+                stopped_any = True
+
+        # Stop intercom if active
+        if hasattr(app, 'active_processes') and 'i' in app.active_processes and app.active_processes['i'] is not None:
+            ic_proc = app.active_processes['i']
+            if hasattr(ic_proc, 'is_alive') and ic_proc.is_alive():
+                print("Stopping intercom...\r")
+                # NEW: signal and try to join before cleanup
+                if hasattr(app, 'intercom_stop_event') and app.intercom_stop_event is not None:
+                    try:
+                        app.intercom_stop_event.set()
+                    except Exception:
+                        pass
+                try:
+                    if hasattr(ic_proc, 'join'):
+                        ic_proc.join(timeout=2.0)
+                except Exception:
+                    pass
+                cleanup_process(app, 'i')
+                print("Intercom stopped.\r")
+                stopped_any = True
+
+        if not stopped_any:
+            print("No VU meter or intercom are active.\r")
+
+    except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
+        print(f"Stop monitoring error: {e}\r")
+        logging.error("Stop monitoring error: %s", e)

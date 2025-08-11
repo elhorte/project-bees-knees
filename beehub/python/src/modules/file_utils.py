@@ -70,56 +70,69 @@ def ensure_directories_exist(directories):
 
 def check_and_create_date_folders(cfg):
     """
-    Create and return dict of config-based recording folders.
-    Uses only BMAR_config fields: win/mac/linux *_data_drive, *_data_path and *_data_folders.
+    Create and return dict of config-based recording folders using the required hierarchy:
+
+    data-drive
+    └── LOCATION_ID
+        └── HIVE_ID
+            └── audio
+                ├── monitor
+                │   └── YYYY-MM-DD
+                ├── raw
+                │   └── YYYY-MM-DD
+                └── plots
+                    └── YYYY-MM-DD
+
     Returns:
       {
-        'base_dir': <root>,
-        'audio_base': <root>/audio,
-        'plots_base': <root>/plots,
+        'base_dir': <root>/LOCATION_ID/HIVE_ID,
+        'audio_base': <base>/audio,
+        'plots_base': <base>/audio/plots,
         'today': YYYY-MM-DD,
-        'audio_dir': <root>/audio/YYYY-MM-DD,
-        'plots_dir': <root>/plots/YYYY-MM-DD,
+        'audio_monitor_dir': <base>/audio/monitor/YYYY-MM-DD,
+        'audio_raw_dir': <base>/audio/raw/YYYY-MM-DD,
+        'plots_dir': <base>/audio/plots/YYYY-MM-DD,
+        # Back-compat:
+        'audio_dir': <base>/audio/raw/YYYY-MM-DD,
       }
     """
+    # Build platform root, then enforce LOCATION_ID/HIVE_ID/audio structure
     root = _platform_base_root(cfg)
+    location = str(getattr(cfg, "LOCATION_ID", "UNKNOWN"))
+    hive = str(getattr(cfg, "HIVE_ID", "UNKNOWN"))
 
-    # Determine folder names list from platform
-    sysname = platform.system()
-    if sysname == "Windows":
-        folders = getattr(cfg, "win_data_folders", ["audio", "plots"])
-    elif sysname == "Darwin":
-        folders = getattr(cfg, "mac_data_folders", ["audio", "plots"])
-    else:
-        folders = getattr(cfg, "linux_data_folders", ["audio", "plots"])
+    base_dir = os.path.join(root, location, hive)
+    audio_base = os.path.join(base_dir, "audio")
+    monitor_base = os.path.join(audio_base, "monitor")
+    raw_base = os.path.join(audio_base, "raw")
+    plots_base = os.path.join(audio_base, "plots")
 
-    # Ensure bases exist
-    os.makedirs(root, exist_ok=True)
-    subdirs = {name: os.path.join(root, name) for name in folders}
-    for p in subdirs.values():
-        os.makedirs(p, exist_ok=True)
+    # Ensure base folders exist
+    for d in (base_dir, audio_base, monitor_base, raw_base, plots_base):
+        os.makedirs(d, exist_ok=True)
 
     # Per-day subfolders
     today = datetime.datetime.now().strftime("%Y-%m-%d")
-    dated = {name: os.path.join(path, today) for name, path in subdirs.items()}
-    for p in dated.values():
-        os.makedirs(p, exist_ok=True)
-
-    audio_base = subdirs.get("audio") or subdirs.get("AUDIO") or list(subdirs.values())[0]
-    plots_base = subdirs.get("plots") or subdirs.get("PLOTS") or list(subdirs.values())[1 if len(subdirs) > 1 else 0]
-    audio_dir = dated.get("audio") or dated.get("AUDIO") or audio_base
-    plots_dir = dated.get("plots") or dated.get("PLOTS") or plots_base
+    monitor_dir = os.path.join(monitor_base, today)
+    raw_dir = os.path.join(raw_base, today)
+    plots_dir = os.path.join(plots_base, today)
+    for d in (monitor_dir, raw_dir, plots_dir):
+        os.makedirs(d, exist_ok=True)
 
     info = {
-        "base_dir": root,
-        "audio_base": audio_base,
-        "plots_base": plots_base,
+        "base_dir": os.path.normpath(base_dir),
+        "audio_base": os.path.normpath(audio_base),
+        "plots_base": os.path.normpath(plots_base),
         "today": today,
-        "audio_dir": os.path.normpath(audio_dir),
+        "audio_monitor_dir": os.path.normpath(monitor_dir),
+        "audio_raw_dir": os.path.normpath(raw_dir),
         "plots_dir": os.path.normpath(plots_dir),
+        # Back-compat (used by main.py logging):
+        "audio_dir": os.path.normpath(raw_dir),
     }
     logging.info("Recording root (config): %s", info["base_dir"])
-    logging.info("Audio dir (config): %s", info["audio_dir"])
+    logging.info("Audio raw dir (config): %s", info["audio_raw_dir"])
+    logging.info("Audio monitor dir (config): %s", info["audio_monitor_dir"])
     logging.info("Plots dir (config): %s", info["plots_dir"])
     return info
 
@@ -350,3 +363,11 @@ def log_saved_file(path: str, prefix: str = "") -> None:
             logging.info("Saved file: %s", abspath)
     except Exception as e:
         logging.warning("Could not log saved file path for %s: %s", path, e)
+
+'''
+
+print(f"{thread_id} recording from {sound_in_samplerate} Hz, {sound_in_chs} channels, device: {sound_in_id}")
+print(f"{thread_id} recording to {file_format.upper()} format, target sample rate: {target_sample_rate} Hz")
+print(f"{thread_id} recording locations: {PRIMARY_DIRECTORY}, {MONITOR_DIRECTORY}")
+
+'''

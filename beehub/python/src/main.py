@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
 BMAR Main Entry Point
-Command-line interface for the Bioacoustic Monitoring and Recording system.
+Command-line interface for the Biometric Monitoring and Recording system.
+
+Windows usage examples for log file management:
+
+Write logs to a file with rotation: python main.py --verbose --log-file "C:\Temp\bmar\bmar.log"
+Quiet console, but keep file logs: python main.py --quiet --log-file "C:\Temp\bmar\bmar.log"
+For time-based rotation, swap RotatingFileHandler for TimedRotatingFileHandler(when="midnight", interval=1, backupCount=7).
 """
 
 import sys
 import argparse
 import logging
 from pathlib import Path
+from logging.handlers import RotatingFileHandler  
 
 # Simplified imports to avoid circular dependencies
 import sounddevice as sd
@@ -25,7 +34,7 @@ def list_audio_devices():
             if device['max_output_channels'] > 0:
                 print(f"  [{i}] {device['name']} (Output: {device['max_output_channels']} channels)")
         return True
-        return True
+
     except Exception as e:
         logging.error(f"Error listing audio devices: {e}")
         return False
@@ -116,14 +125,17 @@ def show_configuration():
 
 def setup_argument_parser():
     parser = argparse.ArgumentParser(
-        description="BMAR - Bioacoustic Monitoring and Recording System",
+        description="BMAR - Biometric Monitoring and Recording System",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   python main.py --list-devices           # List available audio devices
-  python main.py --test-device 1         # Test audio device 1
+  python main.py --test-device 1          # Test audio device 1
   python main.py --config                 # Show current configuration
   python main.py --debug                  # Enable debug logging
+  python main.py --verbose                # Show info-level logs
+  python main.py --quiet                  # Only show errors
+  python main.py --log-level INFO         # Explicitly set log level (overrides --debug/--verbose/--quiet)
         """
     )
     
@@ -151,7 +163,27 @@ Examples:
         action="store_true",
         help="Enable debug logging"
     )
-    
+    # New verbosity controls
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Enable info-level logs"
+    )
+    parser.add_argument(
+        "--quiet", "-q",
+        action="store_true",
+        help="Only errors (suppress info and warnings)"
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Explicitly set log level (overrides --debug/--verbose/--quiet)"
+    )
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        help="Also write logs to this file (rotates at ~10MB, keeps 5 backups)"
+    )
     return parser
 
 def main():
@@ -160,15 +192,39 @@ def main():
     parser = setup_argument_parser()
     args = parser.parse_args()
     
-    # Set up logging
-    log_level = logging.DEBUG if args.debug else logging.INFO
+    # Set up logging (info off by default; enable with --verbose)
+    if args.log_level:
+        log_level = getattr(logging, args.log_level)
+    elif args.debug:
+        log_level = logging.DEBUG
+    elif args.verbose:
+        log_level = logging.INFO
+    elif args.quiet:
+        log_level = logging.ERROR
+    else:
+        log_level = logging.WARNING
+
     logging.basicConfig(
         level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        force=True
     )
-    
+
+    # Optional rotating file output if requested
+    if args.log_file:
+        args.log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            args.log_file,
+            maxBytes=10 * 1024 * 1024,  # ~10 MB
+            backupCount=5,
+            encoding="utf-8"
+        )
+        file_handler.setLevel(log_level)
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        logging.getLogger().addHandler(file_handler)
+
     logger = logging.getLogger(__name__)
-    logger.info("BMAR Application Starting with Pure PyAudio")
+    logger.info("BMAR application starting with sounddevices support")
     
     # Handle information commands
     if args.list_devices:
@@ -202,13 +258,19 @@ def main():
         cfg = app.config  # or however your config object is referenced
         dirs = check_and_create_date_folders(cfg)
         logging.info("Recording directory setup (config): %s", dirs["base_dir"])
-        logging.info("Today's audio directory (config): %s", dirs["audio_dir"])
-        
+        logging.info("Today's audio RAW directory (config): %s", dirs["audio_raw_dir"])
+        logging.info("Today's audio MONITOR directory (config): %s", dirs["audio_monitor_dir"])
+        logging.info("Today's PLOTS directory (config): %s", dirs["plots_dir"])
+
+        # Back-fill config so legacy code uses the correct folders
+        cfg.PRIMARY_DIRECTORY = dirs["audio_raw_dir"]       # RAW saves
+        cfg.MONITOR_DIRECTORY = dirs["audio_monitor_dir"]   # MONITOR (safety) saves
+        cfg.PLOTS_DIRECTORY = dirs["plots_dir"]
+
         app.run()
         
     except ImportError as e:
         logger.error(f"Could not import BMAR application: {e}")
-        logger.info("This may be due to missing functions during PyAudio migration.")
         logger.info("Try using --list-devices or --test-device commands instead.")
         sys.exit(1)
     except KeyboardInterrupt:

@@ -11,6 +11,12 @@ import soundfile as sf
 from .audio_conversion import ensure_pcm16, pcm_to_mp3_write, downsample_audio
 from .file_utils import check_and_create_date_folders, log_saved_file
 from .system_utils import interruptable_sleep
+from .directory_utils import (
+    get_today_monitor_dir_from_cfg,
+    get_today_raw_dir_from_cfg,
+    build_monitor_output_path,
+    build_raw_output_path,
+)
 
 # Track threads we've warned about duration clamping to avoid log spam
 _DURATION_CLAMP_WARNED = set()
@@ -282,14 +288,14 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
                     else:
                         segment = (arr.astype(np.float32) * scale)
 
-                # Build output folder and filename
+                # Build output filename and select correct destination folder
                 ts = datetime.datetime.now()
-                out_dir = _resolve_audio_output_dir(app, thread_id)
 
                 ext = (file_format or "flac").lower()
                 if ext not in ("mp3", "wav", "flac"):
                     ext = "flac"
-                # Determine display bitrate tag for MP3
+
+                # Determine display bitrate tag for MP3 and construct filename
                 if ext == "mp3":
                     q_val = getattr(app.config, 'AUDIO_MONITOR_QUALITY', 128)
                     try:
@@ -302,10 +308,21 @@ def recording_worker_thread(app, record_period, interval, thread_id, file_format
                         rate_tag = f"VBRq{q_int}"
                     else:
                         rate_tag = "128bps"
-                    filename = f"{thread_id}_{ts:%Y%m%d_%H%M%S}_dev{app.sound_in_id}_{app.sound_in_chs}ch_sr{save_sr}_mon{int(getattr(app, 'monitor_channel', 0)) + 1}_{rate_tag}.mp3"
+                    filename = (
+                        f"{thread_id}_{ts:%Y%m%d_%H%M%S}_dev{app.sound_in_id}_"
+                        f"{app.sound_in_chs}ch_sr{save_sr}_mon{int(getattr(app, 'monitor_channel', 0)) + 1}_{rate_tag}.mp3"
+                    )
                 else:
-                    filename = f"{thread_id}_{ts:%Y%m%d_%H%M%S}_dev{app.sound_in_id}_{app.sound_in_chs}ch_sr{save_sr}_mon{int(getattr(app, 'monitor_channel', 0)) + 1}.{ext}"
-                full_path = os.path.join(out_dir, filename)
+                    filename = (
+                        f"{thread_id}_{ts:%Y%m%d_%H%M%S}_dev{app.sound_in_id}_"
+                        f"{app.sound_in_chs}ch_sr{save_sr}_mon{int(getattr(app, 'monitor_channel', 0)) + 1}.{ext}"
+                    )
+
+                # Route MP3/monitor files to audio/monitor, others to audio/raw
+                if ext == "mp3" or thread_id.lower().startswith("audio_monitor"):
+                    full_path = build_monitor_output_path(app.config, filename)
+                else:
+                    full_path = build_raw_output_path(app.config, filename)
 
                 # Write and verify
                 try:

@@ -28,12 +28,12 @@ BUFFER_SECONDS = 900                            # time length of circular buffer
 # recording types controls:
 AUDIO_MONITOR_START = None  ##datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec; None = continuous recording
 AUDIO_MONITOR_END = datetime.time(23, 0, 0)     # time of day to stop recording hr, min, sec
-AUDIO_MONITOR_RECORD = BUFFER_SECONDS           # duration of continuous recording in seconds, must be <= BUFFER_SECONDS (default BUFFER_SECONDS)
+AUDIO_MONITOR_RECORD = 70 #BUFFER_SECONDS           # duration of continuous recording in seconds, must be <= BUFFER_SECONDS (default BUFFER_SECONDS)
 AUDIO_MONITOR_INTERVAL = 0.1                    # seconds between recordings
 
 PERIOD_START = None  ##datetime.time(4, 0, 0)   # 'None' = continuous recording
 PERIOD_END = datetime.time(20, 0, 0)
-PERIOD_RECORD = BUFFER_SECONDS                  # duration of period recording in seconds, must be <= BUFFER_SECONDS (default BUFFER_SECONDS)
+PERIOD_RECORD = 60 #BUFFER_SECONDS                  # duration of period recording in seconds, must be <= BUFFER_SECONDS (default BUFFER_SECONDS)
 PERIOD_SPECTROGRAM = 120                        # spectrogram duration for saved png images
 PERIOD_INTERVAL = 0.1                           # seconds between start of period, must be > period, of course
 
@@ -112,15 +112,15 @@ AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
 # Windows
 win_data_drive = "G:\\"   # D is internal and limited; G is Google Drive, just FYI
 win_data_path = "My Drive\\eb_beehive_data"
-win_data_folders = ["audio", "plots"]
+win_data_folders = ["audio\\raw", "audio\\monitor", "plots"]
 # macOS
-mac_data_drive = "~"  
+mac_data_drive = "~"
 mac_data_path = "data/eb_beehive_data"
-mac_data_folders = ["audio", "plots"]
+mac_data_folders = ["audio/raw", "plots/monitor", "plots"]
 # Linux
 linux_data_drive = "~"                          # Use home directory
 linux_data_path = "beedata/eb_beehive_data"     # Store in ~/beedata
-linux_data_folders = ["audio", "plots"]
+linux_data_folders = ["audio/raw", "audio/monitor", "plots"]
 
 # mic location map channel to position
 MIC_LOCATION = ['1: upper--front', '2: upper--back', '3: lower w/queen--front', '4: lower w/queen--back']

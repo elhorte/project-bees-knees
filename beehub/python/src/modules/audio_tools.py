@@ -12,6 +12,7 @@ import traceback
 from collections import deque
 import random
 import select
+import contextlib
 if sys.platform == "win32": import msvcrt
 
 
@@ -367,11 +368,17 @@ def _display_vu_meter(db_level, rms_level, min_db=-60.0, max_db=0.0):
         print(f"Display error: {e}")
 
 
-def intercom_m(config):
-    """Microphone monitoring - route input to output (intercom).
-    Prefer tapping the existing circular buffer if available (no input device handle).
+def intercom_m(config, stop_event=None):
     """
-    
+    Intercom monitor loop.
+    - config: dict with keys: output_device, samplerate, channels, blocksize, gain, monitor_channel, bit_depth
+    - stop_event: threading.Event or multiprocessing.Event to request shutdown
+    """
+    # Provide a no-op event if none supplied
+    class _DummyEvt:
+        def is_set(self): return False
+    stop_event = stop_event or _DummyEvt()
+
     input_device = config.get('input_device')
     output_device = config.get('output_device', input_device)
     samplerate = int(config.get('samplerate', 48000))
@@ -381,7 +388,6 @@ def intercom_m(config):
     monitor_channel = int(config.get('monitor_channel', 0))
     bit_depth = int(config.get('bit_depth', 16))
 
-    # Suppress prints if VU meter is active
     vu_meter_active = bool(config.get('vu_meter_active', False))
 
     # If the shared buffer exists, use it for monitoring
@@ -390,11 +396,10 @@ def intercom_m(config):
         app_ref = getattr(audio_processing.callback, 'app', None)
     except (ImportError, AttributeError, NameError):
         app_ref = None
-    # Allow explicit app object in config to force buffer path
     app_ref = config.get('app', app_ref)
 
     if app_ref is not None and getattr(app_ref, 'buffer', None) is not None:
-        return _intercom_from_buffer(app_ref, config)
+        return _intercom_from_buffer(app_ref, config, stop_event)  # pass stop_event through
 
     # Helper: check and resolve a valid output device
     def _is_output_device(dev):
@@ -446,13 +451,11 @@ def intercom_m(config):
         out_info = sd.query_devices(resolved_output_device, 'output')
         in_channels = max(1, min(in_channels_req, int(in_info['max_input_channels'])))
         out_channels = max(1, int(out_info['max_output_channels']))
-        # Use up to 2 output channels for monitoring
         out_channels = 2 if out_channels >= 2 else 1
 
         if monitor_channel < 0 or monitor_channel >= in_channels:
             monitor_channel = 0
 
-        # dtype
         dtype = 'int16' if bit_depth == 16 else 'float32'
 
         if not vu_meter_active:
@@ -464,19 +467,18 @@ def intercom_m(config):
             print("Press 'i' again to stop from main UI.")
 
         def callback(indata, outdata, frames, _time, status):
-            # Use frames to avoid unused-var warnings
+            # Stop immediately if requested
+            if stop_event and stop_event.is_set():
+                raise sd.CallbackStop()
             _ = frames
             if status:
-                # Keep silent on minor glitches
                 pass
             try:
-                # Extract selected input channel
                 if in_channels > 1:
                     x = indata[:, monitor_channel]
                 else:
                     x = indata[:, 0]
 
-                # Convert to float for gain and clip
                 if indata.dtype == np.int16:
                     y = x.astype(np.float32)
                     y *= gain
@@ -488,7 +490,6 @@ def intercom_m(config):
                         outdata[:, 0] = y16
                         outdata[:, 1] = y16
                 else:
-                    # float32 pipeline
                     y = x.astype(np.float32) * gain
                     y = np.clip(y, -1.0, 1.0)
                     if out_channels == 1:
@@ -497,10 +498,8 @@ def intercom_m(config):
                         outdata[:, 0] = y
                         outdata[:, 1] = y
             except (ValueError, RuntimeError, IndexError, TypeError):
-                # On any error, output silence to avoid noise
                 outdata.fill(0)
 
-        # Use full-duplex stream
         with sd.Stream(
             device=(input_device, resolved_output_device),
             samplerate=samplerate,
@@ -510,9 +509,10 @@ def intercom_m(config):
             callback=callback
         ):
             try:
-                # Keep process alive; allow user input to stop when attached to a console
-
+                # Exit on stop_event or Enter key (for standalone mode)
                 while True:
+                    if stop_event and stop_event.is_set():
+                        break
                     if sys.platform == "win32":
                         try:
                             if msvcrt.kbhit():
@@ -528,12 +528,11 @@ def intercom_m(config):
                                 if _ in ('\n', '\r'):
                                     break
                         except (OSError, ValueError):
-                            # Likely no TTY; ignore
                             pass
-                    time.sleep(0.1)
+                    time.sleep(0.05)
             except KeyboardInterrupt:
                 pass
-        
+
         if not vu_meter_active:
             print("Intercom stopped")
 
@@ -543,10 +542,15 @@ def intercom_m(config):
         traceback.print_exc()
 
 
-def _intercom_from_buffer(app, config):
+def _intercom_from_buffer(app, config, stop_event=None):
     """Local monitor by reading from the capture circular buffer and resampling to playback.
     Avoids opening any input stream. Supports dynamic channel switching via app.monitor_channel.
     """
+    # Provide a no-op event if none supplied
+    class _DummyEvt:
+        def is_set(self): return False
+    stop_event = stop_event or _DummyEvt()
+
     # Config
     output_device = config.get('output_device')
     out_sr = int(config.get('samplerate', 48000))
@@ -610,10 +614,8 @@ def _intercom_from_buffer(app, config):
             print(f"Starting intercom (buffer): out_dev={out_name} sr={out_sr} out_ch={out_channels} (src_sr={in_sr})")
             print("Press 'i' again to stop from main UI.")
 
-        # Callback: fill output from the latest buffer audio
         def callback(outdata, frames, _time, status):
             if status:
-                # ignore minor glitches
                 pass
             try:
                 buf = getattr(app, 'buffer', None)
@@ -688,11 +690,9 @@ def _intercom_from_buffer(app, config):
                 else:
                     outdata[:, 0] = y
                     outdata[:, 1] = y
-
             except (ValueError, RuntimeError, IndexError, TypeError):
                 outdata.fill(0)
 
-        # Use output-only stream
         with sd.OutputStream(
             device=out_dev,
             samplerate=out_sr,
@@ -703,6 +703,8 @@ def _intercom_from_buffer(app, config):
         ):
             try:
                 while True:
+                    if stop_event and stop_event.is_set():
+                        break
                     if sys.platform == "win32":
                         try:
                             if msvcrt.kbhit():
@@ -719,7 +721,7 @@ def _intercom_from_buffer(app, config):
                                     break
                         except (OSError, ValueError):
                             pass
-                    time.sleep(0.1)
+                    time.sleep(0.05)
             except KeyboardInterrupt:
                 pass
 

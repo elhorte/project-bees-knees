@@ -120,6 +120,22 @@ The application automatically organizes files by type by subtype by date:
 
 `<BMAR data paths>`
 
+data-drive
+|   └──LOCATION_ID
+|       └──HIVE_ID
+|           └──"audio"
+|                   ├──"monitor"
+|                       └──`<YYYY-MM-DD>`
+|                           └──-{YYMMDD-HHMMSS}`<bitrate>`_"monitor_recording"_LOCATION_ID_Z1_4mic.mp3
+|                   ├──raw
+|                       └──2025-08-09
+|                           └──20250809-001850_96000_16_period_recording_Zeev-Berkeley_Z1_4mic.flac
+|                   ├──plots
+|                       └──2025-08-09
+|                           └──fft_20250718_105705_spectrogram_ch1.png
+
+
+
 G:\My Drive
 |   └── eb_beehive_data
 |       └──Zeev-Berkeley
