@@ -1,6 +1,6 @@
 # project-bees-knees
 
-Earth Biometrics biometric monitoring project
+Earth biometric monitoring project
 
 BMAR -- Biometric Monitoring and Analysis for Research
 

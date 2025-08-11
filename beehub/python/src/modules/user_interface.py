@@ -11,37 +11,36 @@ import sys
 import os
 import multiprocessing
 import traceback
+from pathlib import Path
+import datetime
+from .bmar_config import get_platform_audio_config, default_config
 
 # Platform-specific imports for terminal control
-WINDOWS_AVAILABLE = False
-UNIX_AVAILABLE = False
+WINDOWS_AVAILABLE = platform.system() == "Windows"
+UNIX_AVAILABLE = not WINDOWS_AVAILABLE
+
 orig_settings = None
 msvcrt = None
 termios = None
 tty = None
 select = None
 
-if platform.system() == "Windows":
+if WINDOWS_AVAILABLE:
     try:
-        import msvcrt
-        WINDOWS_AVAILABLE = True
-    except ImportError:
-        WINDOWS_AVAILABLE = False
+        import msvcrt  # noqa: F401
+    except Exception:
+        msvcrt = None
 else:
     try:
-        import termios
-        import tty
-        import select
-        UNIX_AVAILABLE = True
-        # Save original terminal settings
-        if sys.stdin.isatty():
-            orig_settings = termios.tcgetattr(sys.stdin)
-    except ImportError:
-        UNIX_AVAILABLE = False
+        import termios  # noqa: F401
+        import tty      # noqa: F401
+        import select   # noqa: F401
+    except Exception:
+        termios = None
+        tty = None
+        select = None
 
-# Global variable to track the state of the keyboard listener toggle
 # Store interactive mode on the app instance instead of using a module-level global
-# interactive_mode = True  # removed in favor of app.interactive_mode
 toggle_key = '^'
 
 def enable_raw_mode():
@@ -54,23 +53,100 @@ def restore_terminal():
     if platform.system() != "Windows" and UNIX_AVAILABLE and orig_settings:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, orig_settings)
 
-def ensure_app_attributes(app):
-    """Ensure app has all required attributes."""
-    if not hasattr(app, 'monitor_channel'):
-        app.monitor_channel = 0
-    if not hasattr(app, 'sound_in_chs'):
-        app.sound_in_chs = getattr(getattr(app, 'config', object()), 'SOUND_IN_CHS', 1) or 1
-    if not hasattr(app, 'sound_in_id'):
-        app.sound_in_id = None
-    if not hasattr(app, 'is_macos'):
-        app.is_macos = (platform.system() == "Darwin")
-    if not hasattr(app, 'os_info'):
-        app.os_info = platform.platform()
-    if not hasattr(app, 'DEBUG_VERBOSE'):
-        app.DEBUG_VERBOSE = False
-    # Store interactive keyboard mode on the app to avoid module-level global
-    if not hasattr(app, 'interactive_mode'):
+# --- VU helpers (safe defaults and launcher) ---
+def _ensure_vu_attrs(app):
+    """
+    Ensure the app has the minimal attributes required for the VU meter.
+    Does not open any streams; just sets defaults if missing.
+    """
+    cfg = getattr(app, "config", None)
+    # UI defaults
+    if not hasattr(app, "active_processes") or app.active_processes is None:
+        app.active_processes = {}
+    if not hasattr(app, "keyboard_listener_running"):
+        app.keyboard_listener_running = True
+    if not hasattr(app, "interactive_mode"):
         app.interactive_mode = True
+    # Required audio params
+    if not hasattr(app, "samplerate") or app.samplerate is None:
+        app.samplerate = int(getattr(cfg, "PRIMARY_IN_SAMPLERATE", 44100)) if cfg else 44100
+    if not hasattr(app, "channels") or app.channels is None:
+        app.channels = int(getattr(cfg, "SOUND_IN_CHS", 1)) if cfg else 1
+    if not hasattr(app, "blocksize") or app.blocksize is None:
+        app.blocksize = 256
+    if not hasattr(app, "monitor_channel") or app.monitor_channel is None:
+        app.monitor_channel = 0
+    # Selected input device index (optional for buffer-based VU)
+    if not hasattr(app, "device_index"):
+        app.device_index = None
+
+def ensure_app_attributes(app):
+    """
+    Back-compat name used elsewhere in UI; call our internal helper.
+    """
+    _ensure_vu_attrs(app)
+
+def start_vu_meter(app):
+    """
+    Start the VU meter in a background thread using audio_tools.vu_meter.
+    This function never raises; it logs and prints errors instead.
+    """
+    from . import audio_tools
+
+    _ensure_vu_attrs(app)
+
+    # Avoid starting twice
+    if getattr(app, "vu_thread", None) and getattr(app, "vu_thread").is_alive():
+        print("VU meter already running")
+        return
+
+    cfg = getattr(app, "config", None)
+    vu_config = {
+        "device_index": app.device_index,
+        "samplerate": int(app.samplerate),
+        "channels": int(app.channels),
+        "blocksize": int(getattr(app, "blocksize", 256)),
+        "monitor_channel": int(getattr(app, "monitor_channel", 0)),
+        # smoothing
+        "VU_METER_LATENCY_MS": int(getattr(cfg, "VU_METER_LATENCY_MS", 150)) if cfg else 150,
+        "VU_METER_DAMPING": float(getattr(cfg, "VU_METER_DAMPING", 0.90)) if cfg else 0.90,
+    }
+
+    # Stop event and thread
+    app.vu_stop_event = threading.Event()
+
+    def _runner():
+        try:
+            audio_tools.vu_meter(vu_config, stop_event=app.vu_stop_event)
+        except Exception as e:
+            import traceback
+            print("\nVU meter crashed:", e)
+            traceback.print_exc()
+            logging.exception("VU meter crashed")
+
+    try:
+        mon = int(vu_config.get("monitor_channel", 0))
+        total = int(vu_config.get("channels", 1))
+        print(f"Starting VU meter (channel {mon + 1} of {max(1, total)})...")
+    except Exception:
+        print("Starting VU meter...")
+    t = threading.Thread(target=_runner, name="VU-Meter", daemon=True)
+    app.vu_thread = t
+    t.start()
+    # Track in active_processes for consistency with other commands
+    app.active_processes['v'] = t
+
+def stop_vu_meter(app):
+    """Stop VU meter thread if running."""
+    evt = getattr(app, "vu_stop_event", None)
+    thr = getattr(app, "vu_thread", None)
+    if evt is not None:
+        evt.set()
+    if thr is not None and thr.is_alive():
+        thr.join(timeout=2.0)
+    print("VU meter stopped")
+    if hasattr(app, "active_processes"):
+        app.active_processes['v'] = None
 
 def background_keyboard_monitor(app):
     """Background thread to monitor for application state."""
@@ -554,68 +630,66 @@ def handle_vu_meter_command(app):
         app.active_processes['v'] = None
 
 def start_vu_meter(app):
-    """Start VU meter using threading instead of multiprocessing."""
-    
-    from .audio_tools import vu_meter
-    
+    """
+    Start the VU meter in a background thread using audio_tools.vu_meter.
+    This function never raises; it logs and prints errors instead.
+    """
+    from . import audio_tools
+
+    _ensure_vu_attrs(app)
+
+    # Avoid starting twice
+    if getattr(app, "vu_thread", None) and getattr(app, "vu_thread").is_alive():
+        print("VU meter already running")
+        return
+
+    cfg = getattr(app, "config", None)
+    vu_config = {
+        "device_index": app.device_index,
+        "samplerate": int(app.samplerate),
+        "channels": int(app.channels),
+        "blocksize": int(getattr(app, "blocksize", 256)),
+        "monitor_channel": int(getattr(app, "monitor_channel", 0)),
+        # smoothing
+        "VU_METER_LATENCY_MS": int(getattr(cfg, "VU_METER_LATENCY_MS", 150)) if cfg else 150,
+        "VU_METER_DAMPING": float(getattr(cfg, "VU_METER_DAMPING", 0.90)) if cfg else 0.90,
+    }
+
+    # Stop event and thread
+    app.vu_stop_event = threading.Event()
+
+    def _runner():
+        try:
+            audio_tools.vu_meter(vu_config, stop_event=app.vu_stop_event)
+        except Exception as e:
+            import traceback
+            print("\nVU meter crashed:", e)
+            traceback.print_exc()
+            logging.exception("VU meter crashed")
+
     try:
-        # Ensure app has all required attributes
-        ensure_app_attributes(app)
-        
-        # Clean up any existing VU meter thread and stop event
-        if hasattr(app, 'vu_stop_event'):
-            app.vu_stop_event.set()  # Stop any existing VU meter
-            time.sleep(0.1)  # Brief pause for cleanup
-        
-        # Create a fresh stop event for the VU meter
-        app.vu_stop_event = threading.Event()
-        
-        # Create VU meter configuration
-        vu_config = {
-            'device_index': app.device_index,
-            'samplerate': app.samplerate,
-            'channels': app.channels,
-            'blocksize': getattr(app, 'blocksize', 1024),
-            'monitor_channel': app.monitor_channel,
-            'sound_in_id': app.device_index,
-            'sound_in_chs': app.channels,
-            'PRIMARY_IN_SAMPLERATE': app.samplerate,
-            'is_macos': getattr(app, 'is_macos', False),
-            'os_info': getattr(app, 'os_info', {}),
-            'DEBUG_VERBOSE': getattr(app, 'DEBUG_VERBOSE', False)
-        }
-        
-        # Inform which channel will be monitored
-        print(f"Now monitoring channel: {app.monitor_channel+1} (of {app.channels})\r")
-        
-        # Create and start VU meter thread
-        vu_thread = threading.Thread(
-            target=vu_meter,
-            args=(vu_config, app.vu_stop_event),
-            daemon=True,
-            name=f"VU-Meter-{app.device_index}"
-        )
-        
-        # Store the thread in active_processes
-        app.active_processes['v'] = vu_thread
-        
-        # Start the thread
-        vu_thread.start()
-        
-        # Brief delay to let the thread initialize
-        time.sleep(0.1)
-        
-        # Verify thread started successfully
-        if not vu_thread.is_alive():
-            print("Warning: VU meter thread failed to start")
-            app.active_processes['v'] = None
-        
-    except (RuntimeError, OSError, ValueError) as e:
-        print(f"Error starting VU meter: {e}\r")
-        # Clean up display and reset state
-        print("\r" + " " * 80 + "\r", end="", flush=True)
+        mon = int(vu_config.get("monitor_channel", 0))
+        total = int(vu_config.get("channels", 1))
+        print(f"Starting VU meter (channel {mon + 1} of {max(1, total)})...")
+    except Exception:
+        print("Starting VU meter...")
+    t = threading.Thread(target=_runner, name="VU-Meter", daemon=True)
+    app.vu_thread = t
+    t.start()
+    # Track in active_processes for consistency with other commands
+    app.active_processes['v'] = t
+
+def stop_vu_meter(app):
+    """Stop VU meter thread if running."""
+    evt = getattr(app, "vu_stop_event", None)
+    thr = getattr(app, "vu_thread", None)
+    if evt is not None:
+        evt.set()
+    if thr is not None and thr.is_alive():
+        thr.join(timeout=2.0)
+    print("VU meter stopped")
+    if hasattr(app, "active_processes"):
         app.active_processes['v'] = None
-        traceback.print_exc()
 
 def handle_intercom_command(app):
     """Handle intercom command."""
@@ -761,34 +835,12 @@ def handle_performance_monitor_command(app):
 
 def handle_configuration_command(app):
     """Handle configuration display command."""
-    
     try:
-        from .bmar_config import get_platform_config
-        
-        print("\nCurrent Configuration:\r")  # Added \r
-        print("-" * 50 + "\r")  # Added \r
-        print(f"Audio Device: {app.device_index}\r")  # Added \r
-        print(f"Sample Rate: {app.samplerate} Hz\r")  # Added \r
-        print(f"Block Size: {app.blocksize}\r")  # Added \r
-        print("Channels: 1 (mono)\r")  # Fixed syntax and added \r
-        print(f"Max File Size: {app.max_file_size_mb} MB\r")  # Added \r
-        print(f"Recording Directory: {app.recording_dir}\r")  # Added \r
-        print(f"Today's Directory: {app.today_dir}\r")  # Added \r
-        
-        # Platform-specific info
-        platform_config = get_platform_config()
-        print(f"\nPlatform: {platform_config['name']}\r")  # Added \r
-        
-        # Buffer info
-        if hasattr(app, 'circular_buffer') and app.circular_buffer is not None:
-            buffer_size_mb = len(app.circular_buffer) * 4 / (1024 * 1024)  # 4 bytes per float32
-            print(f"\nBuffer Size: {buffer_size_mb:.1f} MB\r")  # Added \r
-            print(f"Buffer Duration: {len(app.circular_buffer) / app.samplerate:.1f} seconds\r")  # Added \r
-        
-        print("-" * 50 + "\r")  # Added \r
-        
-    except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
-        print(f"Configuration display error: {e}\r")  # Added \r
+        # Use the unified, config-aware printer
+        show_configuration(app)
+    except (RuntimeError, OSError, ValueError, Exception) as e:  # noqa: BLE001
+        print(f"Configuration display error: {e}\r")
+        traceback.print_exc()
 
 def handle_continuous_performance_monitor_command(app):
     """Handle continuous performance monitor command (uppercase P)."""
@@ -1018,7 +1070,7 @@ def start_fft_analysis(app):
         process.start()
         print(f"FFT analysis started (PID: {process.pid})\r")
         
-    except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
+    except (RuntimeError, OSError, ValueError) as e:
         print(f"Error starting FFT analysis: {e}\r")
         traceback.print_exc()
 
@@ -1094,3 +1146,52 @@ def handle_stop_monitoring_command(app):
     except (RuntimeError, OSError, ValueError) as e:  # noqa: BLE001
         print(f"Stop monitoring error: {e}\r")
         logging.error("Stop monitoring error: %s", e)
+
+def _compute_configured_dirs():
+    """
+    Build the configured (target) directories from bmar_config and platform info.
+    Returns a dict with raw, monitor, plots directory paths for today's date.
+    """
+    cfg = default_config()
+    plat = get_platform_audio_config(None, cfg)
+    # Base: <drive>/<path>/<LOCATION>/<HIVE>/audio
+    base = Path(plat["data_drive"]) / plat["data_path"] / cfg.LOCATION_ID / cfg.HIVE_ID / "audio"
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    return {
+        "raw": base / "raw" / today,
+        "monitor": base / "monitor" / today,
+        "plots": base / "plots" / today,
+    }
+
+def show_configuration(app):
+    """
+    Print a concise configuration summary, including both active and configured dirs.
+    """
+    # Active (current runtime) values
+    active_recording_dir = getattr(app, "recording_dir", None)
+    active_today_dir = getattr(app, "today_dir", None)
+    device_index = getattr(app, "device_index", None)
+    samplerate = getattr(app, "samplerate", None)
+    blocksize = getattr(app, "blocksize", None)
+    channels = getattr(app, "channels", None)
+    max_file_size_mb = getattr(app, "max_file_size_mb", None)
+
+    # Configured (target) directories
+    cfg_dirs = _compute_configured_dirs()
+
+    print("Current Configuration:")
+    print("--------------------------------------------------")
+    print(f"Audio Device: {device_index if device_index is not None else 'N/A'}")
+    print(f"Sample Rate: {samplerate if samplerate is not None else 'N/A'} Hz")
+    print(f"Block Size: {blocksize if blocksize is not None else 'N/A'}")
+    ch_label = f"{channels} (mono)" if channels == 1 else (f"{channels} ch" if channels else "N/A")
+    print(f"Channels: {ch_label}")
+    if max_file_size_mb is not None:
+        print(f"Max File Size: {max_file_size_mb} MB")
+    # Active (in-use) dirs
+    print(f"Active Recording Directory: {active_recording_dir or 'N/A'}")
+    print(f"Active Today's Directory:   {active_today_dir or 'N/A'}")
+    # Configured (target) dirs from config/platform
+    print(f"Configured Recording Dir (raw):    {cfg_dirs['raw']}")
+    print(f"Configured Monitor Dir:            {cfg_dirs['monitor']}")
+    print(f"Configured Plots Dir:              {cfg_dirs['plots']}")
