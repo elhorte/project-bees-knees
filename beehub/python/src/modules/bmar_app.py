@@ -112,7 +112,7 @@ class BmarApp:
         self.channels = 1
         self._bit_depth = 16
         # Use float32 internally for buffers/processing; saving handles bit depth separately
-        self._dtype = np.float32
+        self._dtype = np.int16
         self.blocksize = 1024
         # Default output device index for playback (intercom)
         self.output_device_index = None
@@ -310,7 +310,7 @@ class BmarApp:
 
         try:
             # Validate requested rate against the device
-            sd.check_input_settings(device=idx, samplerate=desired_rate, channels=desired_ch, dtype='float32')
+            sd.check_input_settings(device=idx, samplerate=desired_rate, channels=desired_ch, dtype='int16')
         except Exception as e:
             # Fallback to device default rate when requested is unsupported
             try:
@@ -362,10 +362,9 @@ class BmarApp:
 
     def setup_audio_circular_buffer(self):
         """Set up the circular buffer for audio recording."""
-        # Calculate buffer size and initialize buffer
-        # Use the actual, effective samplerate and channel count selected at init
+        # Use actual selected samplerate/channels
         self.buffer_size = int(self.BUFFER_SECONDS * int(self.samplerate))
-        self.buffer = np.zeros((self.buffer_size, int(self.sound_in_chs)), dtype=self._dtype)
+        self.buffer = np.zeros((self.buffer_size, int(self.sound_in_chs)), dtype=np.int16)
         self.buffer_index = 0
         self.buffer_wrap = False
         self.blocksize = 8196

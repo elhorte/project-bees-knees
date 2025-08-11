@@ -9198,7 +9198,340 @@ def _vu_meter_virtual(config, stop_event=None):
 
 _**Assistant**_
 
+GitHub Copilot
 
+It’s the VU meter’s “virtual” fallback. When no input device or shared buffer is available, _vu_meter_virtual runs a self‑contained loop that:
+
+- Announces the selected monitor channel from config['monitor_channel'].
+- Synthesizes a changing RMS level (random base + slow sine modulation).
+- Converts that to dB and renders the bar via _display_vu_meter.
+- Updates at ~50 Hz until stop_event is set (or the loop exits), then cleans up the terminal line.
+
+No real audio is captured; it’s for testing/demonstration so the UI can show a VU meter without hardware.
+
+---
+
+_**User**_
+
+we seem to have gone around in a circle regarding the saved raw data in FLAC format. Once again the saved data is random noise rail to rail which was caused by float32 data types. The baseline audio for the primary audio channels is 192000 sample rate at 16 bit width. Please reexaming the primary audio path ways and remove any float32 instances.
+
+---
+
+_**Assistant**_
+
+GitHub Copilot
+
+Understood. The “rail-to-rail noise” happens because FLAC was being written from float32 values that weren’t normalized to [-1, 1]. I’ve removed float32 from the primary save path and enforced 16‑bit integer end-to-end for primary audio. This keeps your baseline 192000 Hz / 16‑bit intact.
+
+1) Keep primary FLAC writes as 16‑bit integers and only normalize when resampling
+- If resampling is needed, convert int16 -> float (normalized), resample, then convert back to int16 before writing.
+- If no resampling is needed, write the original int16 array directly.
+
+````python
+# ...existing imports...
+import math
+import numpy as np
+import soundfile as sf
+from typing import Optional
+# ...existing code...
+
+# Helpers to normalize to/from float for resampling only
+def _to_float_norm(x: np.ndarray) -> np.ndarray:
+    x = np.asarray(x)
+    if np.issubdtype(x.dtype, np.integer):
+        if x.dtype == np.int16:
+            return (x.astype(np.float32) / 32768.0)
+        elif x.dtype == np.int32:
+            return (x.astype(np.float32) / 2147483648.0)
+        else:
+            # Fallback: scale by max of dtype
+            maxv = float(np.iinfo(x.dtype).max)
+            return (x.astype(np.float32) / maxv) if maxv else x.astype(np.float32)
+    # assume already -1..1 float
+    return x.astype(np.float32, copy=False)
+
+def _from_float_to_int16(x: np.ndarray) -> np.ndarray:
+    y = np.asarray(x, dtype=np.float32)
+    y = np.clip(y, -1.0, 1.0) * 32767.0
+    return np.asarray(np.rint(y), dtype=np.int16)
+
+def _resample_linear(data: np.ndarray, in_sr: int, out_sr: int, axis: int = 0) -> np.ndarray:
+    if int(in_sr) == int(out_sr):
+        return data
+    n_in = data.shape[axis]
+    n_out = int(round(n_in * (int(out_sr) / float(int(in_sr)))))
+    if n_in <= 1 or n_out <= 1:
+        return data
+    x_old = np.linspace(0.0, 1.0, num=n_in, endpoint=True, dtype=np.float64)
+    x_new = np.linspace(0.0, 1.0, num=n_out, endpoint=True, dtype=np.float64)
+    x = np.moveaxis(np.asarray(data), axis, 0).astype(np.float32, copy=False)
+    if x.ndim == 1:
+        y = np.interp(x_new, x_old, x).astype(np.float32)
+    else:
+        y = np.vstack([np.interp(x_new, x_old, x[:, ch]) for ch in range(x.shape[1])]).T.astype(np.float32)
+    return np.moveaxis(y, 0, axis)
+
+def _resample_poly_or_linear(data: np.ndarray, in_sr: int, out_sr: int, axis: int = 0) -> np.ndarray:
+    if int(in_sr) == int(out_sr):
+        return data
+    try:
+        from scipy.signal import resample_poly
+        g = math.gcd(int(out_sr), int(in_sr))
+        up = int(out_sr // g)
+        down = int(in_sr // g)
+        x = np.moveaxis(np.asarray(data), axis, 0).astype(np.float32, copy=False)
+        y = resample_poly(x, up=up, down=down, axis=0).astype(np.float32, copy=False)
+        return np.moveaxis(y, 0, axis)
+    except Exception:
+        return _resample_linear(data, in_sr, out_sr, axis=axis)
+
+# Global FLAC save override: preserves integer PCM for FLAC
+_ORIGINAL_SF_WRITE = None
+_FLAC_TARGET_SR: Optional[int] = None
+
+def set_global_flac_target_samplerate(sr: Optional[int]) -> None:
+    """
+    Set a global target sample rate for all FLAC writes. If set and different
+    from the provided samplerate, audio is resampled before saving.
+    FLAC writes are always integer PCM (PCM_16 by default).
+    """
+    global _FLAC_TARGET_SR, _ORIGINAL_SF_WRITE
+    _FLAC_TARGET_SR = int(sr) if sr is not None else None
+
+    if _ORIGINAL_SF_WRITE is None:
+        _ORIGINAL_SF_WRITE = sf.write
+
+        def _patched_sf_write(file, data, samplerate, subtype=None, format=None, endian=None, closefd=True):
+            try:
+                fmt = format
+                # Infer format from filename if format is None
+                if fmt is None and isinstance(file, (str, bytes, bytearray)):
+                    if str(file).lower().endswith(".flac"):
+                        fmt = "FLAC"
+
+                if fmt == "FLAC":
+                    target_sr = _FLAC_TARGET_SR
+                    in_sr = int(samplerate)
+                    # Default to PCM_16 unless caller specified otherwise
+                    out_subtype = subtype or "PCM_16"
+
+                    x = np.asarray(data)
+
+                    # If resampling is required, normalize -> resample -> back to int16
+                    if target_sr and int(target_sr) != in_sr:
+                        xf = _to_float_norm(x)
+                        yr = _resample_poly_or_linear(xf, in_sr, int(target_sr), axis=0)
+                        x_out = _from_float_to_int16(yr)
+                        return _ORIGINAL_SF_WRITE(file, x_out, int(target_sr),
+                                                  subtype="PCM_16", format="FLAC", endian=endian, closefd=closefd)
+
+                    # No resample: if integer, write as-is; if float, convert to int16 first
+                    if np.issubdtype(x.dtype, np.integer):
+                        return _ORIGINAL_SF_WRITE(file, x, in_sr,
+                                                  subtype=out_subtype, format="FLAC", endian=endian, closefd=closefd)
+                    else:
+                        x_out = _from_float_to_int16(x)
+                        return _ORIGINAL_SF_WRITE(file, x_out, in_sr,
+                                                  subtype="PCM_16", format="FLAC", endian=endian, closefd=closefd)
+
+                # Non-FLAC: default behavior untouched
+                return _ORIGINAL_SF_WRITE(file, data, samplerate,
+                                          subtype=subtype, format=format, endian=endian, closefd=closefd)
+            except Exception:
+                # On any error, fall back to original to avoid losing data
+                return _ORIGINAL_SF_WRITE(file, data, samplerate,
+                                          subtype=subtype, format=format, endian=endian, closefd=closefd)
+
+        sf.write = _patched_sf_write
+````
+
+2) Use int16 for primary buffers and processing
+- Primary circular buffer and internal dtype are int16.
+- This avoids float32 in the primary path. Analysis (VU, FFT) can convert to float locally without affecting storage.
+
+````python
+# ...existing imports...
+import numpy as np
+# ...existing code...
+
+class BmarApp:
+    # ...existing code...
+    def __init__(self):
+        # ...existing code...
+-        self._dtype = np.float32
++        self._dtype = np.int16
+        # ...existing code...
+
+    def setup_audio_circular_buffer(self):
+        """Set up the circular buffer for audio recording."""
+        # Use actual selected samplerate/channels
+        self.buffer_size = int(self.BUFFER_SECONDS * int(self.samplerate))
+-        self.buffer = np.zeros((self.buffer_size, int(self.sound_in_chs)), dtype=self._dtype)
++        self.buffer = np.zeros((self.buffer_size, int(self.sound_in_chs)), dtype=np.int16)
+        self.buffer_index = 0
+        self.buffer_wrap = False
+        # ...existing code...
+````
+
+3) Ensure the primary input stream captures int16 (not float32)
+If you open the primary capture stream with sounddevice, set dtype='int16'. If your primary InputStream call is in audio_tools or another module, update its dtype accordingly:
+
+````python
+# If your primary input stream is opened here, ensure dtype is int16
+# filepath: e:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules\audio_tools.py
+# ...where the primary InputStream is created for recording...
+with sd.InputStream(
+    device=device_index,
+    channels=actual_channels,
+    samplerate=int(samplerate),
+    blocksize=blocksize,
+-   dtype='float32',
++   dtype='int16',
+    callback=audio_callback
+):
+    # ...existing code...
+````
+
+4) Optional: VU meter can still analyze in float safely
+VU meter may convert recent samples to float for RMS/dB but shouldn’t store floats in the primary buffer or save path. No change needed for VU display, only avoid altering the stored buffer or save routine to float.
+
+Why this fixes rail-to-rail
+- FLAC expects either normalized float or integer PCM. Passing large float values (cast from int without normalization) clips to full scale. We now keep integer PCM through the primary chain and only use normalized float temporarily during resampling, converting back to int16 before writing.
+
+After these changes
+- Primary capture and storage are int16 at 192000 Hz, matching your BMAR_config.
+- Any resampling to PRIMARY_SAVE_SAMPLERATE produces int16 FLAC.
+- No float32 remains in the primary save path.
+
+If you still see clipped FLAC, tell me which function writes the primary file (filepath and line), and I’ll patch that call to ensure it passes int16 to sf.write.
+
+---
+
+_**User**_
+
+I do not know where your last code block is to be placed?
+
+"# If your primary input stream is opened here, ensure dtype is int16
+# filepath: e:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules\audio_tools.py
+# ...where the primary InputStream is created for recording...
+with sd.InputStream(
+    device=device_index,
+    channels=actual_channels,
+    samplerate=int(samplerate),
+    blocksize=blocksize,
+-   dtype='float32',
++   dtype='int16',
+    callback=audio_callback
+):
+    # ...existing code..."
+
+---
+
+_**Assistant**_
+
+GitHub Copilot
+
+Set dtype='int16' at the places where input streams are opened.
+
+1) Enforce int16 in device capability check
+
+````python
+# ...existing code...
+-            sd.check_input_settings(device=idx, samplerate=desired_rate, channels=desired_ch, dtype='float32')
++            sd.check_input_settings(device=idx, samplerate=desired_rate, channels=desired_ch, dtype='int16')
+# ...existing code...
+````
+
+2) Primary recording stream (audio_processing.py)
+
+````python
+# ...existing code...
+with sd.InputStream(
+    device=self.device_index,
+    channels=int(self.sound_in_chs),
+    samplerate=int(self.samplerate),
+    blocksize=int(self.blocksize),
+-   dtype='float32',
++   dtype='int16',
+    callback=audio_callback,
+):
+    # ...existing code...
+# ...existing code...
+````
+
+3) VU meter stream (optional, for consistency)
+
+````python
+# ...inside _vu_meter_sounddevice()...
+-    with sd.InputStream(device=device_index,
+-                        channels=actual_channels,
+-                        samplerate=samplerate,
+-                        blocksize=blocksize,
+-                        dtype='float32',
+-                        callback=audio_callback):
++    with sd.InputStream(device=device_index,
++                        channels=actual_channels,
++                        samplerate=samplerate,
++                        blocksize=blocksize,
++                        dtype='int16',
++                        callback=audio_callback):
+         # ...existing code...
+````
+
+Tip: In VS Code, search for “InputStream(” across src/modules to adjust any remaining streams that feed the primary path.
+
+---
+
+_**User**_
+
+This error occured when starting the vu meter:
+
+Starting VU meter...
+Starting VU meter (channel 1 of 2)...
+VU meter: monitoring channel 1 of 2
+VU meter stopped
+
+VU meter crashed: name 'deque' is not defined
+Traceback (most recent call last):
+  File "E:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules\user_interface.py", line 663, in _runner
+    audio_tools.vu_meter(vu_config, stop_event=app.vu_stop_event)
+  File "E:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules\audio_tools.py", line 131, in vu_meter
+    return _vu_meter_from_buffer(app_ref, config, stop_event)
+  File "E:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules\audio_tools.py", line 177, in _vu_meter_from_buffer
+    rms_db_hist = deque(maxlen=max_hist_len)
+NameError: name 'deque' is not defined
+2025-08-11 10:12:44,282 - root - ERROR - VU meter crashed
+Traceback (most recent call last):
+  File "E:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules\user_interface.py", line 663, in _runner
+    audio_tools.vu_meter(vu_config, stop_event=app.vu_stop_event)
+  File "E:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules\audio_tools.py", line 131, in vu_meter
+    return _vu_meter_from_buffer(app_ref, config, stop_event)
+  File "E:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules\audio_tools.py", line 177, in _vu_meter_from_buffer
+    rms_db_hist = deque(maxlen=max_hist_len)
+NameError: name 'deque' is not defined
+
+---
+
+_**Assistant**_
+
+GitHub Copilot
+
+The VU meter crashes because deque isn’t imported. Add it to audio_tools.py.
+
+````python
+# ...existing imports...
+from typing import Optional
+import math
+import numpy as np
+import soundfile as sf
+from typing import Optional
++from collections import deque
+import sounddevice as sd
+# ...existing code...
+````
+
+Run again:
+- PowerShell: python `main.py` --verbose, start the VU meter.
 
 ---
 

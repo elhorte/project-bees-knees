@@ -7,8 +7,8 @@ from typing import Optional
 import math
 import numpy as np
 import soundfile as sf
-from collections import deque
 from typing import Optional
+from collections import deque
 import sounddevice as sd
 import time
 import sys
@@ -19,6 +19,26 @@ try:
 except Exception:
     msvcrt = None
 import random
+
+# Helpers to normalize to/from float for resampling only
+def _to_float_norm(x: np.ndarray) -> np.ndarray:
+    x = np.asarray(x)
+    if np.issubdtype(x.dtype, np.integer):
+        if x.dtype == np.int16:
+            return (x.astype(np.float32) / 32768.0)
+        elif x.dtype == np.int32:
+            return (x.astype(np.float32) / 2147483648.0)
+        else:
+            # Fallback: scale by max of dtype
+            maxv = float(np.iinfo(x.dtype).max)
+            return (x.astype(np.float32) / maxv) if maxv else x.astype(np.float32)
+    # assume already -1..1 float
+    return x.astype(np.float32, copy=False)
+
+def _from_float_to_int16(x: np.ndarray) -> np.ndarray:
+    y = np.asarray(x, dtype=np.float32)
+    y = np.clip(y, -1.0, 1.0) * 32767.0
+    return np.asarray(np.rint(y), dtype=np.int16)
 
 # High-quality resampling helper (already used for FLAC); keep near top-level
 def _resample_linear(data: np.ndarray, in_sr: int, out_sr: int, axis: int = 0) -> np.ndarray:
@@ -357,7 +377,7 @@ def _vu_meter_sounddevice(config, stop_event=None):
             channels=actual_channels,
             samplerate=int(samplerate),
             blocksize=blocksize,
-            dtype='float32',
+            dtype='int16',
             callback=audio_callback
         ):
             try:
@@ -995,7 +1015,7 @@ def _vu_meter_dummy():
     """Removed stray token fix: placeholder to avoid syntax errors."""
     return None
 
-# Global FLAC save override (monkey-patch sf.write once)
+# Global FLAC save override: preserves integer PCM for FLAC
 _ORIGINAL_SF_WRITE = None
 _FLAC_TARGET_SR: Optional[int] = None
 
@@ -1003,6 +1023,7 @@ def set_global_flac_target_samplerate(sr: Optional[int]) -> None:
     """
     Set a global target sample rate for all FLAC writes. If set and different
     from the provided samplerate, audio is resampled before saving.
+    FLAC writes are always integer PCM (PCM_16 by default).
     """
     global _FLAC_TARGET_SR, _ORIGINAL_SF_WRITE
     _FLAC_TARGET_SR = int(sr) if sr is not None else None
@@ -1013,28 +1034,41 @@ def set_global_flac_target_samplerate(sr: Optional[int]) -> None:
         def _patched_sf_write(file, data, samplerate, subtype=None, format=None, endian=None, closefd=True):
             try:
                 fmt = format
-                # Infer format from filename when not provided
+                # Infer format from filename if format is None
                 if fmt is None and isinstance(file, (str, bytes, bytearray)):
                     if str(file).lower().endswith(".flac"):
                         fmt = "FLAC"
 
-                # Only intervene for FLAC when a global target is set
-                if fmt == "FLAC" and _FLAC_TARGET_SR and int(samplerate) != int(_FLAC_TARGET_SR):
-                    x = np.asarray(data)
-                    # Resample to target SR (axis=0 => frames)
-                    x = _resample_poly_or_linear(x, int(samplerate), int(_FLAC_TARGET_SR), axis=0)
-                    # FLAC happily takes float32
-                    if np.issubdtype(x.dtype, np.integer):
-                        x = x.astype(np.float32)
-                    x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-                    return _ORIGINAL_SF_WRITE(file, x, int(_FLAC_TARGET_SR),
-                                              subtype=subtype, format="FLAC", endian=endian, closefd=closefd)
+                if fmt == "FLAC":
+                    target_sr = _FLAC_TARGET_SR
+                    in_sr = int(samplerate)
+                    # Default to PCM_16 unless caller specified otherwise
+                    out_subtype = subtype or "PCM_16"
 
-                # Default behavior
+                    x = np.asarray(data)
+
+                    # If resampling is required, normalize -> resample -> back to int16
+                    if target_sr and int(target_sr) != in_sr:
+                        xf = _to_float_norm(x)
+                        yr = _resample_poly_or_linear(xf, in_sr, int(target_sr), axis=0)
+                        x_out = _from_float_to_int16(yr)
+                        return _ORIGINAL_SF_WRITE(file, x_out, int(target_sr),
+                                                  subtype="PCM_16", format="FLAC", endian=endian, closefd=closefd)
+
+                    # No resample: if integer, write as-is; if float, convert to int16 first
+                    if np.issubdtype(x.dtype, np.integer):
+                        return _ORIGINAL_SF_WRITE(file, x, in_sr,
+                                                  subtype=out_subtype, format="FLAC", endian=endian, closefd=closefd)
+                    else:
+                        x_out = _from_float_to_int16(x)
+                        return _ORIGINAL_SF_WRITE(file, x_out, in_sr,
+                                                  subtype="PCM_16", format="FLAC", endian=endian, closefd=closefd)
+
+                # Non-FLAC: default behavior untouched
                 return _ORIGINAL_SF_WRITE(file, data, samplerate,
                                           subtype=subtype, format=format, endian=endian, closefd=closefd)
             except Exception:
-                # Never block saving; fall back to original
+                # On any error, fall back to original to avoid losing data
                 return _ORIGINAL_SF_WRITE(file, data, samplerate,
                                           subtype=subtype, format=format, endian=endian, closefd=closefd)
 

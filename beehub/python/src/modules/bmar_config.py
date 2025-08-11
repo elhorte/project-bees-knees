@@ -21,7 +21,7 @@ class BMARConfig:
     MODE_FFT_PERIODIC_RECORD: bool = True
 
     # Circular buffer
-    BUFFER_SECONDS: int = 900
+    BUFFER_SECONDS: int = 600
 
     # Recording windows and parameters
     AUDIO_MONITOR_START: Optional[datetime.time] = None
