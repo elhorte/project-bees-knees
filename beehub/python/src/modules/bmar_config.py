@@ -29,7 +29,7 @@ MODE_EVENT = False                              # event recording
 MODE_FFT_PERIODIC_RECORD = True                 # record fft periodically
 
 # circular buffer size
-BUFFER_SECONDS = 120                            # time length of circular buffer
+BUFFER_SECONDS = 900                            # time length of circular buffer
 
 # recording types controls:
 AUDIO_MONITOR_START = None  # datetime.time(4, 0, 0)  # None = continuous
