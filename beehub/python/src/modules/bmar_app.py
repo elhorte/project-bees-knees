@@ -3,91 +3,27 @@ BMAR Application Module
 Main application class that coordinates all modules and manages the application state.
 """
 
-import multiprocessing
-import threading
-import sys
 import logging
 import os
-import numpy as np
+import sys
 import datetime
+import threading
+import multiprocessing
+import numpy as np
 import sounddevice as sd
-from .audio_tools import set_global_flac_target_samplerate
 from collections import deque
 
-# Import core modules that should always be present
-from .bmar_config import *
+from .bmar_config import default_config, get_platform_audio_config, wire_today_dirs
 from .platform_manager import PlatformManager
-
-# Try to import other modules with fallbacks
-try:
-    from .file_utils import setup_directories, get_today_dir
-except ImportError:
-    logging.warning("file_utils module not available to BMAR_app")
-
-try:
-    from .audio_devices import get_audio_device_config, find_device_by_config
-except ImportError:
-    logging.warning("audio_devices module not available")
-
-try:
-    from .user_interface import keyboard_listener, cleanup_ui, background_keyboard_monitor
-except ImportError:
-    logging.warning("user_interface module not available")
-
-# Prefer package-qualified (relative) import; warn only if truly missing
-try:
-    from .file_utils import check_and_create_date_folders
-except ImportError:
-    logging.warning("file_utils module not available to BMAR_app")
-    check_and_create_date_folders = None
-except Exception as e:
-    logging.exception("BMAR_app failed importing file_utils due to an internal error")
-    raise
-
-# Import bmar_config here for use in BmarApp
-from . import bmar_config as _cfg_mod
-
-try:
-    from .file_utils import setup_directories, get_today_dir, check_and_create_date_folders
-except ImportError:
-    logging.warning("file_utils module not available to BMAR_app")
-    setup_directories = get_today_dir = check_and_create_date_folders = None
-
-# Import core modules that should always be present
-from .bmar_config import *
-from .platform_manager import PlatformManager
-
-# Try to import other modules with fallbacks
-try:
-    from .file_utils import setup_directories, get_today_dir
-except ImportError:
-    logging.warning("file_utils module not available to BMAR_app")
-
-try:
-    from .audio_devices import get_audio_device_config, find_device_by_config
-except ImportError:
-    logging.warning("audio_devices module not available")
-
-try:
-    from .user_interface import keyboard_listener, cleanup_ui, background_keyboard_monitor
-except ImportError:
-    logging.warning("user_interface module not available")
-
-# Prefer package-qualified (relative) import; warn only if truly missing
-try:
-    from .file_utils import check_and_create_date_folders
-except ImportError:
-    logging.warning("file_utils module not available to BMAR_app")
-    check_and_create_date_folders = None
-except Exception as e:
-    logging.exception("BMAR_app failed importing file_utils due to an internal error")
-    raise
-
-# Import bmar_config here for use in BmarApp
-from . import bmar_config as _cfg_mod
-
 from .audio_devices import find_device_by_config, get_audio_device_config
-from .audio_tools import save_flac_with_target_sr
+from .audio_tools import set_global_flac_target_samplerate, save_flac_with_target_sr
+from .user_interface import keyboard_listener, cleanup_ui, background_keyboard_monitor
+
+# Optional; keep None if unavailable
+try:
+    from .file_utils import check_and_create_date_folders  # not required at init
+except Exception:
+    check_and_create_date_folders = None
 
 class BmarApp:
     """Main BMAR Application class."""
@@ -154,12 +90,11 @@ class BmarApp:
         # Initialize platform manager
         self.platform_manager = PlatformManager()
 
-        # Ensure a config module is always available early
-        self.config = _cfg_mod
+        # Use a BMARConfig dataclass instance (no module globals)
+        self.config = default_config()
 
     def initialize(self):
         """Initialize the application components."""
-        
         try:
             print("Initializing BMAR...")
             
@@ -179,74 +114,74 @@ class BmarApp:
             os_info = self.platform_manager.get_os_info()
             self.os_info = f"{os_info['platform']}"
             
-            # Setup directories (with fallback if module missing)
-            try:
-                from .directory_utils import setup_directories, get_today_dir
-                self.recording_dir = setup_directories()
-                self.today_dir = get_today_dir(self.recording_dir)
-            except ImportError:
-                logging.warning("Directory utils module not available, using fallback")
-                self.setup_basic_directories()
-            
-            print(f"Recording directory: {self.recording_dir}")
-            print(f"Today's directory: {self.today_dir}")
-            
             # Load audio-related settings from BMAR_config BEFORE initializing audio
-            # so the requested samplerate comes from config (e.g., 192000), not defaults.
             self.PRIMARY_IN_SAMPLERATE = int(getattr(self.config, 'PRIMARY_IN_SAMPLERATE', 48000))
             self.PRIMARY_BITDEPTH = int(getattr(self.config, 'PRIMARY_BITDEPTH', 16))
             self.PRIMARY_SAVE_SAMPLERATE = getattr(self.config, 'PRIMARY_SAVE_SAMPLERATE', None)
+
             # Preferred input channels from config (used as desired_ch)
             try:
-                self.SOUND_IN_CHS = int(getattr(self.config, 'SOUND_IN_CHS', 1))
+                self.channels = int(getattr(self.config, 'SOUND_IN_CHS', 1))
+                self.sound_in_chs = self.channels
             except Exception:
-                self.SOUND_IN_CHS = 1
+                self.channels = self.sound_in_chs = 1
+
             # Ensure all FLAC writes honor PRIMARY_SAVE_SAMPLERATE
             set_global_flac_target_samplerate(self.PRIMARY_SAVE_SAMPLERATE)
 
             # Initialize audio (config is already set on self)
             audio_success = self.initialize_audio_with_fallback()
             if not audio_success:
-                raise RuntimeError("No suitable audio device found")
-            
+                logging.error("Failed to initialize audio")
+                return False
+
             # Initialize channel to monitor and default output device from config
             try:
                 self.monitor_channel = int(getattr(self.config, 'MONITOR_CH', 0))
             except Exception:
                 self.monitor_channel = 0
             try:
-                self.output_device_index = getattr(self.config, 'SOUND_OUT_ID_DEFAULT', None)
+                self.output_device_index = int(getattr(self.config, 'SOUND_OUT_ID_DEFAULT', 0))
             except Exception:
                 self.output_device_index = None
-            
+
             # Set up platform-specific directory configuration
-            from .bmar_config import get_platform_audio_config
-            platform_config = get_platform_audio_config(self.platform_manager, _cfg_mod)
+            platform_config = get_platform_audio_config(self.platform_manager, self.config)
 
             # Add platform-specific attributes needed by file_utils
             self.data_drive = platform_config['data_drive']
             self.data_path = platform_config['data_path']
             self.folders = platform_config['folders']
-            
+
+            # Create today's directories and wire them into config and globals
+            try:
+                self.config, dir_info = wire_today_dirs(self.config)
+                # Optional: keep for convenience
+                self.recording_dir = str(self.config.PRIMARY_DIRECTORY)
+                self.today_dir = str(self.config.PRIMARY_DIRECTORY)
+                logging.info("Wired directories (raw/monitor/plots): %s", dir_info)
+            except Exception as e:
+                logging.warning("Failed to wire today dirs via bmar_config; falling back: %s", e)
+                self.setup_basic_directories()
+
             # Other timing/buffer settings
-            self.BUFFER_SECONDS = getattr(_cfg_mod, 'BUFFER_SECONDS', 300)
-            
+            self.BUFFER_SECONDS = getattr(self.config, 'BUFFER_SECONDS', 300)
+
             # Initialize circular buffer if audio recording will be used
             if self.should_start_auto_recording():
                 self.setup_audio_circular_buffer()
-            
-            # Initialize circular buffer
+
+            # Initialize circular buffer (legacy int16 shared buffer for other uses)
             buffer_duration = 300  # 5 minutes default
             buffer_size = int(self.samplerate * buffer_duration)
-            self.circular_buffer = multiprocessing.Array('f', buffer_size)
-            
+            self.circular_buffer = multiprocessing.Array('h', buffer_size)  # int16
             print(f"Circular buffer: {buffer_duration}s ({buffer_size} samples)")
-            
+
             # Initialize process tracking
             command_keys = ['r', 's', 'o', 't', 'v', 'i', 'p', 'P']
             for key in command_keys:
                 self.active_processes[key] = None
-            
+
             print("BMAR initialization completed successfully")
             return True
             
@@ -262,7 +197,7 @@ class BmarApp:
         """
         configured_name = None
         try:
-            configured_name = _cfg_mod.DEVICE_NAME_FOR_PLATFORM()
+            configured_name = getattr(self.config, "DEVICE_NAME_FOR_PLATFORM", lambda: None)()
         except Exception:
             configured_name = None
 
@@ -352,13 +287,12 @@ class BmarApp:
 
     def should_start_auto_recording(self):
         """Check if automatic recording should be started based on config."""
-        try:
-            from . import bmar_config
-            return (getattr(bmar_config, 'MODE_AUDIO_MONITOR', False) or 
-                    getattr(bmar_config, 'MODE_PERIOD', False) or 
-                    getattr(bmar_config, 'MODE_EVENT', False))
-        except ImportError:
+        c = getattr(self, "config", None)
+        if not c:
             return False
+        return bool(getattr(c, 'MODE_AUDIO_MONITOR', False) or
+                    getattr(c, 'MODE_PERIOD', False) or
+                    getattr(c, 'MODE_EVENT', False))
 
     def setup_audio_circular_buffer(self):
         """Set up the circular buffer for audio recording."""

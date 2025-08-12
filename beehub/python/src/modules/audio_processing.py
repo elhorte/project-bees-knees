@@ -5,9 +5,9 @@ Handles audio streaming, buffer management, and core audio processing operations
 
 import logging
 import sys, time, threading, os, datetime, platform
-import numpy as np
 import sounddevice as sd
 import soundfile as sf
+import numpy as np
 from .audio_conversion import ensure_pcm16, pcm_to_mp3_write, downsample_audio
 from .system_utils import interruptable_sleep
 from .directory_utils import (

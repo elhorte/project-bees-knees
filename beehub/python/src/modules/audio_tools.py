@@ -6,10 +6,9 @@ Contains VU meter, intercom monitoring, and audio diagnostic utilities.
 from typing import Optional
 import math
 import numpy as np
-import soundfile as sf
-from typing import Optional
 from collections import deque
 import sounddevice as sd
+import soundfile as sf
 import time
 import sys
 import traceback
@@ -19,6 +18,8 @@ try:
 except Exception:
     msvcrt = None
 import random
+from .bmar_config import default_config, wire_today_dirs
+from pathlib import Path
 
 # Helpers to normalize to/from float for resampling only
 def _to_float_norm(x: np.ndarray) -> np.ndarray:
@@ -40,7 +41,7 @@ def _from_float_to_int16(x: np.ndarray) -> np.ndarray:
     y = np.clip(y, -1.0, 1.0) * 32767.0
     return np.asarray(np.rint(y), dtype=np.int16)
 
-# High-quality resampling helper (already used for FLAC); keep near top-level
+# Resampling helpers used by intercom/VU
 def _resample_linear(data: np.ndarray, in_sr: int, out_sr: int, axis: int = 0) -> np.ndarray:
     if int(in_sr) == int(out_sr):
         return data
@@ -63,25 +64,20 @@ def _resample_poly_or_linear(data: np.ndarray, in_sr: int, out_sr: int, axis: in
     try:
         from scipy.signal import resample_poly
         g = math.gcd(int(out_sr), int(in_sr))
-        up = int(out_sr // g)
-        down = int(in_sr // g)
+        up = int(out_sr // g); down = int(in_sr // g)
         x = np.moveaxis(np.asarray(data), axis, 0).astype(np.float32, copy=False)
         y = resample_poly(x, up=up, down=down, axis=0).astype(np.float32, copy=False)
         return np.moveaxis(y, 0, axis)
     except Exception:
         return _resample_linear(data, in_sr, out_sr, axis=axis)
 
-# Public helpers used by intercom code
 def resample_audio(data: np.ndarray, in_sr: int, out_sr: int) -> np.ndarray:
-    """Resample audio frames along time axis (axis=0)."""
     return _resample_poly_or_linear(np.asarray(data), int(in_sr), int(out_sr), axis=0)
 
 def downsample_audio(data: np.ndarray, in_sr: int, out_sr: int) -> np.ndarray:
-    """Alias for resample_audio; kept for backward compatibility."""
     return resample_audio(data, in_sr, out_sr)
 
 def upsample_audio(data: np.ndarray, in_sr: int, out_sr: int) -> np.ndarray:
-    """Alias for resample_audio; kept for backward compatibility."""
     return resample_audio(data, in_sr, out_sr)
 
 def save_flac_with_target_sr(path: str,
@@ -108,6 +104,25 @@ def save_flac_with_target_sr(path: str,
     x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
     sf.write(path, x, sr, format="FLAC", subtype=subtype)
 
+
+# Global config (ensure directories wired once on import)
+try:
+    _CFG = default_config()
+    _CFG, _DIRS = wire_today_dirs(_CFG)
+except Exception:
+    _CFG = default_config()
+
+# Use SAVE_HEADROOM_DB and PRIMARY_SAVE_SAMPLERATE for FLAC saves
+try:
+    from .audio_tools import set_global_flac_target_samplerate  # if declared elsewhere
+except Exception:
+    set_global_flac_target_samplerate = None
+
+if set_global_flac_target_samplerate:
+    try:
+        set_global_flac_target_samplerate(getattr(_CFG, "PRIMARY_SAVE_SAMPLERATE", None))
+    except Exception:
+        pass
 
 # Notes for VU meter tuning (config keys):
 # - vu_dynamic_range_db (default 40.0)
@@ -1038,23 +1053,19 @@ def set_global_flac_target_samplerate(sr: Optional[int]) -> None:
                 if fmt is None and isinstance(file, (str, bytes, bytearray)):
                     if str(file).lower().endswith(".flac"):
                         fmt = "FLAC"
-
                 if fmt == "FLAC":
                     target_sr = _FLAC_TARGET_SR
                     in_sr = int(samplerate)
                     # Default to PCM_16 unless caller specified otherwise
                     out_subtype = subtype or "PCM_16"
-
                     x = np.asarray(data)
-
                     # If resampling is required, normalize -> resample -> back to int16
                     if target_sr and int(target_sr) != in_sr:
                         xf = _to_float_norm(x)
                         yr = _resample_poly_or_linear(xf, in_sr, int(target_sr), axis=0)
                         x_out = _from_float_to_int16(yr)
                         return _ORIGINAL_SF_WRITE(file, x_out, int(target_sr),
-                                                  subtype="PCM_16", format="FLAC", endian=endian, closefd=closefd)
-
+                                                   subtype="PCM_16", format="FLAC", endian=endian, closefd=closefd)
                     # No resample: if integer, write as-is; if float, convert to int16 first
                     if np.issubdtype(x.dtype, np.integer):
                         return _ORIGINAL_SF_WRITE(file, x, in_sr,
@@ -1063,7 +1074,6 @@ def set_global_flac_target_samplerate(sr: Optional[int]) -> None:
                         x_out = _from_float_to_int16(x)
                         return _ORIGINAL_SF_WRITE(file, x_out, in_sr,
                                                   subtype="PCM_16", format="FLAC", endian=endian, closefd=closefd)
-
                 # Non-FLAC: default behavior untouched
                 return _ORIGINAL_SF_WRITE(file, data, samplerate,
                                           subtype=subtype, format=format, endian=endian, closefd=closefd)

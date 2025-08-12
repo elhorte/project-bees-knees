@@ -1,6 +1,7 @@
 import os
 import platform
 import logging
+from pathlib import Path
 import datetime
 
 """
@@ -55,42 +56,54 @@ def ensure_directories_exist(directories):
             logging.error("Failed to create directory '%s': %s", d, e)
     return success
 
-def check_and_create_date_folders(cfg):
+def check_and_create_date_folders(config=None):
     """
-    <platform-root>/<LOCATION_ID>/<HIVE_ID>/audio/{monitor,raw,plots}/YYYY-MM-DD
+    Create today's raw/monitor/plots folders under configured audio root and
+    wire them onto bmar_config so other modules (plotting, UI) use the same paths.
     """
-    root = _platform_base_root(cfg)
-    location = str(getattr(cfg, "LOCATION_ID", "UNKNOWN"))
-    hive = str(getattr(cfg, "HIVE_ID", "UNKNOWN"))
+    try:
+        from .bmar_config import get_platform_audio_config, default_config
+        import modules.bmar_config as _cfgmod  # module to attach runtime dirs
+    except Exception as e:
+        logging.error("bmar_config import error: %s", e)
+        return None
 
-    base_dir = os.path.join(root, location, hive)
-    audio_base = os.path.join(base_dir, "audio")
-    monitor_base = os.path.join(audio_base, "monitor")
-    raw_base = os.path.join(audio_base, "raw")
-    plots_base = os.path.join(audio_base, "plots")
+    cfg = config if config is not None else default_config()
+    plat = get_platform_audio_config(None, cfg)
 
-    ensure_directories_exist((base_dir, audio_base, monitor_base, raw_base, plots_base))
+    # Build audio root: <drive>/<path>/<LOCATION>/<HIVE>/audio
+    audio_root = Path(plat["data_drive"]) / plat["data_path"] / cfg.LOCATION_ID / cfg.HIVE_ID / "audio"
+    today = datetime.date.today().strftime("%Y-%m-%d")
 
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
-    monitor_dir = os.path.join(monitor_base, today)
-    raw_dir = os.path.join(raw_base, today)
-    plots_dir = os.path.join(plots_base, today)
-    ensure_directories_exist((monitor_dir, raw_dir, plots_dir))
+    raw_dir = audio_root / "raw" / today
+    monitor_dir = audio_root / "monitor" / today
+    plots_dir = audio_root / "plots" / today
 
-    info = {
-        "base_dir": os.path.normpath(base_dir),
-        "audio_base": os.path.normpath(audio_base),
-        "plots_base": os.path.normpath(plots_base),
-        "today": today,
-        "audio_monitor_dir": os.path.normpath(monitor_dir),
-        "audio_raw_dir": os.path.normpath(raw_dir),
-        "plots_dir": os.path.normpath(plots_dir),
-        "audio_dir": os.path.normpath(raw_dir),  # back-compat alias
+    # Ensure folders exist
+    for p in (raw_dir, monitor_dir, plots_dir):
+        p.mkdir(parents=True, exist_ok=True)
+
+    logging.info(f"Audio raw dir (config): {raw_dir}")
+    logging.info(f"Audio monitor dir (config): {monitor_dir}")
+    logging.info(f"Plots dir (config): {plots_dir}")
+
+    # Wire onto config module for use by plotting/UI/etc.
+    try:
+        _cfgmod.PRIMARY_DIRECTORY = raw_dir
+        _cfgmod.MONITOR_DIRECTORY = monitor_dir
+        _cfgmod.PLOTS_DIRECTORY = plots_dir
+    except Exception as e:
+        logging.warning("Could not wire runtime directories onto bmar_config: %s", e)
+
+    # Export for consumers that avoid importing bmar_config at runtime
+    os.environ["BMAR_AUDIO_RAW_DIR"] = str(raw_dir)
+    os.environ["BMAR_AUDIO_MONITOR_DIR"] = str(monitor_dir)
+    os.environ["BMAR_PLOTS_DIR"] = str(plots_dir)
+    return {
+        "raw": str(raw_dir),
+        "monitor": str(monitor_dir),
+        "plots": str(plots_dir),
     }
-    logging.info("Audio raw dir (config): %s", info["audio_raw_dir"])
-    logging.info("Audio monitor dir (config): %s", info["audio_monitor_dir"])
-    logging.info("Plots dir (config): %s", info["plots_dir"])
-    return info
 
 def log_saved_file(path: str, prefix: str = "") -> None:
     try:
@@ -98,13 +111,12 @@ def log_saved_file(path: str, prefix: str = "") -> None:
     except Exception:
         pass
 
-# --- Back-compat functions expected by BMAR_app ---
-def setup_directories(cfg):
-    """Legacy: create directories and return a dict of paths."""
-    return check_and_create_date_folders(cfg)
+# If setup_directories/get_today_dir exist, keep behavior but ensure we wire runtime paths too
+def setup_directories(config=None):
+    d = check_and_create_date_folders(config)
+    return Path(d["raw"]).parent if d else Path.home() / "BMAR_Recordings"
 
-def get_today_dir(cfg):
-    """Legacy: return today's primary (raw) directory path."""
-    info = check_and_create_date_folders(cfg)
-    return info["audio_raw_dir"]
-# --- end back-compat ---
+def get_today_dir(recording_dir):
+    # Expect recording_dir like .../audio/raw/<date>
+    rd = Path(recording_dir)
+    return rd if rd.name.count("-") == 2 else rd / datetime.date.today().strftime("%Y-%m-%d")

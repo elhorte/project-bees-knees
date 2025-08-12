@@ -3,17 +3,15 @@ BMAR User Interface Module
 Handles keyboard input, command processing, and user interaction.
 """
 
+import os
 import threading
 import time
 import logging
 import platform
-import sys
-import os
-import multiprocessing
-import traceback
-from pathlib import Path
 import datetime
+from pathlib import Path
 from .bmar_config import get_platform_audio_config, default_config
+from . import bmar_config as _cfg
 
 # Platform-specific imports for terminal control
 WINDOWS_AVAILABLE = platform.system() == "Windows"
