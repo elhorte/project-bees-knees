@@ -17,282 +17,149 @@ from typing import Optional, List, Dict, Tuple
 # USER CONFIGURATION (edit these values)
 # --------------------------------------------------------------------------------------
 
-# location and hive ID
-LOCATION_ID = "Zeev-Berkeley"
-HIVE_ID = "Z1_4mic"
-HIVE_CONFIG = "dual-mic, sensor"
-
-# mode controls
-MODE_AUDIO_MONITOR = True                       # recording continuously to mp3 files
-MODE_PERIOD = True                              # period recording
-MODE_EVENT = False                              # event recording
-MODE_FFT_PERIODIC_RECORD = True                 # record fft periodically
-
-# circular buffer size
-BUFFER_SECONDS = 900                            # time length of circular buffer
-
-# recording types controls:
-AUDIO_MONITOR_START = None  # datetime.time(4, 0, 0)  # None = continuous
-AUDIO_MONITOR_END = datetime.time(23, 0, 0)
-AUDIO_MONITOR_RECORD = BUFFER_SECONDS           # must be <= BUFFER_SECONDS
-AUDIO_MONITOR_INTERVAL = 0.1                    # seconds between recordings
-
-PERIOD_START = None  # datetime.time(4, 0, 0)  # None = continuous
-PERIOD_END = datetime.time(20, 0, 0)
-PERIOD_RECORD = BUFFER_SECONDS                  # must be <= BUFFER_SECONDS
-PERIOD_SPECTROGRAM = 120                        # seconds for saved PNG spectrograms
-PERIOD_INTERVAL = 0.1                           # seconds (must be > period, of course)
-
-EVENT_START = datetime.time(4, 0, 0)
-EVENT_END = datetime.time(22, 0, 0)
-SAVE_BEFORE_EVENT = 30                          # seconds to save before the event
-SAVE_AFTER_EVENT = 30                           # seconds to save after the event
-EVENT_THRESHOLD = 20000                         # audio level threshold
-
-MONITOR_CH = 0                                  # channel to monitor for event
-
-# Audio input configuration
-MIC_1 = True
-MIC_2 = True
-MIC_3 = False
-MIC_4 = False
-
-SOUND_IN_CHS = int(MIC_1) + int(MIC_2) + int(MIC_3) + int(MIC_4)  # count of input channels
-
-# instrumentation parms
-FFT_INTERVAL = 30                               # minutes between ffts
-
-LOG_AUDIO_CALLBACK = False  # set True to see per-callback audio stats
-
-# Global flags
-DEBUG_VERBOSE = False                           # Enable verbose debug output
-
-# Enhanced audio configuration
-ENABLE_ENHANCED_AUDIO = True                    # Enable sounddevice-based device testing
-AUDIO_API_PREFERENCE = ["WASAPI", "DirectSound", "MME"]  # Preferred APIs in order
-AUDIO_FALLBACK_ENABLED = False                  # Allow fallback to default device if specified fails
-
-# input device parameters--linux:
-LINUX_MAKE_NAME = ""                             # Leave empty for Linux default
-LINUX_MODEL_NAME: List[str] = ["pipewire"]       # Use pipewire as the audio system
-LINUX_DEVICE_NAME = "pipewire"                   # Use pipewire device
-LINUX_API_NAME = "ALSA"                          # Use ALSA API for Linux
-LINUX_HOSTAPI_NAME = "ALSA"                      # Use ALSA host API
-LINUX_HOSTAPI_INDEX = 0                          # ALSA is typically index 0
-LINUX_DEVICE_ID: Optional[int] = None            # Use pipewire device ID
-
-# input device parameters--windows:
-WINDOWS_MAKE_NAME = "Behringer"                  # Audio interface make
-WINDOWS_MODEL_NAME = "UMC204HD"                  # Audio interface model
-WINDOWS_DEVICE_NAME = "UMC204HD"                 # Device name
-WINDOWS_API_NAME = "WASAPI"                      # Windows audio API
-WINDOWS_HOSTAPI_NAME = "WASAPI"                  # Host API name
-WINDOWS_HOSTAPI_INDEX = 15                       # Default host API index
-WINDOWS_DEVICE_ID: Optional[int] = None          # Device ID if needed
-
-# input device parameters--macos:
-MACOS_MAKE_NAME = ""                             # Leave empty for macOS default
-MACOS_MODEL_NAME: List[str] = ["Built-in"]       # Built-in audio
-MACOS_DEVICE_NAME = "Built-in"                   # Built-in device
-MACOS_API_NAME = "CoreAudio"                     # macOS audio API
-MACOS_HOSTAPI_NAME = "CoreAudio"                 # Host API name
-MACOS_HOSTAPI_INDEX = 0                          # Default host API index
-MACOS_DEVICE_ID = 0                              # Default device ID
-
-# audio parameters:
-PRIMARY_IN_SAMPLERATE = 192000                  # Audio sample rate
-PRIMARY_BITDEPTH = 16                           # Audio bit depth
-PRIMARY_SAVE_SAMPLERATE: Optional[int] = 96000  # if None then save at Input Samplerate
-PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'
-
-# Apply pre-write attenuation to avoid clipping in saved files (dB)
-# 0 = no attenuation; try 3 for a little headroom
-SAVE_HEADROOM_DB = 0.0
-
-AUDIO_MONITOR_SAMPLERATE = 48000                # For continuous audio
-AUDIO_MONITOR_BITDEPTH = 16                     # Audio bit depth
-AUDIO_MONITOR_CHANNELS = 2                      # Number of channels
-AUDIO_MONITOR_QUALITY = 256                     # mp3: 0-9 vbr; 64-320 cbr kbps
-AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
-
-# Canonical subfolder names under the audio root
-RAW_FOLDER_NAME = "raw"
-MONITOR_FOLDER_NAME = "monitor"  # mp3/continuous recordings
-PLOTS_FOLDER_NAME = "plots"
-#
-# Windows storage roots
-win_data_drive = "G:\\"   # D is internal and limited; G is Google Drive
-win_data_path = "My Drive\\eb_beehive_data"
-# Top-level (under data_path) contains location/hive/audio; plots lives under audio
-win_data_folders = ["audio"]  # kept for compatibility; not used for subfolder names
-# macOS storage roots
-mac_data_drive = "~"
-mac_data_path = "data/eb_beehive_data"
-mac_data_folders = ["audio"]
-# Linux storage roots
-linux_data_drive = "~"                          # Use home directory
-linux_data_path = "beedata/eb_beehive_data"     # Store in ~/beedata
-linux_data_folders = ["audio"]
-
-# mic location map channel to position
-MIC_LOCATION = [
-    '1: upper--front', '2: upper--back', '3: lower w/queen--front', '4: lower w/queen--back'
-]
-
-# Windows mme defaults
-SOUND_IN_DEFAULT = 0                            # default input device id
-SOUND_OUT_ID_DEFAULT = 3                        # default output device id
-SOUND_OUT_CHS_DEFAULT = 1                       # default number of output channels
-SOUND_OUT_SR_DEFAULT = 48000                    # default sample rate
-
-# Intercom (local monitor) parameters
-INTERCOM_SAMPLERATE = 48000                     # Sample rate for local monitoring playback
-
-# audio display parameters:
-TRACE_DURATION = 10.0                            # seconds
-OSCOPE_GAIN_DB = 12                              # Gain in dB of audio level for oscilloscope
-FFT_DURATION = 10.0                              # seconds
-FFT_GAIN = 12                                    # Gain in dB of audio level for fft
-# FFT frequency axis limits (Hz). Set max to None to use Nyquist (samplerate/2)
-FFT_FREQ_MIN_HZ = 0.0
-FFT_FREQ_MAX_HZ = 10000.0  # 10 kHz max for audio
-SPECTROGRAM_DURATION = 10.0                      # seconds
-SPECTROGRAM_GAIN = 12                            # Gain in dB of audio level for spectrogram
-# Spectrogram display scaling (dBFS)
-SPECTROGRAM_DB_MIN = -70.0
-SPECTROGRAM_DB_MAX = 0.0
-
-# VU meter presentation controls
-VU_METER_LATENCY_MS = 30       # msec
-VU_METER_DAMPING = 0.50
-
-# --------------------------------------------------------------------------------------
-# RUNTIME SUPPORT (dataclass, helpers, wiring)
-# --------------------------------------------------------------------------------------
-
-# Runtime directories (wired at startup so modules like plotting can use them)
-PRIMARY_DIRECTORY: Optional[Path] = None
-MONITOR_DIRECTORY: Optional[Path] = None
-PLOTS_DIRECTORY: Optional[Path] = None
-
 @dataclass(frozen=True)
 class BMARConfig:
-    # Identity
-    LOCATION_ID: str
-    HIVE_ID: str
-    HIVE_CONFIG: str
 
-    # Modes and timing
-    MODE_AUDIO_MONITOR: bool
-    MODE_PERIOD: bool
-    MODE_EVENT: bool
-    MODE_FFT_PERIODIC_RECORD: bool
-    BUFFER_SECONDS: int
-    AUDIO_MONITOR_START: Optional[datetime.time]
-    AUDIO_MONITOR_END: Optional[datetime.time]
-    AUDIO_MONITOR_RECORD: int
-    AUDIO_MONITOR_INTERVAL: float
-    PERIOD_START: Optional[datetime.time]
-    PERIOD_END: Optional[datetime.time]
-    PERIOD_RECORD: int
-    PERIOD_SPECTROGRAM: int
-    PERIOD_INTERVAL: float
-    EVENT_START: datetime.time
-    EVENT_END: datetime.time
-    SAVE_BEFORE_EVENT: int
-    SAVE_AFTER_EVENT: int
-    EVENT_THRESHOLD: int
-    MONITOR_CH: int
+    # Canonical subfolder names under the audio root
+    RAW_FOLDER_NAME: str = "raw"                # data folder for primary audio recordings
+    MONITOR_FOLDER_NAME: str = "monitor"        # mp3/continuous recordings
+    PLOTS_FOLDER_NAME: str = "plots"            # data folder for audio plots
 
-    # Audio input and instrumentation
-    MIC_1: bool
-    MIC_2: bool
-    MIC_3: bool
-    MIC_4: bool
-    SOUND_IN_CHS: int
-    FFT_INTERVAL: int
-    LOG_AUDIO_CALLBACK: bool
-    DEBUG_VERBOSE: bool
-
-    ENABLE_ENHANCED_AUDIO: bool
-    AUDIO_API_PREFERENCE: List[str]
-    AUDIO_FALLBACK_ENABLED: bool
-
-    # Per-OS device prefs
-    LINUX_MAKE_NAME: str
-    LINUX_MODEL_NAME: List[str]
-    LINUX_DEVICE_NAME: str
-    LINUX_API_NAME: str
-    LINUX_HOSTAPI_NAME: str
-    LINUX_HOSTAPI_INDEX: int
-    LINUX_DEVICE_ID: Optional[int]
-
-    WINDOWS_MAKE_NAME: str
-    WINDOWS_MODEL_NAME: str
-    WINDOWS_DEVICE_NAME: str
-    WINDOWS_API_NAME: str
-    WINDOWS_HOSTAPI_NAME: str
-    WINDOWS_HOSTAPI_INDEX: int
-    WINDOWS_DEVICE_ID: Optional[int]
-
-    MACOS_MAKE_NAME: str
-    MACOS_MODEL_NAME: List[str]
-    MACOS_DEVICE_NAME: str
-    MACOS_API_NAME: str
-    MACOS_HOSTAPI_NAME: str
-    MACOS_HOSTAPI_INDEX: int
-    MACOS_DEVICE_ID: int
-
-    # Audio parameters
-    PRIMARY_IN_SAMPLERATE: int
-    PRIMARY_BITDEPTH: int
-    PRIMARY_SAVE_SAMPLERATE: Optional[int]
-    PRIMARY_FILE_FORMAT: str
-    SAVE_HEADROOM_DB: float
-
-    AUDIO_MONITOR_SAMPLERATE: int
-    AUDIO_MONITOR_BITDEPTH: int
-    AUDIO_MONITOR_CHANNELS: int
-    AUDIO_MONITOR_QUALITY: int
-    AUDIO_MONITOR_FORMAT: str
-
-    # Data roots
-    win_data_drive: str
-    win_data_path: str
-    win_data_folders: List[str]
-    mac_data_drive: str
-    mac_data_path: str
-    mac_data_folders: List[str]
-    linux_data_drive: str
-    linux_data_path: str
-    linux_data_folders: List[str]
-
-    # UI/plot settings
-    MIC_LOCATION: List[str]
-    SOUND_IN_DEFAULT: int
-    SOUND_OUT_ID_DEFAULT: int
-    SOUND_OUT_CHS_DEFAULT: int
-    SOUND_OUT_SR_DEFAULT: int
-    INTERCOM_SAMPLERATE: int
-    TRACE_DURATION: float
-    OSCOPE_GAIN_DB: float
-    FFT_DURATION: float
-    FFT_GAIN: float
-    FFT_FREQ_MIN_HZ: float
-    FFT_FREQ_MAX_HZ: float
-    SPECTROGRAM_DURATION: float
-    SPECTROGRAM_GAIN: float
-    SPECTROGRAM_DB_MIN: float
-    SPECTROGRAM_DB_MAX: float
-
-    # VU meter presentation controls
-    VU_METER_LATENCY_MS: int = 30       # msec
-    VU_METER_DAMPING: float = 0.50
-
-    # Directories (wired by main/file_utils at runtime)
+    # Runtime-wired directories (set by wire_today_dirs)
     PRIMARY_DIRECTORY: Optional[Path] = None
     MONITOR_DIRECTORY: Optional[Path] = None
     PLOTS_DIRECTORY: Optional[Path] = None
+
+    # Identity
+    LOCATION_ID: str = "Zeev-Berkeley"
+    HIVE_ID: str = "Z1_4mic"
+    HIVE_CONFIG: str = "dual-mic, sensor"
+    
+    # Modes and timing
+    MODE_AUDIO_MONITOR: bool = True                         # enable audio monitoring
+    MODE_PERIOD: bool = True                                # enable periodic recording
+    MODE_EVENT: bool = False                                # enable event recording
+    MODE_FFT_PERIODIC_RECORD: bool = True                   # enable FFT periodic recording
+
+    BUFFER_SECONDS: int = 900                               # default buffer size for audio recording (15 minutes)
+
+    AUDIO_MONITOR_START: Optional[datetime.time] = None     # start time for audio monitoring
+    AUDIO_MONITOR_END: Optional[datetime.time] = None       # end time for audio monitoring
+    AUDIO_MONITOR_RECORD: int = BUFFER_SECONDS              # duration of audio monitoring recording
+    AUDIO_MONITOR_INTERVAL: float = 0.0                     # interval between audio monitoring recordings
+
+    PERIOD_START: Optional[datetime.time] = None            # start time for periodic recording
+    PERIOD_END: Optional[datetime.time] = None              # end time for periodic recording
+    PERIOD_RECORD: int = BUFFER_SECONDS                     # duration of periodic recording
+    PERIOD_SPECTROGRAM: int = 120                           # duration of spectrogram analysis
+    PERIOD_INTERVAL: float = 0.1                            # interval between periodic recordings
+
+    EVENT_START: datetime.time = 0                          # start time for event recording
+    EVENT_END: datetime.time = 0                            # end time for event recording
+    SAVE_BEFORE_EVENT: int = 30                             # seconds to save before event
+    SAVE_AFTER_EVENT: int = 30                              # seconds to save after event
+    EVENT_THRESHOLD: int = 20000                            # threshold for event triggering
+    MONITOR_CH: int = 0                                     # channel for audio monitoring (0 = none)
+
+    # Audio input and instrumentation
+    MIC_1: bool = True
+    MIC_2: bool = True
+    MIC_3: bool = False
+    MIC_4: bool = False
+    # provides count of active microphone channels
+    SOUND_IN_CHS = int(MIC_1) + int(MIC_2) + int(MIC_3) + int(MIC_4) 
+
+    FFT_INTERVAL: int = 30                                  # interval in minutes between FFT analyses
+    LOG_AUDIO_CALLBACK: bool = False                        # enable logging of audio callbacks
+    DEBUG_VERBOSE: bool = False                             # enable verbose debugging output
+
+    ENABLE_ENHANCED_AUDIO: bool = True                      # enable enhanced audio processing
+    AUDIO_API_PREFERENCE: List[str] = ("WASAPI", "DirectSound", "MME")
+    AUDIO_FALLBACK_ENABLED: bool = False                    # enable audio fallback
+
+    # Per-OS device prefs
+    LINUX_MAKE_NAME: str = ""                               # Leave empty for linux default
+    LINUX_MODEL_NAME: List[str] = ("pipewire")              # Use pipewire as the audio system
+    LINUX_DEVICE_NAME: str = "pipewire"                     # Use pipewire as the audio device
+    LINUX_API_NAME: str = "ALSA"                            # Use ALSA as the audio API
+    LINUX_HOSTAPI_NAME: str = "ALSA"                        # Use ALSA as the audio host API
+    LINUX_HOSTAPI_INDEX: int = 0                            # Default ALSA host API index
+    LINUX_DEVICE_ID: Optional[int] = None                   # Use pipewire device ID
+
+    WINDOWS_MAKE_NAME: str = "Behringer"                    # Use Behringer as the audio device manufacturer
+    WINDOWS_MODEL_NAME: str = "UMC204HD"                    # Use UMC204HD as the audio device model
+    WINDOWS_DEVICE_NAME: str = "UMC204HD"                   # Use UMC204HD as the audio device name
+    WINDOWS_API_NAME: str = "WASAPI"                        # Use WASAPI as the audio API
+    WINDOWS_HOSTAPI_NAME: str = "WASAPI"                    # Use WASAPI as the audio host API
+    WINDOWS_HOSTAPI_INDEX: int = 15                         # Default WASAPI host API index
+    WINDOWS_DEVICE_ID: Optional[int] = None                 # Device ID for UMC204HD
+
+    MACOS_MAKE_NAME: str = ""                               # Leave empty for macOS default
+    MACOS_MODEL_NAME: List[str] = ("Built-in")              # Use Built-in as the audio device model
+    MACOS_DEVICE_NAME: str = "Built-in"                     # Use Built-in as the audio device name
+    MACOS_API_NAME: str = "CoreAudio"                       # Use CoreAudio as the audio API
+    MACOS_HOSTAPI_NAME: str = "CoreAudio"                   # Use CoreAudio as the audio host API
+    MACOS_HOSTAPI_INDEX: int = 0                            # Default CoreAudio host API index
+    MACOS_DEVICE_ID: int = 0                                # Use Built-in device ID
+
+    # Audio parameters
+    PRIMARY_IN_SAMPLERATE: int = 192000                     # Use 192000 Hz as the primary input samplerate
+    PRIMARY_BITDEPTH: int = 16                              # Use 16-bit as the primary bitdepth
+    PRIMARY_SAVE_SAMPLERATE: Optional[int] = 96000          # if None then save at Input Samplerate
+    PRIMARY_FILE_FORMAT: str = "FLAC"                       # Use FLAC as the primary file format to save
+
+    SAVE_HEADROOM_DB: float = 0.0                           # Use 0.0 dB as the headroom for saving
+
+    AUDIO_MONITOR_SAMPLERATE: int = 48000                   # Use 48000 Hz as the audio monitor samplerate
+    AUDIO_MONITOR_BITDEPTH: int = 16                        # Use 16-bit as the audio monitor bitdepth
+    AUDIO_MONITOR_CHANNELS: int = 2                         # Use 2 channels for audio monitoring
+    AUDIO_MONITOR_QUALITY: int = 256                        # Use 256 kbps as the audio monitor quality
+    AUDIO_MONITOR_FORMAT: str = "MP3"                       # Use MP3 as the audio monitor format
+
+    # Data roots
+    win_data_drive: str = "G:\\"
+    win_data_path: str = "My Drive\\eb_beehive_data"
+    win_data_folders: List[str] = ("audio",)
+
+    mac_data_drive: str = "~"
+    mac_data_path: str = "data/eb_beehive_data"
+    mac_data_folders: List[str] = ("audio",)
+
+    linux_data_drive: str = "~"
+    linux_data_path: str = "beedata/eb_beehive_data"
+    linux_data_folders: List[str] = ("audio",)
+
+    # UI/plot settings
+    MIC_LOCATION: List[str] = ('1: upper--front', '2: upper--back', \
+                               '3: lower w/queen--front', '4: lower w/queen--back')
+
+    SOUND_IN_DEFAULT: int = 0
+    SOUND_OUT_ID_DEFAULT: int = 3
+    SOUND_OUT_CHS_DEFAULT: int = 2
+    SOUND_OUT_SR_DEFAULT: int = 48000
+
+    INTERCOM_SAMPLERATE: int = 48000
+
+    TRACE_DURATION: float = 10.0
+    OSCOPE_GAIN_DB: float = 12.0
+
+    FFT_DURATION: float = 10.0
+    FFT_GAIN: float = 12.0
+    FFT_FREQ_MIN_HZ: float = 10.0
+    FFT_FREQ_MAX_HZ: float = 10000.0
+
+    SPECTROGRAM_DURATION: float = 10.0
+    SPECTROGRAM_GAIN: float = 12.0
+    SPECTROGRAM_DB_MIN: float = -70.0
+    SPECTROGRAM_DB_MAX: float = 0.0
+
+    # VU meter presentation controls
+    VU_METER_LATENCY_MS: int = 30
+    VU_METER_DAMPING: float = 0.5
+
+    # --------------------------------------------------------------------------------------
+    # end user defined parameters for dataclass
+    # --------------------------------------------------------------------------------------
 
     # Preferred device name by platform (optional helper)
     def DEVICE_NAME_FOR_PLATFORM(self) -> Optional[str]:
@@ -319,109 +186,18 @@ class BMARConfig:
         day = d.strftime("%Y-%m-%d")
         root = self.audio_root()
         return {
-            "raw": root / RAW_FOLDER_NAME / day,
-            "monitor": root / MONITOR_FOLDER_NAME / day,
-            "plots": root / PLOTS_FOLDER_NAME / day,
+            "raw": root / self.RAW_FOLDER_NAME / day,
+            "monitor": root / self.MONITOR_FOLDER_NAME / day,
+            "plots": root / self.PLOTS_FOLDER_NAME / day,
         }
 
+    # --------------------------------------------------------------------------------------
+    # end BMARConfig class
+    # --------------------------------------------------------------------------------------
 
 def default_config() -> BMARConfig:
     """Build a BMARConfig from the user configuration above."""
-    return BMARConfig(
-        LOCATION_ID=LOCATION_ID,
-        HIVE_ID=HIVE_ID,
-        HIVE_CONFIG=HIVE_CONFIG,
-        MODE_AUDIO_MONITOR=MODE_AUDIO_MONITOR,
-        MODE_PERIOD=MODE_PERIOD,
-        MODE_EVENT=MODE_EVENT,
-        MODE_FFT_PERIODIC_RECORD=MODE_FFT_PERIODIC_RECORD,
-        BUFFER_SECONDS=BUFFER_SECONDS,
-        AUDIO_MONITOR_START=AUDIO_MONITOR_START,
-        AUDIO_MONITOR_END=AUDIO_MONITOR_END,
-        AUDIO_MONITOR_RECORD=AUDIO_MONITOR_RECORD,
-        AUDIO_MONITOR_INTERVAL=AUDIO_MONITOR_INTERVAL,
-        PERIOD_START=PERIOD_START,
-        PERIOD_END=PERIOD_END,
-        PERIOD_RECORD=PERIOD_RECORD,
-        PERIOD_SPECTROGRAM=PERIOD_SPECTROGRAM,
-        PERIOD_INTERVAL=PERIOD_INTERVAL,
-        EVENT_START=EVENT_START,
-        EVENT_END=EVENT_END,
-        SAVE_BEFORE_EVENT=SAVE_BEFORE_EVENT,
-        SAVE_AFTER_EVENT=SAVE_AFTER_EVENT,
-        EVENT_THRESHOLD=EVENT_THRESHOLD,
-        MONITOR_CH=MONITOR_CH,
-        MIC_1=MIC_1,
-        MIC_2=MIC_2,
-        MIC_3=MIC_3,
-        MIC_4=MIC_4,
-        SOUND_IN_CHS=SOUND_IN_CHS,
-        FFT_INTERVAL=FFT_INTERVAL,
-        LOG_AUDIO_CALLBACK=LOG_AUDIO_CALLBACK,
-        DEBUG_VERBOSE=DEBUG_VERBOSE,
-        ENABLE_ENHANCED_AUDIO=ENABLE_ENHANCED_AUDIO,
-        AUDIO_API_PREFERENCE=AUDIO_API_PREFERENCE,
-        AUDIO_FALLBACK_ENABLED=AUDIO_FALLBACK_ENABLED,
-        LINUX_MAKE_NAME=LINUX_MAKE_NAME,
-        LINUX_MODEL_NAME=LINUX_MODEL_NAME,
-        LINUX_DEVICE_NAME=LINUX_DEVICE_NAME,
-        LINUX_API_NAME=LINUX_API_NAME,
-        LINUX_HOSTAPI_NAME=LINUX_HOSTAPI_NAME,
-        LINUX_HOSTAPI_INDEX=LINUX_HOSTAPI_INDEX,
-        LINUX_DEVICE_ID=LINUX_DEVICE_ID,
-        WINDOWS_MAKE_NAME=WINDOWS_MAKE_NAME,
-        WINDOWS_MODEL_NAME=WINDOWS_MODEL_NAME,
-        WINDOWS_DEVICE_NAME=WINDOWS_DEVICE_NAME,
-        WINDOWS_API_NAME=WINDOWS_API_NAME,
-        WINDOWS_HOSTAPI_NAME=WINDOWS_HOSTAPI_NAME,
-        WINDOWS_HOSTAPI_INDEX=WINDOWS_HOSTAPI_INDEX,
-        WINDOWS_DEVICE_ID=WINDOWS_DEVICE_ID,
-        MACOS_MAKE_NAME=MACOS_MAKE_NAME,
-        MACOS_MODEL_NAME=MACOS_MODEL_NAME,
-        MACOS_DEVICE_NAME=MACOS_DEVICE_NAME,
-        MACOS_API_NAME=MACOS_API_NAME,
-        MACOS_HOSTAPI_NAME=MACOS_HOSTAPI_NAME,
-        MACOS_HOSTAPI_INDEX=MACOS_HOSTAPI_INDEX,
-        MACOS_DEVICE_ID=MACOS_DEVICE_ID,
-        PRIMARY_IN_SAMPLERATE=PRIMARY_IN_SAMPLERATE,
-        PRIMARY_BITDEPTH=PRIMARY_BITDEPTH,
-        PRIMARY_SAVE_SAMPLERATE=PRIMARY_SAVE_SAMPLERATE,
-        PRIMARY_FILE_FORMAT=PRIMARY_FILE_FORMAT,
-        SAVE_HEADROOM_DB=SAVE_HEADROOM_DB,
-        AUDIO_MONITOR_SAMPLERATE=AUDIO_MONITOR_SAMPLERATE,
-        AUDIO_MONITOR_BITDEPTH=AUDIO_MONITOR_BITDEPTH,
-        AUDIO_MONITOR_CHANNELS=AUDIO_MONITOR_CHANNELS,
-        AUDIO_MONITOR_QUALITY=AUDIO_MONITOR_QUALITY,
-        AUDIO_MONITOR_FORMAT=AUDIO_MONITOR_FORMAT,
-        win_data_drive=win_data_drive,
-        win_data_path=win_data_path,
-        win_data_folders=win_data_folders,
-        mac_data_drive=mac_data_drive,
-        mac_data_path=mac_data_path,
-        mac_data_folders=mac_data_folders,
-        linux_data_drive=linux_data_drive,
-        linux_data_path=linux_data_path,
-        linux_data_folders=linux_data_folders,
-        MIC_LOCATION=MIC_LOCATION,
-        SOUND_IN_DEFAULT=SOUND_IN_DEFAULT,
-        SOUND_OUT_ID_DEFAULT=SOUND_OUT_ID_DEFAULT,
-        SOUND_OUT_CHS_DEFAULT=SOUND_OUT_CHS_DEFAULT,
-        SOUND_OUT_SR_DEFAULT=SOUND_OUT_SR_DEFAULT,
-        INTERCOM_SAMPLERATE=INTERCOM_SAMPLERATE,
-        TRACE_DURATION=TRACE_DURATION,
-        OSCOPE_GAIN_DB=OSCOPE_GAIN_DB,
-        FFT_DURATION=FFT_DURATION,
-        FFT_GAIN=FFT_GAIN,
-        FFT_FREQ_MIN_HZ=FFT_FREQ_MIN_HZ,
-        FFT_FREQ_MAX_HZ=FFT_FREQ_MAX_HZ,
-        SPECTROGRAM_DURATION=SPECTROGRAM_DURATION,
-        SPECTROGRAM_GAIN=SPECTROGRAM_GAIN,
-        SPECTROGRAM_DB_MIN=SPECTROGRAM_DB_MIN,
-        SPECTROGRAM_DB_MAX=SPECTROGRAM_DB_MAX,
-        VU_METER_LATENCY_MS=VU_METER_LATENCY_MS,
-        VU_METER_DAMPING=VU_METER_DAMPING
-    )
-
+    return BMARConfig()
 
 def get_platform_audio_config(platform_manager=None, config: Optional[BMARConfig] = None) -> Dict[str, object]:
     """
@@ -433,17 +209,14 @@ def get_platform_audio_config(platform_manager=None, config: Optional[BMARConfig
     c = config or default_config()
     # Determine OS (prefer platform_manager if provided)
     sysname = platform.system()
-    try:
-        if platform_manager and hasattr(platform_manager, "is_macos") and platform_manager.is_macos():
-            sysname = "Darwin"
-        elif platform_manager and hasattr(platform_manager, "is_windows") and platform_manager.is_windows():
-            sysname = "Windows"
-        elif platform_manager and hasattr(platform_manager, "is_linux") and platform_manager.is_linux():
-            sysname = "Linux"
-    except Exception:
-        pass
+    if platform_manager and hasattr(platform_manager, "is_macos") and platform_manager.is_macos():
+        sysname = "Darwin"
+    elif platform_manager and hasattr(platform_manager, "is_windows") and platform_manager.is_windows():
+        sysname = "Windows"
+    elif platform_manager and hasattr(platform_manager, "is_linux") and platform_manager.is_linux():
+        sysname = "Linux"
 
-    folders = {"raw": RAW_FOLDER_NAME, "monitor": MONITOR_FOLDER_NAME, "plots": PLOTS_FOLDER_NAME}
+    folders = {"raw": c.RAW_FOLDER_NAME, "monitor": c.MONITOR_FOLDER_NAME, "plots": c.PLOTS_FOLDER_NAME}
 
     if sysname == "Darwin":
         return {
@@ -504,11 +277,6 @@ def wire_today_dirs(cfg: BMARConfig) -> Tuple[BMARConfig, Dict[str, str]]:
     mon.mkdir(parents=True, exist_ok=True)
     plt.mkdir(parents=True, exist_ok=True)
 
-    global PRIMARY_DIRECTORY, MONITOR_DIRECTORY, PLOTS_DIRECTORY
-    PRIMARY_DIRECTORY = raw
-    MONITOR_DIRECTORY = mon
-    PLOTS_DIRECTORY = plt
-
     os.environ["BMAR_AUDIO_RAW_DIR"] = str(raw)
     os.environ["BMAR_AUDIO_MONITOR_DIR"] = str(mon)
     os.environ["BMAR_PLOTS_DIR"] = str(plt)
@@ -553,15 +321,12 @@ def device_search_criteria(strict: bool = True, platform_manager=None, cfg: Opti
     c = cfg or default_config()
     # Resolve OS (prefer platform_manager if provided)
     sysname = platform.system()
-    try:
-        if platform_manager and hasattr(platform_manager, "is_macos") and platform_manager.is_macos():
-            sysname = "Darwin"
-        elif platform_manager and hasattr(platform_manager, "is_windows") and platform_manager.is_windows():
-            sysname = "Windows"
-        elif platform_manager and hasattr(platform_manager, "is_linux") and platform_manager.is_linux():
-            sysname = "Linux"
-    except Exception:
-        pass
+    if platform_manager and hasattr(platform_manager, "is_macos") and platform_manager.is_macos():
+        sysname = "Darwin"
+    elif platform_manager and hasattr(platform_manager, "is_windows") and platform_manager.is_windows():
+        sysname = "Windows"
+    elif platform_manager and hasattr(platform_manager, "is_linux") and platform_manager.is_linux():
+        sysname = "Linux"
 
     if sysname == "Windows":
         crit = {
