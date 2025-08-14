@@ -1,210 +1,134 @@
 #!/usr/bin/env python3
-"""
-BMAR Main Entry Point
-Command-line interface for the Bioacoustic Monitoring and Recording system.
-"""
-
+# -*- coding: utf-8 -*-
 import sys
+import os
+from pathlib import Path as _Path
+
+# Ensure src and src/modules are importable
+_SRC_DIR = _Path(__file__).resolve().parent
+_MOD_DIR = _SRC_DIR / "modules"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+if str(_MOD_DIR) not in sys.path:
+    sys.path.insert(0, str(_MOD_DIR))
+
 import argparse
+import datetime
 import logging
+import platform
+import traceback
+from dataclasses import replace
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
+import sounddevice as sd
 
-# Simplified imports to avoid circular dependencies
-from modules.class_PyAudio import AudioPortManager
-from modules import bmar_config
+from modules.bmar_config import default_config, wire_today_dirs
 
-def list_audio_devices():
-    """List all available audio devices using PyAudio"""
-    try:
-        manager = AudioPortManager()
-        manager.print_device_list()
-        return True
-    except Exception as e:
-        logging.error(f"Error listing audio devices: {e}")
-        return False
 
 def validate_audio_device(device_index: int) -> bool:
-    """Validate that the specified audio device exists and is usable"""
+    """Validate that the specified audio device exists and is usable."""
     try:
-        manager = AudioPortManager()
-        devices = manager.list_audio_devices()
-        
-        # Check if device exists
-        device_found = False
-        for device in devices:
-            if device['index'] == device_index and device['is_input']:
-                device_found = True
-                break
-        
-        if not device_found:
-            logging.error(f"Audio device {device_index} not found or not an input device")
+        devices = sd.query_devices()
+        if device_index < 0 or device_index >= len(devices):
+            logging.error("Audio device %d not found", device_index)
             return False
-        
-        # Test basic configuration
-        if manager.test_device_configuration(device_index, 44100, 16, 2):
-            logging.info(f"Audio device {device_index} validated successfully")
+        dev = devices[device_index]
+        if int(dev.get('max_input_channels', 0)) == 0:
+            logging.error("Audio device %d is not an input device", device_index)
+            return False
+        try:
+            # Validate with PCM16 to match primary capture path
+            with sd.InputStream(device=device_index, channels=1, samplerate=44100, blocksize=1024, dtype='int16'):
+                logging.info("Audio device %d validated successfully", device_index)
+                return True
+        except Exception:
+            logging.warning("Audio device %d may have limited capabilities", device_index)
             return True
-        else:
-            logging.warning(f"Audio device {device_index} may have limited capabilities")
-            return True  # Still allow usage, but warn
-            
     except Exception as e:
-        logging.error(f"Error validating audio device {device_index}: {e}")
+        logging.error("Error validating audio device %d: %s", device_index, e)
         return False
 
-def show_configuration():
-    """Display current BMAR configuration"""
-    try:
-        print("Current BMAR Configuration:")
-        print("-" * 40)
-        
-        # Try different ways to access configuration
-        config_found = False
-        
-        # Method 1: Try direct attribute access
-        try:
-            if hasattr(bmar_config, 'PRIMARY_IN_SAMPLERATE'):
-                print(f"Sample Rate: {bmar_config.PRIMARY_IN_SAMPLERATE} Hz")
-                config_found = True
-            if hasattr(bmar_config, 'BIT_DEPTH'):
-                print(f"Bit Depth: {bmar_config.BIT_DEPTH} bits")
-            if hasattr(bmar_config, 'CHANNELS'):
-                print(f"Channels: {bmar_config.CHANNELS}")
-            if hasattr(bmar_config, 'PRIMARY_DIRECTORY'):
-                print(f"Recording Directory: {bmar_config.PRIMARY_DIRECTORY}")
-        except:
-            pass
-        
-        # Method 2: Try get_config function with different names
-        if not config_found:
-            for func_name in ['get_config', 'load_config', 'get_configuration', 'config']:
-                if hasattr(bmar_config, func_name):
-                    try:
-                        config = getattr(bmar_config, func_name)()
-                        print(f"Sample Rate: {getattr(config, 'PRIMARY_IN_SAMPLERATE', 'Unknown')} Hz")
-                        print(f"Bit Depth: {getattr(config, 'BIT_DEPTH', 'Unknown')} bits")
-                        print(f"Channels: {getattr(config, 'CHANNELS', 'Unknown')}")
-                        print(f"Recording Directory: {getattr(config, 'PRIMARY_DIRECTORY', 'Unknown')}")
-                        config_found = True
-                        break
-                    except:
-                        continue
-        
-        # Method 3: Show available attributes if nothing else works
-        if not config_found:
-            print("Available configuration attributes:")
-            config_attrs = [attr for attr in dir(bmar_config) if not attr.startswith('_')]
-            for attr in sorted(config_attrs):
-                try:
-                    value = getattr(bmar_config, attr)
-                    if not callable(value):
-                        print(f"  {attr}: {value}")
-                except:
-                    print(f"  {attr}: <cannot access>")
-        
-        print("-" * 40)
-        
-    except Exception as e:
-        print(f"Error loading configuration: {e}")
-        print("This may indicate the configuration module needs to be updated for PyAudio migration.")
 
 def setup_argument_parser():
-    parser = argparse.ArgumentParser(
-        description="BMAR - Bioacoustic Monitoring and Recording System",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python main.py --list-devices           # List available audio devices
-  python main.py --test-device 1         # Test audio device 1
-  python main.py --config                 # Show current configuration
-  python main.py --debug                  # Enable debug logging
-        """
-    )
-    
-    # Information commands
-    parser.add_argument(
-        "--list-devices", "-l",
-        action="store_true",
-        help="List available audio devices and exit"
-    )
-    
-    parser.add_argument(
-        "--config", "-c",
-        action="store_true",
-        help="Show current configuration and exit"
-    )
-    
-    parser.add_argument(
-        "--test-device",
-        type=int,
-        help="Test specific audio device and exit"
-    )
-    
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug logging"
-    )
-    
-    return parser
+    p = argparse.ArgumentParser(description="BMAR - Biometric Monitoring and Recording System")
+    p.add_argument("--list-devices", "-l", action="store_true")
+    p.add_argument("--show-devices", action="store_true")
+    p.add_argument("--config", "-c", action="store_true")
+    p.add_argument("--test-device", type=int)
+
+    p.add_argument("--debug", action="store_true")
+    p.add_argument("--verbose", "-v", action="store_true")
+    p.add_argument("--quiet", "-q", action="store_true")
+    p.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+    p.add_argument("--log-file", type=Path)
+
+    p.add_argument("--device-name")
+    p.add_argument("--api", dest="api_name")
+    p.add_argument("--hostapi-index", type=int)
+
+    p.add_argument("--data-root", type=Path)
+    p.add_argument("--win-data-drive")
+    p.add_argument("--win-data-path")
+    p.add_argument("--mac-data-root")
+    p.add_argument("--linux-data-root")
+    return p
+
+
+def _compute_log_level(args) -> int:
+    if args.log_level:
+        return getattr(logging, args.log_level.upper(), logging.INFO)
+    if args.debug:
+        return logging.DEBUG
+    if args.quiet:
+        return logging.ERROR
+    if args.verbose:
+        return logging.INFO
+    return logging.WARNING
+
+
+def _extract_dir_paths(d: dict) -> tuple[str, str, str]:
+    """
+    Normalize return keys from check_and_create_date_folders.
+    Accepts variants: raw/monitor/plots or audio_raw_dir/audio_monitor_dir/plots_dir.
+    """
+    raw = d.get("raw") or d.get("audio_raw_dir")
+    mon = d.get("monitor") or d.get("audio_monitor_dir")
+    plt = d.get("plots") or d.get("plots_dir")
+    return str(raw) if raw else "", str(mon) if mon else "", str(plt) if plt else ""
+
 
 def main():
-    """Main application entry point"""
-    # Parse command line arguments
     parser = setup_argument_parser()
     args = parser.parse_args()
-    
-    # Set up logging
-    log_level = logging.DEBUG if args.debug else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    logger = logging.getLogger(__name__)
-    logger.info("BMAR Application Starting with Pure PyAudio")
-    
-    # Handle information commands
-    if args.list_devices:
-        logger.info("Listing available audio devices")
-        if list_audio_devices():
-            sys.exit(0)
-        else:
-            sys.exit(1)
-    
-    if args.test_device is not None:
-        logger.info(f"Testing audio device {args.test_device}")
-        if validate_audio_device(args.test_device):
-            print(f"Device {args.test_device} is working correctly")
-            sys.exit(0)
-        else:
-            print(f"Device {args.test_device} failed validation")
-            sys.exit(1)
-    
-    if args.config:
-        logger.info("Showing current configuration")
-        show_configuration()
-        sys.exit(0)
-    
-    # If no specific command, try to import and run the main app
+
+    cfg = default_config()
     try:
-        logger.info("Attempting to load main BMAR application...")
-        from modules.bmar_app import create_bmar_app
-        
-        app = create_bmar_app()
-        app.run()
-        
-    except ImportError as e:
-        logger.error(f"Could not import BMAR application: {e}")
-        logger.info("This may be due to missing functions during PyAudio migration.")
-        logger.info("Try using --list-devices or --test-device commands instead.")
-        sys.exit(1)
-    except KeyboardInterrupt:
-        logger.info("Application stopped by user")
-        sys.exit(0)
+        cfg, wired = wire_today_dirs(cfg)
+        logging.info("Audio raw dir (config): %s", wired["raw"])
+        logging.info("Audio monitor dir (config): %s", wired["monitor"])
+        logging.info("Plots dir (config): %s", wired["plots"])
     except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
+        logging.warning("Failed to wire directories: %s", e)
+
+    # Create the app and pass cfg (ensures BmarApp sees the dataclass-based config)
+    from modules.bmar_app import create_bmar_app
+    app = create_bmar_app()
+    try:
+        app.config = cfg
+    except Exception:
+        pass
+
+    if app is None:
+        logging.error("BMAR application failed to initialize")
         sys.exit(1)
+
+    # Ensure app uses cfg
+    try:
+        app.config = cfg
+    except Exception:
+        pass
+
+    app.run()
 
 if __name__ == "__main__":
     main()

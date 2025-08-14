@@ -1,273 +1,399 @@
+from __future__ import annotations
 """
 BMAR Configuration Module
-Contains global constants, settings, and configuration validation.
+Humans edit the section labeled "USER CONFIGURATION" below to configure the program.
+The rest of this file adapts those values for runtime.
 """
 
 import os
-import datetime
 import platform
-import subprocess
+import datetime
+import re
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Optional, List, Dict, Tuple
 
-# #############################################################
-# #### Control Panel ##########################################
-# #############################################################
+# --------------------------------------------------------------------------------------
+# USER CONFIGURATION (edit these values)
+# --------------------------------------------------------------------------------------
 
-# location and hive ID
-LOCATION_ID = "Zeev-Berkeley"
-HIVE_ID = "Z1_4mic"
-HIVE_CONFIG = "dual-mic, sensor"
+@dataclass(frozen=True)
+class BMARConfig:
 
-# mode controls
-MODE_AUDIO_MONITOR = True                      # recording continuously to mp3 files
-MODE_PERIOD = True                              # period recording
-MODE_EVENT = False                              # event recording
-MODE_FFT_PERIODIC_RECORD = True                 # record fft periodically
+    # Canonical subfolder names under the audio root
+    RAW_FOLDER_NAME: str = "raw"                # data folder for primary audio recordings
+    MONITOR_FOLDER_NAME: str = "monitor"        # mp3/continuous recordings
+    PLOTS_FOLDER_NAME: str = "plots"            # data folder for audio plots
 
-# recording types controls:
-AUDIO_MONITOR_START = None  ##datetime.time(4, 0, 0)    # time of day to start recording hr, min, sec; None = continuous recording
-AUDIO_MONITOR_END = datetime.time(23, 0, 0)     # time of day to stop recording hr, min, sec
-AUDIO_MONITOR_RECORD = 1800                     # file size in seconds of continuous recording (default 1800 sec)
-AUDIO_MONITOR_INTERVAL = 0.1                      # seconds between recordings
+    # Runtime-wired directories (set by wire_today_dirs)
+    PRIMARY_DIRECTORY: Optional[Path] = None
+    MONITOR_DIRECTORY: Optional[Path] = None
+    PLOTS_DIRECTORY: Optional[Path] = None
 
-PERIOD_START = None  ##datetime.time(4, 0, 0)   # 'None' = continuous recording
-PERIOD_END = datetime.time(20, 0, 0)
-PERIOD_RECORD = 900                             # seconds of recording (default 900 sec)
-PERIOD_SPECTROGRAM = 120                        # spectrogram duration for saved png images
-PERIOD_INTERVAL = 0.1                             # seconds between start of period, must be > period, of course
+    # Identity
+    LOCATION_ID: str = "Zeev-Berkeley"
+    HIVE_ID: str = "Z1_4mic"
+    HIVE_CONFIG: str = "dual-mic, sensor"
+    
+    # Modes and timing
+    MODE_AUDIO_MONITOR: bool = True                         # enable audio monitoring
+    MODE_PERIOD: bool = True                                # enable periodic recording
+    MODE_EVENT: bool = False                                # enable event recording
+    MODE_FFT_PERIODIC_RECORD: bool = True                   # enable FFT periodic recording
 
-EVENT_START = datetime.time(4, 0, 0)
-EVENT_END = datetime.time(22, 0, 0)
-SAVE_BEFORE_EVENT = 30                          # seconds to save before the event
-SAVE_AFTER_EVENT = 30                           # seconds to save after the event
-EVENT_THRESHOLD = 20000                         # audio level threshold to be considered an event
+    BUFFER_SECONDS: int = 900                               # default buffer size for audio recording (15 minutes)
 
-MONITOR_CH = 0                                  # channel to monitor for event (if > number of chs, all channels are monitored)
+    AUDIO_MONITOR_START: Optional[datetime.time] = None     # start time for audio monitoring
+    AUDIO_MONITOR_END: Optional[datetime.time] = None       # end time for audio monitoring
+    AUDIO_MONITOR_RECORD: int = BUFFER_SECONDS              # duration of audio monitoring recording
+    AUDIO_MONITOR_INTERVAL: float = 0.0                     # interval between audio monitoring recordings
 
-# Audio input configuration
-MIC_1 = True
-MIC_2 = True
-MIC_3 = False
-MIC_4 = False
+    PERIOD_START: Optional[datetime.time] = None            # start time for periodic recording
+    PERIOD_END: Optional[datetime.time] = None              # end time for periodic recording
+    PERIOD_RECORD: int = BUFFER_SECONDS                     # duration of periodic recording
+    PERIOD_SPECTROGRAM: int = 120                           # duration of spectrogram analysis
+    PERIOD_INTERVAL: float = 0.1                            # interval between periodic recordings
 
-SOUND_IN_CHS = MIC_1 + MIC_2 + MIC_3 + MIC_4    # count of input channels
+    EVENT_START: datetime.time = 0                          # start time for event recording
+    EVENT_END: datetime.time = 0                            # end time for event recording
+    SAVE_BEFORE_EVENT: int = 30                             # seconds to save before event
+    SAVE_AFTER_EVENT: int = 30                              # seconds to save after event
+    EVENT_THRESHOLD: int = 20000                            # threshold for event triggering
+    MONITOR_CH: int = 0                                     # channel for audio monitoring (0 = none)
 
-# instrumentation parms
-FFT_BINS = 800                                  # number of bins for fft
-FFT_BW = 1000                                   # bandwidth of each bucket in hertz
-FFT_INTERVAL = 30                               # minutes between ffts
+    # Audio input and instrumentation
+    MIC_1: bool = True
+    MIC_2: bool = True
+    MIC_3: bool = False
+    MIC_4: bool = False
+    # provides count of active microphone channels
+    SOUND_IN_CHS = int(MIC_1) + int(MIC_2) + int(MIC_3) + int(MIC_4) 
 
-FULL_SCALE = 2 ** 16                            # just for cli vu meter level reference
-BUFFER_SECONDS = 1000                           # time length of circular buffer 
+    FFT_INTERVAL: int = 30                                  # interval in minutes between FFT analyses
+    LOG_AUDIO_CALLBACK: bool = False                        # enable logging of audio callbacks
+    DEBUG_VERBOSE: bool = False                             # enable verbose debugging output
 
-# Global flags
-testmode = False                                # True = run in test mode with lower than needed sample rate
-KB_or_CP = 'KB'                                 # use keyboard or control panel (PyQT5) to control program
-DEBUG_VERBOSE = False                           # Enable verbose debug output (set to True for troubleshooting)
+    ENABLE_ENHANCED_AUDIO: bool = True                      # enable enhanced audio processing
+    AUDIO_API_PREFERENCE: List[str] = ("WASAPI", "DirectSound", "MME")
+    AUDIO_FALLBACK_ENABLED: bool = False                    # enable audio fallback
 
-# Enhanced audio configuration
-ENABLE_ENHANCED_AUDIO = True                    # Enable PyAudio-based enhanced audio device testing
-AUDIO_API_PREFERENCE = ["WASAPI", "DirectSound", "MME"]  # Preferred audio APIs in order
-AUDIO_FALLBACK_ENABLED = True                   # Allow fallback to sounddevice if PyAudio fails
+    # Per-OS device prefs
+    LINUX_MAKE_NAME: str = ""                               # Leave empty for linux default
+    LINUX_MODEL_NAME: List[str] = ("pipewire")              # Use pipewire as the audio system
+    LINUX_DEVICE_NAME: str = "pipewire"                     # Use pipewire as the audio device
+    LINUX_API_NAME: str = "ALSA"                            # Use ALSA as the audio API
+    LINUX_HOSTAPI_NAME: str = "ALSA"                        # Use ALSA as the audio host API
+    LINUX_HOSTAPI_INDEX: int = 0                            # Default ALSA host API index
+    LINUX_DEVICE_ID: Optional[int] = None                   # Use pipewire device ID
 
-# input device parameters--linux:
-LINUX_MAKE_NAME = ""                             # Leave empty for Linux default
-LINUX_MODEL_NAME = ["pipewire"]                  # Use pipewire as the audio system
-LINUX_DEVICE_NAME = "pipewire"                   # Use pipewire device
-LINUX_API_NAME = "ALSA"                          # Use ALSA API for Linux
-LINUX_HOSTAPI_NAME = "ALSA"                      # Use ALSA host API
-LINUX_HOSTAPI_INDEX = 0                          # ALSA is typically index 0
-LINUX_DEVICE_ID = None                           # Use pipewire device ID
+    WINDOWS_MAKE_NAME: str = "Behringer"                    # Use Behringer as the audio device manufacturer
+    WINDOWS_MODEL_NAME: str = "UMC204HD"                    # Use UMC204HD as the audio device model
+    WINDOWS_DEVICE_NAME: str = "UMC204HD"                   # Use UMC204HD as the audio device name
+    WINDOWS_API_NAME: str = "WASAPI"                        # Use WASAPI as the audio API
+    WINDOWS_HOSTAPI_NAME: str = "WASAPI"                    # Use WASAPI as the audio host API
+    WINDOWS_HOSTAPI_INDEX: int = 15                         # Default WASAPI host API index
+    WINDOWS_DEVICE_ID: Optional[int] = None                 # Device ID for UMC204HD
 
-# input device parameters--windows:
-WINDOWS_MAKE_NAME = "Behringer"                 # Audio interface make
-WINDOWS_MODEL_NAME = "UMC204HD"                 # Audio interface model
-WINDOWS_DEVICE_NAME = "UMC204HD"                # Device name
-WINDOWS_API_NAME = "WASAPI"                     # Windows audio API
-WINDOWS_HOSTAPI_NAME = "WASAPI"                 # Host API name
-WINDOWS_HOSTAPI_INDEX = 1                      # Default host API index
-WINDOWS_DEVICE_ID = None                        # Device ID for Focusrite
+    MACOS_MAKE_NAME: str = "Behringer"                      # Leave empty for macOS default
+    MACOS_MODEL_NAME: str = "UMC204HD"                      # Use Built-in as the audio device model
+    MACOS_DEVICE_NAME: str = "UMC204HD"                     # Use Built-in as the audio device name
+    MACOS_API_NAME: str = "CoreAudio"                       # Use CoreAudio as the audio API
+    MACOS_HOSTAPI_NAME: str = "CoreAudio"                   # Use CoreAudio as the audio host API
+    MACOS_HOSTAPI_INDEX: int = 0                            # Default CoreAudio host API index
+    MACOS_DEVICE_ID: int = 0                                # Use Built-in device ID
 
-# input device parameters--macos:
-MACOS_MAKE_NAME = ""                            # Leave empty for macOS default
-MACOS_MODEL_NAME = ["Built-in"]                 # Built-in audio
-MACOS_DEVICE_NAME = "Built-in"                  # Built-in device
-MACOS_API_NAME = "CoreAudio"                    # macOS audio API
-MACOS_HOSTAPI_NAME = "CoreAudio"                # Host API name
-MACOS_HOSTAPI_INDEX = 0                         # Default host API index
-MACOS_DEVICE_ID = 0                             # Default device ID
+    # Audio parameters
+    PRIMARY_IN_SAMPLERATE: int = 192000                     # Use 192000 Hz as the primary input samplerate
+    PRIMARY_BITDEPTH: int = 16                              # Use 16-bit as the primary bitdepth
+    PRIMARY_SAVE_SAMPLERATE: Optional[int] = 96000          # if None then save at Input Samplerate
+    PRIMARY_FILE_FORMAT: str = "FLAC"                       # Use FLAC as the primary file format to save
 
-# audio parameters:
-PRIMARY_IN_SAMPLERATE = 192000                  # Audio sample rate
-PRIMARY_BITDEPTH = 16                           # Audio bit depth
-PRIMARY_SAVE_SAMPLERATE = 96000                 # if None then save at Input Samplerate
-PRIMARY_FILE_FORMAT = "FLAC"                    # 'WAV' or 'FLAC'
+    SAVE_HEADROOM_DB: float = 0.0                           # Use 0.0 dB as the headroom for saving
 
-AUDIO_MONITOR_SAMPLERATE = 48000                # For continuous audio
-AUDIO_MONITOR_BITDEPTH = 16                     # Audio bit depth
-AUDIO_MONITOR_CHANNELS = 1                      # Number of channels
-AUDIO_MONITOR_QUALITY = 0                       # for mp3 only: 0-9 sets vbr (0=best); 64-320 sets cbr in kbps
-AUDIO_MONITOR_FORMAT = "MP3"                    # accepts mp3, flac, or wav
+    AUDIO_MONITOR_SAMPLERATE: int = 48000                   # Use 48000 Hz as the audio monitor samplerate
+    AUDIO_MONITOR_BITDEPTH: int = 16                        # Use 16-bit as the audio monitor bitdepth
+    AUDIO_MONITOR_CHANNELS: int = 2                         # Use 2 channels for audio monitoring
+    AUDIO_MONITOR_QUALITY: int = 256                        # Use 256 kbps as the audio monitor quality
+    AUDIO_MONITOR_FORMAT: str = "MP3"                       # Use MP3 as the audio monitor format
 
-# Windows
-win_data_drive = "G:\\"   # D is internal and limited; G is Google Drive, just FYI
-win_data_path = "My Drive\\eb_beehive_data"
-win_data_folders = ["audio", "plots"]
-# macOS
-mac_data_drive = "~"  
-mac_data_path = "data/eb_beehive_data"
-mac_data_folders = ["audio", "plots"]
-# Linux
-linux_data_drive = "~"                          # Use home directory
-linux_data_path = "beedata/eb_beehive_data"     # Store in ~/beedata
-linux_data_folders = ["audio", "plots"]
+    # Data roots
+    win_data_drive: str = "G:\\"
+    win_data_path: str = "My Drive\\eb_beehive_data"
+    win_data_folders: List[str] = ("audio",)
 
-# mic location map channel to position
-MIC_LOCATION = ['1: upper--front', '2: upper--back', '3: lower w/queen--front', '4: lower w/queen--back']
+    mac_data_drive: str = "~"
+    mac_data_path: str = "data/eb_beehive_data"
+    mac_data_folders: List[str] = ("audio",)
 
-# Windows mme defaults, 2 ch only
-SOUND_IN_DEFAULT = 0                            # default input device id              
-SOUND_OUT_ID_DEFAULT = 3                        # default output device id
-SOUND_OUT_CHS_DEFAULT = 1                       # default number of output channels
-SOUND_OUT_SR_DEFAULT = 48000                    # default sample rate
+    linux_data_drive: str = "~"
+    linux_data_path: str = "beedata/eb_beehive_data"
+    linux_data_folders: List[str] = ("audio",)
 
-# audio display parameters:
-TRACE_DURATION = 5.0                            # seconds
-OSCOPE_GAIN_DB = 20                             # Gain in dB of audio level for oscope 
+    # UI/plot settings
+    MIC_LOCATION: List[str] = ('1: upper--front', '2: upper--back', \
+                               '3: lower w/queen--front', '4: lower w/queen--back')
 
-FFT_DURATION = 10.0                             # seconds
-FFT_GAIN = 12                                   # Gain in dB of audio level for fft
+    SOUND_IN_DEFAULT: int = 0
+    SOUND_OUT_ID_DEFAULT: int = 3
+    SOUND_OUT_CHS_DEFAULT: int = 2
+    SOUND_OUT_SR_DEFAULT: int = 48000
 
-SPECTROGRAM_DURATION = 10.0                     # seconds
-SPECTROGRAM_GAIN = 12                           # Gain in dB of audio level for spectrogram 
+    INTERCOM_SAMPLERATE: int = 48000
 
-# Dictionary to track active processes by key
-ACTIVE_PROCESSES_TEMPLATE = {
-    'v': None,  # VU meter
-    'o': None,  # Oscilloscope
-    's': None,  # Spectrogram 
-    'f': None,  # FFT
-    'i': None,  # Intercom
-    'p': None,  # Performance monitor (one-shot)
-    'P': None   # Performance monitor (continuous)
-}
+    TRACE_DURATION: float = 10.0
+    OSCOPE_GAIN_DB: float = 12.0
 
-def get_date_folder():
-    """Get current date folder in YYMMDD format."""
-    current_date = datetime.datetime.now()
-    yy = current_date.strftime('%y')  # 2-digit year (e.g., '23' for 2023)
-    mm = current_date.strftime('%m')  # Month (01-12)
-    dd = current_date.strftime('%d')  # Day (01-31)
-    return f"{yy}{mm}{dd}"             # Format YYMMDD (e.g., '230516')
+    FFT_DURATION: float = 10.0
+    FFT_GAIN: float = 12.0
+    FFT_FREQ_MIN_HZ: float = 10.0
+    FFT_FREQ_MAX_HZ: float = 10000.0
 
-def validate_bit_depth(bit_depth):
-    """Validate and return appropriate data type for bit depth."""
-    if bit_depth == 16:
-        return 'int16'
-    elif bit_depth == 24:
-        return 'int32'  # 24-bit audio is typically stored in 32-bit containers
-    elif bit_depth == 32:
-        return 'float32'
-    else:
-        raise ValueError(f"Unsupported bit depth: {bit_depth}")
+    SPECTROGRAM_DURATION: float = 10.0
+    SPECTROGRAM_GAIN: float = 12.0
+    SPECTROGRAM_DB_MIN: float = -70.0
+    SPECTROGRAM_DB_MAX: float = 0.0
 
-def get_platform_audio_config(platform_manager, config):
-    """Get platform-specific audio configuration."""
-    if platform_manager.is_macos():
+    # VU meter presentation controls
+    VU_METER_LATENCY_MS: int = 30
+    VU_METER_DAMPING: float = 0.5
+
+    # --------------------------------------------------------------------------------------
+    # end user defined parameters for dataclass
+    # --------------------------------------------------------------------------------------
+
+    # Preferred device name by platform (optional helper)
+    def DEVICE_NAME_FOR_PLATFORM(self) -> Optional[str]:
+        sysname = platform.system()
+        if sysname == "Windows":
+            return self.WINDOWS_DEVICE_NAME or None
+        if sysname == "Darwin":
+            return self.MACOS_DEVICE_NAME or None
+        return self.LINUX_DEVICE_NAME or None
+
+    # Compute base audio root for current platform
+    def audio_root(self) -> Path:
+        sysname = platform.system()
+        if sysname == "Windows":
+            base = Path((self.win_data_drive or "").strip()) / (self.win_data_path or "").lstrip("\\/").strip()
+        elif sysname == "Darwin":
+            base = Path(os.path.expanduser(self.mac_data_drive or "~")) / (self.mac_data_path or "")
+        else:
+            base = Path(os.path.expanduser(self.linux_data_drive or "~")) / (self.linux_data_path or "")
+        return base / self.LOCATION_ID / self.HIVE_ID / "audio"
+
+    def today_dirs(self, date: Optional[datetime.date] = None) -> Dict[str, Path]:
+        d = date or datetime.date.today()
+        day = d.strftime("%Y-%m-%d")
+        root = self.audio_root()
         return {
-            'data_drive': os.path.expanduser(config.mac_data_drive),
-            'data_path': config.mac_data_path,
-            'folders': config.mac_data_folders,
-            'make_name': config.MACOS_MAKE_NAME,
-            'model_name': config.MACOS_MODEL_NAME,
-            'device_name': config.MACOS_DEVICE_NAME,
-            'api_name': config.MACOS_API_NAME,
-            'hostapi_name': config.MACOS_HOSTAPI_NAME,
-            'hostapi_index': config.MACOS_HOSTAPI_INDEX,
-            'device_id': config.MACOS_DEVICE_ID
-        }
-    elif platform_manager.is_windows():
-        return {
-            'data_drive': config.win_data_drive,
-            'data_path': config.win_data_path,
-            'folders': config.win_data_folders,
-            'make_name': config.WINDOWS_MAKE_NAME,
-            'model_name': config.WINDOWS_MODEL_NAME,
-            'device_name': config.WINDOWS_DEVICE_NAME,
-            'api_name': config.WINDOWS_API_NAME,
-            'hostapi_name': config.WINDOWS_HOSTAPI_NAME,
-            'hostapi_index': config.WINDOWS_HOSTAPI_INDEX,
-            'device_id': config.WINDOWS_DEVICE_ID
-        }
-    else:  # Linux or other Unix-like
-        return {
-            'data_drive': os.path.expanduser(config.linux_data_drive),
-            'data_path': config.linux_data_path,
-            'folders': config.linux_data_folders,
-            'make_name': config.LINUX_MAKE_NAME,
-            'model_name': config.LINUX_MODEL_NAME,
-            'device_name': config.LINUX_DEVICE_NAME,
-            'api_name': config.LINUX_API_NAME,
-            'hostapi_name': config.LINUX_HOSTAPI_NAME,
-            'hostapi_index': config.LINUX_HOSTAPI_INDEX,
-            'device_id': config.LINUX_DEVICE_ID
+            "raw": root / self.RAW_FOLDER_NAME / day,
+            "monitor": root / self.MONITOR_FOLDER_NAME / day,
+            "plots": root / self.PLOTS_FOLDER_NAME / day,
         }
 
-def validate_audio_config(config):
-    """Validate audio configuration parameters."""
-    errors = []
-    
-    # Validate sound input channels
-    if hasattr(config, 'SOUND_IN_CHS'):
-        sound_in_chs = int(config.SOUND_IN_CHS) if hasattr(config, 'SOUND_IN_CHS') else 1
-        if sound_in_chs <= 0 or sound_in_chs > 64:
-            errors.append(f"Invalid SOUND_IN_CHS value: {config.SOUND_IN_CHS}")
-    
-    # Validate bit depth
-    if hasattr(config, 'PRIMARY_BITDEPTH'):
-        try:
-            validate_bit_depth(config.PRIMARY_BITDEPTH)
-        except ValueError as e:
-            errors.append(str(e))
-    
-    return errors
+    # --------------------------------------------------------------------------------------
+    # end BMARConfig class
+    # --------------------------------------------------------------------------------------
 
-def construct_directory_paths(data_drive, data_path, location_id, hive_id, folders, date_folder):
-    """Construct standardized directory paths."""
-    primary_directory = os.path.join(data_drive, data_path, location_id, hive_id, 
-                                   folders[0], "raw", date_folder, "")
-    monitor_directory = os.path.join(data_drive, data_path, location_id, hive_id, 
-                                   folders[0], "mp3", date_folder, "")
-    plot_directory = os.path.join(data_drive, data_path, location_id, hive_id, 
-                                 folders[1], date_folder, "")
-    
+def default_config() -> BMARConfig:
+    """Build a BMARConfig from the user configuration above."""
+    return BMARConfig()
+
+def get_platform_audio_config(platform_manager=None, config: Optional[BMARConfig] = None) -> Dict[str, object]:
+    """
+    Get platform-specific audio configuration (storage and device hints).
+    Returns dict with keys:
+      data_drive, data_path, folders, make_name, model_name, device_name,
+      api_name, hostapi_name, hostapi_index, device_id
+    """
+    c = config or default_config()
+    # Determine OS (prefer platform_manager if provided)
+    sysname = platform.system()
+    if platform_manager and hasattr(platform_manager, "is_macos") and platform_manager.is_macos():
+        sysname = "Darwin"
+    elif platform_manager and hasattr(platform_manager, "is_windows") and platform_manager.is_windows():
+        sysname = "Windows"
+    elif platform_manager and hasattr(platform_manager, "is_linux") and platform_manager.is_linux():
+        sysname = "Linux"
+
+    folders = {"raw": c.RAW_FOLDER_NAME, "monitor": c.MONITOR_FOLDER_NAME, "plots": c.PLOTS_FOLDER_NAME}
+
+    if sysname == "Darwin":
+        return {
+            "data_drive": os.path.expanduser(c.mac_data_drive),
+            "data_path": c.mac_data_path,
+            "folders": folders,
+            "make_name": c.MACOS_MAKE_NAME,
+            "model_name": c.MACOS_MODEL_NAME,
+            "device_name": c.MACOS_DEVICE_NAME,
+            "api_name": c.MACOS_API_NAME,
+            "hostapi_name": c.MACOS_HOSTAPI_NAME,
+            "hostapi_index": c.MACOS_HOSTAPI_INDEX,
+            "device_id": c.MACOS_DEVICE_ID,
+        }
+    if sysname == "Windows":
+        return {
+            "data_drive": c.win_data_drive,
+            "data_path": c.win_data_path,
+            "folders": folders,
+            "make_name": c.WINDOWS_MAKE_NAME,
+            "model_name": c.WINDOWS_MODEL_NAME,
+            "device_name": c.WINDOWS_DEVICE_NAME,
+            "api_name": c.WINDOWS_API_NAME,
+            "hostapi_name": c.WINDOWS_HOSTAPI_NAME,
+            "hostapi_index": c.WINDOWS_HOSTAPI_INDEX,
+            "device_id": c.WINDOWS_DEVICE_ID,
+        }
+    # Linux/default
     return {
-        'primary': primary_directory,
-        'monitor': monitor_directory,
-        'plot': plot_directory
+        "data_drive": os.path.expanduser(c.linux_data_drive),
+        "data_path": c.linux_data_path,
+        "folders": folders,
+        "make_name": c.LINUX_MAKE_NAME,
+        "model_name": c.LINUX_MODEL_NAME,
+        "device_name": c.LINUX_DEVICE_NAME,
+        "api_name": c.LINUX_API_NAME,
+        "hostapi_name": c.LINUX_HOSTAPI_NAME,
+        "hostapi_index": c.LINUX_HOSTAPI_INDEX,
+        "device_id": c.LINUX_DEVICE_ID,
     }
 
-def get_platform_config():
-    """Get platform-specific configuration information."""
-    config = {
-        'name': platform.system(),
-        'version': platform.version(),
-        'machine': platform.machine(),
-        'is_wsl': False,
-        'pulse_server': None
+
+def get_platform_config() -> Dict[str, str]:
+    """Basic platform info (compatibility helper)."""
+    return {'name': platform.system(), 'version': platform.version(), 'machine': platform.machine()}
+
+
+def wire_today_dirs(cfg: BMARConfig) -> Tuple[BMARConfig, Dict[str, str]]:
+    """
+    Create today's raw/monitor/plots directories and wire them to:
+      - module-level PRIMARY_DIRECTORY/MONITOR_DIRECTORY/PLOTS_DIRECTORY
+      - cfg (via replace)
+      - environment variables (BMAR_AUDIO_RAW_DIR, BMAR_AUDIO_MONITOR_DIR, BMAR_PLOTS_DIR)
+    """
+    dirs = cfg.today_dirs()
+    raw = dirs["raw"]; mon = dirs["monitor"]; plt = dirs["plots"]
+    raw.mkdir(parents=True, exist_ok=True)
+    mon.mkdir(parents=True, exist_ok=True)
+    plt.mkdir(parents=True, exist_ok=True)
+
+    os.environ["BMAR_AUDIO_RAW_DIR"] = str(raw)
+    os.environ["BMAR_AUDIO_MONITOR_DIR"] = str(mon)
+    os.environ["BMAR_PLOTS_DIR"] = str(plt)
+
+    new_cfg = replace(cfg, PRIMARY_DIRECTORY=raw, MONITOR_DIRECTORY=mon, PLOTS_DIRECTORY=plt)
+    return new_cfg, {"raw": str(raw), "monitor": str(mon), "plots": str(plt)}
+
+# --------------------------------------------------------------------------------------
+# Compatibility helpers for device selection (expected by audio init)
+# --------------------------------------------------------------------------------------
+
+def _tokens_from(*vals) -> list[str]:
+    toks: list[str] = []
+    for v in vals:
+        if v is None:
+            continue
+        if isinstance(v, (list, tuple, set)):
+            for s in v:
+                if s:
+                    toks += re.findall(r"[A-Za-z0-9]+", str(s).lower())
+        else:
+            toks += re.findall(r"[A-Za-z0-9]+", str(v).lower())
+    # de-dupe, preserve order
+    seen = set()
+    uniq = []
+    for t in toks:
+        if t not in seen:
+            seen.add(t); uniq.append(t)
+    return uniq
+
+def device_search_criteria(strict: bool = True, platform_manager=None, cfg: Optional[BMARConfig] = None) -> Dict[str, object]:
+    """
+    Return device selection criteria expected by audio device initialization.
+    Keys:
+      - make_name, model_name, device_name, api_name,
+        hostapi_name, hostapi_index, device_id
+      - name_tokens (list[str]) for device matching
+      - api_tokens (list[str]) derived from preferences and api_name
+      - api_preference (list), fallback_enabled (bool), strict (bool)
+    Values are sourced from the per-OS section of this config.
+    """
+    c = cfg or default_config()
+    # Resolve OS (prefer platform_manager if provided)
+    sysname = platform.system()
+    if platform_manager and hasattr(platform_manager, "is_macos") and platform_manager.is_macos():
+        sysname = "Darwin"
+    elif platform_manager and hasattr(platform_manager, "is_windows") and platform_manager.is_windows():
+        sysname = "Windows"
+    elif platform_manager and hasattr(platform_manager, "is_linux") and platform_manager.is_linux():
+        sysname = "Linux"
+
+    if sysname == "Windows":
+        crit = {
+            "make_name": c.WINDOWS_MAKE_NAME,
+            "model_name": c.WINDOWS_MODEL_NAME,
+            "device_name": c.WINDOWS_DEVICE_NAME,
+            "api_name": c.WINDOWS_API_NAME,
+            "hostapi_name": c.WINDOWS_HOSTAPI_NAME,
+            "hostapi_index": c.WINDOWS_HOSTAPI_INDEX,
+            "device_id": c.WINDOWS_DEVICE_ID,
+            "api_preference": c.AUDIO_API_PREFERENCE,
+            "fallback_enabled": c.AUDIO_FALLBACK_ENABLED,
+            "strict": bool(strict),
+        }
+        # Only require model/device tokens; exclude brand so "2- UMC204HD 192k" matches
+        crit["name_tokens"] = _tokens_from(crit["model_name"], crit["device_name"])
+        crit["api_tokens"] = _tokens_from(crit["api_name"], crit["api_preference"])
+        return crit
+
+    if sysname == "Darwin":
+        crit = {
+            "make_name": c.MACOS_MAKE_NAME,
+            "model_name": c.MACOS_MODEL_NAME,
+            "device_name": c.MACOS_DEVICE_NAME,
+            "api_name": c.MACOS_API_NAME,
+            "hostapi_name": c.MACOS_HOSTAPI_NAME,
+            "hostapi_index": c.MACOS_HOSTAPI_INDEX,
+            "device_id": c.MACOS_DEVICE_ID,
+            "api_preference": c.AUDIO_API_PREFERENCE,
+            "fallback_enabled": c.AUDIO_FALLBACK_ENABLED,
+            "strict": bool(strict),
+        }
+        crit["name_tokens"] = _tokens_from(crit["model_name"], crit["device_name"])
+        crit["api_tokens"] = _tokens_from(crit["api_name"], crit["api_preference"])
+        return crit
+
+    # Linux/default
+    crit = {
+        "make_name": c.LINUX_MAKE_NAME,
+        "model_name": c.LINUX_MODEL_NAME,
+        "device_name": c.LINUX_DEVICE_NAME,
+        "api_name": c.LINUX_API_NAME,
+        "hostapi_name": c.LINUX_HOSTAPI_NAME,
+        "hostapi_index": c.LINUX_HOSTAPI_INDEX,
+        "device_id": c.LINUX_DEVICE_ID,
+        "api_preference": c.AUDIO_API_PREFERENCE,
+        "fallback_enabled": c.AUDIO_FALLBACK_ENABLED,
+        "strict": bool(strict),
     }
-    
-    # Check if running under WSL
-    try:
-        if platform.system() == 'Linux':
-            with open('/proc/version', 'r') as f:
-                version_info = f.read().lower()
-                if 'microsoft' in version_info or 'wsl' in version_info:
-                    config['is_wsl'] = True
-                    # Check for PulseAudio server
-                    pulse_server = os.environ.get('PULSE_SERVER')
-                    if pulse_server:
-                        config['pulse_server'] = pulse_server
-    except:
-        pass
-    
-    return config
+    crit["name_tokens"] = _tokens_from(crit["model_name"], crit["device_name"])
+    crit["api_tokens"] = _tokens_from(crit["api_name"], crit["api_preference"])
+    return crit
+def api_preferences(cfg: Optional[BMARConfig] = None) -> List[str]:
+    """Return ordered audio API preferences."""
+    c = cfg or default_config()
+    return list(c.AUDIO_API_PREFERENCE)
+
+def fallback_enabled(cfg: Optional[BMARConfig] = None) -> bool:
+    """Return whether device fallback is enabled."""
+    c = cfg or default_config()
+    return bool(c.AUDIO_FALLBACK_ENABLED)
+
+def DEVICE_NAME_FOR_PLATFORM(cfg: Optional[BMARConfig] = None) -> Optional[str]:
+    """
+    Module-level compatibility helper for older callers that used a function instead
+    of the dataclass method. Returns the preferred input device name for this OS.
+    """
+    c = cfg or default_config()
+    return c.DEVICE_NAME_FOR_PLATFORM()
+# --------------------------------------------------------------------------------------

@@ -4,215 +4,143 @@ Handles audio format conversion, downsampling, and encoding operations.
 """
 
 import numpy as np
-from scipy.signal import butter, filtfilt
-from pydub import AudioSegment
+import shutil
+from math import gcd
+try:
+    # High-quality path if SciPy is present; otherwise we’ll fall back to linear interp
+    from scipy.signal import resample_poly
+except ImportError:
+    resample_poly = None
 
-def pcm_to_mp3_write(np_array, full_path, config):
+__all__ = ["ensure_pcm16", "downsample_audio", "pcm_to_mp3_write"]
+
+def ensure_pcm16(data: np.ndarray) -> np.ndarray:
     """
-    Convert PCM audio to MP3 and save to file using downsampled data.
-    
-    Args:
-        np_array: NumPy array containing audio data
-        full_path: Full path where to save the MP3 file
-        config: Configuration object containing audio settings
+    Convert input array to contiguous int16 without normalization/AGC.
+    - float -> clamp [-1,1] then scale to int16
+    - int16 -> returned as-is
+    - int32 -> downscale assuming 24-bit packed in 32-bit
+    - other ints -> clip to int16 range
     """
-    try:
-        int_array = np_array.astype(np.int16)
-        byte_array = int_array.tobytes()
+    if data is None:
+        raise ValueError("ensure_pcm16: data is None")
+    arr = np.asarray(data)
 
-        # Create an AudioSegment instance from the byte array
-        audio_segment = AudioSegment(
-            data=byte_array,
-            sample_width=2,
-            frame_rate=config.AUDIO_MONITOR_SAMPLERATE,
-            channels=config.AUDIO_MONITOR_CHANNELS
-        )
-        
-        # Try to export with ffmpeg first
-        try:
-            if config.AUDIO_MONITOR_QUALITY >= 64 and config.AUDIO_MONITOR_QUALITY <= 320:
-                # Use bitrate for quality between 64-320 kbps
-                audio_segment.export(full_path, format="mp3", bitrate=f"{config.AUDIO_MONITOR_QUALITY}k")
-            elif config.AUDIO_MONITOR_QUALITY < 10:
-                # Use quality setting for values 0-9
-                audio_segment.export(full_path, format="mp3", parameters=["-q:a", str(config.AUDIO_MONITOR_QUALITY)])
-            else:
-                # Default to 128 kbps for other values
-                audio_segment.export(full_path, format="mp3", bitrate="128k")
-                
-        except Exception as e:
-            if "ffmpeg" in str(e).lower():
-                print("\nError: ffmpeg not found or not working properly.")
-                print("Please install ffmpeg:")
-                print("1. Download from https://ffmpeg.org/download.html")
-                print("2. Extract the zip file")
-                print("3. Add the bin folder to your system PATH")
-                print("\nOr install using pip:")
-                print("pip install ffmpeg-python")
-                raise
-            else:
-                raise
-                
-    except Exception as e:
-        print(f"Error converting audio to MP3: {str(e)}")
-        raise
+    if arr.dtype == np.int16:
+        return np.ascontiguousarray(arr)
 
-def downsample_audio(audio_data, orig_sample_rate, target_sample_rate):
+    if np.issubdtype(arr.dtype, np.floating):
+        f = arr.astype(np.float32, copy=False)
+        f = np.nan_to_num(f, nan=0.0, posinf=0.0, neginf=0.0)
+        f = np.clip(f, -1.0, 1.0)
+        return np.ascontiguousarray((f * 32767.0).astype(np.int16))
+
+    if arr.dtype == np.int32:
+        scaled = np.clip(arr / 65536.0, -32768, 32767)
+        return np.ascontiguousarray(scaled.astype(np.int16))
+
+    info16 = np.iinfo(np.int16)
+    clipped = np.clip(arr, info16.min, info16.max)
+    # Return contiguous int16
+    return np.ascontiguousarray(clipped.astype(np.int16))
+
+def downsample_audio(x, in_sr: int, out_sr: int):
     """
-    Downsample audio to a lower sample rate with anti-aliasing filter.
-    
-    Args:
-        audio_data: Input audio data as NumPy array
-        orig_sample_rate: Original sample rate
-        target_sample_rate: Target sample rate
-        
-    Returns:
-        NumPy array: Downsampled audio data
+    Resample from in_sr to out_sr without changing gain.
+    Accepts mono or [N, C] arrays; supports int/float dtypes.
+    Returns same dtype as input (no normalization).
     """
-    # Convert audio to float for processing
-    audio_float = audio_data.astype(np.float32) / np.iinfo(np.int16).max
-    downsample_ratio = int(orig_sample_rate / target_sample_rate)
+    a = np.asarray(x)
+    if in_sr == out_sr:
+        return a
+    if in_sr <= 0 or out_sr <= 0:
+        raise ValueError("downsample_audio: sample rates must be positive")
 
-    # Define an anti-aliasing filter
-    nyq = 0.5 * orig_sample_rate
-    low = 0.5 * target_sample_rate
-    low = low / nyq
-    b, a = butter(5, low, btype='low')
+    orig_dtype = a.dtype
 
-    # If audio is stereo, split channels
-    if len(audio_float.shape) > 1 and audio_float.shape[1] == 2:
-        left_channel = audio_float[:, 0]
-        right_channel = audio_float[:, 1]
+    # Convert to float32 for processing; remember integer scale to restore later
+    if np.issubdtype(orig_dtype, np.integer):
+        info = np.iinfo(orig_dtype)
+        scale = float(max(abs(info.min), info.max)) or 1.0
+        af = (a.astype(np.float32) / scale)
+        int_scale = scale
     else:
-        # If not stereo, duplicate the mono channel
-        left_channel = audio_float.ravel()
-        right_channel = audio_float.ravel()
+        af = a.astype(np.float32, copy=False)
+        af = np.nan_to_num(af, nan=0.0, posinf=0.0, neginf=0.0)
+        int_scale = None
 
-    # Apply the Nyquist filter for each channel
-    left_filtered = filtfilt(b, a, left_channel)
-    right_filtered = filtfilt(b, a, right_channel)
-    
-    # Downsample each channel 
-    left_downsampled = left_filtered[::downsample_ratio]
-    right_downsampled = right_filtered[::downsample_ratio]
-    
-    # Combine the two channels back into a stereo array
-    downsampled_audio_float = np.column_stack((left_downsampled, right_downsampled))
-    
-    # Convert back to int16
-    downsampled_audio = (downsampled_audio_float * np.iinfo(np.int16).max).astype(np.int16)
-    return downsampled_audio
-
-def resample_audio(audio_data, orig_sample_rate, target_sample_rate):
-    """
-    Resample audio data to a different sample rate.
-    
-    Args:
-        audio_data: Input audio data as NumPy array
-        orig_sample_rate: Original sample rate
-        target_sample_rate: Target sample rate
-        
-    Returns:
-        NumPy array: Resampled audio data
-    """
-    if orig_sample_rate == target_sample_rate:
-        return audio_data
-    
-    try:
-        import librosa
-        # Use librosa for high-quality resampling
-        resampled = librosa.resample(audio_data.T, 
-                                   orig_sr=orig_sample_rate, 
-                                   target_sr=target_sample_rate)
-        return resampled.T
-    except ImportError:
-        # Fallback to simple downsampling if librosa not available
-        if target_sample_rate < orig_sample_rate:
-            return downsample_audio(audio_data, orig_sample_rate, target_sample_rate)
+    if resample_poly is not None:
+        g = gcd(int(in_sr), int(out_sr))
+        up = int(out_sr // g)
+        down = int(in_sr // g)
+        y = resample_poly(af, up, down, axis=0)
+    else:
+        n_in = af.shape[0]
+        n_out = int(round(n_in * (out_sr / float(in_sr))))
+        t_in = np.linspace(0.0, 1.0, n_in, endpoint=False, dtype=np.float64)
+        t_out = np.linspace(0.0, 1.0, n_out, endpoint=False, dtype=np.float64)
+        if af.ndim == 1:
+            y = np.interp(t_out, t_in, af).astype(np.float32)
         else:
-            # For upsampling without librosa, just repeat samples (not ideal)
-            ratio = target_sample_rate / orig_sample_rate
-            new_length = int(len(audio_data) * ratio)
-            return np.interp(np.linspace(0, len(audio_data)-1, new_length), 
-                           np.arange(len(audio_data)), audio_data)
+            y = np.vstack([np.interp(t_out, t_in, af[:, ch]) for ch in range(af.shape[1])]).T.astype(np.float32)
 
-def convert_bit_depth(audio_data, target_bit_depth):
-    """
-    Convert audio data to a different bit depth.
-    
-    Args:
-        audio_data: Input audio data as NumPy array
-        target_bit_depth: Target bit depth (16, 24, or 32)
-        
-    Returns:
-        NumPy array: Converted audio data with appropriate dtype
-    """
-    if target_bit_depth == 16:
-        if audio_data.dtype != np.int16:
-            # Normalize to [-1, 1] then scale to int16 range
-            if audio_data.dtype == np.float32 or audio_data.dtype == np.float64:
-                return (audio_data * np.iinfo(np.int16).max).astype(np.int16)
-            else:
-                # Convert from other integer types
-                max_val = np.iinfo(audio_data.dtype).max
-                normalized = audio_data.astype(np.float64) / max_val
-                return (normalized * np.iinfo(np.int16).max).astype(np.int16)
-        return audio_data
-        
-    elif target_bit_depth == 24:
-        # 24-bit is usually stored in 32-bit containers
-        if audio_data.dtype != np.int32:
-            if audio_data.dtype == np.float32 or audio_data.dtype == np.float64:
-                return (audio_data * (2**23 - 1)).astype(np.int32)
-            else:
-                max_val = np.iinfo(audio_data.dtype).max
-                normalized = audio_data.astype(np.float64) / max_val
-                return (normalized * (2**23 - 1)).astype(np.int32)
-        return audio_data
-        
-    elif target_bit_depth == 32:
-        if audio_data.dtype != np.float32:
-            if audio_data.dtype == np.int16:
-                return audio_data.astype(np.float32) / np.iinfo(np.int16).max
-            elif audio_data.dtype == np.int32:
-                return audio_data.astype(np.float32) / np.iinfo(np.int32).max
-            else:
-                max_val = np.iinfo(audio_data.dtype).max
-                return audio_data.astype(np.float32) / max_val
-        return audio_data
-        
+    # Restore original dtype (preserve amplitude)
+    if int_scale is not None:
+        y = np.clip(y * int_scale, -int_scale, int_scale - 1).astype(orig_dtype)
     else:
-        raise ValueError(f"Unsupported bit depth: {target_bit_depth}")
+        y = y.astype(orig_dtype, copy=False)
 
-def normalize_audio(audio_data, target_level_db=-6.0):
+    return y
+
+def pcm_to_mp3_write(np_array, full_path, config, sample_rate=None, bitrate_kbps=None, vbr_quality=None):
     """
-    Normalize audio to a target level in dB.
-    
-    Args:
-        audio_data: Input audio data as NumPy array
-        target_level_db: Target level in dB (default: -6.0 dB)
-        
-    Returns:
-        NumPy array: Normalized audio data
+    Export as MP3 using pydub/ffmpeg. Converts to PCM16 bytes first.
     """
-    # Calculate current RMS level
-    rms = np.sqrt(np.mean(audio_data**2))
-    
-    if rms == 0:
-        return audio_data  # Avoid division by zero for silence
-    
-    # Calculate target level (linear scale)
-    target_level_linear = 10**(target_level_db / 20.0)
-    
-    # Calculate gain needed
-    gain = target_level_linear / rms
-    
-    # Apply gain
-    normalized = audio_data * gain
-    
-    # Ensure we don't clip
-    max_val = np.max(np.abs(normalized))
-    if max_val > 1.0:
-        normalized = normalized / max_val
-    
-    return normalized
+    # Lazy-import pydub here to avoid startup warnings if ffmpeg isn't installed
+    try:
+        from pydub import AudioSegment  # import only when needed
+        # If ffmpeg/avconv is on PATH, point pydub to it explicitly to avoid warnings
+        ffmpeg_path = shutil.which('ffmpeg') or shutil.which('avconv')
+        if ffmpeg_path:
+            try:
+                AudioSegment.converter = ffmpeg_path
+            except Exception:
+                pass
+    except Exception as e:
+        raise RuntimeError("MP3 export requires pydub and an ffmpeg-compatible encoder (ffmpeg or avconv) installed and on PATH.") from e
+
+    pcm16 = ensure_pcm16(np_array)
+    channels = 1 if pcm16.ndim == 1 else pcm16.shape[1]
+    # Use provided sample_rate if given; otherwise fall back to config
+    sr = int(sample_rate) if sample_rate else (
+        getattr(config, "SAVE_SAMPLE_RATE", None) or getattr(config, "PRIMARY_IN_SAMPLERATE", None) or 44100
+    )
+
+    export_kwargs = {"format": "mp3"}
+    # Prefer explicit CBR if provided
+    if bitrate_kbps is not None:
+        export_kwargs["bitrate"] = f"{int(bitrate_kbps)}k"
+    elif vbr_quality is not None:
+        # Use ffmpeg VBR quality parameter
+        export_kwargs["parameters"] = ["-q:a", str(int(vbr_quality))]
+    else:
+        # Fallback to config: treat 64-320 as kbps, 0-9 as VBR
+        q = getattr(config, "AUDIO_MONITOR_QUALITY", 128)
+        try:
+            q = int(q)
+        except (ValueError, TypeError):
+            q = 128
+        if 64 <= q <= 320:
+            export_kwargs["bitrate"] = f"{q}k"
+        elif 0 <= q <= 9:
+            export_kwargs["parameters"] = ["-q:a", str(q)]
+        else:
+            export_kwargs["bitrate"] = "128k"
+
+    seg = AudioSegment(
+        data=pcm16.tobytes(),
+        sample_width=2,
+        frame_rate=int(sr),
+        channels=int(channels),
+    )
+    seg.export(full_path, **export_kwargs)

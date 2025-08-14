@@ -3,53 +3,31 @@ BMAR Application Module
 Main application class that coordinates all modules and manages the application state.
 """
 
-import multiprocessing
-import threading
-import signal
-import sys
 import logging
-import time
 import os
+import sys
+import datetime
+import threading
+import multiprocessing
 import numpy as np
+import sounddevice as sd
+from collections import deque
 
-# Import core modules that should always be present
-from .bmar_config import *
+from .bmar_config import default_config, get_platform_audio_config, wire_today_dirs
 from .platform_manager import PlatformManager
+from .audio_devices import find_device_by_config, get_audio_device_config
+from .audio_tools import set_global_flac_target_samplerate, save_flac_with_target_sr
+from .user_interface import keyboard_listener, cleanup_ui, background_keyboard_monitor
 
-# Try to import other modules with fallbacks
+# Optional; keep None if unavailable
 try:
-    from .system_utils import setup_logging, setup_signal_handlers
-except ImportError:
-    logging.warning("system_utils module not available")
-
-try:
-    from .file_utils import setup_directories, get_today_dir
-except ImportError:
-    logging.warning("file_utils module not available")
-
-try:
-    from .audio_devices import get_audio_device_config, configure_audio_device_interactive
-except ImportError:
-    logging.warning("audio_devices module not available")
-
-try:
-    from .process_manager import stop_all, cleanup
-except ImportError:
-    logging.warning("process_manager module not available")
-
-try:
-    from .user_interface import keyboard_listener, cleanup_ui
-except ImportError:
-    logging.warning("user_interface module not available")
-
-try:
-    from .class_PyAudio import *
-except ImportError:
-    logging.warning("class_PyAudio module not available")
+    from .file_utils import check_and_create_date_folders  # not required at init
+except Exception:
+    check_and_create_date_folders = None
 
 class BmarApp:
     """Main BMAR Application class."""
-    
+
     def __init__(self):
         """Initialize the BMAR application."""
         self.platform_manager = None
@@ -57,45 +35,68 @@ class BmarApp:
         self.today_dir = None
         self.circular_buffer = None
         self.active_processes = {}
-        self.virtual_device = False
-        
+
         # Add debug mode flag
-        self.debug_mode = True  # ← Add this line here
-        
+        self.debug_mode = True
+        # Allow switching to a virtual input generator when no device is available
+        self.use_virtual_input = False
+
         # Audio configuration attributes
         self.device_index = None
         self.sound_in_id = None
         self.sound_in_chs = 1
-        self.samplerate = 44100
-        self.PRIMARY_IN_SAMPLERATE = 44100
+        self.samplerate = 48000
+        self.PRIMARY_IN_SAMPLERATE = 48000
         self.channels = 1
         self._bit_depth = 16
+        # Use float32 internally for buffers/processing; saving handles bit depth separately
+        self._dtype = np.int16
         self.blocksize = 1024
-        self.monitor_channel = 0
-        self.testmode = True
-        
+        # Default output device index for playback (intercom)
+        self.output_device_index = None
+
         # Platform attributes
-        self.is_wsl = False
         self.is_macos = False
         self.os_info = ""
-        
+
         # User interface attributes (required by your keyboard_listener function)
         self.keyboard_listener_running = False
         self.shutdown_requested = False
         self.stop_program = [False]  # Your code expects this as a list
-        
+
         # Other attributes your functions might need
         self.DEBUG_VERBOSE = False
         self.max_file_size_mb = 100
         self.buffer_pointer = [0]  # For circular buffer tracking
-        
+
+        # Audio streaming and recording attributes
+        self.audio_stream = None
+        self.pa_instance = None
+        self.buffer = None
+        self.buffer_index = 0
+        self.buffer_size = 0
+        self.buffer_wrap = False
+        self.period_start_index = 0
+
+        # Threading events for recording
+        self.stop_recording_event = threading.Event()  # For manual recording only
+        self.stop_auto_recording_event = threading.Event()  # For automatic recording
+        self.buffer_wrap_event = threading.Event()
+
+        # VU meter state
+        self.vu_level_db = -120.0  # latest raw block dBFS
+        self.vu_level_db_smooth = -120.0  # smoothed dBFS for UI
+        self._vu_window = deque()  # rolling window of recent dB values
+        self._vu_window_len = 0  # target number of blocks in window
+
         # Initialize platform manager
-        from .platform_manager import PlatformManager
         self.platform_manager = PlatformManager()
+
+        # Use a BMARConfig dataclass instance (no module globals)
+        self.config = default_config()
 
     def initialize(self):
         """Initialize the application components."""
-        
         try:
             print("Initializing BMAR...")
             
@@ -111,46 +112,78 @@ class BmarApp:
             self.platform_manager.setup_environment()
             
             # Set platform attributes for VU meter compatibility
-            self.is_wsl = self.platform_manager.is_wsl()
             self.is_macos = self.platform_manager.is_macos()
             os_info = self.platform_manager.get_os_info()
             self.os_info = f"{os_info['platform']}"
             
-            # Handle WSL-specific setup early
-            if self.is_wsl:
-                print("WSL environment detected - setting up WSL audio...")
-                self.setup_wsl_environment()
-            
-            # Setup directories (with fallback if module missing)
+            # Load audio-related settings from BMAR_config BEFORE initializing audio
+            self.PRIMARY_IN_SAMPLERATE = int(getattr(self.config, 'PRIMARY_IN_SAMPLERATE', 48000))
+            self.PRIMARY_BITDEPTH = int(getattr(self.config, 'PRIMARY_BITDEPTH', 16))
+            self.PRIMARY_SAVE_SAMPLERATE = getattr(self.config, 'PRIMARY_SAVE_SAMPLERATE', None)
+
+            # Preferred input channels from config (used as desired_ch)
             try:
-                from .directory_utils import setup_directories, get_today_dir
-                self.recording_dir = setup_directories()
-                self.today_dir = get_today_dir(self.recording_dir)
-            except ImportError:
-                logging.warning("Directory utils module not available, using fallback")
-                self.setup_basic_directories()
-            
-            print(f"Recording directory: {self.recording_dir}")
-            print(f"Today's directory: {self.today_dir}")
-            
-            # Initialize audio with WSL-aware logic
+                self.channels = int(getattr(self.config, 'SOUND_IN_CHS', 1))
+                self.sound_in_chs = self.channels
+            except Exception:
+                self.channels = self.sound_in_chs = 1
+
+            # Ensure all FLAC writes honor PRIMARY_SAVE_SAMPLERATE
+            set_global_flac_target_samplerate(self.PRIMARY_SAVE_SAMPLERATE)
+
+            # Initialize audio (config is already set on self)
             audio_success = self.initialize_audio_with_fallback()
             if not audio_success:
-                raise RuntimeError("No suitable audio device found")
-            
-            # Initialize circular buffer
-            import multiprocessing
+                logging.error("Failed to initialize audio")
+                return False
+
+            # Initialize channel to monitor and default output device from config
+            try:
+                self.monitor_channel = int(getattr(self.config, 'MONITOR_CH', 0))
+            except Exception:
+                self.monitor_channel = 0
+            try:
+                self.output_device_index = int(getattr(self.config, 'SOUND_OUT_ID_DEFAULT', 0))
+            except Exception:
+                self.output_device_index = None
+
+            # Set up platform-specific directory configuration
+            platform_config = get_platform_audio_config(self.platform_manager, self.config)
+
+            # Add platform-specific attributes needed by file_utils
+            self.data_drive = platform_config['data_drive']
+            self.data_path = platform_config['data_path']
+            self.folders = platform_config['folders']
+
+            # Create today's directories and wire them into config and globals
+            try:
+                self.config, dir_info = wire_today_dirs(self.config)
+                # Optional: keep for convenience
+                self.recording_dir = str(self.config.PRIMARY_DIRECTORY)
+                self.today_dir = str(self.config.PRIMARY_DIRECTORY)
+                logging.info("Wired directories (raw/monitor/plots): %s", dir_info)
+            except Exception as e:
+                logging.warning("Failed to wire today dirs via bmar_config; falling back: %s", e)
+                self.setup_basic_directories()
+
+            # Other timing/buffer settings
+            self.BUFFER_SECONDS = getattr(self.config, 'BUFFER_SECONDS', 300)
+
+            # Initialize circular buffer if audio recording will be used
+            if self.should_start_auto_recording():
+                self.setup_audio_circular_buffer()
+
+            # Initialize circular buffer (legacy int16 shared buffer for other uses)
             buffer_duration = 300  # 5 minutes default
             buffer_size = int(self.samplerate * buffer_duration)
-            self.circular_buffer = multiprocessing.Array('f', buffer_size)
-            
+            self.circular_buffer = multiprocessing.Array('h', buffer_size)  # int16
             print(f"Circular buffer: {buffer_duration}s ({buffer_size} samples)")
-            
+
             # Initialize process tracking
             command_keys = ['r', 's', 'o', 't', 'v', 'i', 'p', 'P']
             for key in command_keys:
                 self.active_processes[key] = None
-            
+
             print("BMAR initialization completed successfully")
             return True
             
@@ -160,132 +193,243 @@ class BmarApp:
             return False
 
     def initialize_audio_with_fallback(self) -> bool:
-        """Initialize audio system with proper WSL fallback handling."""
+        """
+        Initialize audio input with flexible selection and a virtual-input fallback.
+        - Tries configured device; if not found, searches any device supporting desired SR/CH.
+        - Prompts user to accept an alternative; if none found, offers virtual input for testing.
+        """
+        # Desired params from config
+        cfg = getattr(self, "config", None)
+        desired_rate = int(getattr(cfg, "PRIMARY_IN_SAMPLERATE", getattr(self, "PRIMARY_IN_SAMPLERATE", 48000)))
+        desired_ch = int(getattr(cfg, "SOUND_IN_CHS", getattr(self, "SOUND_IN_CHS", 1)))
+
+        # Attempt configured device via helper (non-fatal on failure)
         try:
-            from .audio_devices import configure_audio_device_interactive, get_audio_device_config
-            
-            # Try standard audio configuration first (but don't fail hard)
-            if not self.is_wsl:
-                print("Attempting standard audio device configuration...")
+            configured_name = getattr(cfg, "DEVICE_NAME_FOR_PLATFORM", lambda: None)()
+        except Exception:
+            configured_name = None
+        try:
+            info = find_device_by_config(
+                strict=bool(configured_name),
+                desired_samplerate=desired_rate,
+                desired_channels=desired_ch,
+            )
+        except Exception as e:
+            logging.warning("Configured device selection failed: %s", e)
+            info = None
+
+        # Fallback: search any input device that supports desired settings
+        if not info:
+            try:
+                devices = sd.query_devices()
+            except Exception as e:
+                logging.error("Unable to query audio devices: %s", e)
+                devices = []
+
+            candidates = []
+            for i, d in enumerate(devices):
+                if int(d.get("max_input_channels") or 0) <= 0:
+                    continue
                 try:
-                    if configure_audio_device_interactive(self):
-                        print(f"Audio device: {self.device_index} at {self.samplerate}Hz ({self.channels} channels)")
-                        return True
-                except Exception as e:
-                    print(f"Standard audio configuration failed: {e}")
-                    logging.info(f"Standard audio configuration failed, trying fallback: {e}")
-            
-            # Try fallback configuration
-            print("Attempting fallback audio configuration...")
-            device_config = get_audio_device_config()
-            if device_config and device_config.get('default_device'):
-                device = device_config['default_device']
-                self.device_index = device['index']
-                self.samplerate = int(device['default_sample_rate'])
-                self.channels = min(2, device['input_channels'])
-                self.sound_in_id = device['index']
-                self.sound_in_chs = self.channels
-                self.PRIMARY_IN_SAMPLERATE = self.samplerate
-                print(f"Fallback audio device: {self.device_index} at {self.samplerate}Hz ({self.channels} channels)")
-                return True
-            
-            # WSL-specific fallback
-            if self.is_wsl:
-                print("Attempting WSL audio fallback...")
-                success = self.initialize_wsl_audio_fallback()
-                if success:
-                    print(f"WSL audio device: {self.device_index} at {self.samplerate}Hz ({self.channels} channels)")
+                    sd.check_input_settings(device=i, samplerate=desired_rate, channels=desired_ch, dtype='int16')
+                    candidates.append(i)
+                except Exception:
+                    continue
+
+            if candidates:
+                idx0 = candidates[0]
+                dev = devices[idx0]
+                try:
+                    api_name = sd.query_hostapis()[dev.get("hostapi", -1)].get("name", "Unknown")
+                except Exception:
+                    api_name = "Unknown"
+                print("\nConfigured input device not found.")
+                print(f"Found compatible input device: [{idx0}] {dev.get('name','Unknown')} via {api_name} @ {desired_rate} Hz ({desired_ch} ch)")
+                resp = input("Use this alternative device? [Y/n/q]: ").strip().lower()
+                if resp in ("", "y", "yes"):
+                    info = {"index": idx0, "name": dev.get("name", f"Device {idx0}"), "api_name": api_name,
+                            "samplerate": desired_rate}
+                elif resp in ("q", "quit"):
+                    return False
+                else:
+                    return False
+            else:
+                print("\nNo audio input device supports the requested settings.")
+                print(f"Requested: samplerate={desired_rate} Hz, channels={desired_ch}")
+                resp = input("Use a virtual input generator for testing instead? [y/N]: ").strip().lower()
+                if resp in ("y", "yes"):
+                    self.use_virtual_input = True
+                    self.device_index = None
+                    self.sound_in_id = -1
+                    self.samplerate = desired_rate
+                    self.PRIMARY_IN_SAMPLERATE = desired_rate
+                    self.channels = desired_ch
+                    self.sound_in_chs = desired_ch
+                    logging.info("Virtual input enabled at %d Hz (%d ch)", self.samplerate, self.channels)
                     return True
+                return False
+
+        # We have an info dict or index: honor requested SR if possible, else fallback to device default
+        idx = int(info["index"]) if isinstance(info, dict) else int(info)
+        self.device_index = idx
+        self.sound_in_id = idx
+        self.channels = desired_ch
+
+        effective_rate = desired_rate
+        try:
+            sd.check_input_settings(device=idx, samplerate=desired_rate, channels=desired_ch, dtype='int16')
+        except Exception:
+            try:
+                dev = sd.query_devices(idx)
+                dev_default_rate = int(dev.get("default_samplerate") or 0)
+            except Exception:
+                dev_default_rate = 0
+            effective_rate = int(dev_default_rate or desired_rate)
+            if effective_rate != desired_rate:
+                logging.warning("Requested samplerate %d not supported; using %d", desired_rate, effective_rate)
+
+        self.samplerate = effective_rate
+        self.PRIMARY_IN_SAMPLERATE = effective_rate
+        self.sound_in_chs = int(self.channels)
+
+        # Log selection
+        try:
+            dev = sd.query_devices(idx)
+            apis = sd.query_hostapis()
+            api_name = apis[dev.get("hostapi", -1)]["name"] if 0 <= dev.get("hostapi", -1) < len(apis) else "Unknown API"
+            logging.info("Using input device [%d] %s via %s @ %d Hz (%d ch)",
+                         idx, dev.get("name", "Unknown"), api_name, self.samplerate, self.channels)
+        except Exception:
+            logging.info("Using input device [%d] @ %d Hz (%d ch)", idx, self.samplerate, self.channels)
+        return True
+
+    def should_start_auto_recording(self):
+        """Check if automatic recording should be started based on config."""
+        c = getattr(self, "config", None)
+        if not c:
+            return False
+        return bool(getattr(c, 'MODE_AUDIO_MONITOR', False) or
+                    getattr(c, 'MODE_PERIOD', False) or
+                    getattr(c, 'MODE_EVENT', False))
+
+    def setup_audio_circular_buffer(self):
+        """Set up the circular buffer for audio recording."""
+        # Use actual selected samplerate/channels
+        self.buffer_size = int(self.BUFFER_SECONDS * int(self.samplerate))
+        self.buffer = np.zeros((self.buffer_size, int(self.sound_in_chs)), dtype=np.int16)
+        self.buffer_index = 0
+        self.buffer_wrap = False
+        self.blocksize = 8196
+        self.buffer_wrap_event.clear()
+        
+        print(f"\naudio buffer size: {sys.getsizeof(self.buffer)}\n")
+
+    def start_auto_recording(self):
+        """Start automatic recording if configured."""
+        try:
+            from .audio_processing import audio_stream
             
-            # Last resort: create a minimal virtual device
-            print("Creating virtual audio device as last resort...")
-            self.create_virtual_audio_device()
+            print("Starting automatic audio recording based on configuration...")
+            
+            # Start audio stream in a separate thread
+            self.audio_thread = threading.Thread(target=audio_stream, args=(self,), daemon=True)
+            self.audio_thread.start()
+            
+            print("Automatic recording started successfully.")
             return True
             
         except Exception as e:
-            logging.error(f"Audio initialization error: {e}")
+            logging.error(f"Failed to start automatic recording: {e}")
             return False
 
-    def create_virtual_audio_device(self):
-        """Create a virtual audio device for testing when no real devices are available."""
+    def _ensure_vu_window_len(self, block_len: int):
+        """
+        Ensure the VU window length matches config latency and current block duration.
+        Called on first update and whenever block size changes.
+        """
         try:
-            print("No audio devices found - creating virtual device for testing")
-            print("Warning: No actual audio will be recorded with virtual device")
-            
-            # Set minimal virtual device configuration
-            self.device_index = 0
-            self.samplerate = 44100
-            self.channels = 1
-            self.sound_in_chs = 1
-            self.PRIMARY_IN_SAMPLERATE = 44100
-            self._bit_depth = 16
-            self.blocksize = 1024
-            self.monitor_channel = 0
-            self.virtual_device = True  # Flag to indicate this is virtual
-            self.testmode = False  # Allow operations with virtual device
-            
-            print("Virtual audio device created successfully")
-            print("  Device ID: 0 (virtual)")
-            print("  Sample rate: 44100 Hz")
-            print("  Channels: 1")
-            print("  Note: Interface will work but no audio will be recorded")
-            
-        except Exception as e:
-            logging.error(f"Error creating virtual audio device: {e}")
-            raise
+            latency_ms = int(getattr(self.config, "VU_METER_LATENCY_MS", 120))
+        except Exception:
+            latency_ms = 120
+        sr = max(1, int(self.samplerate or 48000))
+        block_len = max(1, int(block_len or self.blocksize or 1024))
+        block_dt = block_len / float(sr)
+        # number of blocks to roughly match latency_ms
+        target_len = max(1, int(round((latency_ms / 1000.0) / block_dt)))
+        if target_len != self._vu_window_len:
+            self._vu_window = deque(maxlen=target_len)
+            self._vu_window_len = target_len
 
-    def setup_wsl_environment(self):
-        """Set up WSL-specific environment."""
-        try:
-            logging.info("Setting up WSL environment...")
-            
-            # Set up matplotlib for WSL (non-interactive backend)
-            import matplotlib
-            matplotlib.use('Agg')  # Use non-interactive backend
-            logging.info("Matplotlib configured for WSL (Agg backend)")
-            
-            # Set up audio environment variables
-            import os
-            os.environ['PULSE_RUNTIME_PATH'] = '/mnt/wslg/runtime-dir/pulse'
-            
-            # Try to start PulseAudio if available
-            try:
-                import subprocess
-                subprocess.run(['pulseaudio', '--check'], capture_output=True, timeout=2)
-                logging.info("PulseAudio is running")
-            except:
-                try:
-                    subprocess.run(['pulseaudio', '--start'], capture_output=True, timeout=5)
-                    logging.info("Started PulseAudio")
-                except:
-                    logging.info("PulseAudio not available or failed to start")
-            
-            logging.info("WSL environment setup completed")
-            
-        except Exception as e:
-            logging.warning(f"WSL environment setup warning: {e}")
+    @staticmethod
+    def _rms_dbfs(samples: np.ndarray) -> float:
+        """Compute RMS in dBFS from floating samples (-1..1)."""
+        if samples is None or samples.size == 0:
+            return -120.0
+        # If int types, convert to float -1..1
+        if np.issubdtype(samples.dtype, np.integer):
+            info = np.iinfo(samples.dtype)
+            x = samples.astype(np.float32) / max(1.0, float(info.max))
+        else:
+            x = samples.astype(np.float32)
+        # Avoid NaN/Inf
+        x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+        rms = np.sqrt(np.mean(np.square(x))) if x.size else 0.0
+        if rms <= 1e-9:
+            return -120.0
+        db = 20.0 * np.log10(min(1.0, max(1e-9, float(rms))))
+        return float(db)
 
-    def initialize_wsl_audio_fallback(self) -> bool:
-        """Initialize audio system with WSL fallback."""
+    def update_vu_from_block(self, block: np.ndarray) -> float:
+        """
+        Update the VU meter from an audio block and return smoothed dBFS for UI.
+        - Averages recent block dB values over VU_METER_LATENCY_MS.
+        - Applies exponential dampening using VU_METER_DAMPING.
+        """
+        # Ensure we know target window length from this block size
         try:
-            from .audio_devices import setup_wsl_audio_fallback
-            
-            logging.info("Attempting WSL audio fallback...")
-            success = setup_wsl_audio_fallback(self)
-            
-            if success:
-                logging.info("WSL audio fallback successful")
-                return True
+            block_len = block.shape[0] if hasattr(block, "shape") and len(block.shape) > 0 else len(block)
+        except Exception:
+            block_len = self.blocksize or 1024
+        self._ensure_vu_window_len(block_len)
+
+        # Compute block dBFS (mono RMS across channels)
+        try:
+            if block.ndim == 2 and block.shape[1] > 1:
+                # mixdown to mono for VU
+                mono = np.mean(block, axis=1)
             else:
-                logging.warning("WSL audio fallback failed")
-                return False
-                
-        except ImportError:
-            logging.warning("WSL audio manager not available")
-            return False
-        except Exception as e:
-            logging.error(f"WSL audio fallback error: {e}")
-            return False
+                mono = block.reshape(-1)
+        except Exception:
+            mono = np.asarray(block, dtype=np.float32).reshape(-1)
+
+        current_db = self._rms_dbfs(mono)
+        self.vu_level_db = current_db
+
+        # Windowed average for latency
+        self._vu_window.append(current_db)
+        avg_db = float(np.mean(self._vu_window)) if len(self._vu_window) > 0 else current_db
+
+        # Exponential dampening
+        try:
+            damping = float(getattr(self.config, "VU_METER_DAMPING", 0.85))
+        except Exception:
+            damping = 0.85
+        damping = min(0.99, max(0.0, damping))
+        alpha = 1.0 - damping
+        self.vu_level_db_smooth = (damping * self.vu_level_db_smooth) + (alpha * avg_db)
+        return self.vu_level_db_smooth
+
+    def vu_percent(self, floor_db: float = -60.0) -> float:
+        """
+        Convert the current smoothed VU dBFS to 0..1 for UI bars.
+        floor_db defines the lowest visible value (e.g., -60 dBFS).
+        """
+        db = float(self.vu_level_db_smooth)
+        if db <= floor_db:
+            return 0.0
+        if db >= 0.0:
+            return 1.0
+        return (db - floor_db) / (0.0 - floor_db)
 
     def run(self):
         """Main application run loop."""
@@ -293,17 +437,24 @@ class BmarApp:
             print("\nBMAR Audio Recording System")
             print("="*50)
             
-            if hasattr(self, 'virtual_device') and self.virtual_device:
-                print("⚠ RUNNING WITH VIRTUAL AUDIO DEVICE")
-                print("  Interface is functional but no audio will be recorded")
-                print("  This is normal in WSL or systems without audio hardware")
-                print()
-            
             # Set the keyboard listener to running state
             self.keyboard_listener_running = True
             
+            # Start automatic recording if configured
+            if self.should_start_auto_recording():
+                self.start_auto_recording()
+                print("Note: Automatic recording is active based on configuration.")
+                print("You can still use manual controls (press 'h' for help).")
+            else:
+                print("No automatic recording configured. Use 'r' to start manual recording.")
+            
             # Start the user interface using the CORRECT function name
-            from .user_interface import keyboard_listener
+            
+            # Start background keyboard monitor in a separate thread (for '^' key)
+            monitor_thread = threading.Thread(target=background_keyboard_monitor, args=(self,), daemon=True)
+            monitor_thread.start()
+            
+            # Start main keyboard listener (this will block until quit)
             keyboard_listener(self)
             
         except KeyboardInterrupt:
@@ -319,6 +470,29 @@ class BmarApp:
         try:
             print("Cleaning up BMAR application...")
             logging.info("Stopping all processes and threads...")
+            
+            # Stop recording if active
+            if hasattr(self, 'stop_recording_event'):
+                self.stop_recording_event.set()
+            
+            # Stop automatic recording if active
+            if hasattr(self, 'stop_auto_recording_event'):
+                self.stop_auto_recording_event.set()
+            
+            # Stop audio stream if active
+            if hasattr(self, 'audio_stream') and self.audio_stream:
+                try:
+                    self.audio_stream.stop()
+                    self.audio_stream.close()
+                except Exception as e:
+                    logging.warning(f"Error stopping audio stream: {e}")
+            
+            # Wait for audio thread to finish
+            if hasattr(self, 'audio_thread') and self.audio_thread.is_alive():
+                try:
+                    self.audio_thread.join(timeout=5)
+                except Exception as e:
+                    logging.warning(f"Error waiting for audio thread: {e}")
             
             # Stop all active processes
             if hasattr(self, 'active_processes'):
@@ -337,7 +511,6 @@ class BmarApp:
             
             # Clean up user interface using the CORRECT function name
             try:
-                from .user_interface import cleanup_ui
                 cleanup_ui(self)
                 print("User interface cleanup completed.")
             except Exception as e:
@@ -375,16 +548,13 @@ class BmarApp:
     def setup_basic_directories(self):
         """Set up basic directories when directory_utils module is not available."""
         try:
-            import os
-            from datetime import datetime
-            
             # Create basic recording directory
             home_dir = os.path.expanduser("~")
             self.recording_dir = os.path.join(home_dir, "BMAR_Recordings")
             os.makedirs(self.recording_dir, exist_ok=True)
             
             # Create today's directory
-            today = datetime.now().strftime("%Y-%m-%d")
+            today = datetime.datetime.now().strftime("%Y-%m-%d")
             self.today_dir = os.path.join(self.recording_dir, today)
             os.makedirs(self.today_dir, exist_ok=True)
             
@@ -404,6 +574,20 @@ class BmarApp:
         if suffix_newline:
             print("")
 
+    def _save_raw_capture(self, filepath: str, audio_block: np.ndarray, block_sr: int):
+        """Save a raw audio capture to file with optional resampling and bit depth conversion."""
+        try:
+            # Resample and convert bit depth if target settings are defined
+            target_sr = getattr(self, "PRIMARY_SAVE_SAMPLERATE",
+                                getattr(self.config, "PRIMARY_SAVE_SAMPLERATE", None))
+            bitdepth = getattr(self, "PRIMARY_BITDEPTH",
+                               getattr(self.config, "PRIMARY_BITDEPTH", 16))
+            save_flac_with_target_sr(filepath, audio_block, in_samplerate=block_sr,
+                                     target_samplerate=target_sr, bitdepth=bitdepth)
+        except Exception as e:
+            logging.error(f"Error saving raw capture to {filepath}: {e}")
+            raise
+
 def create_bmar_app():
     """Create and initialize a BMAR application instance."""
     try:
@@ -422,8 +606,6 @@ def create_bmar_app():
 
 def run_bmar_application():
     """Main entry point for running the BMAR application."""
-    import sys
-    
     try:
         # Create and run the application
         app = create_bmar_app()
@@ -446,5 +628,10 @@ def run_bmar_application():
 
 if __name__ == "__main__":
     """Allow the module to be run directly for testing."""
-    import sys
     sys.exit(run_bmar_application())
+
+'''
+__init__.py no longer triggers bmar_app at package import time, so importing modules.file_utils doesn’t re-enter bmar_app.
+bmar_app imports file_utils in a package-qualified way and doesn’t suppress real import-time errors.
+file_utils.py is now complete and importable.
+'''
