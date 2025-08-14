@@ -27,7 +27,7 @@ except Exception:
 
 class BmarApp:
     """Main BMAR Application class."""
-    
+
     def __init__(self):
         """Initialize the BMAR application."""
         self.platform_manager = None
@@ -35,10 +35,12 @@ class BmarApp:
         self.today_dir = None
         self.circular_buffer = None
         self.active_processes = {}
-        
+
         # Add debug mode flag
-        self.debug_mode = True  # ← Add this line here
-        
+        self.debug_mode = True
+        # Allow switching to a virtual input generator when no device is available
+        self.use_virtual_input = False
+
         # Audio configuration attributes
         self.device_index = None
         self.sound_in_id = None
@@ -52,21 +54,21 @@ class BmarApp:
         self.blocksize = 1024
         # Default output device index for playback (intercom)
         self.output_device_index = None
-        
+
         # Platform attributes
         self.is_macos = False
         self.os_info = ""
-        
+
         # User interface attributes (required by your keyboard_listener function)
         self.keyboard_listener_running = False
         self.shutdown_requested = False
         self.stop_program = [False]  # Your code expects this as a list
-        
+
         # Other attributes your functions might need
         self.DEBUG_VERBOSE = False
         self.max_file_size_mb = 100
         self.buffer_pointer = [0]  # For circular buffer tracking
-        
+
         # Audio streaming and recording attributes
         self.audio_stream = None
         self.pa_instance = None
@@ -75,18 +77,18 @@ class BmarApp:
         self.buffer_size = 0
         self.buffer_wrap = False
         self.period_start_index = 0
-        
+
         # Threading events for recording
         self.stop_recording_event = threading.Event()  # For manual recording only
         self.stop_auto_recording_event = threading.Event()  # For automatic recording
         self.buffer_wrap_event = threading.Event()
-        
+
         # VU meter state
-        self.vu_level_db = -120.0         # latest raw block dBFS
+        self.vu_level_db = -120.0  # latest raw block dBFS
         self.vu_level_db_smooth = -120.0  # smoothed dBFS for UI
-        self._vu_window = deque()         # rolling window of recent dB values
-        self._vu_window_len = 0           # target number of blocks in window
-        
+        self._vu_window = deque()  # rolling window of recent dB values
+        self._vu_window_len = 0  # target number of blocks in window
+
         # Initialize platform manager
         self.platform_manager = PlatformManager()
 
@@ -192,23 +194,20 @@ class BmarApp:
 
     def initialize_audio_with_fallback(self) -> bool:
         """
-        Initialize audio input. Honor PRIMARY_IN_SAMPLERATE from config if possible.
-        Falls back to device default when the requested rate is not supported.
+        Initialize audio input with flexible selection and a virtual-input fallback.
+        - Tries configured device; if not found, searches any device supporting desired SR/CH.
+        - Prompts user to accept an alternative; if none found, offers virtual input for testing.
         """
-        configured_name = None
+        # Desired params from config
+        cfg = getattr(self, "config", None)
+        desired_rate = int(getattr(cfg, "PRIMARY_IN_SAMPLERATE", getattr(self, "PRIMARY_IN_SAMPLERATE", 48000)))
+        desired_ch = int(getattr(cfg, "SOUND_IN_CHS", getattr(self, "SOUND_IN_CHS", 1)))
+
+        # Attempt configured device via helper (non-fatal on failure)
         try:
-            configured_name = getattr(self.config, "DEVICE_NAME_FOR_PLATFORM", lambda: None)()
+            configured_name = getattr(cfg, "DEVICE_NAME_FOR_PLATFORM", lambda: None)()
         except Exception:
             configured_name = None
-
-        # Desired params from config (prefer module config first)
-        cfg_mod = getattr(self, "config", None)
-        desired_rate = int(getattr(cfg_mod, "PRIMARY_IN_SAMPLERATE",
-                                   getattr(self, "PRIMARY_IN_SAMPLERATE", 44100)) if cfg_mod else getattr(self, "PRIMARY_IN_SAMPLERATE", 44100))
-        desired_ch = int(getattr(cfg_mod, "SOUND_IN_CHS",
-                                 getattr(self, "SOUND_IN_CHS", 1)) if cfg_mod else getattr(self, "SOUND_IN_CHS", 1))
-
-        # 1) Select a device (do not trust samplerate/channels from selection)
         try:
             info = find_device_by_config(
                 strict=bool(configured_name),
@@ -216,73 +215,92 @@ class BmarApp:
                 desired_channels=desired_ch,
             )
         except Exception as e:
-            if configured_name:
-                logging.error("Config-based device configuration failed (strict): %s", e)
-                return False
-            logging.info("Config-based device configuration failed, trying fallback: %s", e)
+            logging.warning("Configured device selection failed: %s", e)
             info = None
 
-        if not info and not configured_name:
-            try:
-                info = get_audio_device_config(
-                    strict=False,
-                    desired_samplerate=desired_rate,
-                    desired_channels=desired_ch,
-                )
-            except Exception as e:
-                logging.error("Fallback audio configuration failed: %s", e)
-                info = None
-
+        # Fallback: search any input device that supports desired settings
         if not info:
-            logging.error("Audio initialization error: No suitable audio devices found. Please check your audio hardware and drivers.")
-            return False
+            try:
+                devices = sd.query_devices()
+            except Exception as e:
+                logging.error("Unable to query audio devices: %s", e)
+                devices = []
 
-        # 2) Enforce desired sample rate if the device supports it; else fallback
-        idx = int(info["index"])
+            candidates = []
+            for i, d in enumerate(devices):
+                if int(d.get("max_input_channels") or 0) <= 0:
+                    continue
+                try:
+                    sd.check_input_settings(device=i, samplerate=desired_rate, channels=desired_ch, dtype='int16')
+                    candidates.append(i)
+                except Exception:
+                    continue
+
+            if candidates:
+                idx0 = candidates[0]
+                dev = devices[idx0]
+                try:
+                    api_name = sd.query_hostapis()[dev.get("hostapi", -1)].get("name", "Unknown")
+                except Exception:
+                    api_name = "Unknown"
+                print("\nConfigured input device not found.")
+                print(f"Found compatible input device: [{idx0}] {dev.get('name','Unknown')} via {api_name} @ {desired_rate} Hz ({desired_ch} ch)")
+                resp = input("Use this alternative device? [Y/n/q]: ").strip().lower()
+                if resp in ("", "y", "yes"):
+                    info = {"index": idx0, "name": dev.get("name", f"Device {idx0}"), "api_name": api_name,
+                            "samplerate": desired_rate}
+                elif resp in ("q", "quit"):
+                    return False
+                else:
+                    return False
+            else:
+                print("\nNo audio input device supports the requested settings.")
+                print(f"Requested: samplerate={desired_rate} Hz, channels={desired_ch}")
+                resp = input("Use a virtual input generator for testing instead? [y/N]: ").strip().lower()
+                if resp in ("y", "yes"):
+                    self.use_virtual_input = True
+                    self.device_index = None
+                    self.sound_in_id = -1
+                    self.samplerate = desired_rate
+                    self.PRIMARY_IN_SAMPLERATE = desired_rate
+                    self.channels = desired_ch
+                    self.sound_in_chs = desired_ch
+                    logging.info("Virtual input enabled at %d Hz (%d ch)", self.samplerate, self.channels)
+                    return True
+                return False
+
+        # We have an info dict or index: honor requested SR if possible, else fallback to device default
+        idx = int(info["index"]) if isinstance(info, dict) else int(info)
         self.device_index = idx
-        self.channels = desired_ch  # prefer config channels
-        effective_rate = desired_rate
+        self.sound_in_id = idx
+        self.channels = desired_ch
 
+        effective_rate = desired_rate
         try:
-            # Validate requested rate against the device
             sd.check_input_settings(device=idx, samplerate=desired_rate, channels=desired_ch, dtype='int16')
-        except Exception as e:
-            # Fallback to device default rate when requested is unsupported
+        except Exception:
             try:
                 dev = sd.query_devices(idx)
                 dev_default_rate = int(dev.get("default_samplerate") or 0)
             except Exception:
                 dev_default_rate = 0
-            fallback_rate = dev_default_rate if dev_default_rate > 0 else int(info.get("samplerate", 48000))
-            logging.warning("Requested samplerate %d not supported on device %s. Falling back to %d. Error: %s",
-                            desired_rate, info.get("name", idx), fallback_rate, e)
-            effective_rate = int(fallback_rate)
+            effective_rate = int(dev_default_rate or desired_rate)
+            if effective_rate != desired_rate:
+                logging.warning("Requested samplerate %d not supported; using %d", desired_rate, effective_rate)
 
-        # Persist final selection
         self.samplerate = effective_rate
-        # Keep legacy and new channel fields in sync for downstream buffer usage
+        self.PRIMARY_IN_SAMPLERATE = effective_rate
         self.sound_in_chs = int(self.channels)
 
-        # 3) Log final choice using our effective params (not selection defaults)
+        # Log selection
         try:
             dev = sd.query_devices(idx)
-            hostapis = sd.query_hostapis()
-            hostapi_name = None
-            try:
-                hostapi_idx = int(dev.get("hostapi", -1))
-                hostapi_name = hostapis[hostapi_idx]["name"] if 0 <= hostapi_idx < len(hostapis) else None
-            except Exception:
-                hostapi_name = None
+            apis = sd.query_hostapis()
+            api_name = apis[dev.get("hostapi", -1)]["name"] if 0 <= dev.get("hostapi", -1) < len(apis) else "Unknown API"
             logging.info("Using input device [%d] %s via %s @ %d Hz (%d ch)",
-                         idx,
-                         dev.get("name", info.get("name", "Unknown")),
-                         hostapi_name or info.get("api_name", "Unknown API"),
-                         self.samplerate,
-                         self.channels)
+                         idx, dev.get("name", "Unknown"), api_name, self.samplerate, self.channels)
         except Exception:
-            logging.info("Using input device [%d] %s @ %d Hz (%d ch)",
-                         idx, info.get("name", "Unknown"), self.samplerate, self.channels)
-
+            logging.info("Using input device [%d] @ %d Hz (%d ch)", idx, self.samplerate, self.channels)
         return True
 
     def should_start_auto_recording(self):

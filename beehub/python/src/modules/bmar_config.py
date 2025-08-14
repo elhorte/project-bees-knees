@@ -94,9 +94,9 @@ class BMARConfig:
     WINDOWS_HOSTAPI_INDEX: int = 15                         # Default WASAPI host API index
     WINDOWS_DEVICE_ID: Optional[int] = None                 # Device ID for UMC204HD
 
-    MACOS_MAKE_NAME: str = ""                               # Leave empty for macOS default
-    MACOS_MODEL_NAME: List[str] = ("Built-in")              # Use Built-in as the audio device model
-    MACOS_DEVICE_NAME: str = "Built-in"                     # Use Built-in as the audio device name
+    MACOS_MAKE_NAME: str = "Behringer"                      # Leave empty for macOS default
+    MACOS_MODEL_NAME: str = "UMC204HD"                      # Use Built-in as the audio device model
+    MACOS_DEVICE_NAME: str = "UMC204HD"                     # Use Built-in as the audio device name
     MACOS_API_NAME: str = "CoreAudio"                       # Use CoreAudio as the audio API
     MACOS_HOSTAPI_NAME: str = "CoreAudio"                   # Use CoreAudio as the audio host API
     MACOS_HOSTAPI_INDEX: int = 0                            # Default CoreAudio host API index

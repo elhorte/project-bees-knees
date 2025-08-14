@@ -4,7 +4,7 @@ Handles audio format conversion, downsampling, and encoding operations.
 """
 
 import numpy as np
-from pydub import AudioSegment
+import shutil
 from math import gcd
 try:
     # High-quality path if SciPy is present; otherwise we’ll fall back to linear interp
@@ -96,6 +96,19 @@ def pcm_to_mp3_write(np_array, full_path, config, sample_rate=None, bitrate_kbps
     """
     Export as MP3 using pydub/ffmpeg. Converts to PCM16 bytes first.
     """
+    # Lazy-import pydub here to avoid startup warnings if ffmpeg isn't installed
+    try:
+        from pydub import AudioSegment  # import only when needed
+        # If ffmpeg/avconv is on PATH, point pydub to it explicitly to avoid warnings
+        ffmpeg_path = shutil.which('ffmpeg') or shutil.which('avconv')
+        if ffmpeg_path:
+            try:
+                AudioSegment.converter = ffmpeg_path
+            except Exception:
+                pass
+    except Exception as e:
+        raise RuntimeError("MP3 export requires pydub and an ffmpeg-compatible encoder (ffmpeg or avconv) installed and on PATH.") from e
+
     pcm16 = ensure_pcm16(np_array)
     channels = 1 if pcm16.ndim == 1 else pcm16.shape[1]
     # Use provided sample_rate if given; otherwise fall back to config

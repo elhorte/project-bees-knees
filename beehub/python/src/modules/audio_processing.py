@@ -106,6 +106,99 @@ def audio_stream(app):
     logging.info(f"Data Type: {app._dtype}")
 
     try:
+        # Virtual input mode: generate synthetic audio into the circular buffer
+        if getattr(app, 'use_virtual_input', False):
+            # Ensure buffer is prepared
+            try:
+                if getattr(app, 'buffer', None) is None or getattr(app, 'buffer_size', 0) <= 0:
+                    setup_audio_circular_buffer(app)
+            except Exception:
+                setup_audio_circular_buffer(app)
+
+            # Start recording threads based on flags
+            threads_started = 0
+            if getattr(app.config, 'MODE_AUDIO_MONITOR', False):
+                logging.info("Starting recording_worker_thread: Audio_monitor (MP3)")
+                threading.Thread(target=recording_worker_thread, args=(
+                    app,
+                    app.config.AUDIO_MONITOR_RECORD,
+                    app.config.AUDIO_MONITOR_INTERVAL,
+                    "Audio_monitor",
+                    app.config.AUDIO_MONITOR_FORMAT,
+                    app.config.AUDIO_MONITOR_SAMPLERATE,
+                    getattr(app.config, 'AUDIO_MONITOR_START', None),
+                    getattr(app.config, 'AUDIO_MONITOR_END', None),
+                    app.stop_auto_recording_event
+                ), daemon=True).start()
+                threads_started += 1
+            if getattr(app.config, 'MODE_PERIOD', False):
+                logging.info("Starting recording_worker_thread: Period_recording (primary)")
+                threading.Thread(target=recording_worker_thread, args=(
+                    app,
+                    app.config.PERIOD_RECORD,
+                    app.config.PERIOD_INTERVAL,
+                    "Period_recording",
+                    app.config.PRIMARY_FILE_FORMAT,
+                    app.PRIMARY_IN_SAMPLERATE,
+                    getattr(app.config, 'PERIOD_START', None),
+                    getattr(app.config, 'PERIOD_END', None),
+                    app.stop_auto_recording_event
+                ), daemon=True).start()
+                threads_started += 1
+            if getattr(app.config, 'MODE_EVENT', False):
+                logging.info("Starting recording_worker_thread: Event_recording (primary)")
+                threading.Thread(target=recording_worker_thread, args=(
+                    app,
+                    app.config.SAVE_BEFORE_EVENT,
+                    app.config.SAVE_AFTER_EVENT,
+                    "Event_recording",
+                    app.config.PRIMARY_FILE_FORMAT,
+                    app.PRIMARY_IN_SAMPLERATE,
+                    getattr(app.config, 'EVENT_START', None),
+                    getattr(app.config, 'EVENT_END', None),
+                    app.stop_auto_recording_event
+                ), daemon=True).start()
+                threads_started += 1
+
+            # Virtual signal generator state
+            phase = 0.0
+            sr = int(getattr(app, 'samplerate', app.PRIMARY_IN_SAMPLERATE))
+            ch = int(getattr(app, 'sound_in_chs', 1))
+            bs = int(getattr(app, 'blocksize', 8192))
+            two_pi = 2.0 * np.pi
+
+            logging.info("Using virtual input generator @ %d Hz (%d ch), blocksize=%d", sr, ch, bs)
+            while not app.stop_program[0]:
+                # Generate a block of synthetic audio
+                t = (np.arange(bs, dtype=np.float32) + phase) / float(sr)
+                # Base sine tone per channel, different frequencies
+                freqs = [440.0 + 110.0 * i for i in range(ch)]
+                block = np.zeros((bs, ch), dtype=np.float32)
+                for ci in range(ch):
+                    block[:, ci] = 0.2 * np.sin(two_pi * freqs[ci] * t)
+                # Add a tiny noise floor
+                block += 0.01 * np.random.randn(bs, ch).astype(np.float32)
+
+                # Convert to int16 and write into circular buffer
+                x = (np.clip(block, -1.0, 1.0) * 32767.0).astype(np.int16)
+                frames = x.shape[0]
+                idx = app.buffer_index
+                end = idx + frames
+                if end <= app.buffer_size:
+                    app.buffer[idx:end, :ch] = x[:, :ch]
+                else:
+                    first = app.buffer_size - idx
+                    app.buffer[idx:, :ch] = x[:first, :ch]
+                    app.buffer[:frames-first, :ch] = x[first:, :ch]
+                    app.buffer_wrap = True
+                app.buffer_index = (idx + frames) % app.buffer_size
+
+                # Advance phase and sleep roughly one block
+                phase = (phase + bs) % sr
+                time.sleep(max(0.0, bs / float(sr)))
+
+            logging.info("Virtual input stopped")
+            return True
         # First verify the device configuration
         try:
             device_info = sd.query_devices(app.sound_in_id, 'input')

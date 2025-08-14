@@ -4,6 +4,9 @@ Handles keyboard input, command processing, and user interaction.
 """
 
 import os
+import sys
+import traceback
+import multiprocessing
 import threading
 import time
 import logging
