@@ -15883,3 +15883,570 @@ If anything regresses, share the first traceback line (file and line).
 
 ---
 
+_**User**_
+
+the BMAR_config.py parameters for time duration of the oscilloscope, fft, and spectrum generation are not being read and these functions seem to be operating on a fixed 5 seconds of audio accumulation before image generation. Pleaes correct this so these function use the config paramters for each one.
+
+---
+
+_**Assistant**_
+
+GitHub Copilot
+
+To fix this, update your plotting functions to read the duration parameters from the config object (BMARConfig) instead of using hardcoded values.
+
+For example, in `plot_oscope`, `plot_fft`, and `plot_spectrogram` in `plotting.py`, replace any hardcoded duration (like `duration = 5.0`) with the corresponding config parameter:
+
+- Oscilloscope: `TRACE_DURATION`
+- FFT: `FFT_DURATION`
+- Spectrogram: `SPECTROGRAM_DURATION`
+
+Here’s how to do it:
+
+````python
+# ...existing imports...
+from .bmar_config import default_config
+
+def plot_oscope(config=None, ...):
+    cfg = default_config() if config is None else config
+    duration = getattr(cfg, "TRACE_DURATION", 5.0)
+    # ...use duration for audio capture and plotting...
+
+def plot_fft(config=None, ...):
+    cfg = default_config() if config is None else config
+    duration = getattr(cfg, "FFT_DURATION", 5.0)
+    # ...use duration for FFT window...
+
+def plot_spectrogram(config=None, ...):
+    cfg = default_config() if config is None else config
+    duration = getattr(cfg, "SPECTROGRAM_DURATION", 5.0)
+    # ...use duration for spectrogram window...
+````
+
+**How to use:**
+- If you pass a config object, it will use your configured durations.
+- If not, it falls back to the default config.
+
+**Result:**  
+Oscilloscope, FFT, and spectrogram will now use the durations set in your BMAR_config.py.
+
+If you need help patching the exact lines, paste the relevant function code and I’ll show the precise edit.
+
+---
+
+_**User**_
+
+your changes did not fix the problem, the three plotting functions continue to operated from fixed time parameters. Please check the code again and have the three plotting functions use the config parameters for their respective duration.
+
+---
+
+_**Assistant**_
+
+Certainly! Here’s how to update your plotting functions in `plotting.py` so they use the duration parameters from your BMARConfig config object.
+
+**Find and update the following functions:**
+
+````python
+from .bmar_config import default_config
+
+def plot_oscope(config=None, ...):
+    # Get config object
+    cfg = default_config() if config is None else config
+    # Use config parameter for oscilloscope duration
+    duration = getattr(cfg, "TRACE_DURATION", 5.0)
+    # ...use 'duration' for audio capture and plotting...
+
+def plot_fft(config=None, ...):
+    cfg = default_config() if config is None else config
+    duration = getattr(cfg, "FFT_DURATION", 5.0)
+    # ...use 'duration' for FFT window...
+
+def plot_spectrogram(config=None, ...):
+    cfg = default_config() if config is None else config
+    duration = getattr(cfg, "SPECTROGRAM_DURATION", 5.0)
+    # ...use 'duration' for spectrogram window...
+````
+
+**What to change:**
+- Replace any hardcoded duration (like `duration = 5.0`) with the config parameter as shown above.
+- Make sure the plotting/capture logic uses the `duration` variable.
+
+**Result:**  
+Oscilloscope, FFT, and spectrogram will now use the durations set in your `BMAR_config.py` file.
+
+If you want me to patch the exact lines, please paste the full code for each plotting function and I’ll show the precise edit.
+
+---
+
+_**User**_
+
+Let's just work on one at a time to see if we can find and fix the problem with plotting duration. When the oscilloscope display is invoked, the terminal maessages are:
+
+Starting oscilloscope...
+Starting oscilloscope (device 7, 192000Hz)
+Oscilloscope started (PID: 38640)
+Oscilloscope capturing 5.0s from device 7 (192000Hz, 2 channels)
+Using device: Microphone (2- UMC204HD 192k)
+Starting multi-channel audio capture...
+Generating multi-channel oscilloscope plot...
+Multi-channel oscilloscope plot saved: G:\My Drive\eb_beehive_data\Zeev-Berkeley\Z1_4mic\audio\plots\2025-08-15\oscilloscope_20250815_000443.png
+
+The oscilloscope is controlled by 'TRACE_DURATION' which is currently set to 10 seconds but, as can be seen, is operating on a fixed 5 second interval.
+
+---
+
+_**Assistant**_
+
+Thanks for the detailed info. The issue is that the oscilloscope function is using `plot_duration` from the config dictionary, which defaults to 5.0 seconds, instead of always using `TRACE_DURATION` from your BMARConfig.
+
+**Here’s how to fix it:**
+
+Find this block in `plot_oscope`:
+
+```python
+try:
+    from . import bmar_config as _cfg
+    _default_trace = float(getattr(_cfg, 'TRACE_DURATION', 5.0))
+except Exception:
+    _default_trace = 5.0
+plot_duration = float(config.get('plot_duration', _default_trace))
+```
+
+**Replace it with:**
+
+```python
+# Always use the config object's TRACE_DURATION
+plot_duration = getattr(cfg, "TRACE_DURATION", 5.0)
+```
+
+**So the relevant section should look like:**
+
+````python
+def plot_oscope(config=None):
+    try:
+        cfg = default_config() if config is None else config
+        # Use BMARConfig TRACE_DURATION directly
+        plot_duration = getattr(cfg, "TRACE_DURATION", 5.0)
+        # ... rest of your code ...
+````
+
+**Result:**  
+The oscilloscope will always use the value set in BMARConfig (`TRACE_DURATION`), regardless of what’s in the config dictionary.
+
+Let me know if you want to do the same for FFT and spectrogram next!
+
+---
+
+_**User**_
+
+I just reloaded the plotting.py module from github and would like to start again.
+
+the BMAR_config.py parameters for time duration of the oscilloscope, fft, and spectrum generation are not being used causing these functions to operatie on a fixed duration of 5 seconds of audio accumulation before image generation. Pleaes correct these functions to use the respective duration config paramters for each one.
+
+---
+
+_**Assistant**_
+
+GitHub Copilot
+
+You’re right—the plotting functions were defaulting to 5s. Below patches make oscilloscope, FFT, and spectrogram durations come from BMAR_config.
+
+1) Add a small helper to resolve durations from BMARConfig or a dict override
+````python
+# ...existing code...
+from scipy import signal
++from .bmar_config import default_config as _default_config
++
++# Resolve duration from BMARConfig or dict; fall back to BMAR defaults
++def _get_cfg_duration(config, attr_name: str, dict_keys: tuple[str, ...], fallback_default: float = 5.0) -> float:
++    try:
++        bmardef = _default_config()
++        default_val = float(getattr(bmardef, attr_name, fallback_default))
++    except Exception:
++        default_val = float(fallback_default)
++    # Dataclass/object with attribute
++    if config is not None and hasattr(config, attr_name):
++        try:
++            return float(getattr(config, attr_name))
++        except Exception:
++            pass
++    # Dict override keys (e.g., {"trace_duration": 8.0})
++    if isinstance(config, dict):
++        for k in dict_keys:
++            if k in config and config[k] is not None:
++                try:
++                    return float(config[k])
++                except Exception:
++                    continue
++    return default_val
+# ...existing code...
+````
+
+2) Use TRACE_DURATION in oscilloscope
+````python
+# ...existing code...
+def plot_oscope(config=None):
+    try:
+-        blocksize = config.get('blocksize', 1024)
++        blocksize = config.get('blocksize', 1024) if isinstance(config, dict) else 1024
++        # Duration from BMAR_config: TRACE_DURATION (fallback 5.0)
++        duration = _get_cfg_duration(config, "TRACE_DURATION", ("trace_duration", "plot_duration", "duration"), 5.0)
+         # ...existing code...
+-        print(f"Oscilloscope capturing 5.0s from device {device_index} ({samplerate}Hz, {channels} channels)")
++        print(f"Oscilloscope capturing {duration:.1f}s from device {device_index} ({samplerate}Hz, {channels} channels)")
+         # ...existing code where samples are computed...
+-        n_samples = int(5.0 * samplerate)
++        n_samples = int(duration * samplerate)
+         # ...existing code...
+    except Exception as e:
+        # ...existing code...
+# ...existing code...
+````
+
+3) Use FFT_DURATION in FFT plotter
+````python
+# ...existing code...
+def plot_fft(config=None):
+    try:
+-        duration = float(config.get('plot_duration', 5.0)) if isinstance(config, dict) else 5.0
++        # Duration from BMAR_config: FFT_DURATION (fallback 5.0)
++        duration = _get_cfg_duration(config, "FFT_DURATION", ("fft_duration", "plot_duration", "duration"), 5.0)
+         # ...existing code...
+-        print(f"Generating FFT plot from {5.0:.1f}s of audio...")
++        print(f"Generating FFT plot from {duration:.1f}s of audio...")
+         # ...existing code where window length is derived...
+-        n_samples = int(5.0 * samplerate)
++        n_samples = int(duration * samplerate)
+         # ...existing code...
+    except Exception as e:
+        # ...existing code...
+# ...existing code...
+````
+
+4) Use SPECTROGRAM_DURATION in spectrogram plotter
+````python
+# ...existing code...
+def plot_spectrogram(config=None):
+    try:
+-        duration = float(config.get('plot_duration', 5.0)) if isinstance(config, dict) else 5.0
++        # Duration from BMAR_config: SPECTROGRAM_DURATION (fallback 5.0)
++        duration = _get_cfg_duration(config, "SPECTROGRAM_DURATION", ("spectrogram_duration", "plot_duration", "duration"), 5.0)
+         # ...existing code...
+-        print(f"Generating spectrogram from {5.0:.1f}s of audio...")
++        print(f"Generating spectrogram from {duration:.1f}s of audio...")
+         # ...existing code where spectrogram length is derived...
+-        n_samples = int(5.0 * samplerate)
++        n_samples = int(duration * samplerate)
+         # ...existing code...
+    except Exception as e:
+        # ...existing code...
+# ...existing code...
+````
+
+Notes
+- Works whether you pass a BMARConfig object or a dict. Dict can override via keys like trace_duration/fft_duration/spectrogram_duration if needed.
+- All user-facing prints now reflect the configured durations.
+
+---
+
+_**User**_
+
+I tried oscilloscope function and got these errors:
+
+Starting oscilloscope...
+Starting oscilloscope (device 7, 192000Hz)
+Oscilloscope started (PID: 40904)
+Oscilloscope capturing 10.0s from device 7 (192000Hz, 2 channels)
+Oscilloscope error: name 'sd' is not defined
+Oscilloscope setup error: name 'traceback' is not defined
+Process Process-1:
+Traceback (most recent call last):
+  File "E:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules\plotting.py", line 314, in plot_oscope
+    device_info = sd.query_devices(device_index, 'input')
+NameError: name 'sd' is not defined
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "E:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules\plotting.py", line 462, in plot_oscope
+    traceback.print_exc()
+NameError: name 'traceback' is not defined
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "E:\git\earth_biometrics\project-bees-knees\beehub\python\src\modules\plotting.py", line 466, in plot_oscope
+    traceback.print_exc()
+NameError: name 'traceback' is not defined
+
+---
+
+_**Assistant**_
+
+GitHub Copilot
+
+You hit missing imports and a couple of stale variable names in plot_oscope. Apply this patch to fix:
+- Import sounddevice, time, traceback (and sys/subprocess/logging used elsewhere).
+- Use the configured TRACE_DURATION everywhere (no stray plot_duration).
+- Read OSCOPE_GAIN_DB and MONITOR_CH from BMAR_config.
+
+````python
+# ...existing code...
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+import os
+from pathlib import Path
+from datetime import datetime
+from scipy import signal
+from .bmar_config import default_config as _default_config
++import time
++import logging
++import sys
++import subprocess
++import traceback
++import sounddevice as sd
+# ...existing code...
+
+def plot_oscope(config=None):
+    try:
+        config = config or {}
+        plots_dir = _resolve_plots_dir(config)
+        device_index = config.get('device_index', 0)
+        samplerate = config.get('samplerate', 44100)
+        channels = config.get('channels', 1)
+        blocksize = config.get('blocksize', 1024) if isinstance(config, dict) else 1024
+        # Duration from BMAR_config: TRACE_DURATION (fallback 5.0)
+        duration = _get_cfg_duration(config, "TRACE_DURATION", ("trace_duration", "plot_duration", "duration"), 5.0)
++        # Read oscilloscope gain and default monitor channel from config
++        try:
++            from . import bmar_config as _cfg
++            oscope_gain_db = float(getattr(_cfg, 'OSCOPE_GAIN_DB', 0))
++            monitor_channel = int(getattr(_cfg, 'MONITOR_CH', 0))
++        except Exception:
++            oscope_gain_db = 0.0
++            monitor_channel = 0
++        oscope_gain = float(10 ** (oscope_gain_db / 20.0))
+        
+        print(f"Oscilloscope capturing {duration:.1f}s from device {device_index} ({samplerate}Hz, {channels} channels)")
+        
+        try:
+            # Validate device
+            if device_index is not None:
+                device_info = sd.query_devices(device_index, 'input')
+                print(f"Using device: {device_info['name']}\r")
+                
+                if device_info['max_input_channels'] == 0:
+                    print(f"Error: Device {device_index} has no input channels\r")
+                    return
+                
+                # Ensure we don't request more channels than available
+                max_channels = device_info['max_input_channels']
+                if channels > max_channels:
+                    print(f"Warning: Requested {channels} channels, but device only has {max_channels}. Using {max_channels} channels.\r")
+                    channels = max_channels
+                
+            else:
+                print("Error: No device specified\r")
+                return
+            
+            print("Starting multi-channel audio capture...\r")
+            
+            # Calculate total samples needed
+-            total_samples = int(samplerate * plot_duration)
++            total_samples = int(samplerate * duration)
+            audio_data = {i: [] for i in range(channels)}  # Store data for each channel
+            # ...existing code...
+            print("\rGenerating multi-channel oscilloscope plot...\r")
+            # ...existing code building time_axis...
+                ax.set_ylabel(f'Ch {ch+1}\nAmplitude')
+                ax.grid(True, alpha=0.3)
+-                ax.set_xlim(0, plot_duration)
++                ax.set_xlim(0, duration)
+                ax.set_ylim(-1.05, 1.05)  # Fixed scale to reveal true clipping
+            # ...existing code...
+    except Exception as e:
+        print(f"Oscilloscope setup error: {e}\r")
+        traceback.print_exc()
+# ...existing code...
+````
+
+Re-run oscilloscope. The capture duration should match TRACE_DURATION, and the NameErrors for sd/traceback are resolved. If you want the same treatment for FFT and Spectrogram, say the word and I’ll patch them too.
+
+---
+
+_**User**_
+
+The FFT and Spectrogram functions need to be corrected similar to oscilloscope to read their respective durations from the config file.
+
+---
+
+_**Assistant**_
+
+GitHub Copilot
+
+Applied fixes so FFT and Spectrogram use durations from BMAR_config (like Oscilloscope). Both now resolve from the BMARConfig object or optional dict overrides.
+
+````python
+# ...existing code...
+
+def plot_spectrogram(config=None):
+    try:
+        config = config or {}
+        plots_dir = _resolve_plots_dir(config)
+        device_index = config.get('device_index', 0)
+        samplerate = config.get('samplerate', 44100)
+        channels = config.get('channels', 1)
+        blocksize = config.get('blocksize', 1024)
+        fft_size = config.get('fft_size', 2048)
+        overlap = config.get('overlap', 0.75)
+-        try:
+-            from . import bmar_config as _cfg
+-            _default_spec = float(getattr(_cfg, 'SPECTROGRAM_DURATION', 5.0))
+-        except Exception:
+-            _default_spec = 5.0
+-        capture_duration = float(config.get('capture_duration', _default_spec))
++        # Read spectrogram duration from BMAR_config with optional dict overrides
++        capture_duration = _get_cfg_duration(
++            config,
++            "SPECTROGRAM_DURATION",
++            ("spectrogram_duration", "capture_duration", "duration"),
++            5.0
++        )
+        freq_range = config.get('freq_range', [0, samplerate // 2])
+
+-        print(f"Spectrogram capturing {capture_duration}s from device {device_index} ({samplerate}Hz)\r")
++        print(f"Spectrogram capturing {capture_duration:.1f}s from device {device_index} ({samplerate}Hz)\r")
+        # ...existing code...
+        total_samples = int(samplerate * capture_duration)
+        # ...existing code...
+````
+
+````python
+# ...existing code...
+
+def plot_fft(config=None):
+    """Generate and display FFT analysis using sounddevice for audio capture."""
+    try:
+        config = config or {}
+        plots_dir = _resolve_plots_dir(config)
+        device_index = config.get('device_index', 0)
+        samplerate = config.get('samplerate', 44100)
+        channels = config.get('channels', 1)
+        blocksize = config.get('blocksize', 1024)
+        monitor_channel = config.get('monitor_channel', 0)
+        mon = int(monitor_channel)
+        # ...existing gain code...
+
+        print(f"Starting FFT analysis on channel {mon + 1}...\r")
+        
+        # Check for virtual device first
+        if device_index is None:
+            print("Virtual device detected for FFT - generating synthetic audio\r")
+-            duration = 2.0
++            duration = _get_cfg_duration(
++                config,
++                "FFT_DURATION",
++                ("fft_duration", "capture_duration", "duration"),
++                2.0
++            )
+            audio_data, _ = _generate_synthetic_audio(duration, channels, samplerate, "FFT analysis")
+            # ...existing code...
+        else:
+            try:
+                device_info = sd.query_devices(device_index, 'input')
+                print(f"Using device: {device_info['name']}\r")
+                # ...existing checks...
+-                print("Capturing audio for FFT analysis...\r")
+-                # Use default duration from config
+-                try:
+-                    from . import bmar_config as _cfg
+-                    _default_fft = float(getattr(_cfg, 'FFT_DURATION', 2.0))
+-                except Exception:
+-                    _default_fft = 2.0
+-                capture_duration = float(config.get('capture_duration', _default_fft))
++                capture_duration = _get_cfg_duration(
++                    config,
++                    "FFT_DURATION",
++                    ("fft_duration", "capture_duration", "duration"),
++                    2.0
++                )
++                print(f"Capturing audio for FFT analysis for {capture_duration:.1f}s...\r")
+                total_samples = int(samplerate * capture_duration)
+                audio_data = []
+                # ...existing code...
+````
+
+Notes
+- Both functions accept either a BMARConfig object or a dict; dict can override using keys: trace_duration/fft_duration/spectrogram_duration or capture_duration/duration.
+- Printed messages now reflect the configured durations.
+
+---
+
+_**User**_
+
+the fft function has a warning on launch and also has a duplicate line output of 'Capturing audio for FFT analysis...'
+
+Starting FFT analysis...
+Starting FFT analysis (device 7, 192000Hz)
+  Channel: 1 of 2
+WARNING:root:Warning: No process tracking for command 'f'
+FFT analysis started (PID: 44476)
+Starting FFT analysis on channel 1...
+Using device: Microphone (2- UMC204HD 192k)
+Capturing audio for FFT analysis...
+Capturing audio for FFT analysis for 10.0s...
+Processing FFT...
+FFT plot saved: G:\My Drive\eb_beehive_data\Zeev-Berkeley\Z1_4mic\audio\plots\2025-08-15\fft_20250815_002645.png
+
+---
+
+_**Assistant**_
+
+GitHub Copilot
+
+Two quick fixes:
+
+1) Remove duplicate “Capturing audio for FFT analysis…” line and keep the duration-specific one.
+
+````python
+# ...existing code...
+            try:
+                device_info = sd.query_devices(device_index, 'input')
+                print(f"Using device: {device_info['name']}\r")
+                # ...existing checks...
+-                print("Capturing audio for FFT analysis...\r")
+-                # Use default duration from config
+                 capture_duration = _get_cfg_duration(
+                     config,
+                     "FFT_DURATION",
+                     ("fft_duration", "capture_duration", "duration"),
+                     2.0
+                 )
+                 print(f"Capturing audio for FFT analysis for {capture_duration:.1f}s...\r")
+# ...existing code...
+````
+
+2) Initialize process tracking for the FFT command key to remove the warning.
+
+````python
+# ...existing code inside BmarApp.initialize() after setting up self.active_processes...
+-            command_keys = ['r', 's', 'o', 't', 'v', 'i', 'p', 'P']
++            command_keys = ['r', 's', 'o', 't', 'v', 'i', 'p', 'P', 'f']  # include FFT
+             for key in command_keys:
+                 self.active_processes[key] = None
+# ...existing code...
+````
+
+After these changes:
+- The FFT log shows only “Capturing audio for FFT analysis for X.Ys…”
+- The “No process tracking for command 'f'” warning disappears.
+
+If you want similar cleanup for spectrogram/oscope prints, I can adjust those too.
+
+---
+

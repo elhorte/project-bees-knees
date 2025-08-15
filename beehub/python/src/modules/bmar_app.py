@@ -180,7 +180,7 @@ class BmarApp:
             print(f"Circular buffer: {buffer_duration}s ({buffer_size} samples)")
 
             # Initialize process tracking
-            command_keys = ['r', 's', 'o', 't', 'v', 'i', 'p', 'P']
+            command_keys = ['r', 's', 'o', 't', 'v', 'i', 'p', 'P', 'f']  # include FFT
             for key in command_keys:
                 self.active_processes[key] = None
 

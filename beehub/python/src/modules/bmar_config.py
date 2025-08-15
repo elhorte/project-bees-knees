@@ -93,7 +93,7 @@ class BMARConfig:
     WINDOWS_API_NAME: str = "WASAPI"                        # Use WASAPI as the audio API
     WINDOWS_HOSTAPI_NAME: str = "WASAPI"                    # Use WASAPI as the audio host API
     WINDOWS_HOSTAPI_INDEX: int = 15                         # Default WASAPI host API index
-    WINDOWS_DEVICE_ID: Optional[int] = None                 # Device ID for UMC204HD
+    WINDOWS_DEVICE_ID: Optional[int] = 15                 # Device ID for UMC204HD
     WINDOWS_API_PRIORITY: List[str] = ("WASAPI", "DirectSound", "MME")    
 
     MACOS_MAKE_NAME: str = "Behringer"                      # Leave empty for macOS default

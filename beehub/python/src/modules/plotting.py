@@ -10,12 +10,13 @@ import os
 from pathlib import Path
 from datetime import datetime
 from scipy import signal
+from .bmar_config import default_config as _default_config
 import time
 import logging
 import sys
-import sounddevice as sd
 import subprocess
 import traceback
+import sounddevice as sd
 
 def _as_plots_sibling(path_like) -> Path:
     """Map any raw/monitor date folder (or its trailing 'plots') to the sibling plots/DATE."""
@@ -94,8 +95,30 @@ def _save_plot(fig, plots_dir_like, filename: str) -> str:
     fig.savefig(fp, dpi=150, bbox_inches='tight')
     return fp
 
-def plot_spectrogram(config):
-    """Generate and display a spectrogram using sounddevice for audio capture."""
+# Resolve duration from BMARConfig or dict; fall back to BMAR defaults
+def _get_cfg_duration(config, attr_name: str, dict_keys: tuple[str, ...], fallback_default: float = 5.0) -> float:
+    try:
+        bmardef = _default_config()
+        default_val = float(getattr(bmardef, attr_name, fallback_default))
+    except Exception:
+        default_val = float(fallback_default)
+    # Dataclass/object with attribute
+    if config is not None and hasattr(config, attr_name):
+        try:
+            return float(getattr(config, attr_name))
+        except Exception:
+            pass
+    # Dict override keys (e.g., {"trace_duration": 8.0})
+    if isinstance(config, dict):
+        for k in dict_keys:
+            if k in config and config[k] is not None:
+                try:
+                    return float(config[k])
+                except Exception:
+                    continue
+    return default_val
+
+def plot_spectrogram(config=None):
     try:
         config = config or {}
         plots_dir = _resolve_plots_dir(config)
@@ -105,15 +128,16 @@ def plot_spectrogram(config):
         blocksize = config.get('blocksize', 1024)
         fft_size = config.get('fft_size', 2048)
         overlap = config.get('overlap', 0.75)
-        try:
-            from . import bmar_config as _cfg
-            _default_spec = float(getattr(_cfg, 'SPECTROGRAM_DURATION', 5.0))
-        except Exception:
-            _default_spec = 5.0
-        capture_duration = float(config.get('capture_duration', _default_spec))
+        # Read spectrogram duration from BMAR_config with optional dict overrides
+        capture_duration = _get_cfg_duration(
+            config,
+            "SPECTROGRAM_DURATION",
+            ("spectrogram_duration", "capture_duration", "duration"),
+            5.0
+        )
         freq_range = config.get('freq_range', [0, samplerate // 2])
 
-        print(f"Spectrogram capturing {capture_duration}s from device {device_index} ({samplerate}Hz)\r")
+        print(f"Spectrogram capturing {capture_duration:.1f}s from device {device_index} ({samplerate}Hz)\r")
         
         try:
             # Validate device
@@ -278,30 +302,27 @@ def plot_spectrogram(config):
         print(f"Spectrogram setup error: {e}\r")
         traceback.print_exc()
 
-def plot_oscope(config):
-    """Generate and display oscilloscope plot with all active audio channels in stacked traces."""
+def plot_oscope(config=None):
     try:
         config = config or {}
         plots_dir = _resolve_plots_dir(config)
         device_index = config.get('device_index', 0)
         samplerate = config.get('samplerate', 44100)
         channels = config.get('channels', 1)
-        blocksize = config.get('blocksize', 1024)
+        blocksize = config.get('blocksize', 1024) if isinstance(config, dict) else 1024
+        # Duration from BMAR_config: TRACE_DURATION (fallback 5.0)
+        duration = _get_cfg_duration(config, "TRACE_DURATION", ("trace_duration", "plot_duration", "duration"), 5.0)
+        # Read oscilloscope gain and default monitor channel from config
         try:
             from . import bmar_config as _cfg
-            _default_trace = float(getattr(_cfg, 'TRACE_DURATION', 5.0))
+            oscope_gain_db = float(getattr(_cfg, 'OSCOPE_GAIN_DB', 0))
+            monitor_channel = int(getattr(_cfg, 'MONITOR_CH', 0))
         except Exception:
-            _default_trace = 5.0
-        plot_duration = float(config.get('plot_duration', _default_trace))
-        monitor_channel = int(config.get('monitor_channel', 0))
-        try:
-            from . import bmar_config as _cfg
-            oscope_gain_db = getattr(_cfg, 'OSCOPE_GAIN_DB', 0)
-        except Exception:
-            oscope_gain_db = 0
+            oscope_gain_db = 0.0
+            monitor_channel = 0
         oscope_gain = float(10 ** (oscope_gain_db / 20.0))
-
-        print(f"Oscilloscope capturing {plot_duration}s from device {device_index} ({samplerate}Hz, {channels} channels)\r")
+        
+        print(f"Oscilloscope capturing {duration:.1f}s from device {device_index} ({samplerate}Hz, {channels} channels)")
         
         try:
             # Validate device
@@ -326,7 +347,7 @@ def plot_oscope(config):
             print("Starting multi-channel audio capture...\r")
             
             # Calculate total samples needed
-            total_samples = int(samplerate * plot_duration)
+            total_samples = int(samplerate * duration)
             audio_data = {i: [] for i in range(channels)}  # Store data for each channel
             
             samples_captured = 0
@@ -417,7 +438,7 @@ def plot_oscope(config):
                 ax.plot(time_axis, y, linewidth=lw, color=color)
                 ax.set_ylabel(f'Ch {ch+1}\nAmplitude')
                 ax.grid(True, alpha=0.3)
-                ax.set_xlim(0, plot_duration)
+                ax.set_xlim(0, duration)
                 ax.set_ylim(-1.05, 1.05)  # Fixed scale to reveal true clipping
                 ax.axhline(1.0, color='r', linestyle='--', linewidth=0.8, alpha=0.7)
                 ax.axhline(-1.0, color='r', linestyle='--', linewidth=0.8, alpha=0.7)
@@ -460,7 +481,7 @@ def plot_oscope(config):
         print(f"Oscilloscope setup error: {e}\r")
         traceback.print_exc()
 
-def plot_fft(config):
+def plot_fft(config=None):
     """Generate and display FFT analysis using sounddevice for audio capture."""
     try:
         config = config or {}
@@ -483,7 +504,12 @@ def plot_fft(config):
         # Check for virtual device first
         if device_index is None:
             print("Virtual device detected for FFT - generating synthetic audio\r")
-            duration = 2.0
+            duration = _get_cfg_duration(
+                config,
+                "FFT_DURATION",
+                ("fft_duration", "capture_duration", "duration"),
+                2.0
+            )
             audio_data, _ = _generate_synthetic_audio(duration, channels, samplerate, "FFT analysis")
             if audio_data is None or len(audio_data) == 0:
                 print("No synthetic audio generated\r")
@@ -505,13 +531,13 @@ def plot_fft(config):
                 channels_to_open = max(1, min(max_in, int(monitor_channel) + 1))
                 
                 print("Capturing audio for FFT analysis...\r")
-                # Use default duration from config
-                try:
-                    from . import bmar_config as _cfg
-                    _default_fft = float(getattr(_cfg, 'FFT_DURATION', 2.0))
-                except Exception:
-                    _default_fft = 2.0
-                capture_duration = float(config.get('capture_duration', _default_fft))
+                capture_duration = _get_cfg_duration(
+                    config,
+                    "FFT_DURATION",
+                    ("fft_duration", "capture_duration", "duration"),
+                    2.0
+                )
+                print(f"Capturing audio for FFT analysis for {capture_duration:.1f}s...\r")
                 total_samples = int(samplerate * capture_duration)
                 audio_data = []
                 samples_captured = 0
