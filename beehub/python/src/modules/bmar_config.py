@@ -74,8 +74,8 @@ class BMARConfig:
     DEBUG_VERBOSE: bool = False                             # enable verbose debugging output
 
     ENABLE_ENHANCED_AUDIO: bool = True                      # enable enhanced audio processing
-    AUDIO_API_PREFERENCE: List[str] = ("WASAPI", "DirectSound", "MME")
-    AUDIO_FALLBACK_ENABLED: bool = False                    # enable audio fallback
+
+    AUDIO_FALLBACK_ENABLED: bool = True                    # enable audio fallback
 
     # Per-OS device prefs
     LINUX_MAKE_NAME: str = ""                               # Leave empty for linux default
@@ -85,6 +85,7 @@ class BMARConfig:
     LINUX_HOSTAPI_NAME: str = "ALSA"                        # Use ALSA as the audio host API
     LINUX_HOSTAPI_INDEX: int = 0                            # Default ALSA host API index
     LINUX_DEVICE_ID: Optional[int] = None                   # Use pipewire device ID
+    LINUX_API_PRIORITY: str = ""
 
     WINDOWS_MAKE_NAME: str = "Behringer"                    # Use Behringer as the audio device manufacturer
     WINDOWS_MODEL_NAME: str = "UMC204HD"                    # Use UMC204HD as the audio device model
@@ -93,6 +94,7 @@ class BMARConfig:
     WINDOWS_HOSTAPI_NAME: str = "WASAPI"                    # Use WASAPI as the audio host API
     WINDOWS_HOSTAPI_INDEX: int = 15                         # Default WASAPI host API index
     WINDOWS_DEVICE_ID: Optional[int] = None                 # Device ID for UMC204HD
+    WINDOWS_API_PRIORITY: List[str] = ("WASAPI", "DirectSound", "MME")    
 
     MACOS_MAKE_NAME: str = "Behringer"                      # Leave empty for macOS default
     MACOS_MODEL_NAME: str = "UMC204HD"                      # Use Built-in as the audio device model
@@ -101,7 +103,8 @@ class BMARConfig:
     MACOS_HOSTAPI_NAME: str = "CoreAudio"                   # Use CoreAudio as the audio host API
     MACOS_HOSTAPI_INDEX: int = 0                            # Default CoreAudio host API index
     MACOS_DEVICE_ID: int = 0                                # Use Built-in device ID
-
+    MACOS_API_PRIORITY: str = ""
+    
     # Audio parameters
     PRIMARY_IN_SAMPLERATE: int = 192000                     # Use 192000 Hz as the primary input samplerate
     PRIMARY_BITDEPTH: int = 16                              # Use 16-bit as the primary bitdepth
@@ -337,7 +340,7 @@ def device_search_criteria(strict: bool = True, platform_manager=None, cfg: Opti
             "hostapi_name": c.WINDOWS_HOSTAPI_NAME,
             "hostapi_index": c.WINDOWS_HOSTAPI_INDEX,
             "device_id": c.WINDOWS_DEVICE_ID,
-            "api_preference": c.AUDIO_API_PREFERENCE,
+            "api_preference": c.WINDOWS_API_PRIORITY,
             "fallback_enabled": c.AUDIO_FALLBACK_ENABLED,
             "strict": bool(strict),
         }
@@ -355,7 +358,7 @@ def device_search_criteria(strict: bool = True, platform_manager=None, cfg: Opti
             "hostapi_name": c.MACOS_HOSTAPI_NAME,
             "hostapi_index": c.MACOS_HOSTAPI_INDEX,
             "device_id": c.MACOS_DEVICE_ID,
-            "api_preference": c.AUDIO_API_PREFERENCE,
+            "api_preference": c.MACOS_API_PRIORITY,
             "fallback_enabled": c.AUDIO_FALLBACK_ENABLED,
             "strict": bool(strict),
         }
@@ -372,17 +375,23 @@ def device_search_criteria(strict: bool = True, platform_manager=None, cfg: Opti
         "hostapi_name": c.LINUX_HOSTAPI_NAME,
         "hostapi_index": c.LINUX_HOSTAPI_INDEX,
         "device_id": c.LINUX_DEVICE_ID,
-        "api_preference": c.AUDIO_API_PREFERENCE,
+        "api_preference": c.LINUX_API_PRIORITY,
         "fallback_enabled": c.AUDIO_FALLBACK_ENABLED,
         "strict": bool(strict),
     }
     crit["name_tokens"] = _tokens_from(crit["model_name"], crit["device_name"])
     crit["api_tokens"] = _tokens_from(crit["api_name"], crit["api_preference"])
     return crit
-def api_preferences(cfg: Optional[BMARConfig] = None) -> List[str]:
-    """Return ordered audio API preferences."""
-    c = cfg or default_config()
-    return list(c.AUDIO_API_PREFERENCE)
+
+def api_preferences(cfg: Optional[BMARConfig] = None, platform_manager=None) -> List[str]:
+    """Return ordered audio API preferences for the current platform."""
+    crit = device_search_criteria(strict=False, platform_manager=platform_manager, cfg=cfg)
+    pref = crit.get("api_preference") or []
+    if isinstance(pref, tuple):
+        return list(pref)
+    if isinstance(pref, str):
+        return [pref]
+    return list(pref) if isinstance(pref, list) else []
 
 def fallback_enabled(cfg: Optional[BMARConfig] = None) -> bool:
     """Return whether device fallback is enabled."""

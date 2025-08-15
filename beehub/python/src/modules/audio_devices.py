@@ -92,12 +92,15 @@ def find_device_by_config(*_args,
     pref_indices: List[int] = []
     if spec["hostapi_name"]:
         pref_indices.extend(list_hostapi_indices_by_names([spec["hostapi_name"]]))
-    # Add OS-level default prefs
-    try:
-        from .bmar_config import API_PREFERENCE_FOR_PLATFORM
-        pref_indices.extend(list_hostapi_indices_by_names(API_PREFERENCE_FOR_PLATFORM()))
-    except Exception:
-        pass
+    # Add OS-level default prefs from config (per-OS: *_API_PRIORITY via bmar_config.device_search_criteria)
+    api_pref = spec.get("api_preference") or []
+    if isinstance(api_pref, tuple):
+        api_pref = list(api_pref)
+    elif isinstance(api_pref, str):
+        api_pref = [api_pref]
+    if api_pref:
+        pref_indices.extend(list_hostapi_indices_by_names(api_pref))
+
     # User-specified index is strongest preference if valid
     user_idx = spec.get("hostapi_index")
     if isinstance(user_idx, int) and 0 <= user_idx < len(apis):
