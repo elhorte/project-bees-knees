@@ -102,10 +102,8 @@ def pcm_to_mp3_write(np_array, full_path, config, sample_rate=None, bitrate_kbps
         # If ffmpeg/avconv is on PATH, point pydub to it explicitly to avoid warnings
         ffmpeg_path = shutil.which('ffmpeg') or shutil.which('avconv')
         if ffmpeg_path:
-            try:
-                AudioSegment.converter = ffmpeg_path
-            except Exception:
-                pass
+            AudioSegment.converter = ffmpeg_path
+
     except Exception as e:
         raise RuntimeError("MP3 export requires pydub and an ffmpeg-compatible encoder (ffmpeg or avconv) installed and on PATH.") from e
 

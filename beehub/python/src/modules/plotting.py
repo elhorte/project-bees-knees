@@ -56,15 +56,13 @@ def _resolve_plots_dir(config: dict | None) -> str:
             p.mkdir(parents=True, exist_ok=True)
             return str(p)
     # 2) module-level from bmar_config if already wired
-    try:
-        from . import bmar_config as _cfg
-        pd = getattr(_cfg, "PLOTS_DIRECTORY", None)
-        if isinstance(pd, (str, os.PathLike, Path)) and str(pd):
-            p = _as_plots_sibling(pd)
-            p.mkdir(parents=True, exist_ok=True)
-            return str(p)
-    except Exception:
-        pass
+    from . import bmar_config as _cfg
+    pd = getattr(_cfg, "PLOTS_DIRECTORY", None)
+    if isinstance(pd, (str, os.PathLike, Path)) and str(pd):
+        p = _as_plots_sibling(pd)
+        p.mkdir(parents=True, exist_ok=True)
+        return str(p)
+
     # 3) env
     pd_env = os.environ.get("BMAR_PLOTS_DIR")
     if pd_env:
@@ -104,10 +102,8 @@ def _get_cfg_duration(config, attr_name: str, dict_keys: tuple[str, ...], fallba
         default_val = float(fallback_default)
     # Dataclass/object with attribute
     if config is not None and hasattr(config, attr_name):
-        try:
-            return float(getattr(config, attr_name))
-        except Exception:
-            pass
+        return float(getattr(config, attr_name))
+
     # Dict override keys (e.g., {"trace_duration": 8.0})
     if isinstance(config, dict):
         for k in dict_keys:

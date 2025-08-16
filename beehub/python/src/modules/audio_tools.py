@@ -119,10 +119,8 @@ except Exception:
     set_global_flac_target_samplerate = None
 
 if set_global_flac_target_samplerate:
-    try:
-        set_global_flac_target_samplerate(getattr(_CFG, "PRIMARY_SAVE_SAMPLERATE", None))
-    except Exception:
-        pass
+    set_global_flac_target_samplerate(getattr(_CFG, "PRIMARY_SAVE_SAMPLERATE", None))
+
 
 # Notes for VU meter tuning (config keys):
 # - vu_dynamic_range_db (default 40.0)
@@ -171,12 +169,10 @@ def _vu_meter_from_buffer(app, config, stop_event=None):
         sr = int(getattr(app, 'PRIMARY_IN_SAMPLERATE', config.get('samplerate', 44100)))
         channels = int(getattr(app, 'sound_in_chs', config.get('channels', 1)))
         # Announce the initial monitored channel once
-        try:
-            _mon0 = int(getattr(app, 'monitor_channel', config.get('monitor_channel', 0)))
-            _mon0 = 0 if _mon0 < 0 else min(_mon0, max(1, channels) - 1)
-            print(f"VU meter: monitoring channel {(_mon0 + 1)} of {max(1, channels)}")
-        except Exception:
-            pass
+
+        _mon0 = int(getattr(app, 'monitor_channel', config.get('monitor_channel', 0)))
+        _mon0 = 0 if _mon0 < 0 else min(_mon0, max(1, channels) - 1)
+        print(f"VU meter: monitoring channel {(_mon0 + 1)} of {max(1, channels)}")
 
         # Window length for RMS calculation and UI update cadence
         update_interval = 0.05  # ~20 Hz UI updates
@@ -319,11 +315,8 @@ def _vu_meter_sounddevice(config, stop_event=None):
                 print(f"Channel {monitor_channel + 1} not available, using channel 1")
                 monitor_channel = 0
             # Announce initial channel selection
-            try:
-                print(f"VU meter: monitoring channel {monitor_channel + 1} of {max(1, actual_channels)}")
-            except Exception:
-                pass
-                
+            print(f"VU meter: monitoring channel {monitor_channel + 1} of {max(1, actual_channels)}")
+
         except (sd.PortAudioError, ValueError) as e:
             print(f"Error getting device info: {e}")
             actual_channels = channels
@@ -437,10 +430,7 @@ def _vu_meter_virtual(config, stop_event=None):
     try:
         # Access config for completeness and future use
         _mon = int(config.get('monitor_channel', 0))
-        try:
-            print(f"VU meter (virtual): monitoring channel {_mon + 1}")
-        except Exception:
-            pass
+        print(f"VU meter (virtual): monitoring channel {_mon + 1}")
 
         try:
             while True:
@@ -555,33 +545,29 @@ def intercom_m(config, stop_event=None):
         if out_dev_hint is not None and _is_output_device(out_dev_hint):
             return out_dev_hint
         # Try system default output
-        try:
-            defaults = sd.default.device
-            if isinstance(defaults, (list, tuple)) and len(defaults) >= 2:
-                out_def = defaults[1]
-                if out_def is not None and _is_output_device(out_def):
-                    if not vu_meter_active and out_dev_hint is not None:
-                        try:
-                            name = sd.query_devices(out_def)['name']
-                            print(f"Output device '{out_dev_hint}' is not an output; using default output '{name}'.")
-                        except Exception:
-                            print(f"Output device '{out_dev_hint}' is not an output; using system default output.")
-                    return out_def
-        except Exception:
-            pass
+        defaults = sd.default.device
+        if isinstance(defaults, (list, tuple)) and len(defaults) >= 2:
+            out_def = defaults[1]
+            if out_def is not None and _is_output_device(out_def):
+                if not vu_meter_active and out_dev_hint is not None:
+                    try:
+                        name = sd.query_devices(out_def)['name']
+                        print(f"Output device '{out_dev_hint}' is not an output; using default output '{name}'.")
+                    except Exception:
+                        print(f"Output device '{out_dev_hint}' is not an output; using system default output.")
+                return out_def
+
         # As a last resort, pick the first available output device
-        try:
-            all_devs = sd.query_devices()
-            for idx, dev in enumerate(all_devs):
-                try:
-                    if int(dev.get('max_output_channels', 0)) > 0:
-                        if not vu_meter_active and out_dev_hint is not None:
-                            print(f"Output device '{out_dev_hint}' is not an output; using '{dev['name']}'.")
-                        return idx
-                except Exception:
-                    continue
-        except Exception:
-            pass
+        all_devs = sd.query_devices()
+        for idx, dev in enumerate(all_devs):
+            try:
+                if int(dev.get('max_output_channels', 0)) > 0:
+                    if not vu_meter_active and out_dev_hint is not None:
+                        print(f"Output device '{out_dev_hint}' is not an output; using '{dev['name']}'.")
+                    return idx
+            except Exception:
+                continue
+
         # Nothing found
         raise ValueError("No valid output device available")
 
@@ -713,32 +699,29 @@ def _intercom_from_buffer(app, config, stop_event=None):
     def _resolve_output_device(out_dev_hint):
         if out_dev_hint is not None and _is_output_device(out_dev_hint):
             return out_dev_hint
-        try:
-            defaults = sd.default.device
-            if isinstance(defaults, (list, tuple)) and len(defaults) >= 2:
-                out_def = defaults[1]
-                if out_def is not None and _is_output_device(out_def):
+
+        defaults = sd.default.device
+        if isinstance(defaults, (list, tuple)) and len(defaults) >= 2:
+            out_def = defaults[1]
+            if out_def is not None and _is_output_device(out_def):
+                if not vu_meter_active and out_dev_hint is not None:
+                    try:
+                        name = sd.query_devices(out_def)['name']
+                        print(f"Output device '{out_dev_hint}' is not an output; using default output '{name}'.")
+                    except Exception:
+                        print(f"Output device '{out_dev_hint}' is not an output; using system default output.")
+                return out_def
+
+        all_devs = sd.query_devices()
+        for idx, dev in enumerate(all_devs):
+            try:
+                if int(dev.get('max_output_channels', 0)) > 0:
                     if not vu_meter_active and out_dev_hint is not None:
-                        try:
-                            name = sd.query_devices(out_def)['name']
-                            print(f"Output device '{out_dev_hint}' is not an output; using default output '{name}'.")
-                        except Exception:
-                            print(f"Output device '{out_dev_hint}' is not an output; using system default output.")
-                    return out_def
-        except Exception:
-            pass
-        try:
-            all_devs = sd.query_devices()
-            for idx, dev in enumerate(all_devs):
-                try:
-                    if int(dev.get('max_output_channels', 0)) > 0:
-                        if not vu_meter_active and out_dev_hint is not None:
-                            print(f"Output device '{out_dev_hint}' is not an output; using '{dev['name']}'.")
-                        return idx
-                except Exception:
-                    continue
-        except Exception:
-            pass
+                        print(f"Output device '{out_dev_hint}' is not an output; using '{dev['name']}'.")
+                    return idx
+            except Exception:
+                continue
+
         raise ValueError("No valid output device available")
 
     try:

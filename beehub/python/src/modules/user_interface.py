@@ -709,16 +709,12 @@ def handle_intercom_command(app):
                     print("Stopping intercom...\r")
                 # NEW: signal intercom to stop and try to join cleanly
                 if hasattr(app, 'intercom_stop_event') and app.intercom_stop_event is not None:
-                    try:
-                        app.intercom_stop_event.set()
-                    except Exception:
-                        pass
-                try:
-                    # Try to join threads/processes quickly before fallback cleanup
-                    if hasattr(ic_proc, 'join'):
-                        ic_proc.join(timeout=2.0)
-                except Exception:
-                    pass
+                    app.intercom_stop_event.set()
+
+                # Try to join threads/processes quickly before fallback cleanup
+                if hasattr(ic_proc, 'join'):
+                    ic_proc.join(timeout=2.0)
+
                 cleanup_process(app, 'i')
             else:
                 if not vu_meter_active:
@@ -1111,11 +1107,9 @@ def handle_stop_monitoring_command(app):
                 if hasattr(app, 'vu_stop_event'):
                     app.vu_stop_event.set()
                 time.sleep(0.2)
-                try:
-                    if hasattr(vu_proc, 'join'):
-                        vu_proc.join(timeout=1.0)
-                except Exception:
-                    pass
+                if hasattr(vu_proc, 'join'):
+                    vu_proc.join(timeout=1.0)
+
                 cleanup_process(app, 'v')
                 print("\r" + " " * 80 + "\r", end="", flush=True)
                 print("VU meter stopped.\r")
@@ -1128,15 +1122,11 @@ def handle_stop_monitoring_command(app):
                 print("Stopping intercom...\r")
                 # NEW: signal and try to join before cleanup
                 if hasattr(app, 'intercom_stop_event') and app.intercom_stop_event is not None:
-                    try:
-                        app.intercom_stop_event.set()
-                    except Exception:
-                        pass
-                try:
-                    if hasattr(ic_proc, 'join'):
-                        ic_proc.join(timeout=2.0)
-                except Exception:
-                    pass
+                    app.intercom_stop_event.set()
+
+                if hasattr(ic_proc, 'join'):
+                    ic_proc.join(timeout=2.0)
+
                 cleanup_process(app, 'i')
                 print("Intercom stopped.\r")
                 stopped_any = True

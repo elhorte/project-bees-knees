@@ -45,7 +45,7 @@ class BMARConfig:
 
     AUDIO_MONITOR_START: Optional[datetime.time] = None     # start time for audio monitoring
     AUDIO_MONITOR_END: Optional[datetime.time] = None       # end time for audio monitoring
-    AUDIO_MONITOR_RECORD: int = BUFFER_SECONDS              # duration of audio monitoring recording
+    AUDIO_MONITOR_RECORD: int = 60 #BUFFER_SECONDS              # duration of audio monitoring recording
     AUDIO_MONITOR_INTERVAL: float = 0.0                     # interval between audio monitoring recordings
 
     PERIOD_START: Optional[datetime.time] = None            # start time for periodic recording

@@ -18,34 +18,28 @@ def get_key():
     Returns None if no key is pressed (non-blocking).
     """
     if sys.platform == 'win32':
-        try:
-            import msvcrt
-            if msvcrt.kbhit():
-                char = msvcrt.getch()
-                if isinstance(char, bytes):
-                    return char.decode('utf-8', errors='ignore')
-                return char
-        except ImportError:
-            pass
+        import msvcrt
+        if msvcrt.kbhit():
+            char = msvcrt.getch()
+            if isinstance(char, bytes):
+                return char.decode('utf-8', errors='ignore')
+            return char
     else:
         # Unix/Linux/macOS
-        try:
-            import termios
-            import tty
-            import select
-            
-            # Check if input is available
-            if select.select([sys.stdin], [], [], 0)[0]:
-                fd = sys.stdin.fileno()
-                old_settings = termios.tcgetattr(fd)
-                try:
-                    tty.setraw(fd)
-                    char = sys.stdin.read(1)
-                    return char
-                finally:
-                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        except ImportError:
-            pass
+        import termios
+        import tty
+        import select
+        
+        # Check if input is available
+        if select.select([sys.stdin], [], [], 0)[0]:
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                char = sys.stdin.read(1)
+                return char
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
     
     return None
 
@@ -58,19 +52,17 @@ def setup_terminal_for_input(app):
         pass
     else:
         # Unix/Linux/macOS
-        try:
-            import termios
-            import tty
-            
-            fd = sys.stdin.fileno()
-            # Save original settings
-            if not hasattr(app, 'original_terminal_settings'):
-                app.original_terminal_settings = termios.tcgetattr(fd)
-            
-            # Set raw mode
-            tty.setraw(fd)
-        except ImportError:
-            pass
+        import termios
+        import tty
+        
+        fd = sys.stdin.fileno()
+        # Save original settings
+        if not hasattr(app, 'original_terminal_settings'):
+            app.original_terminal_settings = termios.tcgetattr(fd)
+        
+        # Set raw mode
+        tty.setraw(fd)
+
 
 def restore_terminal_settings(app, settings=None):
     """
@@ -81,16 +73,13 @@ def restore_terminal_settings(app, settings=None):
         pass
     else:
         # Unix/Linux/macOS
-        try:
-            import termios
-            
-            fd = sys.stdin.fileno()
-            if settings:
-                termios.tcsetattr(fd, termios.TCSADRAIN, settings)
-            elif hasattr(app, 'original_terminal_settings') and app.original_terminal_settings:
-                termios.tcsetattr(fd, termios.TCSADRAIN, app.original_terminal_settings)
-        except ImportError:
-            pass
+        import termios
+        
+        fd = sys.stdin.fileno()
+        if settings:
+            termios.tcsetattr(fd, termios.TCSADRAIN, settings)
+        elif hasattr(app, 'original_terminal_settings') and app.original_terminal_settings:
+            termios.tcsetattr(fd, termios.TCSADRAIN, app.original_terminal_settings)
 
 def timed_input(app, prompt, timeout=3, default='n'):
     """

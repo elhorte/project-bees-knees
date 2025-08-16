@@ -106,10 +106,9 @@ def check_and_create_date_folders(config=None):
     }
 
 def log_saved_file(path: str, prefix: str = "") -> None:
-    try:
-        logging.info("%sSaved: %s", f"{prefix}: " if prefix else "", os.path.normpath(path))
-    except Exception:
-        pass
+
+    logging.info("%sSaved: %s", f"{prefix}: " if prefix else "", os.path.normpath(path))
+
 
 # If setup_directories/get_today_dir exist, keep behavior but ensure we wire runtime paths too
 def setup_directories(config=None):
